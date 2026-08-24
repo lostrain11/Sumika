@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Main Sumika desktop window capabilities.",
+  "windows": ["main", "overlay"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

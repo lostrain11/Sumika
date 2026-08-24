@@ -1,0 +1,32 @@
+{
+  "integration": "ccswitch-v1",
+  "sumika_format": "sumika-provider-profile/v1",
+  "upstream_repository": "https://github.com/farion1231/cc-switch",
+  "upstream_tag": "v3.20.0",
+  "upstream_commit": "5ca9459d50ea4beea6a81bbc509de6ec5b6b09ca",
+  "license": "MIT",
+  "reviewed_at": "2026-08-23",
+  "supported_resource": "provider",
+  "supported_apps": ["codex"],
+  "known_fields": [
+    "resource", "app", "name", "enabled", "homepage", "endpoint", "apiKey",
+    "model", "notes", "icon", "config", "configFormat", "configUrl",
+    "haikuModel", "sonnetModel", "opusModel", "usageEnabled", "usageScript",
+    "usageApiKey", "usageBaseUrl", "usageAccessToken", "usageUserId",
+    "usageAutoInterval"
+  ],
+  "unsupported_behavior": [
+    "system protocol registration",
+    "automatic provider switching",
+    "arbitrary JavaScript usage scripts",
+    "non-Codex application formats"
+  ],
+  "monitored_files": [
+    {"path": "CHANGELOG.md", "category": "release", "sha256": "244030971309e41943e2cdca6911eeda01bd3c9fac5cb3edeec53febfc7429c9"},
+    {"path": "src-tauri/src/deeplink/parser.rs", "category": "protocol", "sha256": "ea7ab6a5f1f7bbbdea4e424f87b6a94d60fa855390913d322d0241b6ffa692aa"},
+    {"path": "src-tauri/src/deeplink/provider.rs", "category": "protocol", "sha256": "2dc487c203de4a110f702e374e09509fa8e216a60e86e8295e7b0f0be2d60258"},
+    {"path": "src-tauri/src/deeplink/mod.rs", "category": "protocol", "sha256": "909903c808a942a00891306242e75715f60c5ccaf12f40ae196eb0004ade4708"},
+    {"path": "src-tauri/src/usage_script.rs", "category": "protocol", "sha256": "b620ec8001c99b1bd8dc49d0cdd5cd3e3d5064d0aa71f2b2d5f4ae5cb20b0f14"},
+    {"path": "src/components/DeepLinkImportDialog.tsx", "category": "ui-reference", "sha256": "797d43f3da417b5771cf0d65718a5976d3b32f98ca754da8fb892aa9f7d6e78f"}
+  ]
+}

@@ -1,0 +1,147 @@
+import base64
+import json
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from sumika_core.credentials import MemoryCredentialStore
+from sumika_core.provider_imports import ProviderImportError, ProviderImportRegistry
+from sumika_core.provider_profiles import ProviderProfileManager
+from sumika_core.storage import Storage
+
+
+class ProviderProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.storage = Storage()
+        self.credentials = MemoryCredentialStore()
+        self.profiles = ProviderProfileManager(self.storage, self.credentials)
+
+    def tearDown(self):
+        self.storage.close()
+
+    def test_profile_secrets_are_isolated_and_edit_requires_retest(self):
+        profile = self.profiles.save({
+            "name": "Cloud test",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "processing_location": "cloud",
+            "api_key": "sk-secret-value",
+            "headers": {"X-Trace": "safe", "X-Api-Key": "header-secret"},
+        })
+        self.assertEqual(profile["status"], "unavailable")
+        self.assertTrue(profile["has_secrets"])
+        row = self.storage.get_provider_profile(profile["id"])
+        self.assertNotIn("sk-secret-value", json.dumps(row, ensure_ascii=False))
+        self.assertEqual(row["config"]["headers"], {"X-Trace": "safe"})
+        secrets = self.credentials.read(profile["id"])
+        self.assertEqual(secrets["api_key"], "sk-secret-value")
+        self.assertEqual(secrets["header:X-Api-Key"], "header-secret")
+
+    def test_health_marks_profile_available_and_archive_is_recoverable(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"ready-model"}]}')
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = self.profiles.save({
+                "name": "Local test",
+                "base_url": f"http://127.0.0.1:{server.server_address[1]}",
+                "model": "ready-model",
+            })
+            health = self.profiles.health(profile["id"])
+            self.assertTrue(health["ok"])
+            self.assertEqual(health["profile"]["status"], "available")
+            archived = self.profiles.archive(profile["id"])
+            self.assertEqual(archived["status"], "archived")
+            self.assertEqual(self.profiles.list(), [])
+            restored = self.profiles.restore(profile["id"])
+            self.assertEqual(restored["status"], "draft")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_ccswitch_preview_masks_secrets_and_preserves_unknown_metadata(self):
+        script = base64.urlsafe_b64encode(b"({request:{url:'{{baseUrl}}/usage'},extractor:function(r){return r}})").decode().rstrip("=")
+        raw = (
+            "ccswitch://v1/import?resource=provider&app=codex&name=SHUAI%20API"
+            "&endpoint=https%3A%2F%2Fapi.example.com%2Fv1%2Chttps%3A%2F%2Fbackup.example.com%2Fv1"
+            "&apiKey=sk-H1234567890&model=gpt-test&futureToken=do-not-show"
+            f"&usageEnabled=true&usageScript={script}"
+        )
+        preview = ProviderImportRegistry().preview(raw)
+        self.assertEqual(preview["importer_id"], "ccswitch-v1")
+        self.assertEqual(len(preview["profile"]["base_urls"]), 2)
+        self.assertNotIn("sk-H1234567890", json.dumps(preview, ensure_ascii=False))
+        self.assertEqual(preview["unsupported_fields"][0]["value"], "[redacted]")
+        self.assertIn("source:futureToken", preview["secret_fields"])
+        self.assertNotIn("do-not-show", json.dumps(preview, ensure_ascii=False))
+        self.assertIn("JavaScript", preview["warnings"][0])
+        self.assertEqual(preview["profile"]["source"]["usage_script"]["execution"], "blocked_javascript")
+
+    def test_ccswitch_unknown_sensitive_field_is_written_only_to_credential_store(self):
+        raw = (
+            "ccswitch://v1/import?resource=provider&app=codex&name=Custom"
+            "&endpoint=https%3A%2F%2Fexample.invalid%2Fv1&model=test-model"
+            "&futureToken=secret-value"
+        )
+        imported = ProviderImportRegistry().parse(raw)
+        profile = self.profiles.save({**imported.profile, "secrets": imported.secrets})
+        row = self.storage.get_provider_profile(profile["id"])
+        self.assertNotIn("secret-value", json.dumps(row, ensure_ascii=False))
+        self.assertEqual(self.credentials.read(profile["id"])["source:futureToken"], "secret-value")
+
+    def test_unknown_ccswitch_version_and_non_codex_app_are_rejected(self):
+        registry = ProviderImportRegistry()
+        with self.assertRaisesRegex(ProviderImportError, "Unsupported CC Switch protocol version"):
+            registry.preview("ccswitch://v2/import?resource=provider&app=codex&name=x")
+        with self.assertRaisesRegex(ProviderImportError, "not an OpenAI-compatible Codex profile"):
+            registry.preview("ccswitch://v1/import?resource=provider&app=claude&name=x")
+
+    def test_provider_profiles_are_part_of_module_snapshots_without_secret_values(self):
+        profile = self.profiles.save({
+            "name": "Snapshot profile",
+            "base_url": "https://example.invalid/v1",
+            "model": "test-model",
+            "api_key": "never-export-this",
+        })
+        payload = self.storage.export_snapshot_state("modules")
+        self.assertEqual(payload["tables"]["provider_profiles"][0]["id"], profile["id"])
+        self.assertNotIn("never-export-this", json.dumps(payload, ensure_ascii=False))
+
+    def test_sumika_profile_import_accepts_public_nested_config(self):
+        raw = json.dumps(
+            {
+                "format": "sumika-provider-profile/v1",
+                "profile": {
+                    "name": "Nested local",
+                    "adapter_id": "openai-compatible",
+                    "template_id": "ollama",
+                    "config": {
+                        "base_urls": ["http://127.0.0.1:11434/v1"],
+                        "active_base_url": "http://127.0.0.1:11434/v1",
+                        "model": "qwen3:4b",
+                        "timeout": 45,
+                    },
+                },
+                "secrets": {"api_key": "nested-secret"},
+            }
+        )
+        imported = ProviderImportRegistry().parse(raw)
+        profile = self.profiles.save({**imported.profile, "secrets": imported.secrets})
+        self.assertEqual(profile["config"]["model"], "qwen3:4b")
+        self.assertEqual(profile["config"]["timeout"], 45.0)
+        self.assertEqual(self.credentials.read(profile["id"])["api_key"], "nested-secret")
+
+
+if __name__ == "__main__":
+    unittest.main()

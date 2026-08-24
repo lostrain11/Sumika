@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sumika-core"
+version = "0.1.0"
+description = "Modular desktop companion core for Sumika"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Sumika contributors" }]
+
+[project.scripts]
+sumika-core = "sumika_core.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

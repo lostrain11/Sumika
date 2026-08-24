@@ -1,0 +1,407 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use std::env;
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc, Mutex,
+};
+use std::time::{Duration, Instant};
+
+use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
+
+#[derive(Clone)]
+struct CoreProcess {
+    inner: Arc<CoreProcessInner>,
+}
+
+struct CoreProcessInner {
+    child: Mutex<Option<Child>>,
+    log_path: PathBuf,
+    host: String,
+    port: u16,
+    stopping: AtomicBool,
+    restart_count: AtomicU32,
+}
+
+fn repository_root() -> Result<PathBuf, String> {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(PathBuf::from)
+        .ok_or_else(|| "无法确定 Sumika 仓库目录".to_string())
+}
+
+fn python_command() -> String {
+    env::var("SUMIKA_PYTHON").unwrap_or_else(|_| "python".to_string())
+}
+
+fn core_endpoint() -> (String, u16) {
+    let host = env::var("SUMIKA_CORE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = env::var("SUMIKA_CORE_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|value| *value != 0)
+        .unwrap_or(8771);
+    (host, port)
+}
+
+fn append_log(log_path: &PathBuf, message: &str) {
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) else { return };
+    let now = chrono_free_timestamp();
+    let _ = writeln!(file, "[{now}] {message}");
+}
+
+fn chrono_free_timestamp() -> String {
+    // Keep the shell dependency-free; the log remains sortable by process time.
+    format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or_default())
+}
+
+fn spawn_core(log_path: &PathBuf, host: &str, port: u16) -> Result<Child, String> {
+    let root = repository_root()?;
+    let data_dir = root.join(".sumika-desktop");
+    std::fs::create_dir_all(&data_dir).map_err(|error| format!("创建桌面数据目录失败: {error}"))?;
+    let python_path = root.join("backend").join("src");
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .map_err(|error| format!("创建桌面日志失败: {error}"))?;
+    let error_log = log_file.try_clone().map_err(|error| format!("复制桌面日志句柄失败: {error}"))?;
+    let mut command = Command::new(python_command());
+    command
+        .current_dir(&root)
+        .env("PYTHONPATH", python_path)
+        .env("SUMIKA_DATA_DIR", &data_dir)
+        .args([
+            "-u",
+            "-m",
+            "sumika_core",
+            "--host",
+            host,
+            "--port",
+            &port.to_string(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(error_log));
+    command
+        .spawn()
+        .map_err(|error| format!("启动 Sumika Python 核心失败（可设置 SUMIKA_PYTHON 指向 Python）: {error}"))
+}
+
+fn resolve_address(host: &str, port: u16) -> Result<SocketAddr, String> {
+    (host, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("解析核心地址失败 {host}:{port}: {error}"))?
+        .next()
+        .ok_or_else(|| format!("核心地址没有可用解析结果 {host}:{port}"))
+}
+
+fn core_health_request(address: SocketAddr) -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let host = address.ip().to_string();
+    let request = format!(
+        "GET /api/health HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = String::new();
+    if stream.read_to_string(&mut response).is_err() {
+        return false;
+    }
+    let status_ok = response
+        .lines()
+        .next()
+        .map(|line| line.contains(" 200 "))
+        .unwrap_or(false);
+    status_ok && (response.contains("\"ok\": true") || response.contains("\"ok\":true"))
+}
+
+fn core_ready(child: &mut Child, host: &str, port: u16) -> Result<(), String> {
+    let address = resolve_address(host, port)?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Err(format!("Sumika Python 核心提前退出: {status}")),
+            Ok(None) => {}
+            Err(error) => return Err(format!("检查 Sumika Python 核心状态失败: {error}")),
+        }
+        if core_health_request(address) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "等待 Sumika Python 核心在 {host}:{port} 健康就绪超时"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn stop_core_inner(inner: &CoreProcessInner, reason: &str) {
+    if inner.stopping.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    append_log(&inner.log_path, reason);
+    let Ok(mut guard) = inner.child.lock() else {
+        append_log(&inner.log_path, "could not lock Python core child during shutdown");
+        return;
+    };
+    let Some(child) = guard.as_mut() else { return };
+    match child.try_wait() {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            append_log(&inner.log_path, "stopping Python core child process");
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Err(error) if error.kind() == ErrorKind::InvalidInput => {}
+        Err(_) => {}
+    }
+    *guard = None;
+    append_log(&inner.log_path, "Python core child process stopped");
+}
+
+fn stop_core(state: &CoreProcess) {
+    stop_core_inner(&state.inner, "desktop shutdown requested");
+}
+
+impl Drop for CoreProcessInner {
+    fn drop(&mut self) {
+        stop_core_inner(self, "desktop process dropped; stopping Python core child process");
+    }
+}
+
+fn supervise_core(state: CoreProcess) {
+    let mut failed_restarts = 0u32;
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        if state.inner.stopping.load(Ordering::SeqCst) {
+            return;
+        }
+
+        let exited = match state.inner.child.lock() {
+            Ok(mut guard) => match guard.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        append_log(
+                            &state.inner.log_path,
+                            &format!("Python core exited unexpectedly: {status}"),
+                        );
+                        *guard = None;
+                        true
+                    }
+                    Ok(None) => false,
+                    Err(error) => {
+                        append_log(
+                            &state.inner.log_path,
+                            &format!("core process health poll failed: {error}"),
+                        );
+                        *guard = None;
+                        true
+                    }
+                },
+                None => true,
+            },
+            Err(_) => return,
+        };
+        if !exited {
+            continue;
+        }
+
+        if failed_restarts >= 5 {
+            append_log(
+                &state.inner.log_path,
+                "core restart limit reached; desktop will keep the core stopped",
+            );
+            return;
+        }
+        failed_restarts += 1;
+        std::thread::sleep(Duration::from_millis(500 * failed_restarts as u64));
+        if state.inner.stopping.load(Ordering::SeqCst) {
+            return;
+        }
+        match spawn_core(&state.inner.log_path, &state.inner.host, state.inner.port) {
+            Ok(mut child) => match core_ready(&mut child, &state.inner.host, state.inner.port) {
+                Ok(()) => {
+                    let pid = child.id();
+                    if let Ok(mut guard) = state.inner.child.lock() {
+                        *guard = Some(child);
+                        state.inner.restart_count.fetch_add(1, Ordering::SeqCst);
+                        failed_restarts = 0;
+                        append_log(
+                            &state.inner.log_path,
+                            &format!("Python core restarted and healthy; pid={pid}"),
+                        );
+                    } else {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+                Err(error) => {
+                    append_log(
+                        &state.inner.log_path,
+                        &format!("core restart health check failed: {error}"),
+                    );
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            },
+            Err(error) => append_log(
+                &state.inner.log_path,
+                &format!("core restart spawn failed: {error}"),
+            ),
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct CoreStatus {
+    host: String,
+    port: u16,
+    pid: Option<u32>,
+    running: bool,
+    restart_count: u32,
+    log_path: String,
+}
+
+#[tauri::command]
+fn core_status(state: State<'_, CoreProcess>) -> CoreStatus {
+    let (pid, running) = match state.inner.child.lock() {
+        Ok(mut guard) => match guard.as_mut() {
+            Some(child) => {
+                let running = child.try_wait().map(|result| result.is_none()).unwrap_or(false);
+                (Some(child.id()), running)
+            }
+            None => (None, false),
+        },
+        Err(_) => (None, false),
+    };
+    CoreStatus {
+        host: state.inner.host.clone(),
+        port: state.inner.port,
+        pid,
+        running,
+        restart_count: state.inner.restart_count.load(Ordering::SeqCst),
+        log_path: state.inner.log_path.display().to_string(),
+    }
+}
+
+#[tauri::command]
+fn show_overlay(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "找不到桌面 Avatar 浮窗".to_string())?;
+    window.show().map_err(|error| format!("显示 Avatar 浮窗失败: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("聚焦 Avatar 浮窗失败: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_overlay(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "找不到桌面 Avatar 浮窗".to_string())?;
+    window.hide().map_err(|error| format!("隐藏 Avatar 浮窗失败: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "找不到 Sumika 主窗口".to_string())?;
+    window.show().map_err(|error| format!("显示 Sumika 主窗口失败: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("聚焦 Sumika 主窗口失败: {error}"))?;
+    Ok(())
+}
+
+fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let root = repository_root().map_err(std::io::Error::other)?;
+    let (host, port) = core_endpoint();
+    let log_dir = root.join(".sumika-desktop").join("logs");
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join("desktop.log");
+    append_log(
+        &log_path,
+        &format!("desktop setup started; data_dir=.sumika-desktop; core={host}:{port}"),
+    );
+    let mut child = match spawn_core(&log_path, &host, port) {
+        Ok(child) => child,
+        Err(error) => {
+            append_log(&log_path, &format!("core spawn failed: {error}"));
+            return Err(std::io::Error::other(error).into());
+        }
+    };
+    append_log(&log_path, &format!("Python core spawned; pid={}", child.id()));
+    if let Err(error) = core_ready(&mut child, &host, port) {
+        append_log(&log_path, &format!("core health check failed: {error}"));
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(std::io::Error::other(error).into());
+    }
+    append_log(&log_path, &format!("core health check passed on {host}:{port}"));
+    let state = CoreProcess {
+        inner: Arc::new(CoreProcessInner {
+            child: Mutex::new(Some(child)),
+            log_path,
+            host,
+            port,
+            stopping: AtomicBool::new(false),
+            restart_count: AtomicU32::new(0),
+        }),
+    };
+    app.manage(state.clone());
+    if let Some(window) = app.get_webview_window("main") {
+        let app_handle = app.handle().clone();
+        let close_log_path = state.inner.log_path.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, WindowEvent::CloseRequested { .. }) {
+                append_log(
+                    &close_log_path,
+                    "main window close requested; exiting desktop application",
+                );
+                app_handle.exit(0);
+            }
+        });
+    }
+    std::thread::Builder::new()
+        .name("sumika-core-supervisor".to_string())
+        .spawn(move || supervise_core(state))?;
+    let _ = app.get_webview_window("main");
+    Ok(())
+}
+
+fn main() {
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            show_overlay,
+            hide_overlay,
+            open_main_window,
+            core_status
+        ])
+        .setup(setup)
+        .build(tauri::generate_context!())
+        .expect("failed to build Sumika desktop shell");
+    app.run(|app: &AppHandle, event: RunEvent| {
+        if let RunEvent::Exit = event {
+            if let Some(state) = app.try_state::<CoreProcess>() {
+                stop_core(&state);
+            }
+        }
+    });
+}

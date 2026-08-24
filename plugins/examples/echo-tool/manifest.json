@@ -1,0 +1,14 @@
+{
+  "id": "example.echo-tool",
+  "version": "0.1.0",
+  "capabilities": ["tool"],
+  "entrypoint": "echo_tool.py",
+  "runtime": "external-process",
+  "permissions": [],
+  "dependencies": [],
+  "resource_requirements": {
+    "network": false,
+    "filesystem": "none"
+  },
+  "sdk_range": ">=0.1,<1.0"
+}

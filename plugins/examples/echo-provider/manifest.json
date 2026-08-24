@@ -1,0 +1,21 @@
+{
+  "id": "example.echo-provider",
+  "version": "0.1.0",
+  "capabilities": ["llm"],
+  "entrypoint": "echo_provider.py",
+  "runtime": "external-process",
+  "sdk_range": ">=0.1,<1.0",
+  "permissions": [],
+  "dependencies": [],
+  "resource_requirements": {
+    "cpu": "low",
+    "network": false,
+    "disk_bytes": 0
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "prefix": {"type": "string", "title": "回复前缀", "default": "Echo"}
+    }
+  }
+}

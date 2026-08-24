@@ -1,0 +1,27 @@
+/.adaptive-response/
+
+# Python
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+.pytest_cache/
+backend/.venv/
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/test-results/
+
+# Runtime data and local secrets
+.sumika/
+.sumika-desktop/
+*.log
+
+# Tauri development output
+src-tauri/target/
+src-tauri/gen/
+
+# Archived generated artifacts
+/deprecated/

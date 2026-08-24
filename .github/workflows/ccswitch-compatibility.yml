@@ -1,0 +1,29 @@
+name: CC Switch compatibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check monitored protocol files and local fixtures
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/check_ccswitch_compatibility.py --output artifacts/ccswitch-compatibility.json
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccswitch-compatibility
+          path: artifacts/ccswitch-compatibility.json
+          if-no-files-found: warn
