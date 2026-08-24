@@ -175,7 +175,22 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
 .character-editor-heading strong { margin-top: 6px; font-size: 14px; }
 .character-editor-heading small { color: var(--faint); font-size: 10px; margin-top: 4px; }
 .character-editor form { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 16px; }
-.character-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px 18px; margin-bottom: 14px; }
+.character-settings-group { border-top: 1px solid var(--line); }
+.character-settings-group:last-of-type { border-bottom: 1px solid var(--line); }
+.character-settings-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 48px; color: var(--muted); cursor: pointer; list-style: none; }
+.character-settings-group > summary::-webkit-details-marker { display: none; }
+.character-settings-group > summary::after { content: "+"; color: var(--accent); font-size: 16px; line-height: 1; }
+.character-settings-group[open] > summary::after { content: "−"; }
+.character-settings-group > summary > span { color: var(--text); font-size: 12px; font-weight: 600; }
+.character-settings-group > summary > small { min-width: 0; margin-left: auto; overflow: hidden; color: var(--faint); font-size: 10px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.character-settings-group > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.character-settings-body { padding: 0 0 15px; }
+.character-settings-subsection { border: 1px solid var(--line); background: var(--surface-2); border-radius: 5px; padding: 12px; }
+.character-settings-subsection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.character-settings-subsection-heading strong { color: var(--text); font-size: 11px; }
+.character-settings-subsection-heading small { color: var(--faint); font-size: 10px; }
+.character-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 14px 18px; }
+.character-editor form > .small-button { margin-top: 14px; }
 .character-field { display: grid; gap: 6px; color: var(--faint); font-size: 10px; }
 .character-field-wide { grid-column: 1 / -1; }
 .character-field input[type="text"], .character-field select, .character-field textarea { width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); color: var(--text); padding: 8px 9px; font-size: 11px; }
@@ -206,7 +221,7 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
 .task-status.failed { background: #4b292d; color: var(--danger); }
 .task-status.cancelled { background: #303238; color: var(--faint); }
   @media (max-width: 1250px) { .task-board { grid-template-columns: repeat(2, minmax(220px, 1fr)); } }
-  @media (max-width: 720px) { .audio-runtime-grid, .character-editor-grid { grid-template-columns: 1fr; } .audio-runtime-heading, .tool-runtime-heading { flex-direction: column; } .character-field-wide { grid-column: auto; } .avatar-model-row, .avatar-audit-row { grid-template-columns: 54px minmax(0, 1fr); } .avatar-model-actions { grid-column: 1 / -1; justify-content: flex-start; } .avatar-audit-row > button { grid-column: 1 / -1; justify-self: start; } .avatar-audit-summary { align-items: flex-start; flex-direction: column; } }
+  @media (max-width: 720px) { .audio-runtime-grid, .character-settings-grid { grid-template-columns: 1fr; } .audio-runtime-heading, .tool-runtime-heading { flex-direction: column; } .character-field-wide { grid-column: auto; } .character-settings-group > summary { gap: 10px; } .character-settings-group > summary > small { max-width: 52%; } .character-settings-subsection-heading { align-items: flex-start; flex-direction: column; gap: 4px; } .avatar-model-row, .avatar-audit-row { grid-template-columns: 54px minmax(0, 1fr); } .avatar-model-actions { grid-column: 1 / -1; justify-content: flex-start; } .avatar-audit-row > button { grid-column: 1 / -1; justify-self: start; } .avatar-audit-summary { align-items: flex-start; flex-direction: column; } }
 
 .history-section { margin-bottom: 26px; }
 .history-section-heading, .memory-browser-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 12px; }

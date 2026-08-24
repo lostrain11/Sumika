@@ -74,6 +74,71 @@ class ServerTests(unittest.TestCase):
         _, messages = self.request("GET", "/api/sessions/default/messages")
         self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
 
+    def test_persona_context_and_first_greeting_are_temporary_provider_messages(self):
+        status, updated = self.request(
+            "POST",
+            "/rpc",
+            {
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "character.update",
+                "params": {
+                    "character_id": "sumika",
+                    "name": "Saki",
+                    "config": {
+                        "language": "zh-CN",
+                        "persona": {
+                            "identity": "学习搭档",
+                            "traits": "耐心、务实",
+                            "relationship": "长期伙伴",
+                            "speaking_style": "自然口语",
+                            "behavior": "先确认目标",
+                            "boundaries": "不编造事实",
+                            "response_length": "concise",
+                            "system_prompt": "结论优先",
+                            "greeting": "欢迎回来",
+                        },
+                    },
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["result"]["config"]["persona"]["response_length"], "concise")
+
+        status, response = self.request(
+            "POST",
+            "/api/chat",
+            {
+                "session_id": "default",
+                "character_id": "sumika",
+                "provider_id": "fake",
+                "messages": [{"role": "user", "content": "开始吧"}],
+            },
+        )
+        self.assertEqual(status, 200)
+        provider = self.application.providers.get("fake")
+        request = provider.requests[-1]
+        self.assertEqual([message.role for message in request.messages], ["system", "assistant", "user"])
+        self.assertIn("角色身份/定位：\n学习搭档", request.messages[0].content)
+        self.assertIn("回答保持简洁", request.messages[0].content)
+        self.assertEqual(request.messages[1].content, "欢迎回来")
+
+        _, stored = self.request("GET", "/api/sessions/default/messages")
+        self.assertEqual([message["role"] for message in stored], ["user", "assistant"])
+
+        self.request(
+            "POST",
+            "/api/chat",
+            {
+                "session_id": "default",
+                "character_id": "sumika",
+                "provider_id": "fake",
+                "messages": [{"role": "user", "content": "继续"}],
+            },
+        )
+        second_request = provider.requests[-1]
+        self.assertEqual([message.role for message in second_request.messages], ["system", "user"])
+
     def test_tauri_cross_origin_preflight_is_allowed(self):
         status, headers, body = self.request_bytes("OPTIONS", "/rpc")
         self.assertEqual(status, 204)

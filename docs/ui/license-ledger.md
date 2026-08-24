@@ -8,8 +8,8 @@ review.
 | Source | Current use | Reuse status |
 | --- | --- | --- |
 | [AIRI](https://github.com/moeru-ai/airi) | overlay, status islands, settings and mobile connection patterns | study; review package license before copying |
-| [Shinsekai](https://github.com/RachelForster/Shinsekai) | chat, character, provider and plugin information architecture | study only by default; custom source-available license |
-| [N.E.K.O.](https://github.com/Project-N-E-K-O/N.E.K.O) | Avatar/task/memory design references | review Apache core and third-party assets separately |
+| [Shinsekai `CharacterBasicSection.tsx` and `CharacterPersonalitySection.tsx`](https://github.com/RachelForster/Shinsekai/tree/main/frontend/src/features/character-editor) | Basic/Personality information architecture for the Sumika character editor | study-only behavior reference under Shinsekai's custom source-available license; no code, text, styles or assets copied |
+| [N.E.K.O `character_fields.py` and `characters/zh-CN.json`](https://github.com/Project-N-E-K-O/N.E.K.O/tree/main/config) | separation of editable persona fields from reserved Avatar runtime fields | Apache-2.0 behavior/schema-boundary reference; Sumika uses its own field names, validation and context renderer; no code, prompts, character data or assets copied |
 | [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) | minimal Live2D/pet UX reference | inspect repository license before reuse |
 | [Super Agent Party](https://github.com/heshengtao/super-agent-party) | VRM/extension interaction reference | study; review AGPL and asset terms before reuse |
 | [madjin/vrm-samples](https://github.com/madjin/vrm-samples) sample `AvatarSample_A.vrm` plus embedded thumbnail | bundled default VRM asset and local UI preview | VRoid Studio sample model conditions; pinned commit and hashes in `assets/avatars/README.md` |

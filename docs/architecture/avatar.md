@@ -70,6 +70,11 @@ returned by `avatar.state`:
 - `idle_motion`, `auto_rotate`, and `rotation_speed` control the procedural
   idle layer.
 
+The Characters page places these low-frequency controls under the collapsed
+`高级设置 > 模型表现` section. The local model catalog stays outside that
+section so asset import, inspection and character binding remain explicit
+operations rather than renderer preferences.
+
 All renderer effects are client-side hints. They do not grant access to model
 files, modify model bytes, or change the selected renderer. Missing humanoid
 bones or a missing `lookAt` manager result in a visible static fallback state.

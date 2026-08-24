@@ -25,6 +25,7 @@ from .integrations import CCSwitchCompatibilityChecker
 from .memory import MemoryRuntime, MemoryRuntimeError
 from .modules import ModuleCatalog, ModuleError
 from .plugins import PluginCatalog, PluginCatalogError
+from .persona import build_persona_context, normalize_persona
 from .provider_imports import ProviderImportError, ProviderImportRegistry
 from .provider_profiles import (
     ProviderProfileError,
@@ -373,6 +374,17 @@ class CoreApplication:
                     "avatar_driver": "none",
                     "memory_enabled": False,
                     "language": "zh-CN",
+                    "persona": {
+                        "identity": "",
+                        "traits": "",
+                        "relationship": "",
+                        "speaking_style": "",
+                        "behavior": "",
+                        "boundaries": "",
+                        "response_length": "balanced",
+                        "system_prompt": "",
+                        "greeting": "",
+                    },
                     "avatar": {
                         "position": "center",
                         "opacity": 1,
@@ -1533,12 +1545,13 @@ class CoreApplication:
                 f"LLM module is configured to use {event_provider_id}; change it on the Modules page",
             )
         provider_id = event_provider_id
-        character_id = params.get("character_id")
+        character_id = str(params.get("character_id")) if params.get("character_id") else None
+        character = self.storage.get_character(character_id) if character_id else None
         raw_messages = params.get("messages")
         if not isinstance(raw_messages, list) or not raw_messages:
             raise JsonRpcError(-32602, "messages must be a non-empty list")
         try:
-            messages = [
+            incoming_messages = [
                 Message(
                     role=item["role"],
                     content=str(item["content"]),
@@ -1551,8 +1564,22 @@ class CoreApplication:
             ]
         except KeyError as exc:
             raise JsonRpcError(-32602, f"message missing field: {exc.args[0]}") from exc
-        if not messages:
+        if not incoming_messages:
             raise JsonRpcError(-32602, "messages contains no valid entries")
+        context_messages: list[Message] = []
+        persona = (character or {}).get("config", {}).get("persona", {}) if character else {}
+        context = build_persona_context(
+            character["name"],
+            (character or {}).get("config", {}).get("language"),
+            persona,
+        ) if character else None
+        if context:
+            context_messages.append(Message(role="system", content=context, character_id=character_id))
+        is_first_turn = not self.storage.list_messages(session_id)
+        greeting = str(persona.get("greeting") or "").strip() if isinstance(persona, dict) else ""
+        if is_first_turn and greeting:
+            context_messages.append(Message(role="assistant", content=greeting, character_id=character_id))
+        messages = [*context_messages, *incoming_messages]
         request = ChatRequest(
             session_id=session_id,
             messages=messages,
@@ -1561,7 +1588,7 @@ class CoreApplication:
             temperature=float(params.get("temperature", 0.7)),
             max_tokens=int(params.get("max_tokens", 512)),
         )
-        latest = messages[-1]
+        latest = incoming_messages[-1]
         if latest.role == "user":
             self.storage.append_message(session_id, latest)
             self.events.publish(EventEnvelope("message.created", {"message": latest.to_dict()}, session_id, character_id))
@@ -2078,14 +2105,7 @@ def _validate_character_config(config: dict[str, Any]) -> dict[str, Any]:
     language = result.get("language")
     if language is not None and (not isinstance(language, str) or not language.strip() or len(language) > 32):
         raise ValueError("language must be a short non-empty string")
-    persona = result.get("persona")
-    if persona is not None:
-        if not isinstance(persona, dict):
-            raise ValueError("persona must be an object")
-        for key, limit in (("system_prompt", 20_000), ("greeting", 2_000)):
-            value = persona.get(key)
-            if value is not None and (not isinstance(value, str) or len(value) > limit):
-                raise ValueError(f"persona.{key} is invalid")
+    result["persona"] = normalize_persona(result.get("persona"))
     avatar_value = result.get("avatar")
     if avatar_value is None:
         avatar: dict[str, Any] = {}

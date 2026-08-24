@@ -16,6 +16,7 @@ from sumika_core.providers.vision import VisionProvider, VisionRequest, VisionRe
 class FakeProvider(LLMProvider):
     def __init__(self, response: str = "test response") -> None:
         self.response = response
+        self.requests: list[ChatRequest] = []
         self.info = ProviderInfo(
             id="fake",
             name="Test fixture LLM",
@@ -25,6 +26,7 @@ class FakeProvider(LLMProvider):
         )
 
     def stream(self, request: ChatRequest):
+        self.requests.append(request)
         yield self.response
 
 

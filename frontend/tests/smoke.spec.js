@@ -33,6 +33,18 @@ async function resetWorkspace(page) {
     character_id: "sumika",
     name: "Sumika",
     config: {
+      language: "zh-CN",
+      persona: {
+        identity: "",
+        traits: "",
+        relationship: "",
+        speaking_style: "",
+        behavior: "",
+        boundaries: "",
+        response_length: "balanced",
+        system_prompt: "",
+        greeting: "",
+      },
       avatar: {
         position: "center",
         opacity: 1,
@@ -48,6 +60,12 @@ async function resetWorkspace(page) {
       },
     },
   });
+}
+
+async function openCharacterSection(page, section) {
+  const details = page.locator(`[data-character-section="${section}"]`);
+  if (!(await details.evaluate((element) => element.open))) await details.locator("summary").click();
+  return details;
 }
 
 test.describe("Sumika UI shell", () => {
@@ -225,6 +243,7 @@ test.describe("Sumika UI shell", () => {
     await expect(renderer).toHaveAttribute("data-vrm-yaw", initialYaw || "3.142");
 
     await page.locator('.nav-item[data-page="Characters"]').click();
+    await openCharacterSection(page, "model");
     const autoRotate = page.locator('input[name="avatar_auto_rotate"]');
     await autoRotate.check();
     await page.locator("#character-form button[type=submit]").click();
@@ -350,6 +369,37 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".avatar-ignored")).toContainText("已忽略模型");
   });
 
+  test("角色配置按职责折叠并持久化可生效人格字段", async ({ page }) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Characters"]').click();
+
+    const groups = page.locator(".character-settings-group");
+    await expect(groups).toHaveCount(3);
+    for (const section of ["identity", "persona", "model"]) {
+      await expect(page.locator(`[data-character-section="${section}"]`)).not.toHaveAttribute("open", "");
+    }
+    await expect(page.locator(".avatar-library")).toBeVisible();
+    await expect(page.locator(".character-settings-group .avatar-library")).toHaveCount(0);
+
+    await openCharacterSection(page, "identity");
+    await page.locator('textarea[name="persona_identity"]').fill("温和可靠的学习搭档");
+    await openCharacterSection(page, "persona");
+    await page.locator('textarea[name="persona_traits"]').fill("耐心、务实");
+    await page.locator('textarea[name="persona_relationship"]').fill("长期合作伙伴");
+    await page.locator('select[name="persona_response_length"]').selectOption("concise");
+    await page.locator('textarea[name="system_prompt"]').fill("结论优先");
+    await page.locator('textarea[name="greeting"]').fill("欢迎回来");
+    await page.locator("#character-form button[type=submit]").click();
+
+    await expect(page.locator(".character-notice")).toContainText("已保存");
+    await expect(page.locator('[data-character-section="persona"] summary')).toContainText("已设置 4 项 · 简洁");
+    await openCharacterSection(page, "identity");
+    await expect(page.locator('textarea[name="persona_identity"]')).toHaveValue("温和可靠的学习搭档");
+    await openCharacterSection(page, "persona");
+    await expect(page.locator('textarea[name="persona_traits"]')).toHaveValue("耐心、务实");
+    await expect(page.locator('select[name="persona_response_length"]')).toHaveValue("concise");
+  });
+
   test("compact viewport stays within the viewport", async ({ page }) => {
     await page.setViewportSize({ width: 860, height: 760 });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -375,6 +425,7 @@ test.describe("Sumika UI shell", () => {
     await expect.poll(async () => Math.abs(Number(await renderer.getAttribute("data-vrm-head-yaw")))).toBeLessThan(0.02);
 
     await page.locator('.nav-item[data-page="Characters"]').click();
+    await openCharacterSection(page, "model");
     await page.locator('input[name="avatar_natural_pose"]').uncheck();
     await page.locator('input[name="avatar_look_at_enabled"]').uncheck();
     await page.locator('input[name="avatar_head_follow_enabled"]').uncheck();

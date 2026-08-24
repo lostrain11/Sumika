@@ -9,7 +9,7 @@ copy a new visual language from scratch.
 | Desktop Avatar / overlay | [AIRI stage renderer](https://github.com/moeru-ai/airi/tree/main/apps/stage-tamagotchi/src/renderer) | overlay windows, status islands, controls and settings routes |
 | Mobile connection | [AIRI pocket](https://github.com/moeru-ai/airi/tree/main/apps/stage-pocket/src) | permission cards and host connection settings |
 | Chat and shell | [Shinsekai chat-stage](https://github.com/RachelForster/Shinsekai/tree/main/frontend/src/features/chat-stage) | stage controls, history, input layer and collapsible overlays |
-| Character editor | [Shinsekai character-editor](https://github.com/RachelForster/Shinsekai/tree/main/frontend/src/features/character-editor) | character sections, voice/model selection and memory visibility |
+| Character editor | [Shinsekai character-editor](https://github.com/RachelForster/Shinsekai/tree/main/frontend/src/features/character-editor), [N.E.K.O character schema](https://github.com/Project-N-E-K-O/N.E.K.O/blob/main/config/character_fields.py) | Basic/Personality section boundaries and separation of persona data from reserved Avatar runtime controls; behavior/information architecture only |
 | Provider/modules | [Shinsekai API/plugin features](https://github.com/RachelForster/Shinsekai/tree/main/frontend/src/features) | schema forms, plugin catalog/detail and provider configuration |
 | Task and Avatar state | [N.E.K.O. design docs](https://github.com/Project-N-E-K-O/N.E.K.O/tree/main/docs/design) | HUD, floating panel and status visibility |
 | Beginner Live2D flow | [Open-LLM-VTuber assets](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber/tree/main/assets) | app/pet mode framing and model presentation |
