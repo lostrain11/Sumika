@@ -11,7 +11,7 @@ API、协议、类名和代码标识保留 English identifier。
 
 ## 用户使用
 
-- [根目录快速开始](../README.md)
+- [根目录快速开始](../README_zh.md)
 - [桌面 Shell 与桌宠](architecture/desktop-shell.md)
 - [本地模型与 Ollama](architecture/local-model.md)
 - [入门指南与 UI 参考](ui/reference-map.md)
@@ -58,4 +58,3 @@ API、协议、类名和代码标识保留 English identifier。
 - 外部项目只作行为或信息架构参考。复制代码、图标、模型或动画前，先更新
   来源与许可证台账及第三方声明。
 - 非产品过程资料进入归档区，不在产品文档索引中重新出现；归档内容保持原样。
-
