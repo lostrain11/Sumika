@@ -14,7 +14,8 @@ from .storage import Storage
 
 
 PROFILE_FORMAT = "sumika-provider-profile/v1"
-DEFAULT_PROFILE_ID = "local-ollama"
+LEGACY_OLLAMA_PROFILE_ID = "local-ollama"
+LEGACY_OPENAI_PROFILE_ID = "legacy-openai-compatible"
 SENSITIVE_HEADER_NAMES = {
     "authorization",
     "proxy-authorization",
@@ -51,20 +52,23 @@ class ProviderProfileManager:
     def templates(self) -> list[dict[str, Any]]:
         return [dict(item) for item in PROVIDER_TEMPLATES]
 
-    def ensure_default(self, legacy_config: dict[str, Any] | None = None) -> dict[str, Any]:
-        existing = self.storage.get_provider_profile(DEFAULT_PROFILE_ID)
+    def ensure_legacy_profile(self, legacy_config: dict[str, Any] | None = None) -> dict[str, Any]:
+        config = dict(legacy_config or {})
+        base_url = str(config.get("base_url") or "").strip()
+        is_ollama = _is_local_ollama_url(base_url)
+        profile_id = LEGACY_OLLAMA_PROFILE_ID if is_ollama else LEGACY_OPENAI_PROFILE_ID
+        existing = self.storage.get_provider_profile(profile_id)
         if existing is not None:
             return self.public(existing)
-        config = dict(legacy_config or {})
         payload = {
-            "id": DEFAULT_PROFILE_ID,
-            "name": "本地 Ollama",
+            "id": profile_id,
+            "name": "本地 Ollama" if is_ollama else "迁移的 OpenAI-compatible 连接",
             "adapter_id": "openai-compatible",
-            "template_id": "ollama",
-            "processing_location": "local",
-            "base_urls": [config.get("base_url") or _TEMPLATES["ollama"]["base_url"]],
-            "active_base_url": config.get("base_url") or _TEMPLATES["ollama"]["base_url"],
-            "model": config.get("model") or _TEMPLATES["ollama"]["model"],
+            "template_id": "ollama" if is_ollama else "openai-compatible",
+            "processing_location": "local" if is_ollama else "auto",
+            "base_urls": [base_url],
+            "active_base_url": base_url,
+            "model": config.get("model") or "",
             "timeout": config.get("timeout", 60),
             "status": "unavailable",
             "source": {"format": PROFILE_FORMAT, "kind": "migration", "adapter": "builtin"},
@@ -265,6 +269,16 @@ def resolve_processing_location(selection: str, base_url: str) -> str:
         return "local" if address.is_loopback or address.is_private or address.is_link_local else "cloud"
     except ValueError:
         return "cloud"
+
+
+def _is_local_ollama_url(base_url: str) -> bool:
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    return (
+        host in {"127.0.0.1", "localhost", "::1"}
+        and parsed.port == 11434
+        and parsed.path.rstrip("/") in {"", "/v1"}
+    )
 
 
 def _profile_id(value: Any) -> str:

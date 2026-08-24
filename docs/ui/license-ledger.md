@@ -21,8 +21,8 @@ review.
 | [CC Switch](https://github.com/farion1231/cc-switch) `src-tauri/src/deeplink/parser.rs`, `provider.rs`, `mod.rs`, `usage_script.rs` and `DeepLinkImportDialog.tsx` | versioned `ccswitch://v1/import` field mapping and compatibility-check behavior | MIT project; behavior and protocol reference only, no source copied; baseline `v3.20.0` / commit `5ca9459d50ea4beea6a81bbc509de6ec5b6b09ca` |
 | [heshengtao/super-agent-party `static/js/vrm.js`](https://github.com/heshengtao/super-agent-party/blob/380ad8422bbe5767e31a70d853a3eb5bb747e4a5/static/js/vrm.js) | natural standing pose bone selection comparison | behavior reference only; no code or model copied; fixed commit `380ad8422bbe5767e31a70d853a3eb5bb747e4a5`; asset license not assumed |
 | [pixiv/three-vrm-animation](https://github.com/pixiv/three-vrm-animation) npm package | optional `VrmaAdapter` in `frontend/src/vrm-viewer.js` | MIT; version pinned in `frontend/package-lock.json`; no VRMA asset bundled |
-| [Ollama](https://github.com/ollama/ollama) Windows runtime | local OpenAI-compatible model service started by `tools/setup-ollama.ps1` | use the official installer; runtime is not redistributed by Sumika |
-| [Qwen3](https://huggingface.co/Qwen/Qwen3-4B) `qwen3:4b` Ollama model | default local test model, downloaded to the user-selected model cache | Qwen license terms apply to the downloaded weights; Sumika does not bundle or redistribute the model |
+| [Ollama](https://github.com/ollama/ollama) Windows runtime | optional local OpenAI-compatible service managed only when the user runs `tools/setup-ollama.ps1` | use the official installer; runtime is not redistributed or installed during normal Sumika startup |
+| [Qwen3](https://huggingface.co/Qwen/Qwen3-4B) `qwen3:4b` Ollama model | editable Ollama template example; downloaded only after explicit user selection | Qwen license terms apply to downloaded weights; Sumika does not bundle, install, or redistribute the model |
 
 The current preview driver and CSS are original Sumika code. Any future
 copied file must add its exact path, upstream revision, license, attribution

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -20,15 +19,15 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:11434/v1",
-        model: str = "qwen3:4b",
+        base_url: str = "",
+        model: str = "",
         api_key: str | None = None,
         timeout: float = 60.0,
         headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.api_key = api_key or os.getenv("SUMIKA_OPENAI_API_KEY")
+        self.api_key = api_key
         self.timeout = timeout
         self.headers = dict(headers or {})
         self.info = ProviderInfo(
@@ -90,6 +89,14 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def health_check(self) -> dict[str, object]:
         """Check both endpoint reachability and the configured model name."""
+        if not self.base_url or not self.model:
+            self.info.status = "unconfigured"
+            return {
+                "ok": False,
+                "provider_id": self.info.id,
+                "status": "unconfigured",
+                "error": "provider is not configured",
+            }
         headers = self._request_headers(accept="application/json")
         request = Request(f"{self.base_url}/models", headers=headers, method="GET")
         try:

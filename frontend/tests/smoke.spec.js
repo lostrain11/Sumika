@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { createServer } from "node:http";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
+let providerStub;
+let providerStubUrl;
 
 async function resetWorkspace(page) {
   const rpcUrl = `${baseUrl.replace(/\/$/, "")}/rpc`;
@@ -13,7 +16,19 @@ async function resetWorkspace(page) {
     if (body.error) throw new Error(`${method} reset failed: ${body.error.message}`);
     return body.result;
   };
-  await call("provider.profile.activate", { profile_id: "local-ollama" });
+  await call("provider.profile.save", {
+    profile: {
+      id: "playwright-openai-stub",
+      name: "Playwright OpenAI-compatible stub",
+      adapter_id: "openai-compatible",
+      template_id: "openai-compatible",
+      processing_location: "local",
+      active_base_url: providerStubUrl,
+      base_urls: [providerStubUrl],
+      model: "playwright-model",
+    },
+  });
+  await call("provider.profile.activate", { profile_id: "playwright-openai-stub" });
   await call("character.update", {
     character_id: "sumika",
     name: "Sumika",
@@ -36,20 +51,49 @@ async function resetWorkspace(page) {
 }
 
 test.describe("Sumika UI shell", () => {
+  test.beforeAll(async () => {
+    providerStub = createServer((request, response) => {
+      if (request.method === "GET" && request.url === "/v1/models") {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "playwright-model" }] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/chat/completions") {
+        request.resume();
+        request.on("end", () => {
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "Playwright stub reply" } }],
+          }));
+        });
+        return;
+      }
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "not found" }));
+    });
+    await new Promise((resolve, reject) => {
+      providerStub.once("error", reject);
+      providerStub.listen(0, "127.0.0.1", resolve);
+    });
+    const address = providerStub.address();
+    providerStubUrl = `http://127.0.0.1:${address.port}/v1`;
+  });
+
+  test.afterAll(async () => {
+    if (providerStub) await new Promise((resolve) => providerStub.close(resolve));
+  });
+
   test.beforeEach(async ({ page }) => {
     await resetWorkspace(page);
   });
 
   test("chat, navigation, and Avatar visibility", async ({ page }) => {
-    // The first Ollama request may include a one-time model load on this machine.
-    test.setTimeout(60000);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await expect(page.locator("body")).toContainText("Sumika 默认 Avatar");
 
     await page.locator("#chat-input").fill("Playwright smoke message");
     await page.locator("#chat-form button[type=submit]").click();
-    // A cold local Ollama model may need to load weights on the first request.
-    await expect(page.locator(".message.assistant").last()).toBeVisible({ timeout: 45000 });
+    await expect(page.locator(".message.assistant").last()).toContainText("Playwright stub reply");
 
     await page.locator('.nav-item[data-page="Modules"]').click();
     await expect(page.locator("body")).toContainText("语音识别");
@@ -61,6 +105,46 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("body")).toContainText("Avatar 已隐藏");
     await page.locator("[data-avatar-toggle]").click();
     await expect(page.locator("body")).toContainText("Sumika 默认 Avatar");
+  });
+
+  test("unconfigured chat directs the user to Provider setup", async ({ page }) => {
+    const llmModule = {
+      id: "llm",
+      name: "大语言模型",
+      capability: "llm",
+      description: "对话生成的可替换 provider。",
+      enabled: false,
+      status: "disabled",
+      implementation_id: "openai-compatible",
+      implementation: {
+        id: "openai-compatible",
+        name: "OpenAI-compatible",
+        status: "unconfigured",
+        config_schema: {},
+      },
+      implementations: [],
+      config: {},
+      config_schema: {},
+      permissions: [],
+      resource_requirements: {},
+    };
+    await page.route("**/api/provider-profiles*", (route) => route.fulfill({
+      contentType: "application/json",
+      body: "[]",
+    }));
+    await page.route("**/api/modules", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([llmModule]),
+    }));
+    await page.route("**/api/sessions/*/messages", (route) => route.fulfill({
+      contentType: "application/json",
+      body: "[]",
+    }));
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await expect(page.locator(".empty-chat")).toContainText("先配置 Provider");
+    await expect(page.locator("#chat-form .send-button")).toBeDisabled();
+    await page.locator('.empty-chat [data-page="Modules"]').click();
+    await expect(page.locator("body")).toContainText("自定义连接");
   });
 
   test("顶部运行状态使用统一的扁平高度", async ({ page }) => {

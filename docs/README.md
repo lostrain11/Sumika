@@ -11,7 +11,9 @@ API、协议、类名和代码标识保留 English identifier。
 
 ## 用户使用
 
-- [根目录快速开始](../README_zh.md)
+- [Windows 启动](../README_zh.md#windows)
+- [macOS 启动](../README_zh.md#macos)
+- [Linux 启动](../README_zh.md#linux)
 - [桌面 Shell 与桌宠](architecture/desktop-shell.md)
 - [本地模型与 Ollama](architecture/local-model.md)
 - [入门指南与 UI 参考](ui/reference-map.md)
@@ -53,6 +55,7 @@ API、协议、类名和代码标识保留 English identifier。
 
 - 手动运行 `python tools/check_docs.py` 检查本地链接、索引覆盖、状态矩阵和
   归档引用。
+- 三端命令分别维护在根 README；未实现的启动器必须明确标为预留或实验性。
 - 新增产品专题时，同时加入本页、状态矩阵和对应专题文档的“相关文档”段落。
 - 功能状态只更新状态矩阵；README 和专题文档引用矩阵，不自行维护第二份状态。
 - 外部项目只作行为或信息架构参考。复制代码、图标、模型或动画前，先更新

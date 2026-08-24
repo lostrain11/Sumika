@@ -1,5 +1,18 @@
 # Desktop shell boundary
 
+## Platform status
+
+- Windows：当前受支持的 Tauri 开发入口是
+  `.\tools\run-desktop.ps1`。
+- macOS/Linux：Python 核心与浏览器界面可使用根 README 中的直接命令；Tauri
+  桌面端属于实验性能力。
+- 原生 `tools/run_core.sh` 和 `tools/run-desktop.sh` 只预留路径，尚未实现。
+  仓库中的现有 `.sh` 文件是旧的 Windows Git Bash 兼容包装器，不是 POSIX
+  启动器。
+
+所有平台的正常启动都不管理 Ollama 或模型权重。Provider 配置与启动生命周期
+保持独立。
+
 The browser preview remains an executable client. The first Tauri development
 shell now wraps the same UI and local core, with:
 
@@ -9,8 +22,11 @@ shell now wraps the same UI and local core, with:
 - a supervised Python child process on `127.0.0.1:8771`;
 - isolated `.sumika-desktop` data and lifecycle logs.
 
-Provider secrets are stored by the Python core through the Windows Credential
-Manager boundary; the desktop shell does not duplicate or expose them.
+Provider secrets are stored by the Python core through the credential-store
+boundary; Windows currently uses Credential Manager. macOS Keychain and Linux
+Secret Service adapters are not implemented, so those platforms fail closed
+for profiles that need a persisted secret. The desktop shell does not
+duplicate or expose credentials.
 
 The overlay keeps only high-frequency actions (open the main window and hide
 the overlay), a compact chat composer, and a draggable Avatar area. Dragging

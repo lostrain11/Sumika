@@ -20,7 +20,7 @@ class ModuleCatalogTests(unittest.TestCase):
 
     def test_defaults_expose_capabilities_and_implementations(self):
         modules = {module["id"]: module for module in self.catalog.list()}
-        self.assertTrue(modules["llm"]["enabled"])
+        self.assertFalse(modules["llm"]["enabled"])
         self.assertEqual(modules["llm"]["implementation_id"], "openai-compatible")
         self.assertFalse(modules["memory"]["enabled"])
         self.assertIn("sqlite-reference", {item["id"] for item in modules["memory"]["implementations"]})

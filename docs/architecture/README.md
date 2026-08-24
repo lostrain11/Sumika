@@ -21,7 +21,7 @@ OpenAI-compatible / external-process providers
 - [Protocol](protocol.md)：HTTP JSON-RPC、WebSocket 事件和命令边界。
 - [Modules](modules.md)：能力目录、实现选择和配置校验。
 - [Provider profiles](provider-profiles.md)：连接档案、凭据和 CC Switch 导入。
-- [Local model](local-model.md)：Ollama 启动、模型缓存和推理边界。
+- [Local model](local-model.md)：用户选择模型、可选 Ollama 辅助脚本和推理边界。
 - [Avatar](avatar.md) / [Characters](characters.md)：模型资产、角色和展示配置。
 - [Desktop shell](desktop-shell.md)：Tauri 主窗口、桌宠浮窗和 Python 子进程。
 - [Tasks](tasks.md)：预算、批准、生命周期和任务 HUD。

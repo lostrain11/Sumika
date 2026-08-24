@@ -1,9 +1,11 @@
 import json
+import os
 import subprocess
 import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 
 from sumika_core.protocol.models import ChatRequest, Message
 from sumika_core.providers import CommandProvider, OpenAICompatibleProvider, ProviderRegistry
@@ -14,6 +16,12 @@ from fixtures.providers import FakeProvider
 class ProviderTests(unittest.TestCase):
     def setUp(self):
         self.request = ChatRequest("s1", [Message("user", "hello")])
+
+    def test_openai_provider_does_not_inherit_legacy_environment_key(self):
+        with patch.dict(os.environ, {"SUMIKA_OPENAI_API_KEY": "legacy-secret"}):
+            provider = OpenAICompatibleProvider("http://127.0.0.1:19090/v1", "test-model")
+        self.assertIsNone(provider.api_key)
+        self.assertNotIn("Authorization", provider._request_headers(accept="application/json"))
 
     def test_fake_provider_streams_deterministically(self):
         provider = FakeProvider("one two")

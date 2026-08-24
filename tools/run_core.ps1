@@ -1,9 +1,6 @@
 param(
     [int]$Port = 8770,
-    [string]$DataDir = $null,
-    [switch]$SkipModel,
-    [string]$Model = 'qwen3:4b',
-    [string]$OllamaModelsDir = [string]$env:SUMIKA_OLLAMA_MODELS
+    [string]$DataDir = $null
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,11 +24,5 @@ $dataPath = if ([string]::IsNullOrWhiteSpace($DataDir)) {
 } else {
     $DataDir
 }
-$ollamaSetup = Join-Path $repoRoot 'tools\setup-ollama.ps1'
-
 $env:PYTHONPATH = Join-Path $repoRoot 'backend/src'
-if (-not $SkipModel) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ollamaSetup -Model $Model -ModelsDir $OllamaModelsDir -InstallIfMissing
-    if ($LASTEXITCODE -ne 0) { throw "Ollama setup failed with exit code $LASTEXITCODE." }
-}
 & $pythonPath -m sumika_core --host 127.0.0.1 --port $Port --data-dir $dataPath
