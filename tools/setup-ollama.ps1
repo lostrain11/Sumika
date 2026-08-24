@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Model = 'qwen3:4b',
+    [string]$Model = '',
     [string]$ModelsDir = [string]$env:SUMIKA_OLLAMA_MODELS,
     [int]$Port = 11434,
     [switch]$InstallIfMissing,
@@ -10,6 +10,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$Model = $Model.Trim()
+if ([string]::IsNullOrWhiteSpace($Model)) {
+    throw "Specify a model explicitly, for example -Model 'qwen3:4b'. Sumika never chooses or downloads a model automatically."
+}
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $logDir = Join-Path $repoRoot '.sumika-desktop\logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

@@ -4,68 +4,107 @@
 
 Sumika is a local-first, modular foundation for a desktop private companion.
 
-## Run the browser slice
+## Platform support
 
-From the repository root. The wrapper uses `SUMIKA_PYTHON` when provided and
-otherwise resolves `python` from `PATH`:
+| Platform | Python core and browser UI | Tauri desktop shell |
+| --- | --- | --- |
+| Windows | Supported | Supported |
+| macOS | Supported command; see credential limitation below | Experimental |
+| Linux | Supported command; see credential limitation below | Experimental |
+
+Python 3.11 or newer is required on every platform. Sumika starts with LLM
+disabled and no provider profile. Normal startup never installs Ollama, starts
+a model service, or downloads model weights.
+
+## Windows
+
+Run the browser UI from PowerShell at the repository root:
 
 ```powershell
 .\tools\run_core.ps1
 ```
 
-The startup wrapper checks the official Ollama installation and ensures that
-the configured local model is present before starting Sumika. The default model
-is `qwen3:4b`; an already-running Ollama service is reused. Pass
-`-OllamaModelsDir` or set `SUMIKA_OLLAMA_MODELS` to use a custom model cache.
-Use `-SkipModel` when you manage Ollama yourself. Git Bash can run
-`./tools/run_core.sh` or `./tools/run-desktop.sh`; the wrappers translate
-common `--skip-model` and `--model=...` options without changing the system
-proxy.
-
-If `bash` resolves to the Windows Subsystem for Linux shim, use the Git Bash
-executable installed on your system instead.
-
-To use another Python runtime:
+Open [http://127.0.0.1:8770/](http://127.0.0.1:8770/). Browser data is stored
+in `.sumika`. To select another Python executable:
 
 ```powershell
 $env:SUMIKA_PYTHON = 'C:\Path\To\python.exe'
 .\tools\run_core.ps1
 ```
 
-Then open [http://127.0.0.1:8770/](http://127.0.0.1:8770/). The browser slice
-keeps its data in `.sumika`.
-
-## Run the desktop development shell
-
-Install dependencies once in `frontend`, then run the desktop shell from the
-repository root:
+For the desktop development shell, install frontend dependencies once and then
+start Tauri:
 
 ```powershell
 npm install --prefix frontend
 .\tools\run-desktop.ps1
 ```
 
-The wrapper resolves `python` from `PATH` by default. Set `SUMIKA_PYTHON` first
-when Python is installed elsewhere:
+The desktop core listens on `127.0.0.1:8771` and stores its data in
+`.sumika-desktop`. Use `-NoBuild` after a successful frontend build. Desktop
+development also requires Rust with the MSVC target and the Windows C++ build
+tools. The `.sh` files are legacy Windows Git Bash compatibility wrappers;
+Git Bash is not a prerequisite or the documented Windows startup path.
 
-```powershell
-$env:SUMIKA_PYTHON = 'C:\Path\To\python.exe'
-.\tools\run-desktop.ps1
-```
+## macOS
 
-Git Bash can invoke the same script:
+The currently supported entry point is the Python core and browser UI:
 
 ```bash
-cd /path/to/Sumika
-export SUMIKA_PYTHON='C:/Path/To/python.exe'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tools/run-desktop.ps1
+PYTHONPATH=backend/src python3 -m sumika_core \
+  --host 127.0.0.1 --port 8770 --data-dir .sumika
 ```
 
-The script builds the frontend, starts the Tauri 2 window, and lets the window
-manage its Python core child on `127.0.0.1:8771`. Desktop data is isolated in
-`.sumika-desktop` and can run independently of the browser slice. Use
-`-NoBuild` for faster repeat launches after a frontend build. The first local
-run requires the Rust MSVC toolchain and Windows C++ build tools.
+Then open [http://127.0.0.1:8770/](http://127.0.0.1:8770/). Native
+`tools/run_core.sh` and `tools/run-desktop.sh` launchers are reserved but
+not implemented. The Tauri shell is experimental; contributors may try it
+with Node.js, Rust, Xcode Command Line Tools, and the platform WebView:
+
+```bash
+npm install --prefix frontend
+npm --prefix frontend run build
+SUMIKA_PYTHON="$(command -v python3)" npm --prefix frontend run tauri:dev
+```
+
+## Linux
+
+The currently supported entry point is the Python core and browser UI:
+
+```bash
+PYTHONPATH=backend/src python3 -m sumika_core \
+  --host 127.0.0.1 --port 8770 --data-dir .sumika
+```
+
+Then open [http://127.0.0.1:8770/](http://127.0.0.1:8770/). Native
+`tools/run_core.sh` and `tools/run-desktop.sh` launchers are reserved but
+not implemented. The experimental Tauri path requires Node.js, Rust, a C
+toolchain, and the WebKitGTK/system packages listed in the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/):
+
+```bash
+npm install --prefix frontend
+npm --prefix frontend run build
+SUMIKA_PYTHON="$(command -v python3)" npm --prefix frontend run tauri:dev
+```
+
+macOS and Linux currently fail closed when a provider profile needs a saved
+API key because an approved Keychain/Secret Service adapter has not been
+implemented. Local endpoints without authentication remain usable.
+
+## Configure a model
+
+Open **Modules**, choose **Custom connection**, select a real template, enter
+the endpoint and model, test the connection, and explicitly enable it. Ollama
+is optional. Install it yourself if selected; after choosing a model, the
+Windows-only helper can start/check Ollama and pull that explicit model:
+
+```powershell
+.\tools\setup-ollama.ps1 -Model 'qwen3:4b'
+```
+
+`qwen3:4b` is an editable example in the Ollama template, not a default
+installation. The helper supports an explicit model cache through
+`-ModelsDir` or `SUMIKA_OLLAMA_MODELS`.
 
 The main window can open an optional always-on-top desktop-pet mode. The model
 area is a Tauri drag region, so the floating pet can be moved around the
@@ -92,12 +131,12 @@ external JSONL process boundary, SQLite sessions/events/snapshots, JSON-RPC
 commands, and a WebSocket event stream. It also includes an approval-gated
 external tool JSONL boundary.
 
-Configure an OpenAI-compatible endpoint with:
-
-- `SUMIKA_OPENAI_BASE_URL`
-- `SUMIKA_OPENAI_MODEL`
-- `SUMIKA_OPENAI_API_KEY`
-- `SUMIKA_COMMAND_PROVIDER`
+New workspaces configure OpenAI-compatible endpoints through Provider profiles.
+`SUMIKA_OPENAI_BASE_URL`, `SUMIKA_OPENAI_MODEL`, and
+`SUMIKA_OPENAI_API_KEY` remain migration inputs for an explicitly enabled
+legacy configuration; they never create or enable a profile in a new
+workspace. `SUMIKA_COMMAND_PROVIDER` can explicitly register an external
+command adapter.
 
 The production provider catalog never registers Fake providers. Deterministic
 test doubles live only in `backend/tests/fixtures` and are injected explicitly

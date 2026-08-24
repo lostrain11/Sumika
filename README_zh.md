@@ -4,64 +4,101 @@
 
 Sumika 是一个本地优先、模块化的桌面私人助手基础项目。
 
-## 快速启动浏览器版本
+## 平台支持
 
-在仓库根目录执行。脚本优先使用 `SUMIKA_PYTHON`，否则从 `PATH` 查找
-`python`：
+| 平台 | Python 核心与浏览器界面 | Tauri 桌面端 |
+| --- | --- | --- |
+| Windows | 支持 | 支持 |
+| macOS | 支持当前命令；凭据限制见下文 | 实验性 |
+| Linux | 支持当前命令；凭据限制见下文 | 实验性 |
+
+三端均要求 Python 3.11 或更高版本。Sumika 首次启动时 LLM 默认关闭，也不会
+创建 Provider 档案。正常启动不会安装 Ollama、启动模型服务或下载模型权重。
+
+## Windows
+
+在仓库根目录的 PowerShell 中启动浏览器界面：
 
 ```powershell
 .\tools\run_core.ps1
 ```
 
-启动包装器会检查官方 Ollama 安装，并在启动 Sumika 前确保本地模型已经存在。
-默认模型是 `qwen3:4b`；如果 Ollama 已经运行，脚本会复用现有服务。使用
-`-OllamaModelsDir` 或设置 `SUMIKA_OLLAMA_MODELS` 可以指定模型缓存目录；如果
-你自行管理 Ollama，可以使用 `-SkipModel` 跳过模型检查。Git Bash 可以执行
-`./tools/run_core.sh` 或 `./tools/run-desktop.sh`；包装器会转换常用的
-`--skip-model` 和 `--model=...` 参数，但不会修改系统代理。
-
-如果 `bash` 指向 Windows Subsystem for Linux 的兼容入口，请改用系统中安装的
-Git Bash 可执行文件。
-
-需要使用其他 Python 运行时：
+然后打开 [http://127.0.0.1:8770/](http://127.0.0.1:8770/)。数据保存在
+`.sumika`。需要指定其他 Python 时：
 
 ```powershell
 $env:SUMIKA_PYTHON = 'C:\Path\To\python.exe'
 .\tools\run_core.ps1
 ```
 
-然后打开 [http://127.0.0.1:8770/](http://127.0.0.1:8770/)。浏览器版本的数据
-保存在 `.sumika`。
-
-## 启动桌面开发端
-
-先在 `frontend` 目录安装一次依赖，然后回到仓库根目录执行：
+启动桌面开发端前安装一次前端依赖：
 
 ```powershell
 npm install --prefix frontend
 .\tools\run-desktop.ps1
 ```
 
-脚本默认从 `PATH` 查找 `python`。如果 Python 位于其他位置，启动前设置
-`SUMIKA_PYTHON`：
+桌面核心监听 `127.0.0.1:8771`，数据保存在 `.sumika-desktop`。前端已经
+成功构建后可使用 `-NoBuild`。桌面开发还需要 Rust MSVC target 和 Windows
+C++ 构建工具。仓库中的 `.sh` 文件只是旧的 Windows Git Bash 兼容包装器；
+Git Bash 不是 Windows 启动前提，也不是文档中的默认入口。
 
-```powershell
-$env:SUMIKA_PYTHON = 'C:\Path\To\python.exe'
-.\tools\run-desktop.ps1
-```
+## macOS
 
-Git Bash 也可以调用同一个脚本：
+当前正式入口是 Python 核心与浏览器界面：
 
 ```bash
-cd /path/to/Sumika
-export SUMIKA_PYTHON='C:/Path/To/python.exe'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tools/run-desktop.ps1
+PYTHONPATH=backend/src python3 -m sumika_core \
+  --host 127.0.0.1 --port 8770 --data-dir .sumika
 ```
 
-脚本会构建前端、启动 Tauri 2 窗口，并让窗口管理监听在 `127.0.0.1:8771` 的
-Python 核心子进程。桌面端数据隔离在 `.sumika-desktop` 中，可以和浏览器版本
-独立运行。前端构建完成后，可以使用 `-NoBuild` 加快重复启动。首次运行需要
-Rust MSVC 工具链和 Windows C++ 构建工具。
+然后打开 [http://127.0.0.1:8770/](http://127.0.0.1:8770/)。原生
+`tools/run_core.sh` 和 `tools/run-desktop.sh` 入口只预留了位置，尚未实现。
+Tauri 桌面端属于实验性能力；贡献者可以准备 Node.js、Rust、Xcode Command
+Line Tools 和系统 WebView 后尝试：
+
+```bash
+npm install --prefix frontend
+npm --prefix frontend run build
+SUMIKA_PYTHON="$(command -v python3)" npm --prefix frontend run tauri:dev
+```
+
+## Linux
+
+当前正式入口是 Python 核心与浏览器界面：
+
+```bash
+PYTHONPATH=backend/src python3 -m sumika_core \
+  --host 127.0.0.1 --port 8770 --data-dir .sumika
+```
+
+然后打开 [http://127.0.0.1:8770/](http://127.0.0.1:8770/)。原生
+`tools/run_core.sh` 和 `tools/run-desktop.sh` 入口只预留了位置，尚未实现。
+实验性 Tauri 路径需要 Node.js、Rust、C 工具链，以及
+[Tauri 前置依赖](https://v2.tauri.app/start/prerequisites/)列出的
+WebKitGTK/系统软件包：
+
+```bash
+npm install --prefix frontend
+npm --prefix frontend run build
+SUMIKA_PYTHON="$(command -v python3)" npm --prefix frontend run tauri:dev
+```
+
+macOS 和 Linux 目前没有经过批准的 Keychain/Secret Service 适配器。需要保存
+API Key 的 Provider 会以安全失败方式拒绝保存；无需鉴权的本地端点仍可使用。
+
+## 配置模型
+
+进入“模块”，选择“自定义连接”，挑选真实模板，填写端点和模型，测试成功后
+再主动启用。Ollama 只是可选实现；选择它时先自行安装。明确选择模型后，可以
+使用仅限 Windows 的辅助脚本启动/检查 Ollama 并拉取该模型：
+
+```powershell
+.\tools\setup-ollama.ps1 -Model 'qwen3:4b'
+```
+
+`qwen3:4b` 只是 Ollama 模板里可编辑的示例，不会默认安装。辅助脚本可通过
+`-ModelsDir` 或 `SUMIKA_OLLAMA_MODELS` 使用用户指定的模型缓存目录。
 
 主窗口可以打开可选的置顶“桌宠模式”。模型区域是 Tauri 拖动区域，浮窗可以
 在桌面上拖动；模型下方有紧凑聊天输入框，并复用主窗口当前的角色、会话和
@@ -81,12 +118,10 @@ provider。Provider、模块、权限和任务配置仍在主窗口中完成。
 OpenAI-compatible provider、外部 JSONL 进程边界、SQLite 会话/事件/快照、
 JSON-RPC 命令和 WebSocket 事件流，也提供经过批准门控的外部工具 JSONL 边界。
 
-使用以下环境变量配置 OpenAI-compatible 端点：
-
-- `SUMIKA_OPENAI_BASE_URL`
-- `SUMIKA_OPENAI_MODEL`
-- `SUMIKA_OPENAI_API_KEY`
-- `SUMIKA_COMMAND_PROVIDER`
+新工作区通过 Provider 档案配置 OpenAI-compatible 端点。
+`SUMIKA_OPENAI_BASE_URL`、`SUMIKA_OPENAI_MODEL` 和
+`SUMIKA_OPENAI_API_KEY` 只作为旧版已启用配置的迁移输入，不会在新工作区创建或
+启用档案。`SUMIKA_COMMAND_PROVIDER` 可用于显式登记外部命令适配器。
 
 生产 Provider 目录不会注册 Fake provider。确定性测试替身只位于
 `backend/tests/fixtures`，并由测试显式注入。

@@ -5,6 +5,11 @@ configuration separate from the capability module and from the runtime
 adapter, so one `openai-compatible` adapter can serve Ollama, a local server,
 or several remote endpoints without duplicating implementation code.
 
+New workspaces contain no automatic profile. Templates are editable starting
+points only: selecting Ollama does not install it, and its `qwen3:4b` value
+does not download a model. Activation always remains a separate, explicit
+health-checked action.
+
 ## Stored shape
 
 The `provider_profiles` SQLite table stores:
@@ -30,6 +35,10 @@ On Windows the production store is Windows Credential Manager under a
 Sumika-specific target; tests use an in-memory store. SQLite, events, snapshots
 and the public RPC representation contain only the opaque credential
 reference, secret field names and `has_secrets: true`.
+
+macOS Keychain and Linux Secret Service adapters are not implemented yet.
+Those platforms fail closed when a profile attempts to persist a non-empty
+secret; unauthenticated local providers remain available.
 
 The UI never reads a secret back. An empty password field preserves the current
 secret; an explicit clear checkbox removes it. Imported unknown sensitive

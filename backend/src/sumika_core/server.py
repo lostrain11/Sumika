@@ -27,7 +27,6 @@ from .modules import ModuleCatalog, ModuleError
 from .plugins import PluginCatalog, PluginCatalogError
 from .provider_imports import ProviderImportError, ProviderImportRegistry
 from .provider_profiles import (
-    DEFAULT_PROFILE_ID,
     ProviderProfileError,
     ProviderProfileManager,
 )
@@ -91,8 +90,9 @@ DEFAULT_AVATAR_METADATA = {
 
 PROVIDER_MIGRATION_META_KEY = "provider.real_backend_migration.v1"
 PROVIDER_PROFILE_MIGRATION_META_KEY = "provider.profile_migration.v1"
-DEFAULT_OPENAI_BASE_URL = "http://127.0.0.1:11434/v1"
-DEFAULT_OPENAI_MODEL = "qwen3:4b"
+PROVIDER_UNCONFIGURED_MIGRATION_META_KEY = "provider.unconfigured_default_migration.v1"
+DEFAULT_OPENAI_BASE_URL = ""
+DEFAULT_OPENAI_MODEL = ""
 
 
 class CoreApplication:
@@ -171,7 +171,7 @@ class CoreApplication:
             injected_info = getattr(injected_llm[0], "info", None)
             if injected_info is not None:
                 self.modules.update("llm", enabled=True, implementation_id=injected_info.id)
-        self._ensure_default_provider_config()
+        self._migrate_legacy_provider_config()
         self.audio = AudioRuntime(self.storage, self.modules, self.audio_providers, self.events)
         self.memory = MemoryRuntime(self.storage, self.modules, self.memory_providers, self.events)
         self.vision = VisionRuntime(self.storage, self.modules, self.vision_providers, self.events)
@@ -221,15 +221,29 @@ class CoreApplication:
                 for key, value in dict(llm.get("config") or {}).items()
                 if key in {"base_url", "model", "timeout"}
             }
-            config.setdefault("base_url", os.getenv("SUMIKA_OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL))
-            config.setdefault("model", os.getenv("SUMIKA_OPENAI_MODEL", DEFAULT_OPENAI_MODEL))
+            has_legacy_config = bool(config)
+            base_url = config.get("base_url") or (os.getenv("SUMIKA_OPENAI_BASE_URL") if has_legacy_config else None)
+            model = config.get("model") or (os.getenv("SUMIKA_OPENAI_MODEL") if has_legacy_config else None)
+            if base_url and model:
+                config.update({"base_url": base_url, "model": model})
+                enabled = bool(llm["enabled"])
+            else:
+                enabled = False
             self.storage.upsert_module_setting(
                 "llm",
-                enabled=bool(llm["enabled"]),
+                enabled=enabled,
                 implementation_id="openai-compatible",
                 config=config,
             )
-            changed.append({"module_id": "llm", "from": llm["implementation_id"], "to": "openai-compatible"})
+            changed.append(
+                {
+                    "module_id": "llm",
+                    "from": llm["implementation_id"],
+                    "to": "openai-compatible",
+                    "enabled": enabled,
+                    "configuration_preserved": bool(config),
+                }
+            )
         disabled_legacy = {
             "asr": {"fake-asr"},
             "tts": {"fake-tts"},
@@ -258,16 +272,66 @@ class CoreApplication:
             )
             self.logger.info("migrated legacy provider settings count=%d", len(changed))
 
-    def _ensure_default_provider_config(self) -> None:
+    def _migrate_legacy_provider_config(self) -> None:
         """Migrate the single legacy adapter config to a reusable profile."""
         setting = self.storage.get_module_setting("llm")
         if not setting or setting.get("implementation_id") != "openai-compatible":
             return
         config = dict(setting.get("config") or {})
         profile_id = config.get("profile_id")
-        if isinstance(profile_id, str) and self.storage.get_provider_profile(profile_id):
+        if isinstance(profile_id, str) and profile_id:
+            if self.storage.get_provider_profile(profile_id):
+                return
+            if bool(setting["enabled"]):
+                self.modules.update(
+                    "llm",
+                    enabled=False,
+                    implementation_id="openai-compatible",
+                    config={"profile_id": profile_id},
+                )
+                if self.storage.get_meta(PROVIDER_UNCONFIGURED_MIGRATION_META_KEY) != "done":
+                    self.storage.set_meta(PROVIDER_UNCONFIGURED_MIGRATION_META_KEY, "done")
+                    self.events.publish(
+                        EventEnvelope(
+                            "provider.unconfigured_default.disabled",
+                            {
+                                "migration": PROVIDER_UNCONFIGURED_MIGRATION_META_KEY,
+                                "previous_enabled": True,
+                                "reason": "missing-profile",
+                                "retained_profile_id": profile_id,
+                            },
+                        )
+                    )
             return
-        profile = self.provider_profiles.ensure_default(config)
+        if not bool(setting["enabled"]) and not config:
+            return
+        has_legacy_config = bool(config)
+        base_url = config.get("base_url") or (os.getenv("SUMIKA_OPENAI_BASE_URL") if has_legacy_config else None)
+        model = config.get("model") or (os.getenv("SUMIKA_OPENAI_MODEL") if has_legacy_config else None)
+        if not base_url or not model:
+            if bool(setting["enabled"]) or config:
+                self.storage.upsert_module_setting(
+                    "llm",
+                    enabled=False,
+                    implementation_id="openai-compatible",
+                    config=config,
+                )
+                if self.storage.get_meta(PROVIDER_UNCONFIGURED_MIGRATION_META_KEY) != "done":
+                    self.storage.set_meta(PROVIDER_UNCONFIGURED_MIGRATION_META_KEY, "done")
+                    self.events.publish(
+                        EventEnvelope(
+                            "provider.unconfigured_default.disabled",
+                            {
+                                "migration": PROVIDER_UNCONFIGURED_MIGRATION_META_KEY,
+                                "previous_enabled": bool(setting["enabled"]),
+                                "reason": "incomplete-legacy-config" if config else "empty-legacy-default",
+                                "retained_config_keys": sorted(config),
+                            },
+                        )
+                    )
+            return
+        config.update({"base_url": base_url, "model": model})
+        profile = self.provider_profiles.ensure_legacy_profile(config)
         if any(config.get(key) not in (None, "") for key in ("base_url", "model", "timeout")):
             profile = self.provider_profiles.save(
                 {
@@ -1112,7 +1176,7 @@ class CoreApplication:
                 )
                 restored = self.storage.restore_snapshot_state(snapshot["payload"])
                 if scope == "modules" or scope == "system":
-                    self._ensure_default_provider_config()
+                    self._migrate_legacy_provider_config()
                     self.modules.restore_runtime()
                 self._ensure_defaults()
                 self.audio.reconcile()

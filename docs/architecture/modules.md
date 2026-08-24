@@ -20,8 +20,10 @@ state.
 
 ## Persistence and secrets
 
-Module state is stored in the versioned SQLite `module_settings` table. The
-catalog validates required fields and basic JSON-schema types before writing.
+Module state is stored in the versioned SQLite `module_settings` table. LLM
+starts disabled in a new workspace and has no profile until the user saves and
+tests one. The catalog validates required fields and basic JSON-schema types
+before writing.
 Properties whose schema uses `format: "password"` are applied to the running
 provider but are deliberately excluded from SQLite. The production desktop
 runtime uses Windows Credential Manager through `CredentialStore`; unit tests
@@ -31,8 +33,9 @@ API.
 LLM connection details use the separate `provider_profiles` table and its
 `CredentialStore` boundary. The module stores only `config.profile_id`; API
 keys and sensitive headers are held by Windows Credential Manager in the
-production desktop runtime. See `provider-profiles.md` for the drawer, health
-check and archive lifecycle.
+current production desktop runtime. macOS/Linux reject non-empty secret
+persistence until an approved Keychain/Secret Service adapter exists. See
+`provider-profiles.md` for the drawer, health check and archive lifecycle.
 
 Switching implementation clears the previous implementation's configuration
 unless the caller supplies a new configuration in the same update. This keeps

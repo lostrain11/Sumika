@@ -12,6 +12,7 @@ from unittest.mock import patch
 from sumika_core.server import CoreApplication, create_server
 from sumika_core.storage import Storage
 from sumika_core.protocol.jsonrpc import JsonRpcError
+from sumika_core.protocol.models import Message
 from fixtures.providers import (
     FakeASRProvider,
     FakeProvider,
@@ -715,22 +716,68 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(second.storage.get_meta("avatar.presentation.center_migration.v1"), "done")
             second.close()
 
-    def test_legacy_fake_provider_selection_migrates_to_local_ollama(self):
+    def test_fresh_workspace_starts_with_llm_disabled_and_no_profile(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            with patch.dict(
+                "os.environ",
+                {
+                    "SUMIKA_OPENAI_BASE_URL": "",
+                    "SUMIKA_OPENAI_MODEL": "",
+                    "SUMIKA_OPENAI_API_KEY": "",
+                },
+            ):
+                application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(llm["implementation_id"], "openai-compatible")
+            self.assertEqual(llm["config"], {})
+            self.assertEqual(application.storage.list_provider_profiles(), [])
+            health = next(
+                item
+                for item in application.rpc("provider.health", {})
+                if item["provider_id"] == "openai-compatible"
+            )
+            self.assertEqual(health["status"], "unconfigured")
+            application.close()
+
+    def test_fresh_workspace_ignores_legacy_provider_environment(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            with patch.dict(
+                "os.environ",
+                {
+                    "SUMIKA_OPENAI_BASE_URL": "http://127.0.0.1:11434/v1",
+                    "SUMIKA_OPENAI_MODEL": "legacy-environment-model",
+                },
+            ):
+                application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(llm["config"], {})
+            self.assertEqual(application.storage.list_provider_profiles(), [])
+            application.close()
+
+    def test_legacy_empty_fake_provider_is_disabled_without_creating_profile(self):
         with tempfile.TemporaryDirectory() as data_directory:
             storage = Storage(Path(data_directory) / "sumika.sqlite3")
             storage.upsert_module_setting("llm", enabled=True, implementation_id="fake", config={})
             storage.upsert_module_setting("asr", enabled=True, implementation_id="fake-asr", config={})
             storage.close()
 
-            first = CoreApplication(data_directory)
+            with patch.dict(
+                "os.environ",
+                {
+                    "SUMIKA_OPENAI_BASE_URL": "",
+                    "SUMIKA_OPENAI_MODEL": "",
+                    "SUMIKA_OPENAI_API_KEY": "",
+                },
+            ):
+                first = CoreApplication(data_directory)
             llm = first.storage.get_module_setting("llm")
             asr = first.storage.get_module_setting("asr")
             self.assertEqual(llm["implementation_id"], "openai-compatible")
-            self.assertEqual(set(llm["config"]), {"profile_id"})
-            profile = first.storage.get_provider_profile(llm["config"]["profile_id"])
-            self.assertIsNotNone(profile)
-            self.assertEqual(profile["config"]["active_base_url"], "http://127.0.0.1:11434/v1")
-            self.assertEqual(profile["config"]["model"], "qwen3:4b")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(llm["config"], {})
+            self.assertEqual(first.storage.list_provider_profiles(), [])
             self.assertFalse(asr["enabled"])
             self.assertEqual(asr["implementation_id"], "none")
             migrated = [
@@ -749,6 +796,208 @@ class ServerTests(unittest.TestCase):
             ]
             self.assertEqual(len(migrated_again), 1)
             second.close()
+
+    def test_legacy_empty_openai_selection_is_disabled_once(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            storage = Storage(Path(data_directory) / "sumika.sqlite3")
+            storage.upsert_module_setting(
+                "llm",
+                enabled=True,
+                implementation_id="openai-compatible",
+                config={},
+            )
+            storage.close()
+
+            first = CoreApplication(data_directory)
+            llm = first.storage.get_module_setting("llm")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(llm["config"], {})
+            disabled_events = [
+                event
+                for event in first.storage.list_events()
+                if event["event_type"] == "provider.unconfigured_default.disabled"
+            ]
+            self.assertEqual(len(disabled_events), 1)
+            first.close()
+
+            second = CoreApplication(data_directory)
+            disabled_again = [
+                event
+                for event in second.storage.list_events()
+                if event["event_type"] == "provider.unconfigured_default.disabled"
+            ]
+            self.assertEqual(len(disabled_again), 1)
+            second.close()
+
+    def test_legacy_empty_selection_ignores_environment_and_stays_disabled(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            storage = Storage(Path(data_directory) / "sumika.sqlite3")
+            storage.upsert_module_setting(
+                "llm",
+                enabled=True,
+                implementation_id="openai-compatible",
+                config={},
+            )
+            storage.close()
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "SUMIKA_OPENAI_BASE_URL": "http://127.0.0.1:11434/v1",
+                    "SUMIKA_OPENAI_MODEL": "environment-model",
+                },
+            ):
+                application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(llm["config"], {})
+            self.assertEqual(application.storage.list_provider_profiles(), [])
+            application.close()
+
+    def test_incomplete_legacy_provider_config_is_disabled_but_preserved(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            storage = Storage(Path(data_directory) / "sumika.sqlite3")
+            storage.upsert_module_setting(
+                "llm",
+                enabled=True,
+                implementation_id="openai-compatible",
+                config={"base_url": "http://127.0.0.1:19090/v1", "timeout": 30},
+            )
+            storage.close()
+
+            with patch.dict(
+                "os.environ",
+                {"SUMIKA_OPENAI_BASE_URL": "", "SUMIKA_OPENAI_MODEL": ""},
+            ):
+                application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(
+                llm["config"],
+                {"base_url": "http://127.0.0.1:19090/v1", "timeout": 30},
+            )
+            self.assertEqual(application.storage.list_provider_profiles(), [])
+            disabled_event = next(
+                event
+                for event in application.storage.list_events()
+                if event["event_type"] == "provider.unconfigured_default.disabled"
+            )
+            self.assertEqual(disabled_event["payload"]["reason"], "incomplete-legacy-config")
+            self.assertEqual(
+                disabled_event["payload"]["retained_config_keys"],
+                ["base_url", "timeout"],
+            )
+            application.close()
+
+    def test_existing_profile_binding_is_not_changed(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            storage = Storage(Path(data_directory) / "sumika.sqlite3")
+            storage.upsert_provider_profile(
+                profile_id="user-connection",
+                name="用户连接",
+                capability="llm",
+                adapter_id="openai-compatible",
+                template_id="openai-compatible",
+                processing_location="cloud",
+                status="available",
+                config={
+                    "base_urls": ["https://example.invalid/v1"],
+                    "active_base_url": "https://example.invalid/v1",
+                    "model": "user-model",
+                    "timeout": 45,
+                    "headers": {},
+                },
+                credential_ref=None,
+                secret_fields=[],
+                source={"format": "sumika-provider-profile/v1", "kind": "manual"},
+            )
+            storage.upsert_module_setting(
+                "llm",
+                enabled=True,
+                implementation_id="openai-compatible",
+                config={"profile_id": "user-connection"},
+            )
+            storage.close()
+
+            application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            profile = application.storage.get_provider_profile("user-connection")
+            self.assertTrue(llm["enabled"])
+            self.assertEqual(llm["config"], {"profile_id": "user-connection"})
+            self.assertEqual(profile["config"]["model"], "user-model")
+            self.assertEqual(profile["status"], "available")
+            self.assertNotIn(
+                "provider.unconfigured_default.disabled",
+                {event["event_type"] for event in application.storage.list_events()},
+            )
+            application.close()
+
+    def test_missing_profile_binding_is_disabled_but_preserved(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            storage = Storage(Path(data_directory) / "sumika.sqlite3")
+            storage.upsert_module_setting(
+                "llm",
+                enabled=True,
+                implementation_id="openai-compatible",
+                config={"profile_id": "temporarily-missing"},
+            )
+            storage.close()
+
+            application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            self.assertFalse(llm["enabled"])
+            self.assertEqual(llm["config"], {"profile_id": "temporarily-missing"})
+            disabled_event = next(
+                event
+                for event in application.storage.list_events()
+                if event["event_type"] == "provider.unconfigured_default.disabled"
+            )
+            self.assertEqual(disabled_event["payload"]["reason"], "missing-profile")
+            self.assertEqual(
+                disabled_event["payload"]["retained_profile_id"],
+                "temporarily-missing",
+            )
+            application.close()
+
+    def test_legacy_explicit_provider_config_preserves_data_and_creates_profile(self):
+        with tempfile.TemporaryDirectory() as data_directory:
+            storage = Storage(Path(data_directory) / "sumika.sqlite3")
+            storage.create_character("legacy-character", "Legacy", {})
+            storage.create_session("legacy-session", "保留的会话", "legacy-character")
+            storage.append_message(
+                "legacy-session",
+                Message(role="user", content="这条消息必须保留", character_id="legacy-character"),
+            )
+            storage.upsert_module_setting(
+                "llm",
+                enabled=True,
+                implementation_id="openai-compatible",
+                config={
+                    "base_url": "https://legacy.example.invalid/v1",
+                    "model": "legacy-model",
+                    "timeout": 30,
+                },
+            )
+            storage.close()
+
+            application = CoreApplication(data_directory)
+            llm = application.storage.get_module_setting("llm")
+            self.assertTrue(llm["enabled"])
+            profile = application.storage.get_provider_profile(llm["config"]["profile_id"])
+            self.assertEqual(llm["config"]["profile_id"], "legacy-openai-compatible")
+            self.assertEqual(profile["name"], "迁移的 OpenAI-compatible 连接")
+            self.assertEqual(profile["processing_location"], "auto")
+            self.assertEqual(profile["config"]["active_base_url"], "https://legacy.example.invalid/v1")
+            self.assertEqual(profile["config"]["model"], "legacy-model")
+            self.assertEqual(
+                application.storage.list_messages("legacy-session")[0]["content"],
+                "这条消息必须保留",
+            )
+            self.assertEqual(
+                application.storage.list_sessions()[0]["title"],
+                "保留的会话",
+            )
+            application.close()
 
     def test_avatar_motion_config_defaults_and_ranges(self):
         status, created = self.request(

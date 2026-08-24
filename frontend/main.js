@@ -1,7 +1,7 @@
 const state = {
   activePage: "Chat",
   overlayMode: new URLSearchParams(window.location.search).get("mode") === "overlay",
-  providerId: "openai-compatible",
+  providerId: "",
   providers: [],
   providerProfiles: [],
   providerTemplates: [],
@@ -166,6 +166,7 @@ function providerName() {
   const llm = state.modules.find((item) => item.id === "llm");
   const profile = activeProviderProfile() || llm?.profile;
   if (profile?.name) return profile.name;
+  if (!state.providerProfiles.length) return "未配置 Provider";
   if (llm?.implementation_id && llm.implementation_id !== "none" && llm?.implementation?.name) return llm.implementation.name;
   const real = (llm?.implementations || []).find((item) => item.id !== "none");
   if (real?.name) return real.name;
@@ -439,7 +440,7 @@ function renderGuide() {
         escapeHtml(id) + '">打开</button></article>';
     }).join("");
   const flow = [
-    ["01", "启动并确认核心和隐私状态", "桌面端每次启动运行 .\\tools\\run-desktop.ps1；Git Bash 可调用同一个脚本。桌面核心默认使用 8771，浏览器预览使用 8770，日志在 .sumika-desktop\\logs\\。打开后先看左下角“核心服务”和顶部状态芯片；摄像头、屏幕、麦克风不会因为打开页面自动启动。", "Chat", "启动脚本 / 顶部状态 / 左侧底部"],
+    ["01", "启动并确认核心和隐私状态", "Windows 桌面端每次启动运行 .\\tools\\run-desktop.ps1。桌面核心默认使用 8771，浏览器预览使用 8770，日志在 .sumika-desktop\\logs\\；macOS 和 Linux 当前使用文档中的 Python 核心命令。打开后先看左下角“核心服务”和顶部状态；摄像头、屏幕、麦克风不会因为打开页面自动启动。", "Chat", "启动脚本 / 顶部状态 / 左侧底部"],
     ["02", "选择角色与 Avatar", "顶部“角色”下拉框用于快速切换。进入“角色”页后点击“使用”切换角色；默认已绑定可用的 VRM Avatar，也可以在 Avatar 模型库中导入绝对路径、刷新、绑定或解除绑定。", "Characters", "顶部角色下拉框 / 角色页"],
      ["03", "选择模型 Provider", "顶部 LLM 状态入口只负责查看和跳转。到“模块”页展开“实现方式”可选择最近用过的健康连接；点击“＋自定义连接”打开配置抽屉，填写 Ollama 或兼容 API，也可以粘贴经过预览的配置。保存后先测试，确认模型可用再启用。", "Modules", "顶部 LLM 状态 / 连接档案 / 配置抽屉"],
     ["04", "只启用需要的模块", "在“模块”页逐张处理：右上角开关是唯一启停入口，连接或实现控件只负责替换后端。语音、视觉、长期记忆默认关闭；涉及设备或数据的能力还要在同页明确授予权限。顶部隐私状态会按所有启用模块显示本地、云端或混合处理。", "Modules", "模块开关 / 实现选择 / 权限按钮"],
@@ -482,7 +483,7 @@ function renderChat() {
            <div class="speech-hint">${state.sending ? "正在思考..." : "今天也一起完成一点小目标吧。"}</div>
          </div>
         <div class="message-list" id="message-list">
-          ${state.messages.length ? state.messages.map(renderMessage).join("") : `<div class="empty-chat"><span class="empty-icon">✦</span><strong>从一个问题开始</strong><p>${state.connected ? `当前使用 ${escapeHtml(providerName())}。发送前请确认模型服务状态为“可用”。` : "核心未连接；启动 Sumika 核心后才能发送消息。"}</p></div>`}
+          ${state.messages.length ? state.messages.map(renderMessage).join("") : renderEmptyChat()}
         </div>
         ${state.voiceNotice ? `<div class="voice-notice" role="status">${escapeHtml(state.voiceNotice)}</div>` : ""}
         <form class="composer" id="chat-form">
@@ -492,6 +493,19 @@ function renderChat() {
       </div>
       ${renderInspector()}
     </section>`;
+}
+
+function renderEmptyChat() {
+  if (!state.connected) {
+    return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>核心未连接</strong><p>启动 Sumika 核心后才能发送消息。</p></div>';
+  }
+  if (!state.providerProfiles.length) {
+    return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>先配置 Provider</strong><p>Sumika 不会自动安装模型或选择连接。</p><button class="outline-button" type="button" data-page="Modules">前往模块页</button></div>';
+  }
+  if (!currentLlmModule()?.enabled) {
+    return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>LLM 已关闭</strong><p>在模块页选择已测试的连接并主动启用。</p><button class="outline-button" type="button" data-page="Modules">前往模块页</button></div>';
+  }
+  return `<div class="empty-chat"><span class="empty-icon">✦</span><strong>从一个问题开始</strong><p>当前使用 ${escapeHtml(providerName())}。发送前请确认模型服务状态为“可用”。</p></div>`;
 }
 
 function renderOverlay() {
@@ -740,7 +754,7 @@ function renderLlmModuleCard(module) {
     <strong>${escapeHtml(module.name)}</strong><p>${escapeHtml(module.description)}</p>
     <details class="provider-picker"><summary><span class="provider-picker-label">实现方式</span>${summary}<span class="provider-picker-chevron" aria-hidden="true">⌄</span></summary><div class="provider-picker-menu">${rows || `<div class="provider-picker-empty">还没有保存的连接</div>`}<button class="provider-add-row" type="button" data-provider-new><span aria-hidden="true">＋</span>自定义连接</button></div></details>
     <div class="llm-profile-meta"><span>${escapeHtml(current?.resolved_processing_location === "cloud" ? "云端" : "本地")}</span><code>${escapeHtml(current?.config?.active_base_url || "未配置端点")}</code>${current ? `<button class="ghost-button" type="button" data-provider-edit="${escapeHtml(current.id)}">编辑</button>` : ""}</div>
-    <div class="module-card-meta"><span>权限</span><small>连接密钥保存在 Windows Credential Manager</small></div>
+    <div class="module-card-meta"><span>权限</span><small>密钥使用系统安全凭据存储；当前 Windows 已实现</small></div>
   </article>`;
 }
 

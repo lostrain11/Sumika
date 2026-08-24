@@ -1,9 +1,6 @@
 [CmdletBinding()]
 param(
-    [switch]$NoBuild,
-    [switch]$SkipModel,
-    [string]$Model = 'qwen3:4b',
-    [string]$OllamaModelsDir = [string]$env:SUMIKA_OLLAMA_MODELS
+    [switch]$NoBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,8 +20,6 @@ if ($pythonCommand) {
     throw "Python was not found. Install Python or set SUMIKA_PYTHON to an executable path."
 }
 $tauriCli = Join-Path $repoRoot 'frontend\node_modules\.bin\tauri.cmd'
-$ollamaSetup = Join-Path $repoRoot 'tools\setup-ollama.ps1'
-
 if (-not (Test-Path -LiteralPath $tauriCli -PathType Leaf)) {
     throw "Tauri CLI not found. Run 'npm install' in frontend first."
 }
@@ -36,10 +31,6 @@ $env:SUMIKA_PYTHON = $pythonPath
 
 Push-Location $repoRoot
 try {
-    if (-not $SkipModel) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ollamaSetup -Model $Model -ModelsDir $OllamaModelsDir -InstallIfMissing
-        if ($LASTEXITCODE -ne 0) { throw "Ollama setup failed with exit code $LASTEXITCODE." }
-    }
     if (-not $NoBuild) {
         npm --prefix frontend run build
     }

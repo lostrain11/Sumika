@@ -6,7 +6,7 @@
 
 | ID | 状态 | 当前入口 | 主文档 | 验证证据 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
-| `local-llm` | 已实现 | `run_core` / `run-desktop`、Modules | [local-model](architecture/local-model.md) | [setup script](../tools/setup-ollama.ps1)、[provider tests](../backend/tests/test_providers.py) | 评估更多本地模型与真实协议 |
+| `local-llm` | 已实现 | Modules > 自定义连接（默认关闭） | [local-model](architecture/local-model.md) | [setup script](../tools/setup-ollama.ps1)、[provider tests](../backend/tests/test_providers.py) | 原生 macOS/Linux 启动器与更多本地运行时验证 |
 | `provider-profiles` | 已实现 | Modules > 实现方式 | [provider profiles](architecture/provider-profiles.md) | [profile tests](../backend/tests/test_provider_profiles.py)、[UI smoke](../frontend/tests/smoke.spec.js) | 增加更多已测试协议适配器 |
 | `ccswitch-import` | 已实现 | Modules > 自定义连接、Developer | [CC Switch](integrations/cc-switch.md) | [compatibility tests](../backend/tests/test_ccswitch_compatibility.py)、[checker](../tools/check_ccswitch_compatibility.py) | 按固定基线人工审查上游更新 |
 | `chat` | 已实现 | Chat | [protocol](architecture/protocol.md) | [server tests](../backend/tests/test_server.py)、[frontend shell](../frontend/main.js) | 持续完善流式状态与错误呈现 |
@@ -30,4 +30,3 @@
 完成一个可验证的用户入口、协议边界或测试夹具后，先更新对应行的状态、入口
 和证据，再在专题文档中补充设计细节。没有实现证据时，不得把状态写成
 `已实现`。
-

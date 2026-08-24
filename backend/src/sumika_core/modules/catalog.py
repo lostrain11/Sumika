@@ -129,7 +129,7 @@ class ModuleCatalog:
                 name="大语言模型",
                 capability="llm",
                 description="对话生成的可替换 provider。",
-                default_enabled=True,
+                default_enabled=False,
                 default_implementation=default_implementation,
                 implementations=provider_options,
                 resource_requirements={"network": "implementation-dependent"},
