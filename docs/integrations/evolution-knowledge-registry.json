@@ -1,0 +1,48 @@
+{
+  "format": "sumika-evolution-knowledge/v1",
+  "policy": "reference-only-until-user-approved",
+  "entries": [
+    {
+      "id": "deepseek-harness",
+      "kind": "agent-runtime",
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "commit": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+      "version": "0.1.1-rc.2",
+      "cli_tarball_sha256": "47ec05f45ada5ab87779ae18a90456b5ebff5421dc0ff5c179677d65e1c16057",
+      "license": "MIT",
+      "capabilities": ["agent-loop", "plan", "mcp", "skills", "subagents", "approvals", "streaming-events"],
+      "usage": "runtime adapter target; Sumika does not fork or copy core",
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "openai-codex",
+      "kind": "architecture-reference",
+      "url": "https://github.com/openai/codex",
+      "commit": "4347f94d5539880e8583028a50a19df5b202d9fa",
+      "license": "Apache-2.0",
+      "capabilities": ["agent-loop", "plan", "mcp", "skills", "subagents", "approvals", "app-server-events"],
+      "usage": "behavior and lifecycle reference; no source dependency",
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "browserskill",
+      "kind": "browser-runtime",
+      "url": "https://github.com/tencent/BrowserSkill",
+      "commit": "a004291848e8641400b973b8d612b4c4b74cdc90",
+      "license": "MIT",
+      "version": "extension 0.1.6 / DSH plugin 0.1.1",
+      "capabilities": ["isolated-session", "dom-navigation", "manual-takeover", "screenshots"],
+      "usage": "pinned backend candidate; automatic updates disabled",
+      "last_checked": "2026-08-25"
+    },
+    {
+      "id": "memory-systems-ranking-2026-08",
+      "kind": "memory-research",
+      "url": "https://mp.weixin.qq.com/s?__biz=MzIyNjM2MzQyNg==&mid=2247725348&idx=1&sn=8f9ddfb57dfaf11b9b159f589aabca59&chksm=e98bf4531942a3f828f1c8a48a0d265eda42e3a5d2e3155073d3f70abcbb529a47beec67caa7&mpshare=1&scene=23&srcid=0825xcKXmksxtdUQNthBQ9Ix&sharer_shareinfo=d8138fbe58d4dfb8e60b0ecf4643b868&sharer_shareinfo_first=d8138fbe58d4dfb8e60b0ecf4643b868#rd",
+      "license": "source article; no code copied",
+      "capabilities": ["long-term-memory-comparison"],
+      "usage": "curated research pointer; verify original project licenses before adoption",
+      "last_checked": "2026-08-25"
+    }
+  ]
+}

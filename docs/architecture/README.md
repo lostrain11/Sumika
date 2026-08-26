@@ -30,6 +30,9 @@ OpenAI-compatible / external-process providers
 - [Security](security.md)：本地服务、凭据、权限和数据边界。
 - [Debugging](debugging.md)：日志、诊断、事件和恢复信号。
 
+DSH Agent、隔离浏览器和外部参考治理属于[外部集成专题](../integrations/dsh-agent.md)，
+不改变首版 Python 核心的 Provider、会话和桌宠边界。
+
 
 ## Boundaries
 

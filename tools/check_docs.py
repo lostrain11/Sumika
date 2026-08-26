@@ -214,10 +214,16 @@ def check_status_matrix(root: Path) -> list[str]:
 
 
 def check_archived_references(root: Path) -> list[str]:
+    # Only an archive subtree that mirrors the product ``docs/`` directory is
+    # a documentation archive.  Runtime profiles can contain dependency
+    # READMEs and other Markdown files that are not product documents.
+    archived_root = root / "deprecated"
     archived = {
         path.name
-        for path in (root / "deprecated").rglob("*")
-        if path.is_file() and path.suffix.lower() == ".md"
+        for path in archived_root.rglob("*.md")
+        if path.is_file()
+        and path.name != "ARCHIVE_RECORD.md"
+        and "docs" in path.relative_to(archived_root).parts
     }
     if not archived:
         return []

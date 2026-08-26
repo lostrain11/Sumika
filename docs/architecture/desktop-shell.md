@@ -28,13 +28,21 @@ Secret Service adapters are not implemented, so those platforms fail closed
 for profiles that need a persisted secret. The desktop shell does not
 duplicate or expose credentials.
 
-The overlay keeps only high-frequency actions (open the main window and hide
-the overlay), a compact chat composer, and a draggable Avatar area. Dragging
-the model area moves the Tauri window; the input stays interactive and is not
-part of the drag region. Chat requests use the current character, session and
-provider from the same local core as the main window. Provider, module,
-permission and task configuration stays in the main window. It is hidden by
-default and is opened from the main window's `桌宠模式` action.
+The overlay is a transparent desktop-pet surface: it paints only the Avatar and
+a compact chat composer. Open-main-window and hide-overlay controls are
+transparent until the pointer hovers the surface or keyboard focus enters it.
+Holding the model area starts Tauri's native window drag; the input, send button
+and overlay controls are explicitly excluded from the drag surface. Chat
+requests use the current character, session and provider from the same local
+core as the main window. Provider, module, permission and task configuration
+stays in the main window. It is hidden by default and is opened from the main
+window's `桌宠模式` action.
+
+The interaction boundary follows N.E.K.O's desktop-pet behavior as a reference;
+Sumika uses Tauri's official `getCurrentWindow().startDragging()` API and does
+not copy N.E.K.O source code, models or animation assets. Transparent means the
+window has no decorative panel background; it remains hit-testable so the model
+can be dragged and the chat composer can receive input.
 
 The following desktop capabilities remain deferred:
 

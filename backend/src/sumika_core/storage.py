@@ -11,7 +11,7 @@ from typing import Any
 from .protocol.models import Message, utc_now
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SNAPSHOT_FORMAT_VERSION = 1
 
@@ -35,6 +35,17 @@ _SNAPSHOT_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "credential_ref",
         "secret_fields_json",
         "source_json",
+        "created_at",
+        "updated_at",
+        "last_used_at",
+        "archived_at",
+    ),
+    "browser_profiles": (
+        "id",
+        "name",
+        "character_id",
+        "agent_id",
+        "status",
         "created_at",
         "updated_at",
         "last_used_at",
@@ -84,6 +95,7 @@ _SNAPSHOT_TABLE_KEYS = {
     "characters": "id",
     "module_settings": "module_id",
     "provider_profiles": "id",
+    "browser_profiles": "id",
     "tasks": "id",
     "avatar_models": "id",
     "audio_permissions": "permission_id",
@@ -92,7 +104,7 @@ _SNAPSHOT_TABLE_KEYS = {
 }
 _SNAPSHOT_SCOPE_TABLES = {
     "system": tuple(_SNAPSHOT_TABLE_COLUMNS),
-    "modules": ("module_settings", "provider_profiles"),
+    "modules": ("module_settings", "provider_profiles", "browser_profiles"),
     "characters": ("characters",),
     "memories": ("memories",),
 }
@@ -236,7 +248,7 @@ class Storage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_memories_character_category
                     ON memories(character_id, category, updated_at);
-                CREATE TABLE IF NOT EXISTS plugin_registrations (
+                 CREATE TABLE IF NOT EXISTS plugin_registrations (
                     candidate_id TEXT PRIMARY KEY,
                     plugin_id TEXT NOT NULL,
                     version TEXT NOT NULL,
@@ -251,11 +263,32 @@ class Storage:
                     updated_at TEXT NOT NULL,
                     launcher_json TEXT NOT NULL DEFAULT '{}',
                     configured_at TEXT,
-                    entrypoint_sha256 TEXT NOT NULL DEFAULT ''
-                );
-                CREATE INDEX IF NOT EXISTS idx_plugin_registrations_plugin
-                    ON plugin_registrations(plugin_id, version, state);
-                """
+                     entrypoint_sha256 TEXT NOT NULL DEFAULT ''
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_plugin_registrations_plugin
+                     ON plugin_registrations(plugin_id, version, state);
+                 CREATE TABLE IF NOT EXISTS browser_profiles (
+                     id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     character_id TEXT,
+                     agent_id TEXT,
+                     status TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL,
+                     last_used_at TEXT,
+                     archived_at TEXT
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_browser_profiles_status
+                     ON browser_profiles(status, archived_at, last_used_at);
+                 CREATE TABLE IF NOT EXISTS browser_profile_leases (
+                     profile_id TEXT PRIMARY KEY,
+                     lease_id TEXT NOT NULL,
+                     owner_token TEXT NOT NULL,
+                     acquired_at TEXT NOT NULL,
+                     expires_at TEXT NOT NULL,
+                     FOREIGN KEY(profile_id) REFERENCES browser_profiles(id)
+                 );
+                 """
             )
             plugin_columns = {
                 str(row[1])
@@ -944,6 +977,164 @@ class Storage:
         value["secret_fields"] = json.loads(value.pop("secret_fields_json"))
         value["source"] = json.loads(value.pop("source_json"))
         return value
+
+    def get_browser_profile(self, profile_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM browser_profiles WHERE id=?", (profile_id,)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_browser_profiles(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
+        where = "" if include_archived else "WHERE archived_at IS NULL"
+        with self._lock:
+            rows = self._connection.execute(
+                f"""
+                SELECT * FROM browser_profiles
+                {where}
+                ORDER BY
+                    CASE status WHEN 'active' THEN 0 ELSE 1 END,
+                    COALESCE(last_used_at, updated_at) DESC,
+                    name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_browser_profile(
+        self,
+        *,
+        profile_id: str,
+        name: str,
+        character_id: str | None,
+        agent_id: str | None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO browser_profiles(
+                    id, name, character_id, agent_id, status,
+                    created_at, updated_at, last_used_at, archived_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+                """,
+                (profile_id, name, character_id, agent_id, "active", now, now, None, None),
+            )
+        profile = self.get_browser_profile(profile_id)
+        assert profile is not None
+        return profile
+
+    def update_browser_profile_state(
+        self,
+        profile_id: str,
+        *,
+        mark_used: bool = False,
+        archived: bool | None = None,
+    ) -> dict[str, Any] | None:
+        profile = self.get_browser_profile(profile_id)
+        if profile is None:
+            return None
+        now = utc_now()
+        next_status = str(profile.get("status") or "active")
+        archived_at = profile.get("archived_at")
+        if archived is True:
+            next_status = "archived"
+            archived_at = now
+        elif archived is False:
+            next_status = "active"
+            archived_at = None
+        last_used_at = now if mark_used else profile.get("last_used_at")
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                UPDATE browser_profiles
+                SET status=?, updated_at=?, last_used_at=?, archived_at=?
+                WHERE id=?
+                """,
+                (next_status, now, last_used_at, archived_at, profile_id),
+            )
+        return self.get_browser_profile(profile_id)
+
+    def get_browser_profile_lease(self, profile_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM browser_profile_leases WHERE profile_id=?", (profile_id,)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def acquire_browser_profile_lease(
+        self,
+        *,
+        profile_id: str,
+        lease_id: str,
+        owner_token: str,
+        expires_at: str,
+    ) -> dict[str, Any] | None:
+        """Acquire one write lease, reclaiming only an already expired lease."""
+
+        acquired_at = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                "DELETE FROM browser_profile_leases WHERE profile_id=? AND expires_at<=?",
+                (profile_id, acquired_at),
+            )
+            current = self._connection.execute(
+                "SELECT * FROM browser_profile_leases WHERE profile_id=?", (profile_id,)
+            ).fetchone()
+            if current is not None:
+                if str(current["lease_id"]) != lease_id or str(current["owner_token"]) != owner_token:
+                    return None
+                self._connection.execute(
+                    "UPDATE browser_profile_leases SET acquired_at=?, expires_at=? WHERE profile_id=?",
+                    (acquired_at, expires_at, profile_id),
+                )
+            else:
+                self._connection.execute(
+                    """
+                    INSERT INTO browser_profile_leases(profile_id, lease_id, owner_token, acquired_at, expires_at)
+                    VALUES(?,?,?,?,?)
+                    """,
+                    (profile_id, lease_id, owner_token, acquired_at, expires_at),
+                )
+        return self.get_browser_profile_lease(profile_id)
+
+    def renew_browser_profile_lease(
+        self, *, profile_id: str, lease_id: str, owner_token: str, expires_at: str
+    ) -> dict[str, Any] | None:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE browser_profile_leases
+                SET acquired_at=?, expires_at=?
+                WHERE profile_id=? AND lease_id=? AND owner_token=?
+                """,
+                (utc_now(), expires_at, profile_id, lease_id, owner_token),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_browser_profile_lease(profile_id)
+
+    def release_browser_profile_lease(self, *, profile_id: str, lease_id: str, owner_token: str) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM browser_profile_leases WHERE profile_id=? AND lease_id=? AND owner_token=?",
+                (profile_id, lease_id, owner_token),
+            )
+        return cursor.rowcount > 0
+
+    def list_browser_profile_leases(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM browser_profile_leases ORDER BY expires_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_expired_browser_profile_leases(self, *, now: str | None = None) -> int:
+        cutoff = now or utc_now()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM browser_profile_leases WHERE expires_at<=?", (cutoff,)
+            )
+        return cursor.rowcount
 
     def get_audio_permission(self, permission_id: str) -> dict[str, Any] | None:
         with self._lock:

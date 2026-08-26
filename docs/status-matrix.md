@@ -13,7 +13,7 @@
 | `characters` | 已实现 | Characters（身份 / 人格 / 高级设置） | [characters](architecture/characters.md) | [persona tests](../backend/tests/test_persona.py)、[server tests](../backend/tests/test_server.py)、[UI smoke](../frontend/tests/smoke.spec.js) | 角色导入，以及真实音频/立绘运行时完成后的对应配置 |
 | `modules` | 已实现 | Modules | [modules](architecture/modules.md) | [module tests](../backend/tests/test_modules.py)、[UI smoke](../frontend/tests/smoke.spec.js) | 继续增加真实可替换实现 |
 | `tasks` | 部分实现 | Tasks | [tasks](architecture/tasks.md) | [task tests](../backend/tests/test_tasks.py)、[runner tests](../backend/tests/test_task_runner.py) | Workspace、diff、回滚和真实 Runner |
-| `avatar-vrm-desktop` | 已实现 | Chat、Characters、桌宠模式 | [Avatar](architecture/avatar.md)、[desktop shell](architecture/desktop-shell.md) | [avatar tests](../backend/tests/test_avatar.py)、[UI smoke](../frontend/tests/smoke.spec.js) | Live2D 驱动与更多动作资源审计 |
+| `avatar-vrm-desktop` | 已实现 | Chat、Characters、透明桌宠模式 | [Avatar](architecture/avatar.md)、[desktop shell](architecture/desktop-shell.md) | [avatar tests](../backend/tests/test_avatar.py)、[UI smoke](../frontend/tests/smoke.spec.js) | Live2D 驱动与更多动作资源审计 |
 | `plugins-manifest` | 部分实现 | Developer | [manifest](architecture/manifest.md) | [plugin tests](../backend/tests/test_plugins.py) | 隔离 Runner、签名与依赖管理 |
 | `audio` | 部分实现 | Modules（默认关闭） | [audio](architecture/audio.md) | [audio tests](../backend/tests/test_audio.py) | 接入真实 ASR/TTS/VAD 软件并完善权限 UI |
 | `memory` | 部分实现 | History / Modules（默认关闭） | [memory](architecture/memory.md) | [memory tests](../backend/tests/test_memory.py) | 检索策略、合并确认与更多外部后端 |
@@ -24,6 +24,9 @@
 | `life-agent` | 规划中 | 暂无 | [tasks](architecture/tasks.md) | [tasks design](architecture/tasks.md) | 与 VirtualWorld 分离设计日程和主动性 |
 | `remote-runner` | 规划中 | 暂无 | [security](architecture/security.md) | [tools boundary](architecture/tools.md) | 隔离执行、权限和回滚协议 |
 | `android-client` | 规划中 | 暂无 | [desktop shell](architecture/desktop-shell.md) | [protocol](architecture/protocol.md) | 配对、认证和远程事件通道 |
+| `dsh-agent-runtime` | 部分实现 | Agent | [DSH Agent](integrations/dsh-agent.md) | [agent runtime adapter](../backend/src/sumika_core/agent/runtime.py)、[server tests](../backend/tests/test_agent_runtime.py)、[Playwright smoke](../frontend/tests/smoke.spec.js)、[setup helper](../tools/setup-dsh.ps1) | Provider 档案、Plan/执行 command plane、事件桥、会话快照、停止回合、模型目录/切换、Workspace 登记、可恢复会话分支、Skills/Subagents 查询、审批/问题交互、ToolEventView 安全投影、diff 文件摘要、原始会话 ZIP 导出、session/queue 编辑、会话搜索/重命名、受控图片附件、只读 `agent.diagnostics` 能力探针和基于会话历史的 MCP 已观察工具清单已具备；下一步建立 Sumika user preset、凭据注入和显式启用流程，固定版仍无独立 MCP 目录、artifact 管理或 rollback RPC |
+| `browser-runtime` | 部分实现 | Agent > 隔离浏览器 | [Browser runtime](integrations/browser-runtime.md) | [BrowserSkill bridge](../backend/src/sumika_core/browser/runtime.py)、[browser tests](../backend/tests/test_browser_runtime.py)、[Playwright smoke](../frontend/tests/smoke.spec.js)、[license ledger](ui/license-ledger.md) | 会话列表、标签页刷新/创建/切换/关闭、受限 observe/ARIA snapshot、审批导航、人工接管、审批门控 DOM 操作、Developer console/network 摘要、下载 quarantine/释放、命名 Profile 元数据持久化、角色/Agent 授权和单写租约已具备；继续完成真实扩展联调、BrowserSkill 持久 Cookie/Profile 绑定、24 小时清理和更细 CDP 事件，真实浏览器仍需用户连接扩展 |
+| `evolution-registry` | 已实现 | Developer > Evolution Knowledge Registry | [Registry](integrations/evolution-registry.md) | [registry data](integrations/evolution-knowledge-registry.json)、[registry tests](../backend/tests/test_evolution_registry.py) | 增加隔离评测报告和用户批准工作流 |
 
 ## 更新规则
 

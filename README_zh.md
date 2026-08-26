@@ -112,6 +112,29 @@ provider。Provider、模块、权限和任务配置仍在主窗口中完成。
 
 桌面端核心默认监听 `127.0.0.1:8771`，浏览器预览默认使用 `127.0.0.1:8770`。
 
+如果要让 Tauri 壳监督已经安装好的 DSH 可执行文件，必须显式选择加入：
+
+```powershell
+$env:SUMIKA_DSH_EXECUTABLE = 'D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd'
+$env:SUMIKA_DSH_AUTOSTART = '1'
+.\tools\run-desktop.ps1
+```
+
+如果尚未安装固定版本，可以先显式执行一次：
+
+```powershell
+.\tools\setup-dsh.ps1 -Proxy 'http://127.0.0.1:6064'
+```
+
+脚本只写入 `D:\Tools\DeepSeekHarness\0.1.1-rc.2`，不修改 PATH 或全局
+DSH。安装完成后把输出的 executable 路径设置给
+`SUMIKA_DSH_EXECUTABLE`；桌面端会使用 `.sumika-desktop\dsh-profile` 作为
+隔离 `DSH_HOME`。
+
+桌面壳会把 DSH 生命周期写入 `.sumika-desktop/logs/dsh.log`，并把
+`.sumika-desktop/dsh-profile` 作为 `DSH_HOME`。没有同时设置这两个变量时不会
+启动 DSH；Agent 页面仍可以通过 `SUMIKA_DSH_ENDPOINT` 连接用户手动启动的实例。
+
 ## 核心能力
 
 首版核心只使用 Python 标准库，提供由 Ollama 或其他真实端点支持的
@@ -125,6 +148,15 @@ JSON-RPC 命令和 WebSocket 事件流，也提供经过批准门控的外部工
 
 生产 Provider 目录不会注册 Fake provider。确定性测试替身只位于
 `backend/tests/fixtures`，并由测试显式注入。
+
+可选的 **Agent** 页面通过固定版本的 DeepSeek Harness Web API 连接
+(`0.1.1-rc.2`，默认 `http://127.0.0.1:3080`)。Sumika 使用隔离 profile，DSH
+未运行时安全失败，不会安装或修改用户全局 DSH。Plan、Skills、MCP、Subagents、
+审批和流式事件会通过适配器逐步暴露。当前会话可以导出 DSH 原始会话日志 ZIP，
+diff 卡片只显示受限的文件摘要，不透传完整 patch；固定版 Web API 尚无独立 rollback
+RPC。同一页面还显示 BrowserSkill 策略层；
+首版浏览器只登记隔离 Profile、审批、人工接管和下载 quarantine，不控制 Windows
+全局鼠标键盘。
 
 顶部的 `LLM` 入口只显示当前状态并跳转到“模块”页；LLM 的启用和关闭由模块卡片
 右侧开关负责，实现方式下拉框只选择真实 provider。关闭后聊天发送按钮会禁用，

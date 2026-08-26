@@ -48,6 +48,10 @@ API、协议、类名和代码标识保留 English identifier。
 
 - [CC Switch 兼容边界](integrations/cc-switch.md)
 - [CC Switch 兼容基线数据](integrations/cc-switch-compatibility.json)
+- [DSH Agent 集成](integrations/dsh-agent.md)
+- [隔离浏览器策略](integrations/browser-runtime.md)
+- [Evolution Knowledge Registry](integrations/evolution-registry.md)
+- [Evolution Knowledge Registry 数据](integrations/evolution-knowledge-registry.json)
 - [UI 参考地图](ui/reference-map.md)
 - [来源与许可证台账](ui/license-ledger.md)
 

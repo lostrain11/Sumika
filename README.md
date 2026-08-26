@@ -123,6 +123,31 @@ or raw visual/audio data.
 The desktop core listens on `127.0.0.1:8771` by default, while the browser
 preview uses `127.0.0.1:8770`.
 
+To let the Tauri shell supervise an already installed DSH executable, opt in
+explicitly:
+
+```powershell
+$env:SUMIKA_DSH_EXECUTABLE = 'D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd'
+$env:SUMIKA_DSH_AUTOSTART = '1'
+.\tools\run-desktop.ps1
+```
+
+If the pinned runtime is not installed yet, explicitly run:
+
+```powershell
+.\tools\setup-dsh.ps1 -Proxy 'http://127.0.0.1:6064'
+```
+
+The helper writes only to `D:\Tools\DeepSeekHarness\0.1.1-rc.2`; it does not
+change `PATH` or the global DSH installation. Use the returned executable path
+for `SUMIKA_DSH_EXECUTABLE`. The desktop shell uses
+`.sumika-desktop\dsh-profile` as the isolated `DSH_HOME`.
+
+The shell writes DSH lifecycle output to `.sumika-desktop/logs/dsh.log` and
+uses `.sumika-desktop/dsh-profile` as `DSH_HOME`. Without both settings, DSH is
+not started; the Agent page can still connect to an externally started
+`SUMIKA_DSH_ENDPOINT`.
+
 ## Core capabilities
 
 The first core uses only the Python standard library. It provides an
@@ -141,6 +166,18 @@ command adapter.
 The production provider catalog never registers Fake providers. Deterministic
 test doubles live only in `backend/tests/fixtures` and are injected explicitly
 by tests.
+
+The optional **Agent** page uses a fixed DeepSeek Harness Web API target
+(`0.1.1-rc.2`, default `http://127.0.0.1:3080`). Sumika keeps this runtime in an
+isolated profile and fails closed when it is not running; it never installs or
+modifies a user's global DSH. Plan, Skills, MCP, Subagents, approvals and
+streaming events are exposed through the adapter as they become available.
+The current session can export DSH's original session-log ZIP, while diff cards
+show only a bounded file summary rather than raw patches. DSH does not yet
+expose an independent rollback RPC in the pinned Web API.
+The same page shows the BrowserSkill policy companion. The first browser slice
+only records isolated profiles, approvals, manual takeover and download
+quarantine; it does not control global desktop input.
 
 The top `LLM` entry shows the current status and opens the Modules page. The
 module card switch controls whether LLM is enabled; the implementation picker

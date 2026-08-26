@@ -87,6 +87,13 @@ the eye/head response, and returns to the center after `pointerleave`. Its
 algorithm and lifecycle are behavior references to N.E.K.O's
 `static/vrm/vrm-cursor-follow.js`; Sumika does not copy that file.
 
+The desktop pet overlay is transparent and intentionally renders only the
+Avatar plus a compact chat composer. The model surface is the native window
+drag handle; controls and text input opt out of dragging. Hover or keyboard
+focus reveals the high-frequency open/hide controls. This follows the behavior
+of N.E.K.O's desktop pet surface as an Apache-2.0 behavior reference, while the
+Sumika implementation uses its own markup, CSS and Tauri API calls.
+
 During procedural idle motion the controller uses a small reduced activity
 weight so breathing and cursor response do not fight each other. A running
 one-shot VRMA action temporarily reduces the weight further, then restores it

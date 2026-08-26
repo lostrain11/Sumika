@@ -1,4 +1,5 @@
 import base64
+from io import BytesIO
 import json
 import sys
 import tempfile
@@ -9,7 +10,7 @@ from pathlib import Path
 from http.client import HTTPConnection
 from unittest.mock import patch
 
-from sumika_core.server import CoreApplication, create_server
+from sumika_core.server import CoreApplication, SumikaRequestHandler, create_server
 from sumika_core.storage import Storage
 from sumika_core.protocol.jsonrpc import JsonRpcError
 from sumika_core.protocol.models import Message
@@ -73,6 +74,32 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(result["result"]["provider_id"], "fake")
         _, messages = self.request("GET", "/api/sessions/default/messages")
         self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
+
+    def test_agent_session_export_streams_dsh_zip_with_safe_headers(self):
+        stream = BytesIO(b"PK-export")
+        with patch.object(
+            self.application.agent,
+            "open_session_export",
+            return_value={
+                "stream": stream,
+                "content_type": "application/zip",
+                "content_length": 9,
+            },
+        ) as export:
+            status, headers, body = self.request_bytes(
+                "GET",
+                "/api/agent/session.export?session_id=session-1&include_descendants=true",
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"PK-export")
+        self.assertEqual(headers["Content-Type"], "application/zip")
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(headers["Content-Disposition"], 'attachment; filename="sumika-dsh-session-1.zip"')
+        export.assert_called_once_with({"session_id": "session-1", "include_descendants": True})
+
+        status, error = self.request("GET", "/api/agent/session.export?include_descendants=maybe")
+        self.assertEqual(status, 400)
+        self.assertIn("session_id", error["error"])
 
     def test_persona_context_and_first_greeting_are_temporary_provider_messages(self):
         status, updated = self.request(
@@ -146,6 +173,37 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(headers["Access-Control-Allow-Origin"], "*")
         self.assertIn("OPTIONS", headers["Access-Control-Allow-Methods"])
         self.assertIn("Content-Type", headers["Access-Control-Allow-Headers"])
+
+    def test_json_body_limits_are_scoped_to_rpc_for_image_prompts(self):
+        # Ordinary JSON endpoints keep the small default limit, while the RPC
+        # boundary has enough room for one validated image prompt (base64 adds
+        # roughly a third to the binary size).
+        rpc_payload = {
+            "jsonrpc": "2.0",
+            "id": "large-rpc",
+            "method": "core.health",
+            "params": {"padding": "x" * 2_100_000},
+        }
+        status, response = self.request("POST", "/rpc", rpc_payload)
+        self.assertEqual(status, 200)
+        self.assertTrue(response["result"]["ok"])
+
+        # Exercise both rejection thresholds without uploading deliberately
+        # oversized bodies to the test socket (Windows can reset that socket
+        # while the client is still writing the rejected payload).
+        handler = object.__new__(SumikaRequestHandler)
+        handler.path = "/api/chat"
+        handler.headers = {"Content-Length": str(2_000_001)}
+        handler.rfile = BytesIO(b"{}")
+        with self.assertRaisesRegex(ValueError, "too large"):
+            handler._read_json()
+
+        handler = object.__new__(SumikaRequestHandler)
+        handler.path = "/rpc"
+        handler.headers = {"Content-Length": str(18 * 1024 * 1024 + 1)}
+        handler.rfile = BytesIO(b"{}")
+        with self.assertRaisesRegex(ValueError, "too large"):
+            handler._read_json()
 
     def test_static_public_module_is_served_at_vite_root(self):
         status, headers, body = self.request_bytes("GET", "/vendor/sumika-vrm-viewer.js")

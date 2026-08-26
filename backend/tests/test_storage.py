@@ -107,3 +107,26 @@ class StorageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             storage.restore_snapshot_state(invalid)
         storage.close()
+
+    def test_named_browser_profiles_are_snapshotable_without_leases(self):
+        storage = Storage()
+        profile = storage.create_browser_profile(
+            profile_id="browser-profile-1",
+            name="持久浏览器",
+            character_id="sumika",
+            agent_id=None,
+        )
+        storage.acquire_browser_profile_lease(
+            profile_id=profile["id"],
+            lease_id="lease-1",
+            owner_token="owner-1",
+            expires_at="2999-01-01T00:00:00+00:00",
+        )
+        payload = storage.export_snapshot_state("modules")
+        self.assertEqual(payload["tables"]["browser_profiles"][0]["id"], profile["id"])
+        self.assertNotIn("browser_profile_leases", payload["tables"])
+        storage.update_browser_profile_state(profile["id"], archived=True)
+        storage.restore_snapshot_state(payload)
+        self.assertEqual(storage.get_browser_profile(profile["id"])["status"], "active")
+        self.assertIsNotNone(storage.get_browser_profile_lease(profile["id"]))
+        storage.close()

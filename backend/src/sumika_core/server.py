@@ -6,6 +6,8 @@ import binascii
 import hashlib
 import json
 import os
+import re
+import shutil
 import socket
 import threading
 import time
@@ -17,10 +19,13 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .audio import AudioRuntime, AudioRuntimeError
+from .agent import AgentRuntimeError, DSHAgentRuntime
 from .avatar import AvatarError, AvatarManager
+from .browser import BrowserRuntime, BrowserRuntimeError
 from .credentials import CredentialStore, default_credential_store
 from .events import EventBus
-from .diagnostics import close_logging, configure_logging, safe_error
+from .evolution import EvolutionRegistry
+from .diagnostics import close_logging, configure_logging, redact_text, safe_error
 from .integrations import CCSwitchCompatibilityChecker
 from .memory import MemoryRuntime, MemoryRuntimeError
 from .modules import ModuleCatalog, ModuleError
@@ -70,6 +75,8 @@ AVATAR_CENTER_MIGRATION_META_KEY = "avatar.presentation.center_migration.v1"
 DEFAULT_AVATAR_META_KEY = "bootstrap.default_avatar.v2"
 DEFAULT_AVATAR_SOURCE_SIZE = 15096320
 DEFAULT_AVATAR_SOURCE_SHA256 = "B86B0B8A66D48911431D6F920A5211A974226F83AA672ECA3F3DFADE58AC346E"
+_DEFAULT_JSON_BODY_LIMIT = 2_000_000
+_RPC_JSON_BODY_LIMIT = 18 * 1024 * 1024
 DEFAULT_AVATAR_METADATA = {
     "bundled": True,
     "bundled_role": "default_demo_avatar",
@@ -127,6 +134,14 @@ class CoreApplication:
             ROOT_DIR / "docs" / "integrations" / "cc-switch-compatibility.json"
         )
         self.events = EventBus(self.storage, self.logger)
+        self.agent = DSHAgentRuntime(self.configured_data_dir, logger=self.logger)
+        self.agent.set_event_sink(self._on_agent_runtime_event)
+        self.browser = BrowserRuntime(
+            self.configured_data_dir,
+            logger=self.logger,
+            storage=self.storage,
+        )
+        self.evolution_registry = EvolutionRegistry(ROOT_DIR / "docs" / "integrations" / "evolution-knowledge-registry.json")
         self.tasks = TaskManager(self.storage, self.events)
         self.task_runner = TaskRunner(self.tasks, self.events)
         self.task_runner.register("core-health", self._run_core_health)
@@ -640,6 +655,28 @@ class CoreApplication:
         finally:
             self.logger.info("rpc end method=%s duration_ms=%d", method, round((time.monotonic() - started) * 1000))
 
+    def _on_agent_runtime_event(self, event: dict[str, Any]) -> None:
+        """Project DSH downlink frames into Sumika's local auditable event bus."""
+
+        event_type = str(event.get("event_type") or "agent.event")
+        projected_type = {
+            "approval/requested": "agent.approval.requested",
+            "approval/resolved": "agent.approval.resolved",
+            "question/requested": "agent.question.requested",
+            "question/resolved": "agent.question.resolved",
+            "session/event": "agent.session.event",
+            "session/queue": "agent.session.queue",
+            "session/jobs": "agent.session.jobs",
+        }.get(event_type, "agent.dsh.event")
+        payload = _redact_agent_payload(event)
+        self.events.publish(
+            EventEnvelope(
+                projected_type,
+                payload,
+                session_id=event.get("session_id"),
+            )
+        )
+
     def _rpc(self, method: str, params: dict[str, Any]) -> Any:
         if method == "core.health":
             return {
@@ -650,6 +687,778 @@ class CoreApplication:
             }
         if method == "core.diagnostics":
             return self.diagnostics()
+        if method in {"agent.status", "agent.health"}:
+            result = self.agent.status() if method == "agent.status" else self.agent.health()
+            if method == "agent.health":
+                self.events.publish(EventEnvelope("agent.runtime.health", {"ok": bool(result.get("ok")), "state": result.get("state")}))
+            return result
+        if method == "agent.diagnostics":
+            try:
+                return self.agent.diagnostics(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.presets":
+            try:
+                return self.agent.list_presets(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.preset.copy":
+            copy_params = _agent_preset_copy_params(params)
+            try:
+                result = self.agent.copy_preset(copy_params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.preset.copied",
+                    {
+                        "source": result.get("source"),
+                        "agent_preset": result.get("agent_preset"),
+                    },
+                )
+            )
+            return result
+        if method == "agent.preset.open":
+            preset = _agent_preset_id_param(
+                params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+                "agentPreset",
+            )
+            try:
+                result = self.agent.open_preset_document({"agentPreset": preset})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.preset.document.opened",
+                    {
+                        "agent_preset": result.get("agent_preset", preset),
+                        "opened": bool(result.get("opened")),
+                    },
+                )
+            )
+            return {
+                "agent_preset": result.get("agent_preset", preset),
+                "opened": bool(result.get("opened")),
+            }
+        if method == "agent.session.select_preset":
+            try:
+                result = self.agent.select_preset(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.session.preset.selected",
+                    {
+                        "session_id": result.get("session_id"),
+                        "agent_preset": result.get("agent_preset"),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.session.create":
+            provider_binding = None
+            try:
+                provider_profile = self._agent_provider_profile(params)
+                if provider_profile is not None:
+                    provider_binding = self.agent.sync_provider_profile(provider_profile)
+            except (AgentRuntimeError, ProviderProfileError) as exc:
+                raise JsonRpcError(-32032, str(exc)) from exc
+            try:
+                result = self.agent.create_session(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            if provider_binding:
+                session_id = result.get("sessionId") or result.get("id")
+                if not session_id:
+                    raise JsonRpcError(-32030, "DSH did not return a session id for provider binding")
+                try:
+                    selected = self.agent.select_model(
+                        {
+                            "session_id": session_id,
+                            "provider": provider_binding["route_id"],
+                            "model": provider_binding["model"],
+                        }
+                    )
+                except AgentRuntimeError as exc:
+                    raise JsonRpcError(-32032, f"DSH Provider 已同步，但会话模型选择失败：{exc}") from exc
+                result = {
+                    **result,
+                    "provider": provider_binding,
+                    "selected_model": selected.get("selected") if isinstance(selected, dict) else selected,
+                }
+            self.events.publish(EventEnvelope("agent.session.created", {"session": _redact_agent_payload(result)}))
+            return result
+        if method == "agent.sessions":
+            try:
+                return self.agent.list_sessions(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.sessions.search":
+            query = params.get("query")
+            if (
+                not isinstance(query, str)
+                or not query.strip()
+                or len(query.strip()) > 512
+                or any(ord(char) < 32 or ord(char) == 127 for char in query)
+            ):
+                raise JsonRpcError(-32602, "session search query must be non-empty, at most 512 characters, and contain no control characters")
+            try:
+                return self.agent.search_sessions({"query": query.strip()})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.rename":
+            session_id = params.get("sessionId") or params.get("session_id")
+            title = params.get("title")
+            if (
+                not isinstance(session_id, (str, int))
+                or isinstance(session_id, bool)
+                or not str(session_id).strip()
+                or len(str(session_id).strip()) > 240
+                or any(ord(char) < 32 or ord(char) == 127 for char in str(session_id))
+            ):
+                raise JsonRpcError(-32602, "sessionId must be a non-empty identifier without control characters")
+            if (
+                not isinstance(title, str)
+                or not title.strip()
+                or len(title.strip()) > 240
+                or any(ord(char) < 32 or ord(char) == 127 for char in title)
+            ):
+                raise JsonRpcError(-32602, "title must be non-empty, at most 240 characters, and contain no control characters")
+            try:
+                result = self.agent.rename_session({"sessionId": str(session_id).strip(), "title": title.strip()})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.session.renamed",
+                    {
+                        "session_id": result.get("session_id"),
+                        "title": result.get("title"),
+                        "seq": result.get("seq"),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.session.models":
+            try:
+                return self.agent.session_models(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.fork":
+            try:
+                result = self.agent.fork_session(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.session.forked",
+                    {
+                        "source_session_id": params.get("sessionId") or params.get("session_id"),
+                        "child_session_id": result.get("sessionId"),
+                        "at_seq": params.get("atSeq") if params.get("atSeq") is not None else params.get("at_seq"),
+                    },
+                    session_id=params.get("sessionId") or params.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.session.select_model":
+            try:
+                return self.agent.select_model(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.workspaces":
+            try:
+                return self.agent.list_workspaces(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.workspace.create":
+            path = params.get("path")
+            if not isinstance(path, str) or not path.strip() or len(path.strip()) > 4096 or any(ord(char) < 32 for char in path):
+                raise JsonRpcError(-32602, "workspace path must be a non-empty path without control characters")
+            try:
+                result = self.agent.create_workspace({"path": path.strip()})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            workspace = result.get("workspace") if isinstance(result, dict) else {}
+            self.events.publish(
+                EventEnvelope(
+                    "agent.workspace.registered",
+                    {
+                        "workspace_id": workspace.get("id") if isinstance(workspace, dict) else None,
+                        "title": workspace.get("title") if isinstance(workspace, dict) else None,
+                        "created": bool(result.get("created")) if isinstance(result, dict) else False,
+                    },
+                )
+            )
+            return result
+        if method == "agent.provider.status":
+            try:
+                profile = self._agent_provider_profile(params, required=False)
+                status = self.agent.provider_status(profile)
+            except (AgentRuntimeError, ProviderProfileError) as exc:
+                raise JsonRpcError(-32032, str(exc)) from exc
+            return {"profile": self._agent_provider_profile_public(profile), **status}
+        if method == "agent.provider.sync":
+            try:
+                profile = self._agent_provider_profile(params)
+                if profile is None:
+                    raise ProviderProfileError("没有可同步的 Sumika Provider 档案")
+                if profile.get("status") != "available":
+                    raise ProviderProfileError("Provider 档案尚未就绪，请先测试连接")
+                result = self.agent.sync_provider_profile(profile)
+            except (AgentRuntimeError, ProviderProfileError) as exc:
+                raise JsonRpcError(-32032, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.provider.synced",
+                    {
+                        "profile_id": result.get("profile_id"),
+                        "route_id": result.get("route_id"),
+                        "model": result.get("model"),
+                        "changed": bool(result.get("changed")),
+                    },
+                )
+            )
+            return {"profile": self._agent_provider_profile_public(profile), **result}
+        if method == "agent.session.history":
+            try:
+                return self.agent.history(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.attachment":
+            session_id = params.get("sessionId") or params.get("session_id")
+            attachment_id = params.get("attachmentId") or params.get("attachment_id")
+            for value, label in ((session_id, "sessionId"), (attachment_id, "attachmentId")):
+                if (
+                    not isinstance(value, (str, int))
+                    or isinstance(value, bool)
+                    or not str(value).strip()
+                    or len(str(value).strip()) > 240
+                    or any(ord(char) < 32 or ord(char) == 127 for char in str(value))
+                ):
+                    raise JsonRpcError(-32602, f"{label} must be a non-empty identifier without control characters")
+            try:
+                return self.agent.attachment(
+                    {"sessionId": str(session_id).strip(), "attachmentId": str(attachment_id).strip()}
+                )
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.snapshot":
+            try:
+                return self.agent.snapshot(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.queue":
+            try:
+                return self.agent.queue(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.update_queue":
+            action = params.get("action") or params.get("kind")
+            if isinstance(action, dict):
+                action_kind = action.get("kind")
+                if action_kind == "edit":
+                    content = action.get("content")
+                    text = " ".join(
+                        str(block.get("text") or "").strip()
+                        for block in content
+                        if isinstance(content, list) and isinstance(block, dict) and block.get("type") == "text"
+                    ).strip()
+                    params = {**params, "kind": "edit", "text": text}
+                elif action_kind in {"remove", "steer"}:
+                    params = {**params, "kind": action_kind}
+            action_kind = str(params.get("kind") or params.get("action") or "").strip().lower()
+            if action_kind not in {"edit", "remove", "steer"}:
+                raise JsonRpcError(-32602, "queue action must be edit, remove, or steer")
+            try:
+                result = self.agent.update_queue(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.session.queue.updated",
+                    {
+                        "session_id": result.get("session_id"),
+                        "item_id": result.get("item_id"),
+                        "action": result.get("action"),
+                        "accepted": bool(result.get("accepted")),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.session.prompt":
+            try:
+                result = self.agent.prompt(params)
+            except AgentRuntimeError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "agent.turn.rejected",
+                        {
+                            "session_id": params.get("sessionId") or params.get("session_id"),
+                            "reason": redact_text(str(exc)),
+                        },
+                    )
+                )
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(EventEnvelope("agent.turn.started", {"session_id": params.get("sessionId") or params.get("session_id")}))
+            return result
+        if method == "agent.session.cancel":
+            try:
+                result = self.agent.cancel(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(EventEnvelope("agent.turn.cancelled", {"session_id": params.get("sessionId") or params.get("session_id")}))
+            return result
+        if method == "agent.subagent.list":
+            try:
+                return self.agent.list_subagents(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.subagent.history":
+            try:
+                return self.agent.subagent_history(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.subagent.prompt":
+            try:
+                result = self.agent.prompt_subagent(params)
+            except AgentRuntimeError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "agent.subagent.prompt.rejected",
+                        {
+                            "parent_session_id": params.get("parentSessionId") or params.get("parent_session_id"),
+                            "child_session_id": params.get("childSessionId") or params.get("child_session_id"),
+                            "reason": redact_text(str(exc)),
+                        },
+                    )
+                )
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.subagent.prompt.accepted",
+                    {
+                        "parent_session_id": result.get("parent_session_id"),
+                        "child_session_id": result.get("child_session_id"),
+                        "message_id": result.get("message_id"),
+                    },
+                    session_id=result.get("parent_session_id"),
+                )
+            )
+            return result
+        if method == "agent.subagent.interrupt":
+            try:
+                result = self.agent.interrupt_subagent(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.subagent.interrupt.accepted",
+                    {
+                        "parent_session_id": result.get("parent_session_id"),
+                        "child_session_id": result.get("child_session_id"),
+                    },
+                    session_id=result.get("parent_session_id"),
+                )
+            )
+            return result
+        if method.startswith("agent.goal."):
+            action = method.removeprefix("agent.goal.")
+            if action not in {"create", "edit", "pause", "resume", "complete", "clear"}:
+                raise JsonRpcError(-32601, "unknown Agent goal method")
+            try:
+                result = self.agent.goal_action(action, params)
+            except AgentRuntimeError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "agent.goal.rejected",
+                        {
+                            "action": action,
+                            "session_id": params.get("sessionId") or params.get("session_id"),
+                            "reason": redact_text(str(exc)),
+                        },
+                    )
+                )
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.goal.changed",
+                    {
+                        "action": action,
+                        "session_id": params.get("sessionId") or params.get("session_id"),
+                        "goal_id": result.get("ref", {}).get("id") if isinstance(result.get("ref"), dict) else None,
+                        "revision": result.get("ref", {}).get("revision") if isinstance(result.get("ref"), dict) else None,
+                        "cleared": bool(result.get("cleared")),
+                    },
+                    session_id=params.get("sessionId") or params.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.mcp.inventory":
+            try:
+                return self.agent.mcp_inventory(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method in {"agent.skills", "agent.mcp", "agent.subagents", "agent.commands"}:
+            try:
+                values = self.agent.list_capabilities(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            key = method.removeprefix("agent.")
+            return values.get(key, {"available": False})
+        if method == "agent.interactions":
+            try:
+                return self.agent.interactions(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.approval.respond":
+            try:
+                result = self.agent.respond_interaction(
+                    {
+                        "rpcId": params.get("rpcId") or params.get("rpc_id"),
+                        "sessionId": params.get("sessionId") or params.get("session_id"),
+                        "approvalId": params.get("approvalId") or params.get("approval_id"),
+                        "outcome": params.get("outcome"),
+                    }
+                )
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.approval.decided",
+                    {
+                        "request_id": params.get("rpcId") or params.get("rpc_id"),
+                        "decision": params.get("outcome"),
+                    },
+                    session_id=params.get("sessionId") or params.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.question.respond":
+            try:
+                result = self.agent.respond_interaction(
+                    {
+                        "rpcId": params.get("rpcId") or params.get("rpc_id"),
+                        "sessionId": params.get("sessionId") or params.get("session_id"),
+                        "answer": params.get("answer"),
+                    }
+                )
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            answers = params.get("answer", {}).get("answers", []) if isinstance(params.get("answer"), dict) else []
+            self.events.publish(
+                EventEnvelope(
+                    "agent.question.answered",
+                    {
+                        "request_id": params.get("rpcId") or params.get("rpc_id"),
+                        "answer_count": len(answers),
+                    },
+                    session_id=params.get("sessionId") or params.get("session_id"),
+                )
+            )
+            return result
+        if method == "agent.event.ingest":
+            payload = params.get("event") if isinstance(params.get("event"), dict) else params
+            if not isinstance(payload, dict):
+                raise JsonRpcError(-32602, "event must be an object")
+            event = self.agent.normalize_event(payload)
+            self.events.publish(
+                EventEnvelope(
+                    "agent.event",
+                    _redact_agent_payload(event),
+                    session_id=event.get("session_id"),
+                )
+            )
+            return event
+        if method == "browser.status":
+            return self.browser.status()
+        if method == "browser.profiles":
+            return {
+                "profiles": self.browser.list_profiles(
+                    include_archived=bool(params.get("include_archived"))
+                )
+            }
+        if method == "browser.profile.create":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "creating a named browser profile requires explicit approval")
+            try:
+                result = self.browser.create_profile(
+                    name=str(params.get("name") or ""),
+                    character_id=str(params["character_id"]) if params.get("character_id") else None,
+                    agent_id=str(params["agent_id"]) if params.get("agent_id") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.profile.created",
+                    {"profile": _redact_browser_payload(result)},
+                )
+            )
+            return result
+        if method in {"browser.profile.archive", "browser.profile.restore"}:
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "changing a named browser profile requires explicit approval")
+            try:
+                if method.endswith("archive"):
+                    result = self.browser.archive_profile(str(params.get("profile_id") or ""))
+                    event_type = "browser.profile.archived"
+                else:
+                    result = self.browser.restore_profile(str(params.get("profile_id") or ""))
+                    event_type = "browser.profile.restored"
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(event_type, {"profile": _redact_browser_payload(result)})
+            )
+            return result
+        if method == "browser.sessions":
+            return {"sessions": self.browser.list_sessions()}
+        if method == "browser.session.create":
+            try:
+                result = self.browser.create_session(
+                    profile=str(params.get("profile") or "temporary"),
+                    profile_id=str(params["profile_id"]) if params.get("profile_id") else None,
+                    character_id=str(params["character_id"]) if params.get("character_id") else None,
+                    agent_id=str(params["agent_id"]) if params.get("agent_id") else None,
+                    approved=bool(params.get("approved")),
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.session.created", {"session": _redact_browser_payload(result)}))
+            return result
+        if method == "browser.session.close":
+            try:
+                result = self.browser.close_session(str(params.get("session_id") or params.get("id") or ""))
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.session.closed", result))
+            return result
+        if method == "browser.tabs":
+            try:
+                scope = str(params.get("scope") or "").strip().lower() or None
+                if scope not in {None, "user", "agent", "all"}:
+                    raise JsonRpcError(-32602, "browser tab scope must be user, agent, or all")
+                return self.browser.list_tabs(str(params.get("session_id") or ""), scope=scope)
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+        if method == "browser.tab.create":
+            try:
+                result = self.browser.create_tab(
+                    str(params.get("session_id") or ""),
+                    url=str(params["url"]) if params.get("url") is not None else None,
+                    approved=bool(params.get("approved")),
+                    active=bool(params.get("active", True)),
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.tab.created" if result.get("executed") else "browser.tab.waiting_approval",
+                    {
+                        "session_id": result.get("session_id"),
+                        "executed": bool(result.get("executed")),
+                        "domain": (result.get("policy") or {}).get("domain"),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "browser.tab.select":
+            try:
+                result = self.browser.select_tab(
+                    str(params.get("session_id") or ""),
+                    tab_id=str(params.get("tab_id") or ""),
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.tab.selected", {"session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "executed": bool(result.get("executed"))}, session_id=result.get("session_id")))
+            return result
+        if method == "browser.tab.close":
+            try:
+                result = self.browser.close_tab(
+                    str(params.get("session_id") or ""),
+                    tab_id=str(params.get("tab_id") or ""),
+                    approved=bool(params.get("approved")),
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.tab.closed" if result.get("executed") else "browser.tab.close.waiting_approval",
+                    {"session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "executed": bool(result.get("executed"))},
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "browser.observe":
+            try:
+                result = self.browser.observe_session(
+                    str(params.get("session_id") or ""),
+                    tab_id=str(params["tab_id"]) if params.get("tab_id") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.observed",
+                    {
+                        "session_id": result.get("session_id"),
+                        "tab_id": result.get("tab_id"),
+                        "ready": bool(result.get("ready")),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "browser.snapshot":
+            try:
+                result = self.browser.snapshot_session(
+                    str(params.get("session_id") or ""),
+                    tab_id=str(params["tab_id"]) if params.get("tab_id") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.snapshot", {"session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "ready": bool(result.get("ready"))}, session_id=result.get("session_id")))
+            return result
+        if method == "browser.screenshot":
+            try:
+                result = self.browser.screenshot_session(
+                    str(params.get("session_id") or ""),
+                    tab_id=str(params["tab_id"]) if params.get("tab_id") else None,
+                    ref=str(params["ref"]) if params.get("ref") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.screenshot", {"session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "ready": bool(result.get("ready"))}, session_id=result.get("session_id")))
+            return result
+        if method in {"browser.console", "browser.network"}:
+            try:
+                since = params.get("since")
+                if since is not None:
+                    since = int(since)
+                    if since < 0:
+                        raise ValueError
+                limit = int(params.get("limit", 50))
+                if limit < 1 or limit > 200:
+                    raise ValueError
+                kwargs = {
+                    "tab_id": str(params["tab_id"]) if params.get("tab_id") else None,
+                    "since": since,
+                    "limit": limit,
+                    "developer_mode": bool(params.get("developer_mode")),
+                    "approved": bool(params.get("approved")),
+                }
+                result = self.browser.read_console(str(params.get("session_id") or ""), **kwargs) if method == "browser.console" else self.browser.read_network(str(params.get("session_id") or ""), **kwargs)
+            except ValueError as exc:
+                raise JsonRpcError(-32602, "since must be non-negative and limit must be between 1 and 200") from exc
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.console.read" if method == "browser.console" else "browser.network.read",
+                    {"session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "executed": bool(result.get("executed")), "requires_developer_mode": bool(result.get("requires_developer_mode"))},
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "browser.navigate":
+            url = str(params.get("url") or "").strip()
+            try:
+                result = self.browser.navigate_session(
+                    str(params.get("session_id") or ""),
+                    url=url,
+                    approved=bool(params.get("approved")),
+                    tab_id=str(params["tab_id"]) if params.get("tab_id") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.navigated" if result.get("executed") else "browser.navigation.waiting_approval",
+                    {
+                        "session_id": result.get("session_id"),
+                        "domain": result.get("domain") or (result.get("policy") or {}).get("domain"),
+                        "executed": bool(result.get("executed")),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "browser.action.execute":
+            values = params.get("values")
+            if values is not None and not isinstance(values, list):
+                raise JsonRpcError(-32602, "browser action values must be an array")
+            try:
+                result = self.browser.execute_action(
+                    str(params.get("session_id") or ""),
+                    action=str(params.get("action") or ""),
+                    target=str(params["target"]) if params.get("target") is not None else None,
+                    value=str(params["value"]) if params.get("value") is not None else None,
+                    values=[str(entry) for entry in values] if isinstance(values, list) else None,
+                    key=str(params["key"]) if params.get("key") is not None else None,
+                    approved=bool(params.get("approved")),
+                    tab_id=str(params["tab_id"]) if params.get("tab_id") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.action.executed" if result.get("executed") else "browser.action.waiting_approval",
+                    {
+                        "session_id": result.get("session_id"),
+                        "action": result.get("action"),
+                        "executed": bool(result.get("executed")),
+                        "requires_human": bool(result.get("requires_human")),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "browser.action.check":
+            try:
+                return self.browser.check_action(
+                    session_id=str(params.get("session_id") or ""),
+                    action=str(params.get("action") or ""),
+                    domain=str(params["domain"]) if params.get("domain") else None,
+                    approved=bool(params.get("approved")),
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+        if method == "browser.request_help":
+            try:
+                result = self.browser.request_help(session_id=str(params.get("session_id") or ""), domain=str(params.get("domain") or ""), reason=str(params.get("reason") or ""))
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.request_help", {"session_id": result["session_id"], "domain": result["domain"], "reason": redact_text(result["reason"]), "credentials_excluded": True}))
+            return result
+        if method == "browser.download.quarantine":
+            try:
+                result = self.browser.quarantine_download(session_id=str(params.get("session_id") or ""), path=str(params.get("path") or ""), source_url=str(params.get("source_url") or ""), content_type=str(params["content_type"]) if params.get("content_type") else None)
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.download.quarantined", {"download_id": result["id"], "sha256": result["sha256"], "source_url": result["source_url"]}))
+            return result
+        if method == "browser.downloads":
+            return {"downloads": self.browser.list_downloads()}
+        if method == "browser.download.release":
+            try:
+                result = self.browser.release_download(
+                    str(params.get("download_id") or ""),
+                    approved=bool(params.get("approved")),
+                    workspace_path=str(params["workspace_path"]) if params.get("workspace_path") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(EventEnvelope("browser.download.released", {"download_id": result["id"], "approved": True}))
+            return result
+        if method == "evolution.registry.list":
+            return self.evolution_registry.list()
+        if method == "evolution.registry.check":
+            return self.evolution_registry.check()
         if method == "privacy.status":
             return self._privacy_status()
         if method == "provider.list":
@@ -1464,6 +2273,36 @@ class CoreApplication:
         profile_id = (setting.get("config") or {}).get("profile_id")
         return str(profile_id) if isinstance(profile_id, str) and profile_id else None
 
+    def _agent_provider_profile(
+        self,
+        params: dict[str, Any] | None = None,
+        *,
+        required: bool = True,
+    ) -> dict[str, Any] | None:
+        params = params or {}
+        requested = params.get("provider_profile_id") or params.get("profile_id")
+        profile_id = str(requested).strip() if requested else self._active_provider_profile_id()
+        if not profile_id:
+            if required:
+                raise ProviderProfileError("没有启用的 Sumika Provider 档案")
+            return None
+        try:
+            return self.provider_profiles.get(profile_id, include_secrets=True)
+        except ProviderProfileError:
+            if required:
+                raise
+            return None
+
+    @staticmethod
+    def _agent_provider_profile_public(profile: dict[str, Any] | None) -> dict[str, Any] | None:
+        if profile is None:
+            return None
+        return {
+            key: value
+            for key, value in profile.items()
+            if key not in {"secrets", "credential_ref"}
+        }
+
     def _provider_profile_list(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         active_profile_id = self._active_provider_profile_id()
         return [
@@ -1634,6 +2473,8 @@ class CoreApplication:
         try:
             self.logger.info("core shutdown requested uptime_seconds=%.3f", time.monotonic() - self.started_at)
             self.providers.close()
+            self.agent.close()
+            self.browser.close()
             self.audio.close()
             self.vision.close()
             self.audio_providers.close()
@@ -1659,6 +2500,9 @@ class CoreApplication:
             "provider_profile_count": len(self.provider_profiles.list(include_archived=True)),
             "avatar_count": len(self.avatar.list_models()),
             "event_count": self.storage.count_events(),
+            "agent_runtime": self.agent.status(),
+            "browser_runtime": self.browser.status(),
+            "evolution_registry": self.evolution_registry.check(),
         }
 
 
@@ -1684,6 +2528,32 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/diagnostics":
             self._send_json(self.application.rpc("core.diagnostics", {}))
+            return
+        if parsed.path == "/api/agent/status":
+            self._send_json(self.application.rpc("agent.status", {}))
+            return
+        if parsed.path == "/api/agent/diagnostics":
+            self._send_json(self.application.rpc("agent.diagnostics", {}))
+            return
+        if parsed.path == "/api/agent/provider":
+            self._send_json(self.application.rpc("agent.provider.status", {}))
+            return
+        if parsed.path == "/api/agent/session.export":
+            self._serve_agent_session_export(parsed.query)
+            return
+        if parsed.path == "/api/browser/status":
+            self._send_json(self.application.rpc("browser.status", {}))
+            return
+        if parsed.path == "/api/browser/profiles":
+            query = parse_qs(parsed.query)
+            include_archived = (query.get("include_archived") or ["false"])[0].lower() == "true"
+            self._send_json(self.application.rpc("browser.profiles", {"include_archived": include_archived}))
+            return
+        if parsed.path == "/api/browser/downloads":
+            self._send_json(self.application.rpc("browser.downloads", {}))
+            return
+        if parsed.path == "/api/evolution/registry":
+            self._send_json(self.application.rpc("evolution.registry.list", {}))
             return
         if parsed.path == "/api/providers":
             self._send_json(self.application.rpc("provider.list", {}))
@@ -1787,6 +2657,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         self._serve_static(parsed.path)
 
     def do_POST(self) -> None:  # noqa: N802
+        payload: dict[str, Any] = {}
         try:
             payload = self._read_json()
             if self.path == "/rpc":
@@ -1890,8 +2761,16 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             self.application.logger.info("http client disconnected path=%s error_type=%s", urlparse(self.path).path, type(exc).__name__)
 
     def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length > 2_000_000:
+        raw_length = self.headers.get("Content-Length", "0")
+        try:
+            length = int(raw_length)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid Content-Length") from exc
+        if length < 0:
+            raise ValueError("Invalid Content-Length")
+        request_path = urlparse(self.path).path
+        limit = _RPC_JSON_BODY_LIMIT if request_path == "/rpc" else _DEFAULT_JSON_BODY_LIMIT
+        if length > limit:
             raise ValueError("Request body is too large")
         value = json.loads(self.rfile.read(length).decode("utf-8"))
         if not isinstance(value, dict):
@@ -1911,6 +2790,73 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError) as exc:
             self.application.logger.info("http client disconnected path=%s error_type=%s", urlparse(self.path).path, type(exc).__name__)
+
+    def _serve_agent_session_export(self, raw_query: str) -> None:
+        query = parse_qs(raw_query, keep_blank_values=True)
+        session_values = query.get("session_id") or []
+        include_values = query.get("include_descendants") or ["false"]
+        if len(session_values) != 1 or len(include_values) != 1:
+            self._send_json({"error": "A single session_id is required"}, HTTPStatus.BAD_REQUEST)
+            return
+        session_id = session_values[0].strip()
+        include_text = include_values[0].strip().lower()
+        if (
+            not session_id
+            or len(session_id) > 240
+            or any(ord(character) < 32 for character in session_id)
+            or include_text not in {"true", "false"}
+        ):
+            self._send_json({"error": "Invalid session export parameters"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            export = self.application.agent.open_session_export(
+                {
+                    "session_id": session_id,
+                    "include_descendants": include_text == "true",
+                }
+            )
+        except AgentRuntimeError as exc:
+            status = HTTPStatus.SERVICE_UNAVAILABLE if exc.transport else HTTPStatus.BAD_GATEWAY
+            if exc.http_status == 404:
+                status = HTTPStatus.NOT_FOUND
+            elif exc.http_status == 501:
+                status = HTTPStatus.NOT_IMPLEMENTED
+            self._send_json({"error": str(exc)}, status)
+            return
+
+        stream = export.get("stream") if isinstance(export, dict) else None
+        if stream is None or not hasattr(stream, "read"):
+            self._send_json({"error": "DSH session export stream is unavailable"}, HTTPStatus.BAD_GATEWAY)
+            return
+        filename_token = re.sub(r"[^A-Za-z0-9._-]+", "-", session_id).strip("-.")[:80] or "session"
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/zip")
+            content_length = export.get("content_length")
+            if isinstance(content_length, int) and not isinstance(content_length, bool) and content_length >= 0:
+                self.send_header("Content-Length", str(content_length))
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="sumika-dsh-{filename_token}.zip"',
+            )
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            shutil.copyfileobj(stream, self.wfile, length=64 * 1024)
+            self.application.logger.info(
+                "dsh session export completed session_id=%s include_descendants=%s",
+                session_id,
+                include_text == "true",
+            )
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError) as exc:
+            self.application.logger.info(
+                "dsh session export interrupted session_id=%s error_type=%s",
+                session_id,
+                type(exc).__name__,
+            )
+        finally:
+            stream.close()
 
     def _send_bytes(self, body: bytes, content_type: str, status: HTTPStatus = HTTPStatus.OK) -> None:
         self.send_response(status)
@@ -2017,6 +2963,91 @@ def _plugin_summary(plugin: dict[str, Any]) -> dict[str, Any]:
         "error": plugin.get("error"),
         "updated_at": plugin.get("updated_at"),
     }
+
+
+_AGENT_PRESET_ID_PARAM_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_MAX_AGENT_PRESET_ID_PARAM_LENGTH = 160
+_MAX_AGENT_PRESET_NAME_PARAM_LENGTH = 240
+
+
+def _agent_preset_id_param(value: Any, field: str = "agentPreset") -> str:
+    """Validate a preset id before dispatching a mutating DSH operation."""
+
+    if not isinstance(value, str):
+        raise JsonRpcError(-32602, f"{field} must be a preset id")
+    candidate = value.strip()
+    if (
+        not candidate
+        or len(candidate) > _MAX_AGENT_PRESET_ID_PARAM_LENGTH
+        or _AGENT_PRESET_ID_PARAM_RE.fullmatch(candidate) is None
+    ):
+        raise JsonRpcError(
+            -32602,
+            f"{field} must use lowercase letters, digits, and hyphens; paths are not allowed",
+        )
+    return candidate
+
+
+def _agent_preset_copy_params(params: dict[str, Any]) -> dict[str, Any]:
+    source = _agent_preset_id_param(params.get("from") or params.get("source"), "from")
+    destination = _agent_preset_id_param(
+        params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+        "agentPreset",
+    )
+    if source == destination:
+        raise JsonRpcError(-32602, "from and agentPreset must differ")
+    name = params.get("name")
+    if name is not None:
+        if not isinstance(name, str):
+            raise JsonRpcError(-32602, "name must be text")
+        name = name.strip()
+        if (
+            len(name) > _MAX_AGENT_PRESET_NAME_PARAM_LENGTH
+            or any(ord(char) < 32 or ord(char) == 127 for char in name)
+            or any(separator in name for separator in ("/", "\\"))
+            or ":" in name
+        ):
+            raise JsonRpcError(-32602, "name must be at most 240 characters and must not be a path")
+    return {"from": source, "agentPreset": destination, "name": name}
+
+
+def _redact_agent_payload(value: Any) -> Any:
+    """Remove likely credential fields before agent metadata enters the audit log."""
+
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if any(token in normalized for token in ("token", "secret", "password", "apikey", "api_key", "authorization", "cookie")):
+                result[str(key)] = "[redacted]"
+            else:
+                result[str(key)] = _redact_agent_payload(item)
+        return result
+    if isinstance(value, list):
+        return [_redact_agent_payload(item) for item in value]
+    return value
+
+
+def _redact_browser_payload(value: Any) -> Any:
+    """Keep browser audit events free of credentials and page contents."""
+
+    if not isinstance(value, dict):
+        return value
+    allowed = {
+        "id",
+        "name",
+        "profile",
+        "profile_id",
+        "character_id",
+        "agent_id",
+        "status",
+        "state",
+        "created_at",
+        "updated_at",
+        "expires_at",
+        "lease_expires_at",
+    }
+    return {key: value[key] for key in allowed if key in value}
 
 
 def _snapshot_target(params: dict[str, Any]) -> tuple[str, str | None]:

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Sumika warm window icon</title>
+  <desc id="desc">A warm rounded home badge with a cute character peeking through a glowing window.</desc>
+  <rect x="48" y="48" width="928" height="928" rx="224" fill="#f4c989" stroke="#3e3b4e" stroke-width="36"/>
+  <path d="M188 492 512 214l324 278v300c0 43-35 78-78 78H266c-43 0-78-35-78-78Z" fill="#e98972" stroke="#3e3b4e" stroke-width="30" stroke-linejoin="round"/>
+  <path d="m138 500 374-320 374 320-44 52L512 260 182 552Z" fill="#6e8f8f" stroke="#3e3b4e" stroke-width="30" stroke-linejoin="round"/>
+  <rect x="270" y="442" width="484" height="330" rx="74" fill="#fff0c4" stroke="#3e3b4e" stroke-width="28"/>
+  <path d="M512 438c-97 0-176 78-176 175v159h352V613c0-97-79-175-176-175Z" fill="#f4a98e" stroke="#3e3b4e" stroke-width="26"/>
+  <path d="M376 558c17-75 67-120 136-120s119 45 136 120c-39-29-83-44-136-44s-97 15-136 44Z" fill="#51465d"/>
+  <path d="M422 618c21-25 51-39 90-39s69 14 90 39" fill="none" stroke="#3e3b4e" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="438" cy="625" r="18" fill="#3e3b4e"/>
+  <circle cx="586" cy="625" r="18" fill="#3e3b4e"/>
+  <path d="M486 681c16 14 36 14 52 0" fill="none" stroke="#d86f6a" stroke-width="14" stroke-linecap="round"/>
+  <path d="M336 792h352" stroke="#3e3b4e" stroke-width="26" stroke-linecap="round"/>
+  <path d="M218 836h588" stroke="#6e8f8f" stroke-width="28" stroke-linecap="round"/>
+</svg>

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.sumika.desktop",
   "build": {
-    "beforeBuildCommand": "npm --prefix frontend run build",
+    "beforeBuildCommand": "npm run build",
     "devUrl": "http://127.0.0.1:8771",
     "frontendDist": "../frontend/dist"
   },
@@ -42,6 +42,15 @@
   },
   "bundle": {
     "active": false,
-    "icon": []
+    "icon": [
+      "icons/sumika-icon-sharp.ico",
+      "icons/sumika-icon-sharp-16.png",
+      "icons/sumika-icon-sharp-24.png",
+      "icons/sumika-icon-sharp-32.png",
+      "icons/sumika-icon-sharp-48.png",
+      "icons/sumika-icon-sharp-64.png",
+      "icons/sumika-icon-sharp-128.png",
+      "icons/sumika-icon-sharp-256.png"
+    ]
   }
 }

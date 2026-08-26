@@ -45,6 +45,13 @@ class DocumentationCheckerTests(unittest.TestCase):
             self.assertEqual(len(errors), 1)
             self.assertIn("old.md", errors[0])
 
+    def test_runtime_dependency_readme_is_not_treated_as_product_doc(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write(root, "deprecated/20260101/profile/node_modules/pkg/README.md", "# Dependency\n")
+            self.write(root, "docs/README.md", "README.md is a normal filename\n")
+            self.assertEqual(check_archived_references(root), [])
+
 
 if __name__ == "__main__":
     unittest.main()
