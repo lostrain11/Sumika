@@ -649,6 +649,7 @@ class AgentRuntimeTests(unittest.TestCase):
                     "presets": [
                         {"id": "standard", "trust": "system", "isDefault": True, "name": "标准", "description": "可用", "path": "D:\\private"},
                         {"id": "broken", "trust": "user", "isDefault": False, "broken": "缺少插件", "composition": "secret"},
+                        {"id": "untrusted"},
                         {"id": "D:\\private\\preset", "trust": "user"},
                     ],
                     "authorable": True,
@@ -661,6 +662,7 @@ class AgentRuntimeTests(unittest.TestCase):
         runtime._call = capture
         roster = runtime.list_presets()
         self.assertEqual(roster["presets"][0]["id"], "standard")
+        self.assertEqual(roster["presets"][2]["trust"], "unknown")
         self.assertTrue(roster["authorable"])
         self.assertNotIn("path", str(roster))
         self.assertNotIn("composition", str(roster))
@@ -669,7 +671,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(selected, {"session_id": "blank-1", "agent_preset": "standard"})
         self.assertEqual(calls[-1], ("agentPreset.select", {"sessionId": "blank-1", "agentPreset": "standard"}))
 
-    def test_agent_preset_copy_and_open_are_slug_bounded_and_path_free(self):
+    def test_agent_preset_copy_open_and_remove_are_slug_bounded_and_path_free(self):
         runtime = DSHAgentRuntime(":memory:", env={"SUMIKA_DSH_ENDPOINT": "http://127.0.0.1:1"})
         calls = []
 
@@ -679,6 +681,8 @@ class AgentRuntimeTests(unittest.TestCase):
                 return {"agentPreset": "sumika-work"}
             if method == "agentPreset.openDocument":
                 return {"opened": False, "path": "D:\\private\\agent-presets\\sumika-work"}
+            if method == "agentPreset.remove":
+                return {}
             raise AssertionError(method)
 
         runtime._call = capture
@@ -697,6 +701,9 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(opened, {"agent_preset": "sumika-work", "opened": False})
         self.assertNotIn("private", str(opened))
         self.assertEqual(calls[1], ("agentPreset.openDocument", {"agentPreset": "sumika-work"}))
+        removed = runtime.remove_preset({"agentPreset": "sumika-work"})
+        self.assertEqual(removed, {"agent_preset": "sumika-work", "removed": True})
+        self.assertEqual(calls[2], ("agentPreset.remove", {"agentPreset": "sumika-work"}))
         for params in (
             {"from": "..\\secret", "agentPreset": "sumika-work"},
             {"from": "standard", "agentPreset": "D:\\secret"},
@@ -705,6 +712,8 @@ class AgentRuntimeTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "preset|path"):
                 runtime.copy_preset(params)
+        with self.assertRaisesRegex(RuntimeError, "preset"):
+            runtime.remove_preset({"agentPreset": "D:\\secret"})
 
     def test_subagent_operations_keep_exact_parent_child_address_and_text_boundary(self):
         runtime = DSHAgentRuntime(":memory:", env={"SUMIKA_DSH_ENDPOINT": "http://127.0.0.1:1"})

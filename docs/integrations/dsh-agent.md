@@ -50,6 +50,18 @@ MCP 配置写入仍保持关闭。固定版 `dsh-mcp-client` 由 Agent preset �
 必须先创建 Sumika 自有的 user preset、隔离凭据注入并通过 mount validation，再允许用户
 显式启用；当前实现不会静默修改 `cordis.patch.yml`、系统 preset 或全局 DSH。
 
+### User Preset 管理
+
+Agent 页读取 DSH 的真实 `agentPreset.list`，并通过固定协议提供
+`agentPreset.copy`、`agentPreset.openDocument` 和 `agentPreset.remove`。Sumika 不读取、
+展示或直接改写 Preset composition，也不会直接删除 DSH profile 中的目录。
+
+删除不是只由 Skill 约束的工具能力。Core 在每次删除前重新读取 DSH roster，只允许
+`trust=user` 的精确 Preset ID，并同时要求 `approved: true` 与完整 ID 二次确认；系统、
+未知来源、路径式或已经不在 roster 中的 ID 一律拒绝。UI 先要求用户输入完整 ID，再显示
+不可恢复确认。审计只记录 Preset ID 和结果，不记录名称、路径或 composition。自动测试
+只 mock DSH 的 `agentPreset.remove`，不会删除受管 profile 的真实内容。
+
 Developer 页的“DSH 能力探针”（`agent.diagnostics` 或
 `GET /api/agent/diagnostics`）会逐项调用只读 RPC，并显示 `available`、
 `session-scoped`、`not-exposed`、`rejected` 或 `unavailable`。它会额外检查受管

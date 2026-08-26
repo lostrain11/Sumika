@@ -1280,24 +1280,25 @@ function renderAgentPresetPanel(status) {
   const presets = Array.isArray(state.agentPresets) ? state.agentPresets : [];
   const effective = session?.agent_preset || state.agentPresetId || presets.find((item) => item.is_default && !item.broken)?.id || "";
   const options = presets.map((preset) => {
-    const label = `${preset.name || preset.id} · ${preset.trust === "system" ? "系统" : "用户"}${preset.broken ? ` · 不可用：${preset.broken}` : ""}`;
+    const trustLabel = preset.trust === "system" ? "系统" : preset.trust === "user" ? "用户" : "未知来源";
+    const label = `${preset.name || preset.id} · ${trustLabel}${preset.broken ? ` · 不可用：${preset.broken}` : ""}`;
     return `<option value="${escapeHtml(preset.id)}" ${preset.id === effective ? "selected" : ""} ${preset.broken || locked || !status.ready || state.agentBusy ? "disabled" : ""}>${escapeHtml(label)}</option>`;
   }).join("");
   const usable = presets.filter((preset) => preset && preset.id && !preset.broken);
   const copySource = usable.some((preset) => preset.id === state.agentPresetCopySource)
     ? state.agentPresetCopySource
     : (usable[0]?.id || "");
-  const copySourceOptions = usable.map((preset) => `<option value="${escapeHtml(preset.id)}" ${preset.id === copySource ? "selected" : ""}>${escapeHtml(preset.name || preset.id)} · ${preset.trust === "system" ? "系统" : "用户"}</option>`).join("");
+  const copySourceOptions = usable.map((preset) => `<option value="${escapeHtml(preset.id)}" ${preset.id === copySource ? "selected" : ""}>${escapeHtml(preset.name || preset.id)} · ${preset.trust === "system" ? "系统" : preset.trust === "user" ? "用户" : "未知来源"}</option>`).join("");
   const userPresets = presets.filter((preset) => preset.trust === "user");
   const userPresetRows = userPresets.length
-    ? userPresets.map((preset) => `<div class="agent-preset-user-row" data-agent-preset-row="${escapeHtml(preset.id)}"><div><strong>${escapeHtml(preset.name || preset.id)}</strong><small><code>${escapeHtml(preset.id)}</code>${preset.broken ? ` · 不可用：${escapeHtml(preset.broken)}` : " · 用户 Preset"}</small></div>${state.agentPresetHasDocument ? `<button class="ghost-button" type="button" data-agent-preset-open="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>打开目录</button>` : `<span class="muted-text">未配置目录打开器</span>`}</div>`).join("")
+    ? userPresets.map((preset) => `<div class="agent-preset-user-row" data-agent-preset-row="${escapeHtml(preset.id)}"><div><strong>${escapeHtml(preset.name || preset.id)}</strong><small><code>${escapeHtml(preset.id)}</code>${preset.broken ? ` · 不可用：${escapeHtml(preset.broken)}` : " · 用户 Preset"}</small></div><div class="agent-preset-user-actions">${state.agentPresetHasDocument ? `<button class="ghost-button" type="button" data-agent-preset-open="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>打开目录</button>` : `<span class="muted-text">未配置目录打开器</span>`}<button class="ghost-button danger-text" type="button" data-agent-preset-remove="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>删除</button></div></div>`).join("")
     : `<small class="muted-text">还没有用户 Preset；复制系统 Preset 后可在 DSH 管理的目录中编辑。</small>`;
   const broken = presets.filter((preset) => preset.broken).length;
   const note = !status.ready
     ? "连接 DSH 后读取真实 Preset 清单。"
     : locked
       ? "当前会话已经产生回合，Preset 已锁定；新建会话时可重新选择。"
-      : "Preset 由 DSH 运行时管理；Sumika 只通过固定 ID 请求复制或打开，不读取和改写组合文件。";
+      : "Preset 由 DSH 运行时管理；Sumika 只通过固定 ID 请求复制、打开或删除用户 Preset，不读取和改写组合文件。";
   const authoring = status.ready && state.agentPresetAuthorable;
   const copyPanel = authoring
     ? `<form id="agent-preset-copy-form" class="agent-preset-copy-form"><label><span>复制来源</span><select id="agent-preset-copy-source" ${state.agentBusy ? "disabled" : ""}>${copySourceOptions || "<option value=\"\">暂无可复制 Preset</option>"}</select></label><label><span>新 Preset ID</span><input id="agent-preset-copy-id" type="text" maxlength="160" pattern="[a-z0-9][a-z0-9-]*" value="${escapeHtml(state.agentPresetCopyId)}" placeholder="例如 sumika-work" ${state.agentBusy || !usable.length ? "disabled" : ""} /></label><label><span>显示名称（可选）</span><input id="agent-preset-copy-name" type="text" maxlength="240" value="${escapeHtml(state.agentPresetCopyName)}" placeholder="例如 Sumika 工作" ${state.agentBusy || !usable.length ? "disabled" : ""} /></label><button class="outline-button" type="submit" ${state.agentBusy || !copySource || !usable.length ? "disabled" : ""}>复制为用户 Preset</button></form>`
@@ -1679,6 +1680,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-agent-preset-open]").forEach((element) => element.addEventListener("click", () => {
     void openAgentPresetDocument(element.dataset.agentPresetOpen);
+  }));
+  document.querySelectorAll("[data-agent-preset-remove]").forEach((element) => element.addEventListener("click", () => {
+    void removeAgentPreset(element.dataset.agentPresetRemove);
   }));
   document.querySelector("#agent-send")?.addEventListener("click", sendAgentPrompt);
   document.querySelector("#agent-prompt")?.addEventListener("input", (event) => {
@@ -2600,6 +2604,44 @@ async function openAgentPresetDocument(presetId) {
       : "DSH 没有可用的系统目录打开器；为保护隐私，Sumika 不显示本地路径。";
   } catch (error) {
     state.agentNotice = `打开 Preset 目录失败：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function removeAgentPreset(presetId) {
+  const id = validAgentPresetSlug(presetId);
+  const preset = state.agentPresets.find((item) => item.id === id);
+  if (!id || !preset || preset.trust !== "user" || state.agentBusy || !state.agentStatus?.ready) return;
+  const confirmation = window.prompt(
+    `删除用户 Preset “${preset.name || id}”将由 DSH 永久移除，Sumika 不提供内置恢复。请输入完整 Preset ID：${id}`,
+    "",
+  );
+  if (confirmation === null) return;
+  if (confirmation !== id) {
+    state.agentNotice = "Preset ID 确认不匹配，未执行删除。";
+    render();
+    return;
+  }
+  if (!window.confirm(`确认永久删除用户 Preset “${id}”？系统 Preset 不受此操作影响。`)) return;
+  const resetDefault = state.agentPresetId === id;
+  state.agentBusy = "preset-remove";
+  state.agentNotice = `正在删除用户 Preset：${id}…`;
+  render();
+  try {
+    const result = await rpc("agent.preset.remove", {
+      agentPreset: id,
+      confirm_agent_preset: id,
+      approved: true,
+    });
+    if (result?.removed !== true) throw new Error("DSH 未确认删除结果");
+    if (resetDefault) state.agentPresetId = "";
+    if (state.agentPresetCopySource === id) state.agentPresetCopySource = "";
+    await loadAgentPresets(false);
+    state.agentNotice = `用户 Preset 已删除：${id}${resetDefault ? "；新会话已恢复使用 DSH 默认 Preset" : ""}。`;
+  } catch (error) {
+    state.agentNotice = `删除用户 Preset 失败：${error.message}`;
   } finally {
     state.agentBusy = null;
     render();

@@ -740,6 +740,47 @@ class CoreApplication:
                 "agent_preset": result.get("agent_preset", preset),
                 "opened": bool(result.get("opened")),
             }
+        if method == "agent.preset.remove":
+            preset = _agent_preset_id_param(
+                params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+                "agentPreset",
+            )
+            if params.get("approved") is not True or params.get("confirm_agent_preset") != preset:
+                raise JsonRpcError(
+                    -32031,
+                    "removing a user preset requires explicit approval and an exact preset id confirmation",
+                )
+            try:
+                roster = self.agent.list_presets({})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            entries = roster.get("presets") if isinstance(roster, dict) else None
+            entry = next(
+                (
+                    item
+                    for item in entries
+                    if isinstance(item, dict) and item.get("id") == preset
+                ),
+                None,
+            ) if isinstance(entries, list) else None
+            if entry is None:
+                raise JsonRpcError(-32602, "the requested Agent preset is not in the current DSH roster")
+            if entry.get("trust") != "user":
+                raise JsonRpcError(-32031, "only explicitly user-owned Agent presets can be removed")
+            try:
+                result = self.agent.remove_preset({"agentPreset": preset})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            removed = isinstance(result, dict) and result.get("removed") is True
+            if not removed:
+                raise JsonRpcError(-32030, "DSH did not confirm Agent preset removal")
+            self.events.publish(
+                EventEnvelope(
+                    "agent.preset.removed",
+                    {"agent_preset": preset, "removed": True},
+                )
+            )
+            return {"agent_preset": preset, "removed": True}
         if method == "agent.session.select_preset":
             try:
                 result = self.agent.select_preset(params)

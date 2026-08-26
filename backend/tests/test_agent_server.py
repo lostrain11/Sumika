@@ -353,6 +353,82 @@ class AgentServerTests(unittest.TestCase):
                 self.application.rpc(method, params)
             self.assertEqual(error.exception.code, -32602)
 
+    def test_agent_preset_remove_requires_exact_confirmation_and_explicit_user_trust(self):
+        roster = {
+            "presets": [
+                {"id": "standard", "trust": "system", "name": "System Preset"},
+                {"id": "untrusted", "trust": "unknown"},
+                {
+                    "id": "sumika-work",
+                    "trust": "user",
+                    "name": "Private display name",
+                    "path": "D:\\private\\agent-presets\\sumika-work",
+                    "composition": "must not enter audit",
+                },
+            ]
+        }
+        with (
+            patch.object(self.application.agent, "list_presets", return_value=roster),
+            patch.object(
+                self.application.agent,
+                "remove_preset",
+                return_value={"agent_preset": "sumika-work", "removed": True},
+            ) as remove,
+        ):
+            for params in (
+                {"agentPreset": "sumika-work"},
+                {"agentPreset": "sumika-work", "approved": True, "confirm_agent_preset": "other"},
+            ):
+                with self.assertRaises(JsonRpcError) as error:
+                    self.application.rpc("agent.preset.remove", params)
+                self.assertEqual(error.exception.code, -32031)
+
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "agent.preset.remove",
+                    {"agentPreset": "standard", "approved": True, "confirm_agent_preset": "standard"},
+                )
+            self.assertEqual(error.exception.code, -32031)
+
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "agent.preset.remove",
+                    {"agentPreset": "untrusted", "approved": True, "confirm_agent_preset": "untrusted"},
+                )
+            self.assertEqual(error.exception.code, -32031)
+
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "agent.preset.remove",
+                    {"agentPreset": "missing", "approved": True, "confirm_agent_preset": "missing"},
+                )
+            self.assertEqual(error.exception.code, -32602)
+
+            removed = self.application.rpc(
+                "agent.preset.remove",
+                {
+                    "agentPreset": "sumika-work",
+                    "approved": True,
+                    "confirm_agent_preset": "sumika-work",
+                },
+            )
+
+        remove.assert_called_once_with({"agentPreset": "sumika-work"})
+        self.assertEqual(removed, {"agent_preset": "sumika-work", "removed": True})
+        events = str(self.application.storage.list_events(10))
+        self.assertIn("agent.preset.removed", events)
+        self.assertIn("sumika-work", events)
+        self.assertNotIn("Private display name", events)
+        self.assertNotIn("private", events)
+        self.assertNotIn("composition", events)
+
+        with self.assertRaises(JsonRpcError) as error:
+            self.application.rpc(
+                "agent.preset.remove",
+                {"agentPreset": "D:\\secret", "approved": True, "confirm_agent_preset": "D:\\secret"},
+            )
+        self.assertEqual(error.exception.code, -32602)
+
     def test_agent_workspace_registration_validates_and_audits_metadata(self):
         workspace = {
             "id": "workspace-1",

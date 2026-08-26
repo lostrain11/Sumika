@@ -103,6 +103,10 @@ class AgentRuntime(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def remove_preset(self, params: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
     def select_preset(self, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -256,6 +260,9 @@ class UnavailableAgentRuntime(AgentRuntime):
         self._fail()
 
     def open_preset_document(self, params: dict[str, Any]) -> dict[str, Any]:
+        self._fail()
+
+    def remove_preset(self, params: dict[str, Any]) -> dict[str, Any]:
         self._fail()
 
     def select_preset(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -887,6 +894,16 @@ class DSHAgentRuntime(AgentRuntime):
         value = self._call("agentPreset.openDocument", {"agentPreset": preset})
         opened = bool(value.get("opened")) if isinstance(value, dict) else False
         return {"agent_preset": preset, "opened": opened}
+
+    def remove_preset(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Remove a preset through DSH after the Core policy gate approves it."""
+
+        preset = _agent_preset_id(
+            params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+            "agentPreset",
+        )
+        self._call("agentPreset.remove", {"agentPreset": preset})
+        return {"agent_preset": preset, "removed": True}
 
     def select_preset(self, params: dict[str, Any]) -> dict[str, Any]:
         """Select a preset for a still-blank session; DSH enforces that lock."""
@@ -1909,9 +1926,9 @@ def _compact_agent_presets(value: Any) -> dict[str, Any]:
             preset_id = _agent_preset_id(item.get("id") or item.get("agentPreset"))
         except AgentRuntimeError:
             continue
-        trust = str(item.get("trust") or "user").strip().lower()
+        trust = str(item.get("trust") or "unknown").strip().lower()
         if trust not in {"system", "user"}:
-            trust = "user"
+            trust = "unknown"
         row: dict[str, Any] = {
             "id": preset_id,
             "trust": trust,

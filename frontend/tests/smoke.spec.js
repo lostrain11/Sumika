@@ -487,7 +487,7 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("body")).toContainText("目标已提交");
   });
 
-  test("Agent preset, Goal revision, and Subagent controls use the pinned DSH contract", async ({ page }) => {
+  test("Agent preset lifecycle, Goal revision, and Subagent controls use the pinned DSH contract", async ({ page }) => {
     let createdParams;
     let selectedPreset;
     let goal;
@@ -495,6 +495,7 @@ test.describe("Sumika UI shell", () => {
     let subagentPrompt;
     let copiedPreset;
     let openedPreset;
+    let removedPreset;
     const presets = [
       { id: "standard", name: "标准", trust: "system", is_default: true },
       { id: "advanced", name: "高级", trust: "user" },
@@ -526,6 +527,11 @@ test.describe("Sumika UI shell", () => {
       } else if (method === "agent.preset.open") {
         openedPreset = body.params.agentPreset;
         result = { agent_preset: body.params.agentPreset, opened: true };
+      } else if (method === "agent.preset.remove") {
+        removedPreset = body.params;
+        const index = presets.findIndex((preset) => preset.id === body.params.agentPreset);
+        if (index >= 0) presets.splice(index, 1);
+        result = { agent_preset: body.params.agentPreset, removed: true };
       } else if (method === "agent.goal.create") {
         goal = { ref: { id: "goal-contract", revision: 0 }, objective: body.params.objective, phase: "active", max_goal_rounds: body.params.maxGoalRounds };
         result = { ref: goal.ref };
@@ -594,6 +600,24 @@ test.describe("Sumika UI shell", () => {
     await page.locator('[data-agent-preset-open="sumika-work"]').click();
     await expect(page.locator(".agent-notice")).toContainText("已打开用户 Preset 目录");
     expect(openedPreset).toBe("sumika-work");
+    await expect(page.locator('[data-agent-preset-remove="standard"]')).toHaveCount(0);
+    const deletionDialogs = [];
+    const handleDeletionDialog = async (dialog) => {
+      deletionDialogs.push(dialog.type());
+      if (dialog.type() === "prompt") await dialog.accept("sumika-work");
+      else await dialog.accept();
+    };
+    page.on("dialog", handleDeletionDialog);
+    await page.locator('[data-agent-preset-remove="sumika-work"]').click();
+    await expect(page.locator(".agent-notice")).toContainText("用户 Preset 已删除");
+    page.off("dialog", handleDeletionDialog);
+    expect(deletionDialogs).toEqual(["prompt", "confirm"]);
+    expect(removedPreset).toEqual({
+      agentPreset: "sumika-work",
+      confirm_agent_preset: "sumika-work",
+      approved: true,
+    });
+    await expect(page.locator('[data-agent-preset-row="sumika-work"]')).toHaveCount(0);
 
     await page.locator('#agent-goal-form input[name="objective"]').fill("完成契约检查");
     await page.locator("#agent-goal-form").getByRole("button", { name: "创建 Goal" }).click();
