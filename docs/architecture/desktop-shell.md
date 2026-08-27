@@ -20,6 +20,7 @@ shell now wraps the same UI and local core, with:
 - an opt-in, always-on-top desktop pet overlay window;
 - a native Avatar file picker through `tauri-plugin-dialog`;
 - a supervised Python child process on `127.0.0.1:8771`;
+- an optional Agent Runtime child supervised through a runtime-specific launcher config;
 - isolated `.sumika-desktop` data and lifecycle logs.
 
 Provider secrets are stored by the Python core through the credential-store
@@ -51,12 +52,18 @@ The following desktop capabilities remain deferred:
 - low-priority background scheduling.
 
 The shell waits for the Python `/api/health` response before presenting the
-window. If the child exits unexpectedly, Rust records the exit and retries with
-bounded backoff (up to five consecutive restart attempts). A normal shutdown,
-window lifecycle exit, or Rust process drop kills and waits for the child so a
-Python core is not left behind. The current child PID, endpoint, restart count
-and desktop log path are available through the `core_status` command in the
-Developer page.
+window. If a managed child exits unexpectedly, Rust records the exit and retries
+with bounded backoff. A normal shutdown, window lifecycle exit, or Rust process
+drop kills and waits only for children created by that Sumika instance. The
+current Core and Agent Runtime IDs, PIDs, endpoints and restart counts are
+available through the `core_status` command in the Developer page.
+
+Agent process supervision is runtime-neutral. `AgentLaunchConfig` contains the
+executable, arguments, environment, isolated profile, endpoint and health probe;
+currently only the real DSH launcher is registered. `SUMIKA_AGENT_*` selects the
+runtime and launcher settings, while existing `SUMIKA_DSH_*` names remain DSH
+compatibility aliases. An unknown runtime cannot enable managed autostart and
+must run externally until its real launcher is implemented.
 
 It does not move provider orchestration into Rust or frontend components. The
 browser client continues to use `127.0.0.1:8770` and `.sumika`. In a packaged
@@ -71,6 +78,7 @@ authentication are designed.
 
 ## 相关文档
 
+- [Agent Runtime](agent-runtime.md)
 - [本地模型](local-model.md)
 - [调试与恢复](debugging.md)
 - [Protocol](protocol.md)

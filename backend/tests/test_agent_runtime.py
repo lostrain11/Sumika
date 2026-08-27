@@ -8,8 +8,8 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import patch
 
-from sumika_core.agent.models import DSH_COMMIT, DSH_VERSION
-from sumika_core.agent.runtime import (
+from sumika_core.agent.adapters.dsh.config import DSH_COMMIT, DSH_VERSION
+from sumika_core.agent.adapters.dsh.runtime import (
     DSHAgentRuntime,
     UnavailableAgentRuntime,
     _compact_session_history,
@@ -34,6 +34,23 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(status["global_install_untouched"])
         self.assertTrue(status["profile_dir"].endswith("dsh-profile"))
 
+    def test_dsh_adapter_accepts_generic_runtime_environment_aliases(self):
+        runtime = DSHAgentRuntime(
+            ":memory:",
+            env={
+                "SUMIKA_AGENT_ENDPOINT": "http://127.0.0.1:3999",
+                "SUMIKA_AGENT_PROFILE_DIR": "D:\\portable-profile",
+                "SUMIKA_AGENT_EXECUTABLE": "D:\\portable-dsh.cmd",
+                "SUMIKA_AGENT_ENABLED": "0",
+            },
+        )
+
+        status = runtime.status()
+        self.assertEqual(status["endpoint"], "http://127.0.0.1:3999")
+        self.assertEqual(status["profile_dir"], "D:\\portable-profile")
+        self.assertEqual(status["executable"], "D:\\portable-dsh.cmd")
+        self.assertEqual(status["state"], "disabled")
+
     def test_diagnostics_distinguishes_missing_mcp_rpc_from_transport_failure(self):
         runtime = DSHAgentRuntime(":memory:", env={"SUMIKA_DSH_ENDPOINT": "http://127.0.0.1:1"})
         calls = []
@@ -52,7 +69,7 @@ class AgentRuntimeTests(unittest.TestCase):
             if method == "session.list":
                 return {"items": [{"sessionId": "session-1"}]}
             if method == "mcp.list":
-                from sumika_core.agent.runtime import AgentRuntimeError
+                from sumika_core.agent import AgentRuntimeError
 
                 raise AgentRuntimeError("not found", http_status=404)
             return {"value": []}

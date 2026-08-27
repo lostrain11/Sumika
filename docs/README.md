@@ -28,6 +28,7 @@ API、协议、类名和代码标识保留 English identifier。
 - [Avatar 资产与驱动](architecture/avatar.md)
 - [角色与 persona](architecture/characters.md)
 - [任务中心](architecture/tasks.md)
+- [Agent Runtime 可移植边界](architecture/agent-runtime.md)
 - [音频 ASR/TTS/VAD](architecture/audio.md)
 - [长期记忆](architecture/memory.md)
 - [视觉观察](architecture/vision.md)

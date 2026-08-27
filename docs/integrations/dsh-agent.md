@@ -1,6 +1,7 @@
 # DSH Agent 集成
 
-Sumika 采用 DSH-first，但不 fork DeepSeek Harness Core。后端通过
+Sumika 当前采用 DSH-first，但 DSH 只是 [Agent Runtime](../architecture/agent-runtime.md)
+的生产 adapter，不是 Core 的基类。后端通过 `AgentRuntimeRegistry` 构造
 `sumika_core.agent.DSHAgentRuntime` 访问固定版本的 DSH Web API，并把
 `session / turn / tool / approval / question / error` 事件映射到稳定的
 `AgentRuntime` 边界。DSH 未运行时，Agent 页面显示“未连接”，不会生成 Fake
@@ -8,9 +9,12 @@ Sumika 采用 DSH-first，但不 fork DeepSeek Harness Core。后端通过
 
 当前固定基线：`0.1.1-rc.2`、commit
 `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`，默认地址
-`http://127.0.0.1:3080`。可以用 `SUMIKA_DSH_ENDPOINT` 指向受管实例，用
-`SUMIKA_DSH_PROFILE_DIR` 指定隔离 profile；桌面端只有在同时设置
-`SUMIKA_DSH_AUTOSTART=1` 和 `SUMIKA_DSH_EXECUTABLE` 时才会启动子进程，并把
+`http://127.0.0.1:3080`。`SUMIKA_AGENT_RUNTIME=dsh` 是默认选择。可以用
+`SUMIKA_AGENT_ENDPOINT`（兼容 `SUMIKA_DSH_ENDPOINT`）指向受管实例，用
+`SUMIKA_AGENT_PROFILE_DIR`（兼容 `SUMIKA_DSH_PROFILE_DIR`）指定隔离 profile；
+桌面端只有在同时设置
+`SUMIKA_AGENT_AUTOSTART=1` 和 `SUMIKA_AGENT_EXECUTABLE` 时才会启动子进程；
+现有 `SUMIKA_DSH_AUTOSTART` / `SUMIKA_DSH_EXECUTABLE` 继续兼容。launcher 会把
 `.sumika-desktop/dsh-profile` 作为子进程 `DSH_HOME`。Sumika 不会写入用户全局
 `DSH_HOME`。`SUMIKA_DSH_ENABLED=0` 可关闭适配器。
 
@@ -25,6 +29,8 @@ CLI 版本；它不会修改 PATH 或全局 DSH。npm 生成的 `.cmd` 启动器
 
 受管 DSH 的 stdout/stderr 位于 `.sumika-desktop/logs/dsh.log`；桌面退出时只
 停止由本次 Sumika 实例创建的子进程。外部已运行的 DSH 不会被停止或重启。
+启动、健康检查、退避重启和退出清理由通用 `AgentLaunchConfig` 监督器完成；DSH
+adapter 只登记自己的 CLI 参数、环境变量和 `host.describe` 探针。
 
 适配器按固定版本的真实协议发送 `client-request`：`session.create` 使用
 `workspaceId`/`cwd`，返回的 `sessionId` 会被保存；`session.prompt` 使用

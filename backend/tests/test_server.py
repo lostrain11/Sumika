@@ -75,7 +75,7 @@ class ServerTests(unittest.TestCase):
         _, messages = self.request("GET", "/api/sessions/default/messages")
         self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
 
-    def test_agent_session_export_streams_dsh_zip_with_safe_headers(self):
+    def test_agent_session_export_streams_runtime_zip_with_safe_headers(self):
         stream = BytesIO(b"PK-export")
         with patch.object(
             self.application.agent,
@@ -94,7 +94,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(body, b"PK-export")
         self.assertEqual(headers["Content-Type"], "application/zip")
         self.assertEqual(headers["Cache-Control"], "no-store")
-        self.assertEqual(headers["Content-Disposition"], 'attachment; filename="sumika-dsh-session-1.zip"')
+        self.assertEqual(headers["Content-Disposition"], 'attachment; filename="sumika-agent-session-1.zip"')
         export.assert_called_once_with({"session_id": "session-1", "include_descendants": True})
 
         status, error = self.request("GET", "/api/agent/session.export?include_descendants=maybe")

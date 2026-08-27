@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .audio import AudioRuntime, AudioRuntimeError
-from .agent import AgentRuntimeError, DSHAgentRuntime
+from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, create_agent_runtime
 from .avatar import AvatarError, AvatarManager
 from .browser import BrowserRuntime, BrowserRuntimeError
 from .credentials import CredentialStore, default_credential_store
@@ -110,6 +110,7 @@ class CoreApplication:
         *,
         test_providers: dict[str, list[Any]] | None = None,
         credential_store: CredentialStore | None = None,
+        agent_runtime: AgentRuntime | None = None,
     ) -> None:
         configured_dir = data_dir or os.getenv("SUMIKA_DATA_DIR", str(ROOT_DIR / ".sumika"))
         self.data_dir = Path(configured_dir) if str(configured_dir) != ":memory:" else Path(".")
@@ -134,7 +135,10 @@ class CoreApplication:
             ROOT_DIR / "docs" / "integrations" / "cc-switch-compatibility.json"
         )
         self.events = EventBus(self.storage, self.logger)
-        self.agent = DSHAgentRuntime(self.configured_data_dir, logger=self.logger)
+        self.agent = agent_runtime if agent_runtime is not None else create_agent_runtime(
+            self.configured_data_dir,
+            logger=self.logger,
+        )
         self.agent.set_event_sink(self._on_agent_runtime_event)
         self.browser = BrowserRuntime(
             self.configured_data_dir,
@@ -656,7 +660,7 @@ class CoreApplication:
             self.logger.info("rpc end method=%s duration_ms=%d", method, round((time.monotonic() - started) * 1000))
 
     def _on_agent_runtime_event(self, event: dict[str, Any]) -> None:
-        """Project DSH downlink frames into Sumika's local auditable event bus."""
+        """Project harness events into Sumika's local auditable event bus."""
 
         event_type = str(event.get("event_type") or "agent.event")
         projected_type = {
@@ -667,7 +671,7 @@ class CoreApplication:
             "session/event": "agent.session.event",
             "session/queue": "agent.session.queue",
             "session/jobs": "agent.session.jobs",
-        }.get(event_type, "agent.dsh.event")
+        }.get(event_type, f"agent.{self.agent.runtime_id}.event")
         payload = _redact_agent_payload(event)
         self.events.publish(
             EventEnvelope(
@@ -689,6 +693,11 @@ class CoreApplication:
             return self.diagnostics()
         if method in {"agent.status", "agent.health"}:
             result = self.agent.status() if method == "agent.status" else self.agent.health()
+            result = {
+                **result,
+                "runtime_id": self.agent.runtime_id,
+                "runtime_capabilities": self.agent.runtime_capabilities(),
+            }
             if method == "agent.health":
                 self.events.publish(EventEnvelope("agent.runtime.health", {"ok": bool(result.get("ok")), "state": result.get("state")}))
             return result
@@ -764,7 +773,7 @@ class CoreApplication:
                 None,
             ) if isinstance(entries, list) else None
             if entry is None:
-                raise JsonRpcError(-32602, "the requested Agent preset is not in the current DSH roster")
+                raise JsonRpcError(-32602, "the requested Agent preset is not in the current runtime roster")
             if entry.get("trust") != "user":
                 raise JsonRpcError(-32031, "only explicitly user-owned Agent presets can be removed")
             try:
@@ -773,7 +782,7 @@ class CoreApplication:
                 raise JsonRpcError(-32030, str(exc)) from exc
             removed = isinstance(result, dict) and result.get("removed") is True
             if not removed:
-                raise JsonRpcError(-32030, "DSH did not confirm Agent preset removal")
+                raise JsonRpcError(-32030, "the Agent runtime did not confirm preset removal")
             self.events.publish(
                 EventEnvelope(
                     "agent.preset.removed",
@@ -799,12 +808,12 @@ class CoreApplication:
             return result
         if method == "agent.session.create":
             provider_binding = None
-            try:
-                provider_profile = self._agent_provider_profile(params)
-                if provider_profile is not None:
+            if self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
+                try:
+                    provider_profile = self._agent_provider_profile(params)
                     provider_binding = self.agent.sync_provider_profile(provider_profile)
-            except (AgentRuntimeError, ProviderProfileError) as exc:
-                raise JsonRpcError(-32032, str(exc)) from exc
+                except (AgentRuntimeError, ProviderProfileError) as exc:
+                    raise JsonRpcError(-32032, str(exc)) from exc
             try:
                 result = self.agent.create_session(params)
             except AgentRuntimeError as exc:
@@ -812,7 +821,7 @@ class CoreApplication:
             if provider_binding:
                 session_id = result.get("sessionId") or result.get("id")
                 if not session_id:
-                    raise JsonRpcError(-32030, "DSH did not return a session id for provider binding")
+                    raise JsonRpcError(-32030, "Agent runtime did not return a session id for provider binding")
                 try:
                     selected = self.agent.select_model(
                         {
@@ -822,7 +831,7 @@ class CoreApplication:
                         }
                     )
                 except AgentRuntimeError as exc:
-                    raise JsonRpcError(-32032, f"DSH Provider 已同步，但会话模型选择失败：{exc}") from exc
+                    raise JsonRpcError(-32032, f"Agent Provider 已同步，但会话模型选择失败：{exc}") from exc
                 result = {
                     **result,
                     "provider": provider_binding,
@@ -935,6 +944,14 @@ class CoreApplication:
             )
             return result
         if method == "agent.provider.status":
+            if not self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
+                status = self.agent.status()
+                return {
+                    "profile": None,
+                    "state": "runtime-owned",
+                    "ready": bool(status.get("ready")),
+                    "runtime_id": self.agent.runtime_id,
+                }
             try:
                 profile = self._agent_provider_profile(params, required=False)
                 status = self.agent.provider_status(profile)
@@ -1205,7 +1222,10 @@ class CoreApplication:
             payload = params.get("event") if isinstance(params.get("event"), dict) else params
             if not isinstance(payload, dict):
                 raise JsonRpcError(-32602, "event must be an object")
-            event = self.agent.normalize_event(payload)
+            try:
+                event = self.agent.normalize_event(payload)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
             self.events.publish(
                 EventEnvelope(
                     "agent.event",
@@ -2867,7 +2887,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
 
         stream = export.get("stream") if isinstance(export, dict) else None
         if stream is None or not hasattr(stream, "read"):
-            self._send_json({"error": "DSH session export stream is unavailable"}, HTTPStatus.BAD_GATEWAY)
+            self._send_json({"error": "Agent session export stream is unavailable"}, HTTPStatus.BAD_GATEWAY)
             return
         filename_token = re.sub(r"[^A-Za-z0-9._-]+", "-", session_id).strip("-.")[:80] or "session"
         try:
@@ -2878,7 +2898,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(content_length))
             self.send_header(
                 "Content-Disposition",
-                f'attachment; filename="sumika-dsh-{filename_token}.zip"',
+                f'attachment; filename="sumika-agent-{filename_token}.zip"',
             )
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -2886,13 +2906,13 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             shutil.copyfileobj(stream, self.wfile, length=64 * 1024)
             self.application.logger.info(
-                "dsh session export completed session_id=%s include_descendants=%s",
+                "agent session export completed session_id=%s include_descendants=%s",
                 session_id,
                 include_text == "true",
             )
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError) as exc:
             self.application.logger.info(
-                "dsh session export interrupted session_id=%s error_type=%s",
+                "agent session export interrupted session_id=%s error_type=%s",
                 session_id,
                 type(exc).__name__,
             )
@@ -3012,7 +3032,7 @@ _MAX_AGENT_PRESET_NAME_PARAM_LENGTH = 240
 
 
 def _agent_preset_id_param(value: Any, field: str = "agentPreset") -> str:
-    """Validate a preset id before dispatching a mutating DSH operation."""
+    """Validate a preset id before dispatching a mutating runtime operation."""
 
     if not isinstance(value, str):
         raise JsonRpcError(-32602, f"{field} must be a preset id")

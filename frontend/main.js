@@ -487,7 +487,7 @@ function renderGuide() {
     Notifications: ["按严重级别查看权限、失败、批准和恢复通知。", "筛选按钮、通知中的查看"],
     Settings: ["管理数据快照、导入导出、差异检查和恢复。", "快照范围、创建、选择、导出/恢复/导入"],
     Developer: ["检查 provider、扫描插件 manifest、配置外部启动器和查看事件。", "刷新、扫描、批准、配置、测试调用、撤销"],
-    Agent: ["连接 DSH Agent runtime，查看 Plan、工具调用、审批、MCP、Skills、Subagents 和浏览器策略。", "检查连接、切换模式、提交目标、创建隔离浏览器 Profile"],
+    Agent: ["连接 Agent Runtime（当前默认 DSH），查看 Plan、工具调用、审批、MCP、Skills、Subagents 和浏览器策略。", "检查连接、切换模式、提交目标、创建隔离浏览器 Profile"],
   };
   const navigation = navItems
     .filter(([id]) => id !== "Guide")
@@ -1108,6 +1108,31 @@ function snapshotDiffCount(diff) {
   return (diff?.tables || []).filter((table) => table.added || table.removed || table.changed).length;
 }
 
+function agentRuntimeLabel(status = state.agentStatus) {
+  const id = String(status?.runtime_id || "").trim().toLowerCase();
+  if (id === "dsh") return "DSH";
+  if (!id && status?.version && status?.commit) return "DSH";
+  if (id === "unavailable" || !id) return "Agent Runtime";
+  return id;
+}
+
+function agentSupports(capability) {
+  const values = state.agentStatus?.runtime_capabilities;
+  if (Array.isArray(values)) return values.includes(capability);
+  // Compatibility with a Core predating capability discovery.
+  return state.agentStatus?.runtime_id === "dsh" || Boolean(state.agentStatus?.version && state.agentStatus?.commit);
+}
+
+function effectiveAgentMode() {
+  const mode = ["plan", "execute", "readonly"].includes(state.agentMode) ? state.agentMode : "execute";
+  return mode === "plan" && !agentSupports("plan") ? "execute" : mode;
+}
+
+function supportedAgentPromptAttachments() {
+  if (!agentSupports("attachments") || !Array.isArray(state.agentPromptAttachments)) return [];
+  return state.agentPromptAttachments;
+}
+
 function renderAgentCapabilityCard(title, value, description) {
   const data = value && typeof value === "object" ? value : {};
   const entries = Array.isArray(data.skills) ? data.skills : Array.isArray(data.entries) ? data.entries : Array.isArray(value) ? value : [];
@@ -1117,7 +1142,7 @@ function renderAgentCapabilityCard(title, value, description) {
     if (typeof entry === "string") return escapeHtml(entry);
     return escapeHtml(entry?.name || entry?.id || entry?.title || "未命名");
   }).join(" · ");
-  return `<article class="agent-capability"><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(status)}</span></div><small>${escapeHtml(description)}</small>${names ? `<code class="agent-capability-items">${names}</code>` : unavailable ? `<code class="agent-capability-items">${escapeHtml(data.error || "DSH 未提供目录")}</code>` : ""}</article>`;
+  return `<article class="agent-capability"><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(status)}</span></div><small>${escapeHtml(description)}</small>${names ? `<code class="agent-capability-items">${names}</code>` : unavailable ? `<code class="agent-capability-items">${escapeHtml(data.error || "当前 Runtime 未提供目录")}</code>` : ""}</article>`;
 }
 
 function renderAgentMcpCapability(value) {
@@ -1127,11 +1152,12 @@ function renderAgentMcpCapability(value) {
   const status = data.status === "observed"
     ? `${Number(data.server_count || entries.length)} 服务 · ${Number(data.tool_count || tools.length)} 工具`
     : data.status === "unavailable" ? "不可用" : "尚未观察";
-  const packageStatus = data.client_installed
-    ? `dsh-mcp-client ${data.client_version || "版本未知"} 已安装`
-    : "受管 profile 尚未发现 dsh-mcp-client";
+  const dsh = state.agentStatus?.runtime_id === "dsh";
+  const packageStatus = dsh
+    ? (data.client_installed ? `dsh-mcp-client ${data.client_version || "版本未知"} 已安装` : "受管 profile 尚未发现 dsh-mcp-client")
+    : (data.client_installed ? `MCP client ${data.client_version || "版本未知"} 已安装` : "Runtime 未报告 MCP client");
   const names = tools.slice(0, 4).map((tool) => escapeHtml(tool?.name || tool?.tool_name || "未命名")).join(" · ");
-  const detail = names || escapeHtml(data.reason || "选择会话后从近期 DSH 工具事件中归纳；没有独立 MCP 目录 RPC");
+  const detail = names || escapeHtml(data.reason || "选择会话后从近期工具事件中归纳；没有独立 MCP 目录 RPC");
   return `<article class="agent-capability" data-agent-mcp-inventory="${escapeHtml(data.status || "not-observed")}"><div><strong>MCP</strong><span>${escapeHtml(status)}</span></div><small>${escapeHtml(packageStatus)}；仅显示会话中已观察的公开工具名，不作为实时健康状态。</small><code class="agent-capability-items">${detail}</code></article>`;
 }
 
@@ -1160,7 +1186,7 @@ function renderAgentQueue(queue) {
   const value = queue && typeof queue === "object" ? queue : {};
   const items = Array.isArray(value.items) ? value.items : [];
   if (!value.known) {
-    return `<div class="agent-queue-empty">等待 DSH 的 <code>session/queue</code> 快照；这里是待发送队列，不是聊天历史。</div>`;
+    return `<div class="agent-queue-empty">等待 Runtime 的队列快照；这里是待发送队列，不是聊天历史。</div>`;
   }
   const rows = items.length ? items.map((item) => {
     const placement = item.placement === "steering" ? "steer" : "queued";
@@ -1173,13 +1199,13 @@ function renderAgentQueue(queue) {
     return `<article class="agent-queue-row" data-agent-queue-row="${escapeHtml(item.id)}"><div class="agent-queue-copy"><div><strong>${escapeHtml(placement)}</strong><code>${escapeHtml(item.id)}</code></div><p>${escapeHtml(item.text || (item.attachment_count ? `${item.attachment_count} 个附件` : "不可编辑内容"))}</p></div><div class="agent-queue-actions">${controls}</div></article>`;
   }).join("") : `<div class="agent-queue-empty">当前没有待发送项目。</div>`;
   const hidden = Number(value.hidden_context_count || 0);
-  return `${rows}${hidden ? `<small class="agent-queue-note">另有 ${hidden} 项 DSH context 隐藏，不会显示或编辑。</small>` : ""}`;
+  return `${rows}${hidden ? `<small class="agent-queue-note">另有 ${hidden} 项 Runtime context 隐藏，不会显示或编辑。</small>` : ""}`;
 }
 
 function renderAgentMessage(message) {
   const role = message?.role === "assistant" ? "Agent" : "你";
   const content = message?.content || "";
-  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+  const attachments = agentSupports("attachments") && Array.isArray(message?.attachments) ? message.attachments : [];
   const mediaRows = attachments.map((attachment) => {
     const id = attachment.attachment_id || "";
     const preview = state.agentAttachmentPreviews[id];
@@ -1199,7 +1225,8 @@ function renderAgentArtifact(item) {
 
 function renderAgentSessionPanel(snapshot) {
   if (!snapshot) {
-    return `<section class="agent-panel agent-session-panel"><div class="panel-heading"><div><strong>当前会话</strong><small>新建 Agent 会话后，这里显示计划、最终消息、工具调用和运行统计。</small></div></div><div class="empty-column">尚未创建 Agent 会话</div></section>`;
+    const projections = agentSupports("plan") ? "计划、最终消息、工具调用和运行统计" : "最终消息、工具调用和运行统计";
+    return `<section class="agent-panel agent-session-panel"><div class="panel-heading"><div><strong>当前会话</strong><small>新建 Agent 会话后，这里显示${projections}。</small></div></div><div class="empty-column">尚未创建 Agent 会话</div></section>`;
   }
   const plan = snapshot.plan || { active: false, pending: false, steps: [] };
   const messages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
@@ -1208,27 +1235,34 @@ function renderAgentSessionPanel(snapshot) {
   const artifacts = Array.isArray(snapshot.artifacts) ? snapshot.artifacts : [];
   const stats = snapshot.stats && typeof snapshot.stats === "object" ? Object.entries(snapshot.stats).slice(0, 6) : [];
   const stateLabel = ({ running: "运行中", completed: "已完成", cancelled: "已停止", error: "失败", idle: "空闲", unavailable: "暂不可读" })[snapshot.state] || snapshot.state || "未知";
-  const steps = Array.isArray(plan.steps) && plan.steps.length ? plan.steps.slice(0, 8).map((step) => `<li><span class="plan-step-status">${escapeHtml(step.status || "未知")}</span><span>${escapeHtml(step.title || "未命名步骤")}</span></li>`).join("") : `<li class="muted-text">DSH 尚未返回可展示的计划步骤</li>`;
+  const steps = Array.isArray(plan.steps) && plan.steps.length ? plan.steps.slice(0, 8).map((step) => `<li><span class="plan-step-status">${escapeHtml(step.status || "未知")}</span><span>${escapeHtml(step.title || "未命名步骤")}</span></li>`).join("") : `<li class="muted-text">Runtime 尚未返回可展示的计划步骤</li>`;
   const messageRows = messages.length ? messages.slice(-8).map((message) => renderAgentMessage({ ...message, session_id: snapshot.session_id })).join("") : `<div class="empty-column">尚未收到可展示的消息</div>`;
   const toolRows = tools.length ? tools.slice(-8).map(renderAgentTool).join("") : `<span class="muted-text">暂无工具调用</span>`;
   const approvalRows = approvals.length ? approvals.slice(-6).map((item) => `<span class="agent-chip ${item.status === "pending" ? "pending" : ""}">${escapeHtml(item.action || "需要确认")} · ${escapeHtml(item.status || "未知")}</span>`).join("") : `<span class="muted-text">暂无审批记录</span>`;
-  const artifactRows = artifacts.length ? artifacts.slice(-6).map(renderAgentArtifact).join("") : `<span class="muted-text">当前会话没有可展示的 DSH diff 摘要；完整日志可导出</span>`;
+  const artifactRows = artifacts.length ? artifacts.slice(-6).map(renderAgentArtifact).join("") : `<span class="muted-text">当前会话没有可展示的 diff 摘要</span>`;
   const statRows = stats.length ? stats.map(([key, value]) => `<div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") : `<div><span>事件</span><strong>${escapeHtml(snapshot.event_count ?? 0)}</strong></div>`;
   const running = snapshot.state === "running";
-  const sessionTitle = snapshot.title || snapshot.session_id || "DSH session";
+  const sessionTitle = snapshot.title || snapshot.session_id || "Agent session";
   const titleDraft = state.agentSessionRenameDraft || sessionTitle;
-  const renameEditor = `<div class="agent-session-title-editor"><input id="agent-session-title" type="text" maxlength="240" value="${escapeHtml(titleDraft)}" aria-label="Agent 会话标题" /><button class="ghost-button" id="agent-session-rename" type="button" ${state.agentBusy ? "disabled" : ""}>保存名称</button></div>`;
+  const renameEditor = agentSupports("session-rename") ? `<div class="agent-session-title-editor"><input id="agent-session-title" type="text" maxlength="240" value="${escapeHtml(titleDraft)}" aria-label="Agent 会话标题" /><button class="ghost-button" id="agent-session-rename" type="button" ${state.agentBusy ? "disabled" : ""}>保存名称</button></div>` : "";
   const exportUrl = `/api/agent/session.export?session_id=${encodeURIComponent(snapshot.session_id || "")}&include_descendants=true`;
-  return `<section class="agent-panel agent-session-panel"><div class="panel-heading"><div><strong>当前会话 · ${escapeHtml(stateLabel)}</strong><span class="agent-session-visible-title" aria-live="polite">${escapeHtml(sessionTitle)}</span><small>${escapeHtml(snapshot.session_id || "DSH session")}</small>${renameEditor}</div><div class="agent-session-actions"><button class="small-button" id="agent-refresh-session" type="button" ${state.agentBusy ? "disabled" : ""}>刷新</button><a class="ghost-button" id="agent-export-session" href="${escapeHtml(exportUrl)}" download title="导出 DSH 原始会话日志、附件和子 Agent 日志">导出原始日志</a><button class="ghost-button" id="agent-fork-session" type="button" title="从最近完成回合创建新会话；原会话保持不变" ${!running && !state.agentBusy ? "" : "disabled"}>创建分支</button><button class="ghost-button" id="agent-cancel-turn" type="button" ${running && !state.agentBusy ? "" : "disabled"}>停止回合</button></div></div><div class="agent-session-grid"><div class="agent-session-main"><div class="agent-subsection"><div class="agent-subsection-heading"><strong>Plan</strong><span>${plan.active ? "进行中" : plan.pending ? "待确认" : "无活动计划"}</span></div><ol class="agent-plan-list">${steps}</ol></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>最近消息</strong><span>${messages.length} 条</span></div><div class="agent-message-list">${messageRows}</div></div><div class="agent-subsection agent-queue-subsection"><div class="agent-subsection-heading"><strong>待发送队列</strong><span>${state.agentQueue.known ? `${state.agentQueue.items.length} 项` : "等待快照"}</span></div><small class="agent-queue-intro">DSH 的瞬时 inbox；编辑、移除和 steer 不会改写聊天历史。</small><div class="agent-queue-list">${renderAgentQueue(state.agentQueue)}</div></div></div><aside class="agent-session-meta"><div class="agent-subsection"><div class="agent-subsection-heading"><strong>运行统计</strong></div><div class="diagnostic-grid">${statRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>工具</strong></div><div class="agent-tool-list">${toolRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>审批</strong></div><div class="agent-chip-list">${approvalRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>产物 / diff</strong></div><div class="agent-artifact-list">${artifactRows}</div></div></aside></div></section>`;
+  const exportAction = agentSupports("raw-export") ? `<a class="ghost-button" id="agent-export-session" href="${escapeHtml(exportUrl)}" download title="导出 Runtime 原始会话日志、附件和子 Agent 日志">导出原始日志</a>` : "";
+  const forkAction = agentSupports("session-fork") ? `<button class="ghost-button" id="agent-fork-session" type="button" title="从最近完成回合创建新会话；原会话保持不变" ${!running && !state.agentBusy ? "" : "disabled"}>创建分支</button>` : "";
+  const planSection = agentSupports("plan") ? `<div class="agent-subsection"><div class="agent-subsection-heading"><strong>Plan</strong><span>${plan.active ? "进行中" : plan.pending ? "待确认" : "无活动计划"}</span></div><ol class="agent-plan-list">${steps}</ol></div>` : "";
+  const queueSection = agentSupports("queue") ? `<div class="agent-subsection agent-queue-subsection"><div class="agent-subsection-heading"><strong>待发送队列</strong><span>${state.agentQueue.known ? `${state.agentQueue.items.length} 项` : "等待快照"}</span></div><small class="agent-queue-intro">Runtime 的瞬时 inbox；编辑、移除和 steer 不会改写聊天历史。</small><div class="agent-queue-list">${renderAgentQueue(state.agentQueue)}</div></div>` : "";
+  return `<section class="agent-panel agent-session-panel"><div class="panel-heading"><div><strong>当前会话 · ${escapeHtml(stateLabel)}</strong><span class="agent-session-visible-title" aria-live="polite">${escapeHtml(sessionTitle)}</span><small>${escapeHtml(snapshot.session_id || "Agent session")}</small>${renameEditor}</div><div class="agent-session-actions"><button class="small-button" id="agent-refresh-session" type="button" ${state.agentBusy ? "disabled" : ""}>刷新</button>${exportAction}${forkAction}<button class="ghost-button" id="agent-cancel-turn" type="button" ${running && !state.agentBusy ? "" : "disabled"}>停止回合</button></div></div><div class="agent-session-grid"><div class="agent-session-main">${planSection}<div class="agent-subsection"><div class="agent-subsection-heading"><strong>最近消息</strong><span>${messages.length} 条</span></div><div class="agent-message-list">${messageRows}</div></div>${queueSection}</div><aside class="agent-session-meta"><div class="agent-subsection"><div class="agent-subsection-heading"><strong>运行统计</strong></div><div class="diagnostic-grid">${statRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>工具</strong></div><div class="agent-tool-list">${toolRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>审批</strong></div><div class="agent-chip-list">${approvalRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>产物 / diff</strong></div><div class="agent-artifact-list">${artifactRows}</div></div></aside></div></section>`;
 }
 
 function renderAgentWorkspacePanel(status) {
+  if (!agentSupports("workspaces")) return "";
   const options = [`<option value="">当前进程目录（未登记）</option>`, ...state.agentWorkspaces.map((workspace) => `<option value="${escapeHtml(workspace.id)}" ${workspace.id === state.agentWorkspaceId ? "selected" : ""}>${escapeHtml(workspace.title || workspace.path)} · ${escapeHtml(workspace.path)}</option>`)].join("");
   const selected = state.agentWorkspaces.find((workspace) => workspace.id === state.agentWorkspaceId);
   return `<section class="agent-panel agent-workspace-panel"><div class="panel-heading"><div><strong>Agent 工作区</strong><small>登记已有目录后，新会话会归入该 Workspace；Sumika 不创建、移动或删除目录。</small></div><button class="small-button" id="agent-refresh-workspaces" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div><label class="agent-workspace-select"><span>新会话位置</span><select id="agent-workspace-select" ${status.ready && !state.agentBusy ? "" : "disabled"}>${options}</select></label><div class="agent-workspace-form"><input id="agent-workspace-path" type="text" value="${escapeHtml(state.agentWorkspacePath)}" placeholder="输入已存在目录的绝对路径" aria-label="登记已有 Agent 工作区路径" /><button class="outline-button" id="agent-register-workspace" type="button" ${status.ready && state.agentWorkspacePath.trim() && !state.agentBusy ? "" : "disabled"}>登记目录</button></div>${selected ? `<small class="agent-workspace-current">当前：${escapeHtml(selected.title)} · ${escapeHtml(selected.session_ids?.length || 0)} 个会话</small>` : ""}</section>`;
 }
 
 function renderAgentModelPanel(status) {
+  if (!agentSupports("models")) return "";
+  const runtimeLabel = agentRuntimeLabel();
   const catalog = state.agentModels || { current: {}, groups: [], failures: [] };
   const current = catalog.current || {};
   const rows = [];
@@ -1244,16 +1278,17 @@ function renderAgentModelPanel(status) {
     rows.unshift(`<option value="current" data-agent-provider="${escapeHtml(current.provider)}" data-agent-model="${escapeHtml(current.model)}" selected>${escapeHtml(current.provider)} · ${escapeHtml(current.model)}（当前）</option>`);
   }
   const stateLabel = catalog.routable ? "可路由" : state.agentSessionId ? "当前模型不可路由" : "选择会话后加载";
-  return `<section class="agent-panel agent-model-panel"><div class="panel-heading"><div><strong>会话模型</strong><small>目录来自 DSH <code>session.models</code>；切换只影响当前 Agent 会话。</small></div><span class="agent-chip ${catalog.routable ? "" : "pending"}">${escapeHtml(stateLabel)}</span></div><label class="agent-model-select"><span>Provider / Model</span><select id="agent-model-select" ${status.ready && state.agentSessionId && rows.length && !state.agentBusy ? "" : "disabled"}>${rows.join("") || `<option>暂无可用模型</option>`}</select></label>${catalog.failures?.length ? `<small class="agent-mode-warning">${escapeHtml(catalog.failures.length)} 个 Provider 目录加载失败；其余可用项不受影响。</small>` : ""}</section>`;
+  return `<section class="agent-panel agent-model-panel"><div class="panel-heading"><div><strong>会话模型</strong><small>目录来自 ${escapeHtml(runtimeLabel)} <code>session.models</code>；切换只影响当前 Agent 会话。</small></div><span class="agent-chip ${catalog.routable ? "" : "pending"}">${escapeHtml(stateLabel)}</span></div><label class="agent-model-select"><span>Provider / Model</span><select id="agent-model-select" ${status.ready && state.agentSessionId && rows.length && !state.agentBusy ? "" : "disabled"}>${rows.join("") || `<option>暂无可用模型</option>`}</select></label>${catalog.failures?.length ? `<small class="agent-mode-warning">${escapeHtml(catalog.failures.length)} 个 Provider 目录加载失败；其余可用项不受影响。</small>` : ""}</section>`;
 }
 
 function renderAgentInteractions(interactions) {
+  const runtimeLabel = agentRuntimeLabel();
   if (!Array.isArray(interactions) || !interactions.length) {
-    return `<section class="agent-panel agent-interactions-panel"><div class="panel-heading"><div><strong>待处理交互</strong><small>DSH 没有等待用户回答的审批或问题。</small></div></div><div class="empty-column">队列为空</div></section>`;
+    return `<section class="agent-panel agent-interactions-panel"><div class="panel-heading"><div><strong>待处理交互</strong><small>${escapeHtml(runtimeLabel)} 没有等待用户回答的审批或问题。</small></div></div><div class="empty-column">队列为空</div></section>`;
   }
   const rows = interactions.map((item) => {
     if (item.kind === "approval") {
-      return `<article class="agent-interaction approval-interaction"><div class="agent-interaction-copy"><strong>需要批准：${escapeHtml(item.action || "工具操作")}</strong><small>${escapeHtml(item.reason || "DSH 请求用户确认后才能继续")}</small></div><div class="agent-approval-actions"><button class="small-button" type="button" data-agent-approval="${escapeHtml(item.id)}" data-agent-approval-session="${escapeHtml(item.session_id)}" data-agent-approval-id="${escapeHtml(item.approval_id)}" data-agent-approval-outcome="allowed-once" ${state.agentBusy ? "disabled" : ""}>允许一次</button><button class="ghost-button" type="button" data-agent-approval="${escapeHtml(item.id)}" data-agent-approval-session="${escapeHtml(item.session_id)}" data-agent-approval-id="${escapeHtml(item.approval_id)}" data-agent-approval-outcome="rejected" ${state.agentBusy ? "disabled" : ""}>拒绝</button></div></article>`;
+      return `<article class="agent-interaction approval-interaction"><div class="agent-interaction-copy"><strong>需要批准：${escapeHtml(item.action || "工具操作")}</strong><small>${escapeHtml(item.reason || `${runtimeLabel} 请求用户确认后才能继续`)}</small></div><div class="agent-approval-actions"><button class="small-button" type="button" data-agent-approval="${escapeHtml(item.id)}" data-agent-approval-session="${escapeHtml(item.session_id)}" data-agent-approval-id="${escapeHtml(item.approval_id)}" data-agent-approval-outcome="allowed-once" ${state.agentBusy ? "disabled" : ""}>允许一次</button><button class="ghost-button" type="button" data-agent-approval="${escapeHtml(item.id)}" data-agent-approval-session="${escapeHtml(item.session_id)}" data-agent-approval-id="${escapeHtml(item.approval_id)}" data-agent-approval-outcome="rejected" ${state.agentBusy ? "disabled" : ""}>拒绝</button></div></article>`;
     }
     const questions = Array.isArray(item.questions) ? item.questions : [];
     const drafts = state.agentInteractionDrafts[item.id] || {};
@@ -1265,7 +1300,7 @@ function renderAgentInteractions(interactions) {
       const optionRows = options.map((option) => `<label class="agent-question-option"><input type="${controlType}" name="answer-${escapeHtml(question.id)}" value="${escapeHtml(option.label)}" ${selected.includes(option.label) ? "checked" : ""} /><span><strong>${escapeHtml(option.label)}</strong>${option.description ? `<small>${escapeHtml(option.description)}</small>` : ""}</span></label>`).join("");
       return `<fieldset class="agent-question" data-agent-question-id="${escapeHtml(question.id)}"><legend>${question.header ? `${escapeHtml(question.header)} · ` : ""}${escapeHtml(question.question)}</legend>${question.detail ? `<p>${escapeHtml(question.detail)}</p>` : ""}${optionRows}<label class="agent-question-custom"><span>其他回答（可选）</span><input data-agent-custom type="text" maxlength="2000" placeholder="输入自定义回答" value="${escapeHtml(draft.custom || "")}" /></label></fieldset>`;
     }).join("");
-    return `<form class="agent-interaction question-interaction" data-agent-interaction-form data-agent-interaction-id="${escapeHtml(item.id)}" data-agent-interaction-session="${escapeHtml(item.session_id)}"><div class="agent-interaction-heading"><div><strong>Agent 需要你的回答</strong><small>回答后 DSH 才会继续当前回合；问题内容来自受管运行时。</small></div><span class="agent-chip pending">待回答</span></div>${questionRows}<button class="small-button" type="submit" ${state.agentBusy ? "disabled" : ""}>提交回答</button></form>`;
+    return `<form class="agent-interaction question-interaction" data-agent-interaction-form data-agent-interaction-id="${escapeHtml(item.id)}" data-agent-interaction-session="${escapeHtml(item.session_id)}"><div class="agent-interaction-heading"><div><strong>Agent 需要你的回答</strong><small>回答后 ${escapeHtml(runtimeLabel)} 才会继续当前回合；问题内容来自受管运行时。</small></div><span class="agent-chip pending">待回答</span></div>${questionRows}<button class="small-button" type="submit" ${state.agentBusy ? "disabled" : ""}>提交回答</button></form>`;
   }).join("");
   return `<section class="agent-panel agent-interactions-panel"><div class="panel-heading"><div><strong>待处理交互 · ${interactions.length}</strong><small>审批只对当前动作生效；回答不会写入 Sumika 聊天消息。</small></div></div><div class="agent-interaction-list">${rows}</div></section>`;
 }
@@ -1275,6 +1310,8 @@ function selectedAgentSession() {
 }
 
 function renderAgentPresetPanel(status) {
+  if (!agentSupports("presets")) return "";
+  const runtimeLabel = agentRuntimeLabel();
   const session = selectedAgentSession();
   const locked = Boolean(session && session.blank === false);
   const presets = Array.isArray(state.agentPresets) ? state.agentPresets : [];
@@ -1292,21 +1329,23 @@ function renderAgentPresetPanel(status) {
   const userPresets = presets.filter((preset) => preset.trust === "user");
   const userPresetRows = userPresets.length
     ? userPresets.map((preset) => `<div class="agent-preset-user-row" data-agent-preset-row="${escapeHtml(preset.id)}"><div><strong>${escapeHtml(preset.name || preset.id)}</strong><small><code>${escapeHtml(preset.id)}</code>${preset.broken ? ` · 不可用：${escapeHtml(preset.broken)}` : " · 用户 Preset"}</small></div><div class="agent-preset-user-actions">${state.agentPresetHasDocument ? `<button class="ghost-button" type="button" data-agent-preset-open="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>打开目录</button>` : `<span class="muted-text">未配置目录打开器</span>`}<button class="ghost-button danger-text" type="button" data-agent-preset-remove="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>删除</button></div></div>`).join("")
-    : `<small class="muted-text">还没有用户 Preset；复制系统 Preset 后可在 DSH 管理的目录中编辑。</small>`;
+    : `<small class="muted-text">还没有用户 Preset；复制系统 Preset 后可在 ${escapeHtml(runtimeLabel)} 管理的目录中编辑。</small>`;
   const broken = presets.filter((preset) => preset.broken).length;
   const note = !status.ready
-    ? "连接 DSH 后读取真实 Preset 清单。"
+    ? `连接 ${runtimeLabel} 后读取真实 Preset 清单。`
     : locked
       ? "当前会话已经产生回合，Preset 已锁定；新建会话时可重新选择。"
-      : "Preset 由 DSH 运行时管理；Sumika 只通过固定 ID 请求复制、打开或删除用户 Preset，不读取和改写组合文件。";
+      : `Preset 由 ${runtimeLabel} 管理；Sumika 只通过固定 ID 请求复制、打开或删除用户 Preset，不读取和改写组合文件。`;
   const authoring = status.ready && state.agentPresetAuthorable;
   const copyPanel = authoring
     ? `<form id="agent-preset-copy-form" class="agent-preset-copy-form"><label><span>复制来源</span><select id="agent-preset-copy-source" ${state.agentBusy ? "disabled" : ""}>${copySourceOptions || "<option value=\"\">暂无可复制 Preset</option>"}</select></label><label><span>新 Preset ID</span><input id="agent-preset-copy-id" type="text" maxlength="160" pattern="[a-z0-9][a-z0-9-]*" value="${escapeHtml(state.agentPresetCopyId)}" placeholder="例如 sumika-work" ${state.agentBusy || !usable.length ? "disabled" : ""} /></label><label><span>显示名称（可选）</span><input id="agent-preset-copy-name" type="text" maxlength="240" value="${escapeHtml(state.agentPresetCopyName)}" placeholder="例如 Sumika 工作" ${state.agentBusy || !usable.length ? "disabled" : ""} /></label><button class="outline-button" type="submit" ${state.agentBusy || !copySource || !usable.length ? "disabled" : ""}>复制为用户 Preset</button></form>`
-    : `<small class="muted-text">当前 DSH profile 不允许通过 API 创建用户 Preset；请在 DSH 配置中启用 authorable 后刷新。</small>`;
-  return `<section class="agent-panel agent-preset-panel"><div class="panel-heading"><div><strong>Agent Preset</strong><small>${escapeHtml(note)}</small></div><span class="agent-chip ${presets.length ? "" : "pending"}">${presets.length ? `${presets.length} 项` : "未读取"}</span></div><label class="agent-preset-select"><span>${session ? "当前空白会话" : "新会话默认"}</span><select id="agent-preset-select" ${status.ready && !state.agentBusy && !locked && presets.some((item) => !item.broken) ? "" : "disabled"}><option value="">使用 DSH 默认</option>${options}</select></label>${broken ? `<small class="agent-mode-warning">${broken} 个 Preset 因组合错误被保留为不可选状态。</small>` : ""}<div class="agent-preset-authoring"><div class="agent-subsection-heading"><strong>用户 Preset</strong><span>${userPresets.length} 项</span></div><div class="agent-preset-user-list">${userPresetRows}</div><div class="agent-preset-copy-heading"><strong>复制为用户 Preset</strong><small>复制完成后由 DSH 管理文件；Sumika 不展示原始 composition 内容。</small></div>${copyPanel}</div></section>`;
+    : `<small class="muted-text">当前 ${escapeHtml(runtimeLabel)} profile 不允许通过 API 创建用户 Preset；请在 Runtime 配置中启用 authorable 后刷新。</small>`;
+  return `<section class="agent-panel agent-preset-panel"><div class="panel-heading"><div><strong>Agent Preset</strong><small>${escapeHtml(note)}</small></div><span class="agent-chip ${presets.length ? "" : "pending"}">${presets.length ? `${presets.length} 项` : "未读取"}</span></div><label class="agent-preset-select"><span>${session ? "当前空白会话" : "新会话默认"}</span><select id="agent-preset-select" ${status.ready && !state.agentBusy && !locked && presets.some((item) => !item.broken) ? "" : "disabled"}><option value="">使用 ${escapeHtml(runtimeLabel)} 默认</option>${options}</select></label>${broken ? `<small class="agent-mode-warning">${broken} 个 Preset 因组合错误被保留为不可选状态。</small>` : ""}<div class="agent-preset-authoring"><div class="agent-subsection-heading"><strong>用户 Preset</strong><span>${userPresets.length} 项</span></div><div class="agent-preset-user-list">${userPresetRows}</div><div class="agent-preset-copy-heading"><strong>复制为用户 Preset</strong><small>复制完成后由 ${escapeHtml(runtimeLabel)} 管理文件；Sumika 不展示原始 composition 内容。</small></div>${copyPanel}</div></section>`;
 }
 
 function renderAgentGoalPanel(status) {
+  if (!agentSupports("goals")) return "";
+  const runtimeLabel = agentRuntimeLabel();
   const goal = state.agentGoal || state.agentSnapshot?.goal;
   const ref = goal?.ref;
   const phase = String(goal?.phase || "").toLowerCase();
@@ -1323,10 +1362,12 @@ function renderAgentGoalPanel(status) {
     ? `<div class="agent-goal-current"><div><strong>${escapeHtml(goal.objective || "未命名目标")}</strong><small>${escapeHtml(goal.phase || "状态未知")} · revision ${escapeHtml(ref?.revision ?? "?")}</small></div><div class="agent-goal-actions">${buttons}</div></div>`
     : `<div class="empty-column">当前会话没有活动 Goal</div>`;
   const canCreate = status.ready && state.agentSessionId && !state.agentBusy && !goal;
-  return `<section class="agent-panel agent-goal-panel"><div class="panel-heading"><div><strong>Goal / 自治目标</strong><small>状态和版本由 DSH projection 提供；每次修改都携带精确 revision。</small></div></div>${summary}<form id="agent-goal-form" class="agent-goal-form"><input name="objective" type="text" maxlength="12000" placeholder="为当前会话创建一个可暂停的目标" ${canCreate ? "" : "disabled"} /><input name="max_goal_rounds" type="number" min="1" max="1000" value="20" aria-label="最大 Goal 回合数" ${canCreate ? "" : "disabled"} /><button class="outline-button" type="submit" ${canCreate ? "" : "disabled"}>${goal ? "当前已有 Goal" : "创建 Goal"}</button></form></section>`;
+  return `<section class="agent-panel agent-goal-panel"><div class="panel-heading"><div><strong>Goal / 自治目标</strong><small>状态和版本由 ${escapeHtml(runtimeLabel)} projection 提供；每次修改都携带精确 revision。</small></div></div>${summary}<form id="agent-goal-form" class="agent-goal-form"><input name="objective" type="text" maxlength="12000" placeholder="为当前会话创建一个可暂停的目标" ${canCreate ? "" : "disabled"} /><input name="max_goal_rounds" type="number" min="1" max="1000" value="20" aria-label="最大 Goal 回合数" ${canCreate ? "" : "disabled"} /><button class="outline-button" type="submit" ${canCreate ? "" : "disabled"}>${goal ? "当前已有 Goal" : "创建 Goal"}</button></form></section>`;
 }
 
 function renderAgentSubagentPanel(status) {
+  if (!agentSupports("subagents")) return "";
+  const runtimeLabel = agentRuntimeLabel();
   const entries = Array.isArray(state.agentSubagents) ? state.agentSubagents : [];
   const rows = entries.length ? entries.map((entry) => {
     const history = state.agentSubagentHistories[entry.id];
@@ -1335,7 +1376,7 @@ function renderAgentSubagentPanel(status) {
     const historyText = history ? (history.messages || []).slice(-6).map((message) => `${message.role === "assistant" ? "Agent" : "你"}: ${message.content || ""}`).join("\n") : "";
     return `<article class="agent-subagent-row"><div><strong>${escapeHtml(childLabel)}</strong><small>${escapeHtml(entry.id)} · ${escapeHtml(entry.mode || "未知")} · ${escapeHtml(entry.activity || entry.reason || "未知")}</small>${historyText ? `<pre class="agent-subagent-history">${escapeHtml(historyText)}</pre>` : ""}</div><div class="agent-subagent-actions">${controls}</div></article>`;
   }).join("") : `<div class="empty-column">当前会话没有可展示的直接子 Agent</div>`;
-  return `<section class="agent-panel agent-subagent-panel"><div class="panel-heading"><div><strong>Subagents</strong><small>只操作当前会话的直接子 Agent；继续发送仅允许 DSH 标记为 continuable 的子 Agent。</small></div><button class="small-button" id="agent-refresh-subagents" type="button" ${status.ready && state.agentSessionId && !state.agentBusy ? "" : "disabled"}>刷新</button></div><div class="agent-subagent-list">${rows}</div></section>`;
+  return `<section class="agent-panel agent-subagent-panel"><div class="panel-heading"><div><strong>Subagents</strong><small>只操作当前会话的直接子 Agent；继续发送仅允许 ${escapeHtml(runtimeLabel)} 标记为 continuable 的子 Agent。</small></div><button class="small-button" id="agent-refresh-subagents" type="button" ${status.ready && state.agentSessionId && !state.agentBusy ? "" : "disabled"}>刷新</button></div><div class="agent-subagent-list">${rows}</div></section>`;
 }
 
 function renderBrowserTab(tab, sessionId) {
@@ -1410,18 +1451,22 @@ function renderAgentSessionSearch() {
       snippet: item.snippet || "",
     }));
   const rows = source.map(({ session, snippet }) => renderAgentSessionRow(session, snippet)).filter(Boolean).join("");
-  const empty = results !== null && !results.length ? "没有匹配的会话" : "暂无受管 DSH 会话";
-  return `<form id="agent-session-search-form" class="agent-session-search"><input id="agent-session-search" type="search" maxlength="512" value="${escapeHtml(state.agentSessionSearchQuery)}" placeholder="搜索会话内容" aria-label="搜索 Agent 会话" /><button class="ghost-button" type="submit" ${state.agentSessionSearchBusy ? "disabled" : ""}>${state.agentSessionSearchBusy ? "搜索中" : "搜索"}</button>${results !== null ? `<button class="ghost-button" type="button" id="agent-session-search-clear">清除</button>` : ""}</form>${state.agentSessionSearchNotice ? `<small class="agent-session-search-notice" role="status">${escapeHtml(state.agentSessionSearchNotice)}</small>` : ""}<div class="agent-session-list">${rows || `<div class="empty-column">${empty}</div>`}</div>`;
+  const empty = results !== null && !results.length ? "没有匹配的会话" : "暂无受管 Agent 会话";
+  const search = agentSupports("session-search")
+    ? `<form id="agent-session-search-form" class="agent-session-search"><input id="agent-session-search" type="search" maxlength="512" value="${escapeHtml(state.agentSessionSearchQuery)}" placeholder="搜索会话内容" aria-label="搜索 Agent 会话" /><button class="ghost-button" type="submit" ${state.agentSessionSearchBusy ? "disabled" : ""}>${state.agentSessionSearchBusy ? "搜索中" : "搜索"}</button>${results !== null ? `<button class="ghost-button" type="button" id="agent-session-search-clear">清除</button>` : ""}</form>${state.agentSessionSearchNotice ? `<small class="agent-session-search-notice" role="status">${escapeHtml(state.agentSessionSearchNotice)}</small>` : ""}`
+    : "";
+  return `${search}<div class="agent-session-list">${rows || `<div class="empty-column">${empty}</div>`}</div>`;
 }
 
 function renderAgentPromptAttachments() {
-  const attachments = Array.isArray(state.agentPromptAttachments) ? state.agentPromptAttachments : [];
+  const attachments = supportedAgentPromptAttachments();
   if (!attachments.length) return `<span class="agent-attachment-empty">可附加 PNG、JPEG、WebP 或 GIF</span>`;
   return attachments.map((item, index) => `<span class="agent-attachment-chip"><span>${escapeHtml(item.name || `图片 ${index + 1}`)} · ${escapeHtml(formatBytes(item.bytes || 0))}</span><button class="icon-button" type="button" data-agent-attachment-remove="${index}" aria-label="移除附件" title="移除附件">×</button></span>`).join("");
 }
 
 function renderAgent() {
   const status = state.agentStatus || {};
+  const runtimeLabel = agentRuntimeLabel(status);
   const provider = state.agentProvider || {};
   const browser = state.browserStatus || {};
   const statusLabel = ({ ready: "已连接", unavailable: "未连接", disabled: "已关闭", "policy-only": "策略层已加载" })[status.state] || status.state || "未知";
@@ -1431,18 +1476,22 @@ function renderAgent() {
   const browserPanel = renderBrowserPanel(browser, browserLabel, browserDetail);
   const notice = state.agentNotice ? `<div class="agent-notice" role="status">${escapeHtml(state.agentNotice)}</div>` : "";
   const capabilities = [
-    renderAgentCapabilityCard("Skills", state.agentCapabilities.skills, "可复用技能由 DSH 管理，未经批准不会安装"),
-    renderAgentMcpCapability(state.agentCapabilities.mcp),
-    renderAgentCapabilityCard("Subagents", state.agentCapabilities.subagents, "子 Agent 由独立会话和预算隔离"),
-    renderAgentCapabilityCard("Commands", state.agentCapabilities.commands, "Plan 和 slash command 通过 DSH command plane 执行，不写入普通消息"),
-  ].join("");
-  const events = state.agentEvents.length ? state.agentEvents.slice(0, 10).map(renderAgentEventRow).join("") : `<div class="empty-column">尚未收到 DSH 事件</div>`;
+    agentSupports("skills") ? renderAgentCapabilityCard("Skills", state.agentCapabilities.skills, `可复用技能由 ${runtimeLabel} 管理，未经批准不会安装`) : "",
+    agentSupports("mcp") ? renderAgentMcpCapability(state.agentCapabilities.mcp) : "",
+    agentSupports("subagents") ? renderAgentCapabilityCard("Subagents", state.agentCapabilities.subagents, "子 Agent 由独立会话和预算隔离") : "",
+    agentSupports("commands") ? renderAgentCapabilityCard("Commands", state.agentCapabilities.commands, `Plan 和命令通过 ${runtimeLabel} command plane 执行，不写入普通消息`) : "",
+  ].filter(Boolean).join("");
+  const events = state.agentEvents.length ? state.agentEvents.slice(0, 10).map(renderAgentEventRow).join("") : `<div class="empty-column">尚未收到 Agent 事件</div>`;
   const commandPlane = state.agentCapabilities.commands;
-  const commandNotice = commandPlane?.available === false
-    ? `<small class="agent-mode-warning">当前 DSH 会话没有可用的 command plane；Plan/执行切换会安全拒绝，不会把 slash command 当普通消息发送。</small>`
+  const commandNotice = agentSupports("commands") && commandPlane?.available === false
+    ? `<small class="agent-mode-warning">当前 ${escapeHtml(runtimeLabel)} 会话没有可用的 command plane；Plan/执行切换会安全拒绝，不会把命令当普通消息发送。</small>`
     : "";
-  const providerPanel = `<section class="agent-panel agent-provider-panel"><div class="panel-heading"><div><strong>当前 Agent Provider</strong><small>新建 Agent 会话时，当前 Sumika 档案会映射为独立 DSH route；原有 DSH Provider 不会被覆盖。</small></div><button class="small-button" id="agent-provider-sync" type="button" ${status.ready && provider.profile_id ? "" : "disabled"}>同步当前档案</button></div><div class="diagnostic-grid"><div><span>状态</span><strong>${escapeHtml(providerLabel)}</strong></div><div><span>档案</span><strong>${escapeHtml(provider.profile?.name || "未选择")}</strong></div><div><span>模型</span><strong>${escapeHtml(provider.model || provider.profile?.config?.model || "未配置")}</strong></div><div><span>DSH route</span><strong><code>${escapeHtml(provider.route_id || "未同步")}</code></strong></div></div></section>`;
-  return renderPageFrame("Agent 工作区", "以 DSH 为运行时，统一展示 Plan、工具、审批、MCP、Skills、Subagents 和会话状态。", `${notice}<div class="agent-toolbar"><div class="agent-status-line"><span class="status-dot ${status.state === "ready" ? "online" : status.state === "disabled" ? "offline" : "warning"}"></span><strong>DSH ${escapeHtml(statusLabel)}</strong><code>${escapeHtml(status.version || "0.1.1-rc.2")} · ${(status.commit || "b150a551").slice(0, 12)}</code></div><div class="agent-actions"><button class="small-button" id="agent-health" type="button" ${state.agentBusy ? "disabled" : ""}>检查连接</button><button class="outline-button" id="agent-create-session" type="button" ${status.ready ? "" : "disabled"}>新建 Agent 会话</button></div></div>${renderAgentPresetPanel(status)}${providerPanel}${renderAgentWorkspacePanel(status)}${renderAgentModelPanel(status)}<section class="agent-panel agent-sessions-panel"><div class="panel-heading"><div><strong>受管 Agent 会话</strong><small>只显示当前 Sumika 受管 DSH profile 的会话元数据；旧聊天会话不会混入。</small></div><button class="small-button" id="agent-refresh-sessions" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div>${renderAgentSessionSearch()}</section>${renderAgentSessionPanel(state.agentSnapshot)}${renderAgentGoalPanel(status)}${renderAgentSubagentPanel(status)}${renderAgentInteractions(state.agentInteractions)}<section class="agent-panel"><div class="panel-heading"><div><strong>运行模式</strong><small>Plan 只规划和请求批准；执行能力由 DSH 与 Sumika policy companion 共同决定。</small>${commandNotice}</div><select id="agent-mode" aria-label="Agent 模式"><option value="plan" ${state.agentMode === "plan" ? "selected" : ""}>Plan</option><option value="execute" ${state.agentMode === "execute" ? "selected" : ""}>执行</option><option value="readonly" ${state.agentMode === "readonly" ? "selected" : ""}>只读</option></select></div><div class="agent-composer"><textarea id="agent-prompt" rows="3" maxlength="48000" placeholder="输入 Agent 目标；未连接 DSH 时不会发送或生成回复">${escapeHtml(state.agentPromptDraft)}</textarea><div class="agent-composer-footer"><div class="agent-attachment-tools"><input id="agent-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden /><button class="ghost-button" id="agent-attach-image" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>添加图片</button><div class="agent-attachment-list">${renderAgentPromptAttachments()}</div>${state.agentAttachmentNotice ? `<small class="agent-attachment-notice" role="status">${escapeHtml(state.agentAttachmentNotice)}</small>` : ""}</div><button class="outline-button" id="agent-send" type="button" ${status.ready && (state.agentPromptDraft.trim() || state.agentPromptAttachments.length) ? "" : "disabled"}>发送目标</button></div></div></section><section class="agent-capability-grid">${capabilities}</section><div class="agent-two-column"><section class="agent-panel"><div class="panel-heading"><div><strong>事件审计</strong><small>敏感动作默认拒绝，登录凭据和 OTP 不进入模型上下文。</small></div></div><div class="agent-event-list">${events}</div></section>${browserPanel}</div>`);
+  const providerPanel = agentSupports("provider-bridge") ? `<section class="agent-panel agent-provider-panel"><div class="panel-heading"><div><strong>当前 Agent Provider</strong><small>新建 Agent 会话时，当前 Sumika 档案会映射到 ${escapeHtml(runtimeLabel)}；运行时原有 Provider 不会被覆盖。</small></div><button class="small-button" id="agent-provider-sync" type="button" ${status.ready && provider.profile_id ? "" : "disabled"}>同步当前档案</button></div><div class="diagnostic-grid"><div><span>状态</span><strong>${escapeHtml(providerLabel)}</strong></div><div><span>档案</span><strong>${escapeHtml(provider.profile?.name || "未选择")}</strong></div><div><span>模型</span><strong>${escapeHtml(provider.model || provider.profile?.config?.model || "未配置")}</strong></div><div><span>Runtime binding</span><strong><code>${escapeHtml(provider.route_id || provider.binding_id || "未同步")}</code></strong></div></div></section>` : "";
+  const mode = effectiveAgentMode();
+  const promptAttachments = supportedAgentPromptAttachments();
+  const modeOptions = `${agentSupports("plan") ? `<option value="plan" ${mode === "plan" ? "selected" : ""}>Plan</option>` : ""}<option value="execute" ${mode === "execute" ? "selected" : ""}>执行</option><option value="readonly" ${mode === "readonly" ? "selected" : ""}>只读</option>`;
+  const attachmentTools = agentSupports("attachments") ? `<div class="agent-attachment-tools"><input id="agent-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden /><button class="ghost-button" id="agent-attach-image" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>添加图片</button><div class="agent-attachment-list">${renderAgentPromptAttachments()}</div>${state.agentAttachmentNotice ? `<small class="agent-attachment-notice" role="status">${escapeHtml(state.agentAttachmentNotice)}</small>` : ""}</div>` : "";
+  return renderPageFrame("Agent 工作区", `以 ${runtimeLabel} 为运行时，统一展示会话、计划、工具、审批和可选能力。`, `${notice}<div class="agent-toolbar"><div class="agent-status-line"><span class="status-dot ${status.state === "ready" ? "online" : status.state === "disabled" ? "offline" : "warning"}"></span><strong>${escapeHtml(runtimeLabel)} ${escapeHtml(statusLabel)}</strong><code>${escapeHtml(status.version || status.runtime_id || "未配置")}${status.commit ? ` · ${String(status.commit).slice(0, 12)}` : ""}</code></div><div class="agent-actions"><button class="small-button" id="agent-health" type="button" ${state.agentBusy ? "disabled" : ""}>检查连接</button><button class="outline-button" id="agent-create-session" type="button" ${status.ready ? "" : "disabled"}>新建 Agent 会话</button></div></div>${renderAgentPresetPanel(status)}${providerPanel}${renderAgentWorkspacePanel(status)}${renderAgentModelPanel(status)}<section class="agent-panel agent-sessions-panel"><div class="panel-heading"><div><strong>受管 Agent 会话</strong><small>只显示当前 Sumika 受管 ${escapeHtml(runtimeLabel)} 实例的会话元数据；旧聊天会话不会混入。</small></div><button class="small-button" id="agent-refresh-sessions" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div>${renderAgentSessionSearch()}</section>${renderAgentSessionPanel(state.agentSnapshot)}${renderAgentGoalPanel(status)}${renderAgentSubagentPanel(status)}${agentSupports("interactions") ? renderAgentInteractions(state.agentInteractions) : ""}<section class="agent-panel"><div class="panel-heading"><div><strong>运行模式</strong><small>执行能力由 ${escapeHtml(runtimeLabel)} 与 Sumika policy companion 共同决定。</small>${commandNotice}</div><select id="agent-mode" aria-label="Agent 模式">${modeOptions}</select></div><div class="agent-composer"><textarea id="agent-prompt" rows="3" maxlength="48000" placeholder="输入 Agent 目标；Runtime 未连接时不会发送或生成回复">${escapeHtml(state.agentPromptDraft)}</textarea><div class="agent-composer-footer">${attachmentTools}<button class="outline-button" id="agent-send" type="button" ${status.ready && (state.agentPromptDraft.trim() || promptAttachments.length) ? "" : "disabled"}>发送目标</button></div></div></section>${capabilities ? `<section class="agent-capability-grid">${capabilities}</section>` : ""}<div class="agent-two-column"><section class="agent-panel"><div class="panel-heading"><div><strong>事件审计</strong><small>敏感动作默认拒绝，登录凭据和 OTP 不进入模型上下文。</small></div></div><div class="agent-event-list">${events}</div></section>${browserPanel}</div>`);
 }
 
 function renderAgentEventRow(event) {
@@ -1469,7 +1518,7 @@ function renderDeveloper() {
   const diagnosticPanel = `<section class="dev-panel diagnostics-panel"><div class="panel-heading"><div><strong>核心诊断</strong><small>只显示运行元数据；详细运行线索写入本机日志，不包含聊天正文、密钥或原始媒体。</small></div><button class="small-button" id="refresh-diagnostics">刷新</button></div>${diagnostics ? `<div class="diagnostic-grid"><div><span>进程</span><strong>PID ${escapeHtml(diagnostics.pid)}</strong></div><div><span>运行时间</span><strong>${escapeHtml(formatDuration(diagnostics.uptime_seconds))}</strong></div><div><span>事件</span><strong>${escapeHtml(diagnostics.event_count)} 条</strong></div><div><span>模块 / Provider / Avatar</span><strong>${escapeHtml(diagnostics.module_count)} / ${escapeHtml(diagnostics.provider_count)} / ${escapeHtml(diagnostics.avatar_count)}</strong></div></div><div class="diagnostic-path"><span>数据目录</span><code>${escapeHtml(diagnostics.data_dir || "-")}</code><span>核心日志</span><code>${escapeHtml(diagnostics.log_path || "仅 stderr")}</code></div>` : `<div class="empty-column">诊断信息尚未加载</div>`}</section>`;
   const agentDiagnosticPanel = renderAgentDiagnosticsPanel();
   const desktopStatus = state.desktopStatus;
-  const desktopPanel = isDesktopShell ? `<section class="dev-panel desktop-status-panel" data-desktop-status><div class="panel-heading"><div><strong>桌面生命周期</strong><small>Rust 壳负责核心进程；异常退出会有限次退避重启。</small></div><button class="small-button" id="refresh-desktop-status">刷新</button></div>${desktopStatus ? `<div class="diagnostic-grid"><div><span>核心地址</span><strong>${escapeHtml(desktopStatus.host)}:${escapeHtml(desktopStatus.port)}</strong></div><div><span>Python PID</span><strong>${escapeHtml(desktopStatus.pid || "-")}</strong></div><div><span>状态</span><strong>${desktopStatus.running ? "运行中" : "已停止"}</strong></div><div><span>本次重启</span><strong>${escapeHtml(desktopStatus.restart_count)}</strong></div></div><div class="diagnostic-path"><span>桌面日志</span><code>${escapeHtml(desktopStatus.log_path || "-")}</code></div>` : `<div class="empty-column">桌面状态尚未加载</div>`}</section>` : "";
+  const desktopPanel = isDesktopShell ? `<section class="dev-panel desktop-status-panel" data-desktop-status><div class="panel-heading"><div><strong>桌面生命周期</strong><small>Rust 壳负责核心与可选 Agent Runtime 进程；异常退出会有限次退避重启。</small></div><button class="small-button" id="refresh-desktop-status">刷新</button></div>${desktopStatus ? `<div class="diagnostic-grid"><div><span>核心地址</span><strong>${escapeHtml(desktopStatus.host)}:${escapeHtml(desktopStatus.port)}</strong></div><div><span>Python PID</span><strong>${escapeHtml(desktopStatus.pid || "-")}</strong></div><div><span>状态</span><strong>${desktopStatus.running ? "运行中" : "已停止"}</strong></div><div><span>本次重启</span><strong>${escapeHtml(desktopStatus.restart_count)}</strong></div><div><span>Agent Runtime</span><strong>${escapeHtml(desktopStatus.agent_runtime_id || "-")}</strong></div><div><span>Runtime 进程</span><strong>${desktopStatus.agent_managed ? `${escapeHtml(desktopStatus.agent_pid || "-")} · ${desktopStatus.agent_running ? "运行中" : "已停止"}` : "外部或未启动"}</strong></div></div><div class="diagnostic-path"><span>桌面日志</span><code>${escapeHtml(desktopStatus.log_path || "-")}</code><span>Runtime endpoint</span><code>${escapeHtml(desktopStatus.agent_endpoint || "-")}</code></div>` : `<div class="empty-column">桌面状态尚未加载</div>`}</section>` : "";
   const avatarAuditPanel = renderAvatarAssetAudit();
   const evolutionPanel = `<section class="dev-panel evolution-panel"><div class="panel-heading"><div><strong>Evolution Knowledge Registry</strong><small>只读参考索引；安装、升级和正式启用仍需用户批准。</small></div><button class="small-button" id="refresh-evolution-registry" type="button">刷新</button></div><div class="evolution-list">${state.evolutionRegistry.length ? state.evolutionRegistry.map((entry) => `<div class="evolution-row"><div><strong>${escapeHtml(entry.id)}</strong><small>${escapeHtml(entry.kind || "reference")} · ${escapeHtml(entry.license || "未登记许可证")}</small></div><code>${escapeHtml(entry.commit || entry.version || "未固定")}</code></div>`).join("") : `<div class="empty-column">尚未加载参考登记</div>`}</div></section>`;
   const profileRows = state.providerProfiles.map((profile) => `<div class="provider-row"><span class="status-dot ${profile.status === "available" ? "online" : "offline"}"></span><div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.adapter_id)} · ${escapeHtml(providerProfileStatusLabel(profile.status))}</small></div>${profile.status === "archived" ? `<button class="ghost-button" type="button" data-provider-restore="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>恢复</button>` : `<button class="ghost-button" type="button" data-provider-health="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>测试</button>`}</div>`).join("") || `<div class="empty-column">暂无 Provider 档案</div>`;
@@ -1480,6 +1529,7 @@ function renderAgentDiagnosticsPanel() {
   const report = state.agentDiagnostics;
   const runtime = report?.runtime || {};
   const mcp = report?.mcp || {};
+  const runtimeLabel = agentRuntimeLabel();
   const statusLabels = {
     available: "可用",
     "not-exposed": "未暴露",
@@ -1494,7 +1544,10 @@ function renderAgentDiagnosticsPanel() {
     ? report.capabilities.map((item) => `<div class="agent-diagnostic-row"><div><strong>${escapeHtml(item.label || item.id || "能力")}</strong><small><code>${escapeHtml(item.endpoint || "-")}</code> · ${escapeHtml(item.detail || "")}</small></div><span class="agent-diagnostic-status ${statusClass(item.status)}">${escapeHtml(statusLabel(item.status))}</span></div>`).join("")
     : "";
   const mcpStatus = statusClass(mcp.status);
-  return `<section class="dev-panel agent-diagnostics-panel" data-agent-diagnostics><div class="panel-heading"><div><strong>DSH 能力探针</strong><small>只调用固定版 DSH 的只读 RPC；不执行工具、不读取密钥，也不会把 404 当成可用能力。</small></div><button class="small-button" id="refresh-agent-diagnostics" type="button" ${state.agentDiagnosticsBusy ? "disabled" : ""}>${state.agentDiagnosticsBusy ? "检查中" : "检查"}</button></div>${report ? `<div class="diagnostic-grid agent-diagnostic-summary"><div><span>运行时</span><strong>${escapeHtml(runtime.ready ? "已连接" : runtime.state || "未连接")}</strong></div><div><span>客户端版本</span><strong>${escapeHtml(runtime.version || "-")}</strong></div><div><span>协议版本</span><strong>${escapeHtml(runtime.protocol_version || "未读取")}</strong></div><div><span>检查时间</span><strong>${escapeHtml(formatTime(report.checked_at))}</strong></div></div><div class="agent-diagnostic-mcp" data-agent-mcp-status="${escapeHtml(mcp.status || "unknown")}"><div><strong>MCP</strong><span class="agent-diagnostic-status ${mcpStatus}">${escapeHtml(statusLabel(mcp.status))}</span></div><small>${escapeHtml(mcp.reason || "未读取 MCP 状态")}</small><code>${escapeHtml(mcp.client_installed ? `dsh-mcp-client ${mcp.client_version || "已挂载"}` : "受管 web profile 未发现 dsh-mcp-client")}</code></div><div class="agent-diagnostic-list">${rows || `<div class="empty-column">没有可探测的 DSH 能力</div>`}</div>${report.runtime?.error ? `<p class="plugin-error">${escapeHtml(report.runtime.error)}</p>` : ""}` : `<div class="empty-column">尚未检查 DSH 能力</div>`}</section>`;
+  const mcpClient = runtimeLabel === "DSH"
+    ? (mcp.client_installed ? `dsh-mcp-client ${mcp.client_version || "已挂载"}` : "受管 web profile 未发现 dsh-mcp-client")
+    : (mcp.client_installed ? `MCP client ${mcp.client_version || "已挂载"}` : "Runtime 未报告 MCP client");
+  return `<section class="dev-panel agent-diagnostics-panel" data-agent-diagnostics><div class="panel-heading"><div><strong>${escapeHtml(runtimeLabel)} 能力探针</strong><small>只调用 Runtime 的只读诊断接口；不执行工具、不读取密钥，也不会把 404 当成可用能力。</small></div><button class="small-button" id="refresh-agent-diagnostics" type="button" ${state.agentDiagnosticsBusy ? "disabled" : ""}>${state.agentDiagnosticsBusy ? "检查中" : "检查"}</button></div>${report ? `<div class="diagnostic-grid agent-diagnostic-summary"><div><span>运行时</span><strong>${escapeHtml(runtime.ready ? "已连接" : runtime.state || "未连接")}</strong></div><div><span>客户端版本</span><strong>${escapeHtml(runtime.version || "-")}</strong></div><div><span>协议版本</span><strong>${escapeHtml(runtime.protocol_version || "未读取")}</strong></div><div><span>检查时间</span><strong>${escapeHtml(formatTime(report.checked_at))}</strong></div></div><div class="agent-diagnostic-mcp" data-agent-mcp-status="${escapeHtml(mcp.status || "unknown")}"><div><strong>MCP</strong><span class="agent-diagnostic-status ${mcpStatus}">${escapeHtml(statusLabel(mcp.status))}</span></div><small>${escapeHtml(mcp.reason || "未读取 MCP 状态")}</small><code>${escapeHtml(mcpClient)}</code></div><div class="agent-diagnostic-list">${rows || `<div class="empty-column">没有可探测的 Runtime 能力</div>`}</div>${report.runtime?.error ? `<p class="plugin-error">${escapeHtml(report.runtime.error)}</p>` : ""}` : `<div class="empty-column">尚未检查 Runtime 能力</div>`}</section>`;
 }
 
 function renderCcsCompatibilityPanel() {
@@ -1688,7 +1741,7 @@ function bindEvents() {
   document.querySelector("#agent-prompt")?.addEventListener("input", (event) => {
     state.agentPromptDraft = event.target.value;
     const button = document.querySelector("#agent-send");
-    if (button) button.disabled = !state.agentStatus?.ready || (!state.agentPromptDraft.trim() && !state.agentPromptAttachments.length) || Boolean(state.agentBusy);
+    if (button) button.disabled = !state.agentStatus?.ready || (!state.agentPromptDraft.trim() && !supportedAgentPromptAttachments().length) || Boolean(state.agentBusy);
   });
   document.querySelector("#agent-attach-image")?.addEventListener("click", () => document.querySelector("#agent-image-input")?.click());
   document.querySelector("#agent-image-input")?.addEventListener("change", handleAgentImageSelection);
@@ -1976,6 +2029,10 @@ async function loadAgentRuntime(shouldRender = true) {
     state.agentStatus = { state: "unavailable", ready: false, reason: "核心未连接" };
     state.agentProvider = { state: "unavailable", ready: false, reason: "核心未连接" };
   }
+  if (!agentSupports("attachments")) {
+    state.agentPromptAttachments = [];
+    state.agentAttachmentNotice = "";
+  }
   try {
     state.browserStatus = await api("/api/browser/status");
   } catch {
@@ -2021,7 +2078,7 @@ async function loadAgentRuntime(shouldRender = true) {
 }
 
 async function loadAgentInteractions(shouldRender = true) {
-  if (!state.agentStatus?.ready) {
+  if (!state.agentStatus?.ready || !agentSupports("interactions")) {
     state.agentInteractions = [];
     if (shouldRender) render();
     return;
@@ -2060,7 +2117,7 @@ async function loadBrowserTabs(sessionId, shouldRender = true) {
 }
 
 async function loadAgentQueue(shouldRender = true) {
-  if (!state.agentSessionId || !state.agentStatus?.ready) {
+  if (!state.agentSessionId || !state.agentStatus?.ready || !agentSupports("queue")) {
     state.agentQueue = { known: false, items: [], hidden_context_count: 0, updated_at: null };
     if (shouldRender) render();
     return;
@@ -2094,7 +2151,7 @@ async function loadAgentSessions(shouldRender = true) {
 
 async function searchAgentSessions() {
   const query = String(state.agentSessionSearchQuery || "").trim();
-  if (!query || state.agentSessionSearchBusy || !state.agentStatus?.ready) {
+  if (!query || state.agentSessionSearchBusy || !state.agentStatus?.ready || !agentSupports("session-search")) {
     if (!query) {
       state.agentSessionSearchResults = null;
       state.agentSessionSearchNotice = "";
@@ -2103,7 +2160,7 @@ async function searchAgentSessions() {
     return;
   }
   state.agentSessionSearchBusy = true;
-  state.agentSessionSearchNotice = "正在搜索受管 DSH 会话…";
+  state.agentSessionSearchNotice = `正在搜索受管 ${agentRuntimeLabel()} 会话…`;
   render();
   try {
     const result = await rpc("agent.sessions.search", { query });
@@ -2225,7 +2282,7 @@ async function loadAgentAttachment(sessionId, attachmentId) {
 }
 
 async function loadAgentPresets(shouldRender = true) {
-  if (!state.agentStatus?.ready) {
+  if (!state.agentStatus?.ready || !agentSupports("presets")) {
     state.agentPresets = [];
     state.agentPresetAuthorable = false;
     state.agentPresetHasDocument = false;
@@ -2252,7 +2309,7 @@ async function loadAgentPresets(shouldRender = true) {
 }
 
 async function loadAgentSubagents(shouldRender = true) {
-  if (!state.agentSessionId || !state.agentStatus?.ready) {
+  if (!state.agentSessionId || !state.agentStatus?.ready || !agentSupports("subagents")) {
     state.agentSubagents = [];
     state.agentSubagentHistories = {};
     if (shouldRender) render();
@@ -2270,7 +2327,7 @@ async function loadAgentSubagents(shouldRender = true) {
 }
 
 async function loadAgentWorkspaces(shouldRender = true) {
-  if (!state.agentStatus?.ready) {
+  if (!state.agentStatus?.ready || !agentSupports("workspaces")) {
     state.agentWorkspaces = [];
     if (shouldRender) render();
     return;
@@ -2288,7 +2345,7 @@ async function loadAgentWorkspaces(shouldRender = true) {
 }
 
 async function loadAgentModels(shouldRender = true) {
-  if (!state.agentSessionId || !state.agentStatus?.ready) {
+  if (!state.agentSessionId || !state.agentStatus?.ready || !agentSupports("models")) {
     state.agentModels = { current: {}, routable: false, groups: [], failures: [] };
     if (shouldRender) render();
     return;
@@ -2296,7 +2353,7 @@ async function loadAgentModels(shouldRender = true) {
   try {
     state.agentModels = await rpc("agent.session.models", { sessionId: state.agentSessionId });
   } catch (error) {
-    state.agentModels = { current: {}, routable: false, groups: [], failures: [{ id: "catalog", name: "DSH", message: error.message }] };
+    state.agentModels = { current: {}, routable: false, groups: [], failures: [{ id: "catalog", name: agentRuntimeLabel(), message: error.message }] };
   }
   if (shouldRender) render();
 }
@@ -2324,7 +2381,8 @@ async function loadEvolutionRegistry(shouldRender = true) {
 async function loadAgentCapabilities(shouldRender = true) {
   if (!state.agentStatus?.ready) return;
   const values = {};
-  for (const [key, method] of [["skills", "agent.skills"], ["mcp", "agent.mcp.inventory"], ["subagents", "agent.subagents"], ["commands", "agent.commands"]]) {
+  const capabilityMethods = [["skills", "skills", "agent.skills"], ["mcp", "mcp", "agent.mcp.inventory"], ["subagents", "subagents", "agent.subagents"], ["commands", "commands", "agent.commands"]];
+  for (const [key, capability, method] of capabilityMethods.filter(([, capability]) => agentSupports(capability))) {
     const params = key === "subagents"
       ? (state.agentSessionId ? { parentSessionId: state.agentSessionId } : {})
       : (state.agentSessionId ? { sessionId: state.agentSessionId } : {});
@@ -2347,7 +2405,7 @@ async function loadAgentSnapshot(shouldRender = true, includeHistory = true) {
       maxMessages: includeHistory ? 2 : 1,
       include_history: includeHistory,
     });
-    // Older DSH projections may omit goal entirely. Only an explicit null
+    // Older Runtime projections may omit goal entirely. Only an explicit null
     // clears the local receipt; a missing field must not make a just-created
     // goal disappear while its projection is catching up.
     if (Object.prototype.hasOwnProperty.call(state.agentSnapshot || {}, "goal")) {
@@ -2379,7 +2437,7 @@ async function loadAgentSnapshot(shouldRender = true, includeHistory = true) {
 async function checkAgentHealth() {
   if (state.agentBusy) return;
   state.agentBusy = "health";
-  state.agentNotice = "正在检查受管 DSH 运行时…";
+  state.agentNotice = `正在检查受管 ${agentRuntimeLabel()} 运行时…`;
   render();
   try {
     const result = await rpc("agent.health");
@@ -2389,9 +2447,10 @@ async function checkAgentHealth() {
       await Promise.all([loadAgentCapabilities(false), loadAgentWorkspaces(false), loadAgentSessions(false), loadAgentPresets(false), loadAgentSubagents(false)]);
       if (state.agentSessionId) await loadAgentModels(false);
     }
-    state.agentNotice = result.ok ? "DSH 已连接；后续 Agent 请求将使用固定 profile" : `DSH 未就绪：${result.error || "请先启动 DSH Web"}`;
+    const runtimeLabel = agentRuntimeLabel({ ...state.agentStatus, ...result });
+    state.agentNotice = result.ok ? `${runtimeLabel} 已连接` : `${runtimeLabel} 未就绪：${result.error || "请先启动对应 Runtime"}`;
   } catch (error) {
-    state.agentNotice = `DSH 连接检查失败：${error.message}`;
+    state.agentNotice = `${agentRuntimeLabel()} 连接检查失败：${error.message}`;
   } finally {
     state.agentBusy = null;
     render();
@@ -2407,12 +2466,12 @@ async function syncAgentProvider() {
     return;
   }
   state.agentBusy = "provider-sync";
-  state.agentNotice = "正在把当前 Provider 档案同步到受管 DSH…";
+  state.agentNotice = `正在把当前 Provider 档案同步到受管 ${agentRuntimeLabel()}…`;
   render();
   try {
     const result = await rpc("agent.provider.sync", { profile_id: profile.id });
     state.agentProvider = { ...result, state: "ready", ready: true };
-    state.agentNotice = `${profile.name} 已同步到 DSH；新建会话会选择 ${result.model || profile.config?.model}。`;
+    state.agentNotice = `${profile.name} 已同步到 ${agentRuntimeLabel()}；新建会话会选择 ${result.model || profile.config?.model}。`;
   } catch (error) {
     state.agentNotice = `Provider 同步失败：${error.message}`;
   } finally {
@@ -2474,16 +2533,17 @@ async function selectAgentPreset(event) {
   const value = String(event.target.value || "").trim();
   const session = selectedAgentSession();
   const previous = state.agentPresetId;
+  const runtimeLabel = agentRuntimeLabel();
   if (state.agentBusy || !state.agentStatus?.ready) return;
   if (!value) {
-    // DSH exposes no "clear preset" mutation. Do not pretend that choosing
+    // The portable contract exposes no "clear preset" mutation. Do not pretend that choosing
     // the visual default can rewrite a blank session that already has one.
     if (session?.agent_preset) {
       state.agentPresetId = session.agent_preset;
-      state.agentNotice = "当前空白会话已有 Preset；DSH 不支持清除，请新建会话使用默认。";
+      state.agentNotice = `当前空白会话已有 Preset；${runtimeLabel} 不支持清除，请新建会话使用默认。`;
     } else {
       state.agentPresetId = "";
-      state.agentNotice = "新建 Agent 会话将使用 DSH 默认 Preset。";
+      state.agentNotice = `新建 Agent 会话将使用 ${runtimeLabel} 默认 Preset。`;
     }
     render();
     return;
@@ -2569,7 +2629,7 @@ async function copyAgentPreset(event) {
     return;
   }
   state.agentBusy = "preset-copy";
-  state.agentNotice = "正在让 DSH 创建用户 Preset…";
+  state.agentNotice = `正在让 ${agentRuntimeLabel()} 创建用户 Preset…`;
   render();
   try {
     const result = await rpc("agent.preset.copy", {
@@ -2601,7 +2661,7 @@ async function openAgentPresetDocument(presetId) {
     const result = await rpc("agent.preset.open", { agentPreset: id });
     state.agentNotice = result?.opened
       ? `已打开用户 Preset 目录：${id}`
-      : "DSH 没有可用的系统目录打开器；为保护隐私，Sumika 不显示本地路径。";
+      : `${agentRuntimeLabel()} 没有可用的系统目录打开器；为保护隐私，Sumika 不显示本地路径。`;
   } catch (error) {
     state.agentNotice = `打开 Preset 目录失败：${error.message}`;
   } finally {
@@ -2615,7 +2675,7 @@ async function removeAgentPreset(presetId) {
   const preset = state.agentPresets.find((item) => item.id === id);
   if (!id || !preset || preset.trust !== "user" || state.agentBusy || !state.agentStatus?.ready) return;
   const confirmation = window.prompt(
-    `删除用户 Preset “${preset.name || id}”将由 DSH 永久移除，Sumika 不提供内置恢复。请输入完整 Preset ID：${id}`,
+    `删除用户 Preset “${preset.name || id}”将由 ${agentRuntimeLabel()} 永久移除，Sumika 不提供内置恢复。请输入完整 Preset ID：${id}`,
     "",
   );
   if (confirmation === null) return;
@@ -2635,11 +2695,11 @@ async function removeAgentPreset(presetId) {
       confirm_agent_preset: id,
       approved: true,
     });
-    if (result?.removed !== true) throw new Error("DSH 未确认删除结果");
+    if (result?.removed !== true) throw new Error(`${agentRuntimeLabel()} 未确认删除结果`);
     if (resetDefault) state.agentPresetId = "";
     if (state.agentPresetCopySource === id) state.agentPresetCopySource = "";
     await loadAgentPresets(false);
-    state.agentNotice = `用户 Preset 已删除：${id}${resetDefault ? "；新会话已恢复使用 DSH 默认 Preset" : ""}。`;
+    state.agentNotice = `用户 Preset 已删除：${id}${resetDefault ? `；新会话已恢复使用 ${agentRuntimeLabel()} 默认 Preset` : ""}。`;
   } catch (error) {
     state.agentNotice = `删除用户 Preset 失败：${error.message}`;
   } finally {
@@ -2675,12 +2735,12 @@ async function createAgentGoal(event) {
     return;
   }
   state.agentBusy = "goal-create";
-  state.agentNotice = "正在创建 DSH Goal…";
+  state.agentNotice = `正在创建 ${agentRuntimeLabel()} Goal…`;
   render();
   try {
     const result = await rpc("agent.goal.create", { sessionId: state.agentSessionId, objective, maxGoalRounds });
     const ref = goalReceiptRef(result);
-    if (!ref) throw new Error("DSH 未返回 Goal revision");
+    if (!ref) throw new Error(`${agentRuntimeLabel()} 未返回 Goal revision`);
     state.agentGoal = { ref, objective, phase: "active", max_goal_rounds: maxGoalRounds };
     state.agentNotice = "Goal 已创建；后续暂停、继续和完成都会校验 revision。";
     void loadAgentSnapshot(false, false);
@@ -2697,9 +2757,9 @@ async function agentGoalAction(action) {
   const ref = goalReceiptRef(goal);
   if (!goal || !ref || !state.agentSessionId || state.agentBusy || !state.agentStatus?.ready) return;
   if (!["pause", "resume", "complete", "clear"].includes(action)) return;
-  if (action === "clear" && !window.confirm("清除当前 Goal？这只清除 DSH 目标，不删除会话消息。")) return;
+  if (action === "clear" && !window.confirm(`清除当前 Goal？这只清除 ${agentRuntimeLabel()} 目标，不删除会话消息。`)) return;
   state.agentBusy = `goal-${action}`;
-  state.agentNotice = action === "clear" ? "正在清除 DSH Goal…" : `正在${action === "pause" ? "暂停" : action === "resume" ? "继续" : "完成"} DSH Goal…`;
+  state.agentNotice = action === "clear" ? `正在清除 ${agentRuntimeLabel()} Goal…` : `正在${action === "pause" ? "暂停" : action === "resume" ? "继续" : "完成"} ${agentRuntimeLabel()} Goal…`;
   render();
   try {
     const result = await rpc(`agent.goal.${action}`, { sessionId: state.agentSessionId, ref });
@@ -2792,7 +2852,7 @@ async function interruptAgentSubagent(childId) {
       mode: "continuable",
     });
     await loadAgentSubagents(false);
-    state.agentNotice = "已发送子 Agent 中断请求；最终状态以 DSH 刷新结果为准。";
+    state.agentNotice = `已发送子 Agent 中断请求；最终状态以 ${agentRuntimeLabel()} 刷新结果为准。`;
   } catch (error) {
     state.agentNotice = `子 Agent 中断失败：${error.message}`;
   } finally {
@@ -2854,10 +2914,10 @@ async function createAgentSession() {
 async function sendAgentPrompt() {
   const input = document.querySelector("#agent-prompt");
   const text = (input?.value ?? state.agentPromptDraft ?? "").trim();
-  const attachments = Array.isArray(state.agentPromptAttachments) ? state.agentPromptAttachments : [];
+  const attachments = supportedAgentPromptAttachments();
   if ((!text && !attachments.length) || state.agentBusy || !state.agentStatus?.ready) return;
   state.agentBusy = "prompt";
-  state.agentNotice = "目标已提交，等待 DSH 事件…";
+  state.agentNotice = `目标已提交，等待 ${agentRuntimeLabel()} 事件…`;
   render();
   try {
     if (!state.agentSessionId) {
@@ -2866,7 +2926,7 @@ async function sendAgentPrompt() {
       const selectedPreset = usableAgentPresetId(state.agentPresetId);
       const session = await rpc("agent.session.create", { ...location, characterId: state.selectedCharacter, provider_profile_id: profile?.id, ...(selectedPreset ? { agentPreset: selectedPreset } : {}) });
       state.agentSessionId = session.sessionId || session.id || null;
-      if (!state.agentSessionId) throw new Error("DSH 未返回 sessionId");
+      if (!state.agentSessionId) throw new Error(`${agentRuntimeLabel()} 未返回 sessionId`);
       state.agentGoal = null;
       state.agentSubagentHistories = {};
       state.agentSessionRenameDraft = "";
@@ -2879,12 +2939,12 @@ async function sendAgentPrompt() {
       ...(text ? [{ type: "text", text }] : []),
       ...attachments.map((item) => ({ type: "image", mediaType: item.mediaType, data: item.data, name: item.name })),
     ];
-    const result = await rpc("agent.session.prompt", { text, content, mode: state.agentMode, sessionId: state.agentSessionId || undefined });
+    const result = await rpc("agent.session.prompt", { text, content, mode: effectiveAgentMode(), sessionId: state.agentSessionId || undefined });
     state.agentEvents.unshift({ event_type: "agent.turn.accepted", status: "running", content: result.id || "已接受", timestamp: new Date().toISOString() });
     state.agentPromptDraft = "";
     state.agentPromptAttachments = [];
     state.agentAttachmentNotice = "";
-    // Repaint when DSH publishes the accepted prompt projection. Some DSH
+    // Repaint when the Runtime publishes the accepted prompt projection. Some
     // deployments do not emit a follow-up event, so a silent refresh would
     // leave newly attached media invisible until the user manually refreshes.
     void loadAgentSnapshot(true);
@@ -2901,12 +2961,12 @@ async function sendAgentPrompt() {
 async function cancelAgentTurn() {
   if (state.agentBusy || !state.agentSessionId || !state.agentStatus?.ready) return;
   state.agentBusy = "cancel";
-  state.agentNotice = "正在请求 DSH 停止当前回合…";
+  state.agentNotice = `正在请求 ${agentRuntimeLabel()} 停止当前回合…`;
   render();
   try {
     await rpc("agent.session.cancel", { sessionId: state.agentSessionId });
     await Promise.all([loadAgentSnapshot(false), loadAgentQueue(false)]);
-    state.agentNotice = "已发送停止请求；DSH 会通过 turn/end 事件确认最终状态。";
+    state.agentNotice = `已发送停止请求；${agentRuntimeLabel()} 会通过事件确认最终状态。`;
   } catch (error) {
     state.agentNotice = `停止回合失败：${error.message}`;
   } finally {
@@ -2923,7 +2983,7 @@ async function updateAgentQueue(itemId, action, text = "") {
     return;
   }
   state.agentBusy = "queue";
-  state.agentNotice = action === "remove" ? "正在从 DSH 队列移除项目…" : action === "steer" ? "正在请求 DSH 立即 steer…" : "正在保存待发送消息…";
+  state.agentNotice = action === "remove" ? `正在从 ${agentRuntimeLabel()} 队列移除项目…` : action === "steer" ? `正在请求 ${agentRuntimeLabel()} 立即 steer…` : "正在保存待发送消息…";
   render();
   try {
     await rpc("agent.session.update_queue", {
@@ -2938,7 +2998,7 @@ async function updateAgentQueue(itemId, action, text = "") {
       delete drafts[itemId];
       state.agentQueueDrafts = drafts;
     }
-    state.agentNotice = action === "remove" ? "已从队列移除。" : action === "steer" ? "已请求 steer；最终顺序由 DSH 队列快照确认。" : "已更新待发送消息。";
+    state.agentNotice = action === "remove" ? "已从队列移除。" : action === "steer" ? `已请求 steer；最终顺序由 ${agentRuntimeLabel()} 队列快照确认。` : "已更新待发送消息。";
   } catch (error) {
     state.agentNotice = `队列操作失败：${error.message}`;
   } finally {
@@ -2997,7 +3057,7 @@ async function respondAgentQuestion(form) {
     answers.push(answer);
   }
   state.agentBusy = "question";
-  state.agentNotice = "正在提交回答，等待 DSH 继续…";
+  state.agentNotice = `正在提交回答，等待 ${agentRuntimeLabel()} 继续…`;
   render();
   try {
     await rpc("agent.question.respond", { rpcId, sessionId, answer: { answers } });
@@ -3005,7 +3065,7 @@ async function respondAgentQuestion(form) {
     const drafts = { ...state.agentInteractionDrafts };
     delete drafts[rpcId];
     state.agentInteractionDrafts = drafts;
-    state.agentNotice = "回答已提交；DSH 会通过事件确认当前回合状态。";
+    state.agentNotice = `回答已提交；${agentRuntimeLabel()} 会通过事件确认当前回合状态。`;
     void loadAgentSnapshot(false, false);
   } catch (error) {
     state.agentNotice = `回答未提交：${error.message}`;
@@ -4911,11 +4971,12 @@ function connectEvents() {
               void loadAgentSessions(false);
             }
           }
-          const dshStatus = value.payload?.status;
-          if (value.event_type === "agent.session.event" && state.agentSessionId && !["assistant/chunk", "session/projection"].includes(dshStatus)) {
+          const runtimeStatus = value.payload?.status;
+          if (value.event_type === "agent.session.event" && state.agentSessionId && !["assistant/chunk", "session/projection"].includes(runtimeStatus)) {
             void loadAgentSnapshot(false, false).then(() => { if (state.activePage === "Agent") render(); });
           }
-          if (["agent.approval.requested", "agent.approval.resolved", "agent.question.requested", "agent.question.resolved", "agent.dsh.event"].includes(value.event_type)) {
+          const runtimeEvent = /^agent\.[a-z0-9-]+\.event$/i.test(String(value.event_type || ""));
+          if (runtimeEvent || ["agent.approval.requested", "agent.approval.resolved", "agent.question.requested", "agent.question.resolved"].includes(value.event_type)) {
             void loadAgentInteractions(false).then(() => { if (state.activePage === "Agent") render(); });
           }
         }

@@ -25,13 +25,14 @@ OpenAI-compatible / external-process providers
 - [Avatar](avatar.md) / [Characters](characters.md)：模型资产、角色和展示配置。
 - [Desktop shell](desktop-shell.md)：Tauri 主窗口、桌宠浮窗和 Python 子进程。
 - [Tasks](tasks.md)：预算、批准、生命周期和任务 HUD。
+- [Agent Runtime](agent-runtime.md)：稳定会话内核、可选能力、adapter registry 和进程边界。
 - [Audio](audio.md) / [Memory](memory.md) / [Vision](vision.md)：可选能力边界。
 - [Manifest](manifest.md) / [Tools](tools.md)：插件发现和外部软件调用。
 - [Security](security.md)：本地服务、凭据、权限和数据边界。
 - [Debugging](debugging.md)：日志、诊断、事件和恢复信号。
 
-DSH Agent、隔离浏览器和外部参考治理属于[外部集成专题](../integrations/dsh-agent.md)，
-不改变首版 Python 核心的 Provider、会话和桌宠边界。
+DSH 是当前 [Agent Runtime](agent-runtime.md) 的生产 adapter；其固定协议、隔离
+profile 和插件约束记录在[外部集成专题](../integrations/dsh-agent.md)。
 
 
 ## Boundaries

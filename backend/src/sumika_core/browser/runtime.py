@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import uuid4
 
-from ..agent.models import BROWSERSKILL_COMMIT, BROWSERSKILL_DSH_PLUGIN_VERSION, BROWSERSKILL_EXTENSION_VERSION
+from .constants import BROWSERSKILL_COMMIT, BROWSERSKILL_DSH_PLUGIN_VERSION, BROWSERSKILL_EXTENSION_VERSION
 from ..protocol.models import utc_now
 from ..storage import Storage
 

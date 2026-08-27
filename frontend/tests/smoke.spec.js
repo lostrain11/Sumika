@@ -413,6 +413,67 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".agent-panel").last()).toContainText("BrowserSkill");
   });
 
+  test("Agent workspace hides capabilities not implemented by a portable runtime", async ({ page }) => {
+    let submittedPrompt = null;
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, runtime_id: "minimal", runtime_capabilities: [] }),
+    }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "runtime-owned", ready: true, runtime_id: "minimal", profile: null }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body?.method === "agent.session.prompt") submittedPrompt = body.params;
+      const result = {
+        "browser.profiles": { profiles: [] },
+        "browser.sessions": { sessions: [] },
+        "agent.sessions": { sessions: [] },
+        "agent.session.create": { sessionId: "minimal-session" },
+        "agent.session.prompt": { accepted: true, id: "minimal-turn" },
+        "agent.session.snapshot": {
+          session_id: "minimal-session",
+          state: "idle",
+          title: "Minimal session",
+          plan: { active: true, pending: false, steps: [{ status: "running", title: "unsupported" }] },
+          messages: [{ role: "user", content: "执行最小任务" }],
+          tools: [],
+          approvals: [],
+          artifacts: [],
+          timeline: [],
+          stats: {},
+        },
+      }[body?.method];
+      if (result === undefined) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
+      });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+
+    await expect(page.locator(".agent-status-line")).toContainText("minimal 已连接");
+    await expect(page.locator("#agent-create-session")).toBeEnabled();
+    await expect(page.locator("#agent-prompt")).toBeVisible();
+    await expect(page.locator("#agent-mode option[value='plan']")).toHaveCount(0);
+    await expect(page.locator("#agent-mode")).toHaveValue("execute");
+    await expect(page.locator(".agent-attachment-tools")).toHaveCount(0);
+    await expect(page.locator(".agent-provider-panel, .agent-preset-panel, .agent-workspace-panel, .agent-model-panel, .agent-goal-panel, .agent-subagent-panel")).toHaveCount(0);
+
+    await page.locator("#agent-prompt").fill("执行最小任务");
+    await page.locator("#agent-send").click();
+    await expect.poll(() => submittedPrompt?.mode).toBe("execute");
+    expect(submittedPrompt?.content).toEqual([{ type: "text", text: "执行最小任务" }]);
+    await expect(page.locator(".agent-session-visible-title")).toHaveText("Minimal session");
+    await expect(page.locator(".agent-session-panel .agent-subsection-heading strong", { hasText: "Plan" })).toHaveCount(0);
+  });
+
   test("Agent workspace exposes a synced provider and submits a goal", async ({ page }) => {
     await page.route("**/api/agent/status", async (route) => {
       await route.fulfill({
