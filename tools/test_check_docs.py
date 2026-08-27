@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import check_archived_references, check_local_links, check_status_matrix
+from check_docs import (
+    check_archived_references,
+    check_current_execution,
+    check_local_links,
+    check_status_matrix,
+)
 
 
 class DocumentationCheckerTests(unittest.TestCase):
@@ -51,6 +56,55 @@ class DocumentationCheckerTests(unittest.TestCase):
             self.write(root, "deprecated/20260101/profile/node_modules/pkg/README.md", "# Dependency\n")
             self.write(root, "docs/README.md", "README.md is a normal filename\n")
             self.assertEqual(check_archived_references(root), [])
+
+    def valid_current_execution(self) -> str:
+        headings = [
+            "# Sumika 当前执行契约",
+            "## 目标",
+            "## Definition of Done",
+            "## 当前基线",
+        ]
+        baseline = [
+            "- Branch: `test`",
+            "- Baseline commit: `abc1234`",
+            "- Last verified commit: `abc1234`",
+        ]
+        tail = [
+            "## 当前里程碑",
+            "## 接下来的三个动作",
+            "1. First",
+            "2. Second",
+            "3. Third",
+            "## 固定决策",
+            "## 明确暂缓",
+            "## 当前阻塞",
+            "## 验证记录",
+            "## 恢复顺序",
+            "## 更新规则",
+        ]
+        return "\n\n".join(headings + baseline + tail) + "\n"
+
+    def test_current_execution_contract_accepts_required_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write(root, "docs/current-execution.md", self.valid_current_execution())
+            self.assertEqual(check_current_execution(root), [])
+
+    def test_current_execution_contract_requires_three_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            content = self.valid_current_execution().replace("3. Third\n", "")
+            self.write(root, "docs/current-execution.md", content)
+            errors = check_current_execution(root)
+            self.assertTrue(any("exactly numbered items" in error for error in errors))
+
+    def test_current_execution_contract_rejects_sensitive_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            content = self.valid_current_execution() + "C:\\Users\\someone\\secret\n"
+            self.write(root, "docs/current-execution.md", content)
+            errors = check_current_execution(root)
+            self.assertTrue(any("Windows user path" in error for error in errors))
 
 
 if __name__ == "__main__":

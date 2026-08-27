@@ -2,7 +2,7 @@
 
 The checker is deliberately read-only and uses only the Python standard library.
 It validates repository-local Markdown links, the documentation index, the
-status matrix, and references to archived documents.
+status matrix, current execution contract, and references to archived documents.
 """
 
 from __future__ import annotations
@@ -37,6 +37,30 @@ REQUIRED_STATUS_IDS = {
     "remote-runner",
     "android-client",
 }
+CURRENT_EXECUTION_HEADINGS = (
+    "# Sumika 当前执行契约",
+    "## 目标",
+    "## Definition of Done",
+    "## 当前基线",
+    "## 当前里程碑",
+    "## 接下来的三个动作",
+    "## 固定决策",
+    "## 明确暂缓",
+    "## 当前阻塞",
+    "## 验证记录",
+    "## 恢复顺序",
+    "## 更新规则",
+)
+CURRENT_EXECUTION_BASELINE_FIELDS = (
+    "- Branch:",
+    "- Baseline commit:",
+    "- Last verified commit:",
+)
+CURRENT_EXECUTION_SENSITIVE = (
+    (re.compile(r"(?i)\b[a-z]:\\users\\"), "Windows user path"),
+    (re.compile(r"(?i)\bsk-[a-z0-9_-]{8,}"), "API key-like token"),
+    (re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"), "Bearer token-like value"),
+)
 
 
 def product_markdown(root: Path) -> list[Path]:
@@ -213,6 +237,61 @@ def check_status_matrix(root: Path) -> list[str]:
     return errors
 
 
+def check_current_execution(root: Path) -> list[str]:
+    root = root.resolve()
+    document = root / "docs" / "current-execution.md"
+    if not document.exists():
+        return ["docs/current-execution.md: current execution contract is missing"]
+    lines = document.read_text(encoding="utf-8").splitlines()
+    errors: list[str] = []
+    if len(lines) > 150:
+        errors.append(
+            f"docs/current-execution.md: expected at most 150 lines; got {len(lines)}"
+        )
+
+    stripped = {line.strip() for line in lines}
+    for heading in CURRENT_EXECUTION_HEADINGS:
+        if heading not in stripped:
+            errors.append(f"docs/current-execution.md: missing heading {heading}")
+    for field in CURRENT_EXECUTION_BASELINE_FIELDS:
+        if not any(line.strip().startswith(field) for line in lines):
+            errors.append(f"docs/current-execution.md: missing baseline field {field}")
+
+    try:
+        action_start = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == "## 接下来的三个动作"
+        ) + 1
+    except StopIteration:
+        action_start = len(lines)
+    action_end = next(
+        (
+            index
+            for index in range(action_start, len(lines))
+            if lines[index].strip().startswith("## ")
+        ),
+        len(lines),
+    )
+    action_numbers = [
+        match.group(1)
+        for line in lines[action_start:action_end]
+        if (match := re.match(r"^\s*([1-9]\d*)\.\s+", line))
+    ]
+    if action_numbers != ["1", "2", "3"]:
+        errors.append(
+            "docs/current-execution.md: next actions must contain exactly numbered items 1, 2, 3"
+        )
+
+    for line_number, line in enumerate(lines, start=1):
+        for pattern, label in CURRENT_EXECUTION_SENSITIVE:
+            if pattern.search(line):
+                errors.append(
+                    f"docs/current-execution.md:{line_number}: contains {label}"
+                )
+    return errors
+
+
 def check_archived_references(root: Path) -> list[str]:
     # Only an archive subtree that mirrors the product ``docs/`` directory is
     # a documentation archive.  Runtime profiles can contain dependency
@@ -243,6 +322,7 @@ def run_checks(root: Path) -> list[str]:
         check_local_links(root)
         + check_index_coverage(root)
         + check_status_matrix(root)
+        + check_current_execution(root)
         + check_archived_references(root)
     )
 
