@@ -53,7 +53,15 @@ def default_agent_runtime_registry() -> AgentRuntimeRegistry:
 
         return create_runtime(data_dir, env, logger)
 
+    def build_zcode(data_dir: str | Path | None, env: Mapping[str, str], logger: Any) -> AgentRuntime:
+        # Keep the optional adapter lazy so selecting DSH never imports or
+        # probes the ZCode process.
+        from .adapters.zcode import create_runtime
+
+        return create_runtime(data_dir, env, logger)
+
     registry.register("dsh", build_dsh)
+    registry.register("zcode", build_zcode)
     return registry
 
 

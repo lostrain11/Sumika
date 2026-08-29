@@ -10,6 +10,8 @@ from .skill_catalog import SkillCatalog, SkillCatalogError
 if TYPE_CHECKING:
     from .adapters.dsh.config import DSHRuntimeConfig
     from .adapters.dsh.runtime import DSHAgentRuntime
+    from .adapters.zcode.config import ZCodeRuntimeConfig
+    from .adapters.zcode.runtime import ZCodeAgentRuntime
 
 
 def __getattr__(name: str) -> Any:
@@ -21,6 +23,14 @@ def __getattr__(name: str) -> Any:
         from .adapters.dsh.runtime import DSHAgentRuntime
 
         return DSHAgentRuntime
+    if name == "ZCodeRuntimeConfig":
+        from .adapters.zcode.config import ZCodeRuntimeConfig
+
+        return ZCodeRuntimeConfig
+    if name == "ZCodeAgentRuntime":
+        from .adapters.zcode.runtime import ZCodeAgentRuntime
+
+        return ZCodeAgentRuntime
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -34,6 +44,8 @@ __all__ = [
     "SkillCatalogError",
     "DSHAgentRuntime",
     "DSHRuntimeConfig",
+    "ZCodeAgentRuntime",
+    "ZCodeRuntimeConfig",
     "UnavailableAgentRuntime",
     "create_agent_runtime",
 ]
