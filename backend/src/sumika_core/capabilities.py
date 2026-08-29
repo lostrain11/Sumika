@@ -28,6 +28,8 @@ VALID_CAPABILITY_STATUSES = frozenset(
         "ready",
         "healthy",
         "running",
+        "low",
+        "not-applicable",
         "disabled",
         "unconfigured",
         "draft",
@@ -44,11 +46,27 @@ VALID_CAPABILITY_STATUSES = frozenset(
         "not-installed",
         "awaiting-extension",
         "policy-only",
+        "declared",
+        "preview",
+        "approved",
+        "rejected",
+        "session-scoped",
         "unknown",
     }
 )
 
 _BLOCKED_NAME_TOKENS = ("fake", "stub", "placeholder")
+_SENSITIVE_KEY_TOKENS = (
+    "secret",
+    "password",
+    "token",
+    "cookie",
+    "authorization",
+    "api_key",
+    "apikey",
+    "credential",
+)
+_PATH_VALUE_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]\\?\\?\\?[\\/]|/|\\\\)")
 _SAFE_ID_RE = re.compile(r"[^a-zA-Z0-9._:-]+")
 
 _CAPABILITY_LABELS = {
@@ -183,23 +201,36 @@ class CapabilityCatalog:
         module_rows = self._module_rows(errors)
         selected_by_capability = self._selected_map(module_rows)
 
+        def extend_from(source: str, factory: Any, *args: Any) -> None:
+            try:
+                values = factory(*args)
+                if isinstance(values, list):
+                    entries.extend(item for item in values if isinstance(item, CapabilityImplementationDescriptor))
+            except Exception as error:
+                errors.append({"source": source, "error": type(error).__name__})
+                if self.logger is not None:
+                    try:
+                        self.logger.info("capability catalog source failed source=%s error_type=%s", source, type(error).__name__)
+                    except Exception:
+                        pass
+
         # LLM profiles, harness models, and web-chat candidates are already
         # normalized by model-policy.  Keeping them here avoids a second
         # interpretation of Provider credentials and quota state.
         model_rows = self._model_rows(refresh, session_id, errors)
-        entries.extend(self._model_entries(model_rows, selected_by_capability))
-        entries.extend(self._module_entries(module_rows, selected_by_capability))
-        entries.extend(self._plugin_entries(selected_by_capability))
-        entries.extend(self._skill_entries())
+        extend_from("model-policy-projection", self._model_entries, model_rows, selected_by_capability)
+        extend_from("module-projection", self._module_entries, module_rows, selected_by_capability)
+        extend_from("plugin-projection", self._plugin_entries, selected_by_capability)
+        extend_from("skill-projection", self._skill_entries)
 
         if include_runtime:
-            entries.extend(self._runtime_entries())
-            entries.extend(self._browser_entries(errors))
-            entries.extend(self._mcp_entries(errors))
+            extend_from("agent-runtime", self._runtime_entries)
+            extend_from("browser", self._browser_entries, errors)
+            extend_from("mcp", self._mcp_entries, errors)
         else:
             # The current runtime remains useful in diagnostics without a
             # network probe; Browser/MCP details are intentionally omitted.
-            entries.extend(self._runtime_entries())
+            extend_from("agent-runtime", self._runtime_entries)
 
         entries = _deduplicate_entries(entries)
         groups = self._groups(entries)
@@ -269,7 +300,13 @@ class CapabilityCatalog:
             module_id = _safe_text(row.get("id"), 80)
             implementation_id = _safe_text(row.get("implementation_id"), 180)
             if module_id and implementation_id:
-                result[module_id] = (implementation_id, bool(row.get("enabled")))
+                selected_id = implementation_id
+                if module_id == "llm":
+                    config = row.get("config") if isinstance(row.get("config"), dict) else {}
+                    profile_id = _safe_text(config.get("profile_id"), 160)
+                    if profile_id:
+                        selected_id = profile_id
+                result[module_id] = (selected_id, bool(row.get("enabled")))
         return result
 
     def _model_entries(
@@ -402,7 +439,8 @@ class CapabilityCatalog:
                     )
                     continue
                 source = _safe_text(implementation.get("source"), 80).lower() or "builtin"
-                status = _module_status(implementation.get("status"), is_selected, module_enabled)
+                raw_status = _safe_text(implementation.get("status"), 48).lower() or "unknown"
+                status = _module_status(raw_status, is_selected, module_enabled)
                 if source == "provider":
                     source_type, transport, trust, lifecycle = "provider", "adapter", "builtin", "provider"
                 elif implementation_id.startswith("plugin:"):
@@ -419,7 +457,7 @@ class CapabilityCatalog:
                         capability=capability,
                         name=name,
                         status=status,
-                        selectable=status != "preview",
+                        selectable=raw_status != "preview",
                         selected=is_selected,
                         enabled=is_selected and bool(selected_enabled),
                         source_type=source_type,
@@ -453,7 +491,7 @@ class CapabilityCatalog:
             manifest = row.get("manifest") if isinstance(row.get("manifest"), dict) else {}
             plugin_id = _safe_text(row.get("plugin_id") or manifest.get("id"), 180)
             candidate_id = _safe_text(row.get("candidate_id"), 180)
-            if not plugin_id or _contains_blocked_name(plugin_id, row.get("name")):
+            if not plugin_id or not candidate_id or _contains_blocked_name(plugin_id, row.get("name")):
                 continue
             capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), list) else []
             state = _safe_text(row.get("state"), 48).lower() or "invalid"
@@ -548,7 +586,10 @@ class CapabilityCatalog:
         runtime_id = _safe_text(getattr(self.agent, "runtime_id", None) or status.get("runtime_id"), 100) or "unknown"
         state = _safe_text(status.get("state"), 48).lower()
         capability_status = "available" if status.get("ready") is True else "disabled" if state == "disabled" else "unavailable"
-        capabilities = getattr(self.agent, "runtime_capabilities", lambda: [])()
+        try:
+            capabilities = getattr(self.agent, "runtime_capabilities", lambda: [])()
+        except Exception:
+            capabilities = []
         return [
             CapabilityImplementationDescriptor(
                 id=f"harness:{runtime_id}",
@@ -746,7 +787,7 @@ def _safe_tuple(value: Any, *, limit: int = 32) -> tuple[str, ...]:
     result: list[str] = []
     for item in list(values)[:limit]:
         text = _safe_text(item, 120)
-        if text and text not in result:
+        if text and not _looks_like_sensitive_value(text) and text not in result:
             result.append(text)
     return tuple(result)
 
@@ -757,15 +798,19 @@ def _safe_metadata(value: Any, *, depth: int = 3) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, item in list(value.items())[:64]:
         name = _safe_text(key, 80).lower()
-        if not name or any(token in name for token in ("secret", "password", "token", "cookie", "authorization", "api_key", "apikey", "path")):
+        if not name or any(token in name for token in (*_SENSITIVE_KEY_TOKENS, "path", "file", "directory")):
             continue
         if isinstance(item, (str, int, float, bool)) or item is None:
+            if isinstance(item, str) and _looks_like_sensitive_value(item):
+                continue
             result[name] = item
         elif isinstance(item, list):
             result[name] = [
-                _safe_text(entry, 160) if isinstance(entry, str) else entry
+                _safe_text(entry, 160) if isinstance(entry, str) and not _looks_like_sensitive_value(entry) else entry
                 for entry in item[:32]
-                if isinstance(entry, (str, int, float, bool)) or entry is None
+                if (isinstance(entry, str) and not _looks_like_sensitive_value(entry))
+                or isinstance(entry, (int, float, bool))
+                or entry is None
             ]
         elif isinstance(item, dict):
             result[name] = _safe_metadata(item, depth=depth - 1)
@@ -775,6 +820,22 @@ def _safe_metadata(value: Any, *, depth: int = 3) -> dict[str, Any]:
 def _contains_blocked_name(*values: Any) -> bool:
     text = " ".join(_safe_text(value, 300).lower() for value in values if value is not None)
     return any(token in text for token in _BLOCKED_NAME_TOKENS)
+
+
+def _looks_like_sensitive_value(value: str) -> bool:
+    """Reject path-like and credential-shaped strings at the projection edge."""
+
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if _PATH_VALUE_RE.match(text):
+        return True
+    lowered = text.lower()
+    if lowered.startswith(("bearer ", "basic ", "sk-", "ghp_", "github_pat_", "jwt ")):
+        return True
+    if "=" in text and any(token in lowered for token in _SENSITIVE_KEY_TOKENS):
+        return True
+    return False
 
 
 def _stable_id(prefix: str, value: str) -> str:

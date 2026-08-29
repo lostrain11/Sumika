@@ -188,6 +188,9 @@ const state = {
   agentSyncing: false,
   agentSyncQueued: false,
   evolutionRegistry: [],
+  capabilityCatalog: null,
+  capabilityCatalogBusy: false,
+  capabilityCatalogNotice: "",
 };
 
 const navItems = [
@@ -850,9 +853,94 @@ function renderModules() {
   const modules = state.modules;
   const notices = [state.moduleNotice, state.providerNotice].filter(Boolean).map((notice) => `<div class="module-notice" role="status">${escapeHtml(notice)}</div>`).join("");
   const body = modules.length
-    ? `${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${modules.map(renderModuleCard).join("")}</div>`
+    ? `${renderCapabilityCatalogPanel()}${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${modules.map(renderModuleCard).join("")}</div>`
     : `<div class="empty-panel">核心未连接，模块目录暂不可用。启动核心后刷新此页。</div>`;
   return renderPageFrame("模块", "每个模块都有可替换实现。连接档案可保存、测试并随时切换。", `${notices}${body}${renderProviderDrawer()}`);
+}
+
+function capabilityStatusLabel(status) {
+  return ({
+    available: "可用",
+    ready: "就绪",
+    healthy: "健康",
+    running: "运行中",
+    low: "额度较低",
+    "not-applicable": "不适用",
+    disabled: "已关闭",
+    unconfigured: "未配置",
+    draft: "草稿",
+    "needs-auth": "需要登录",
+    unavailable: "不可用",
+    error: "错误",
+    discovered: "已发现",
+    changed: "有变化",
+    revoked: "已撤销",
+    invalid: "无效",
+    configured: "已配置",
+    observed: "已观察",
+    "not-exposed": "未暴露",
+    "not-installed": "未安装",
+    "awaiting-extension": "等待扩展",
+    "policy-only": "仅策略",
+    declared: "已声明",
+    preview: "预览",
+    approved: "已批准",
+    rejected: "已拒绝",
+    "session-scoped": "按会话",
+  })[status] || status || "未知";
+}
+
+function capabilitySourceLabel(source) {
+  return ({
+    builtin: "内置",
+    control: "模块控制",
+    provider: "Provider 适配器",
+    "provider-profile": "连接档案",
+    plugin: "插件",
+    skill: "Skill",
+    harness: "Harness",
+    "harness-model": "Harness 模型",
+    "browser-runtime": "浏览器运行时",
+    mcp: "MCP",
+    "external-process": "外部软件",
+    "web-chat": "网页聊天",
+  })[source] || source || "未知来源";
+}
+
+function capabilityLocationLabel(location) {
+  return ({ local: "本地", cloud: "云端", mixed: "混合", unknown: "位置未知" })[location] || location || "位置未知";
+}
+
+function capabilityEntryStatusClass(status) {
+  return String(status || "unknown").replace(/[^a-z0-9-]/gi, "-").slice(0, 40) || "unknown";
+}
+
+function renderCapabilityCatalogPanel() {
+  const catalog = state.capabilityCatalog;
+  const summary = catalog?.summary || {};
+  const groups = Array.isArray(catalog?.groups) ? catalog.groups : [];
+  const notice = state.capabilityCatalogNotice
+    ? `<div class="capability-catalog-notice" role="status">${escapeHtml(state.capabilityCatalogNotice)}</div>`
+    : "";
+  const groupRows = groups.map((group) => {
+    const entries = Array.isArray(group.entries) ? group.entries : [];
+    const entryRows = entries.map((entry) => {
+      const metadata = entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+      const manualLogin = metadata.requires_user_login === true || entry.source_type === "web-chat";
+      const stateText = capabilityStatusLabel(entry.status);
+      const selectable = entry.selectable === true;
+      const selected = entry.selected === true;
+      return `<div class="capability-entry" data-capability-entry="${escapeHtml(entry.id || "unknown")}">
+        <div class="capability-entry-main"><strong>${escapeHtml(entry.name || entry.id || "未命名实现")}</strong><small>${escapeHtml(capabilitySourceLabel(entry.source_type))} · ${escapeHtml(entry.transport || "未知传输")} · ${escapeHtml(capabilityLocationLabel(entry.processing_location))}</small>${manualLogin ? `<small class="capability-entry-warning">需要人工登录 / 隔离浏览器，不作为 API Provider</small>` : ""}</div>
+        <div class="capability-entry-state"><span class="capability-status ${capabilityEntryStatusClass(entry.status)}">${escapeHtml(stateText)}</span>${selected ? `<span class="capability-selected">当前</span>` : selectable ? `<span class="capability-selectable">可选</span>` : ""}</div>
+      </div>`;
+    }).join("");
+    return `<section class="capability-group" data-capability-group="${escapeHtml(group.id || "unknown")}"><div class="capability-group-heading"><strong>${escapeHtml(group.name || group.id || "能力")}</strong><span>${escapeHtml(String(group.entry_count ?? entries.length))}</span></div>${entryRows || `<div class="empty-column">暂无已登记实现</div>`}</section>`;
+  }).join("");
+  const body = groupRows || (catalog
+    ? `<div class="empty-column">当前没有可展示的真实实现。</div>`
+    : `<div class="empty-column">目录尚未加载；点击刷新读取当前运行时和 Provider 状态。</div>`);
+  return `<section class="dev-panel capability-catalog-panel" data-capability-catalog><div class="panel-heading"><div><strong>统一能力目录</strong><small>同一能力可以由本地、云端、外部软件、插件或隔离浏览器实现；这里仅展示真实状态，不替代模块启停和 Provider 路由。</small></div><button class="small-button" id="refresh-capability-catalog" type="button" ${state.capabilityCatalogBusy ? "disabled" : ""}>${state.capabilityCatalogBusy ? "读取中" : "刷新"}</button></div>${notice}<div class="capability-catalog-summary"><span>实现 ${escapeHtml(String(summary.entry_count ?? 0))}</span><span>就绪 ${escapeHtml(String(summary.ready_count ?? 0))}</span><span>可选 ${escapeHtml(String(summary.selectable_count ?? 0))}</span>${summary.source_errors ? `<span class="warn">来源错误 ${escapeHtml(String(summary.source_errors))}</span>` : ""}</div><div class="capability-group-grid">${body}</div></section>`;
 }
 
 function renderToolRuntime() {
@@ -2060,7 +2148,7 @@ function renderDeveloper() {
   const avatarAuditPanel = renderAvatarAssetAudit();
   const evolutionPanel = `<section class="dev-panel evolution-panel"><div class="panel-heading"><div><strong>Evolution Knowledge Registry</strong><small>只读参考索引；安装、升级和正式启用仍需用户批准。</small></div><button class="small-button" id="refresh-evolution-registry" type="button">刷新</button></div><div class="evolution-list">${state.evolutionRegistry.length ? state.evolutionRegistry.map((entry) => `<div class="evolution-row"><div><strong>${escapeHtml(entry.id)}</strong><small>${escapeHtml(entry.kind || "reference")} · ${escapeHtml(entry.license || "未登记许可证")}</small></div><code>${escapeHtml(entry.commit || entry.version || "未固定")}</code></div>`).join("") : `<div class="empty-column">尚未加载参考登记</div>`}</div></section>`;
   const profileRows = state.providerProfiles.map((profile) => `<div class="provider-row"><span class="status-dot ${profile.status === "available" ? "online" : "offline"}"></span><div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.adapter_id)} · ${escapeHtml(providerProfileStatusLabel(profile.status))}</small></div>${profile.status === "archived" ? `<button class="ghost-button" type="button" data-provider-restore="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>恢复</button>` : `<button class="ghost-button" type="button" data-provider-health="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>测试</button>`}</div>`).join("") || `<div class="empty-column">暂无 Provider 档案</div>`;
-  return renderPageFrame("开发者", "查看 manifest、事件、健康检查和 provider 运行边界。", `<div class="developer-grid">${providerNotice}<section class="dev-panel"><div class="panel-heading"><strong>Provider 健康</strong><button class="small-button" id="refresh-health">刷新</button></div>${profileRows}</section>${renderCcsCompatibilityPanel()}${evolutionPanel}${pluginPanel}${renderAgentMcpCatalogPanel()}${renderAgentSkillCatalogPanel()}${diagnosticPanel}${agentDiagnosticPanel}${desktopPanel}${avatarAuditPanel}<section class="dev-panel"><div class="panel-heading"><strong>事件流</strong><span class="muted-text">${state.events.length} 条</span></div><div class="event-log">${state.events.slice(0, 12).map((event) => `<div class="log-row"><code>${escapeHtml(event.event_type)}</code><span>${escapeHtml(JSON.stringify(event.payload).slice(0, 100))}</span></div>`).join("") || `<div class="empty-column">暂无事件</div>`}</div></section></div>`);
+  return renderPageFrame("开发者", "查看 manifest、事件、健康检查和 provider 运行边界。", `<div class="developer-grid">${providerNotice}${renderCapabilityCatalogPanel()}<section class="dev-panel"><div class="panel-heading"><strong>Provider 健康</strong><button class="small-button" id="refresh-health">刷新</button></div>${profileRows}</section>${renderCcsCompatibilityPanel()}${evolutionPanel}${pluginPanel}${renderAgentMcpCatalogPanel()}${renderAgentSkillCatalogPanel()}${diagnosticPanel}${agentDiagnosticPanel}${desktopPanel}${avatarAuditPanel}<section class="dev-panel"><div class="panel-heading"><strong>事件流</strong><span class="muted-text">${state.events.length} 条</span></div><div class="event-log">${state.events.slice(0, 12).map((event) => `<div class="log-row"><code>${escapeHtml(event.event_type)}</code><span>${escapeHtml(JSON.stringify(event.payload).slice(0, 100))}</span></div>`).join("") || `<div class="empty-column">暂无事件</div>`}</div></section></div>`);
 }
 
 function renderAgentDiagnosticsPanel() {
@@ -2155,6 +2243,7 @@ function formatDuration(seconds) {
 function bindEvents() {
   document.querySelectorAll("[data-page]").forEach((element) => element.addEventListener("click", () => {
     state.activePage = element.dataset.page;
+    if (state.activePage === "Modules" || state.activePage === "Developer") void loadCapabilityCatalog(true, false);
     if (state.activePage === "Developer") void loadProviderProfiles(true, true);
     if (state.activePage === "Developer") void loadEvolutionRegistry(true);
     if (state.activePage === "Developer") void loadAgentDiagnostics(true);
@@ -2229,6 +2318,9 @@ function bindEvents() {
     clearIgnoredAvatar(element.dataset.avatarIgnoredClear);
   }));
   document.querySelector("#refresh-health")?.addEventListener("click", refreshProviderHealth);
+  document.querySelector("#refresh-capability-catalog")?.addEventListener("click", () => {
+    void loadCapabilityCatalog(true, true);
+  });
   document.querySelector("#agent-health")?.addEventListener("click", checkAgentHealth);
   document.querySelector("#agent-provider-sync")?.addEventListener("click", syncAgentProvider);
   document.querySelector("#refresh-agent-mcp-catalog")?.addEventListener("click", () => {
@@ -2720,6 +2812,25 @@ async function loadProviders(shouldRender = true) {
   if (shouldRender) render();
 }
 
+async function loadCapabilityCatalog(shouldRender = true, refresh = false) {
+  if (state.capabilityCatalogBusy) return;
+  state.capabilityCatalogBusy = true;
+  if (shouldRender) render();
+  try {
+    const query = new URLSearchParams();
+    if (refresh) query.set("refresh", "true");
+    state.capabilityCatalog = await api(`/api/capabilities${query.toString() ? `?${query.toString()}` : ""}`);
+    const errors = Number(state.capabilityCatalog?.summary?.source_errors || 0);
+    state.capabilityCatalogNotice = errors ? `目录已读取，但有 ${errors} 个来源暂不可用。` : "";
+  } catch (error) {
+    if (!state.capabilityCatalog) state.capabilityCatalog = null;
+    state.capabilityCatalogNotice = `统一能力目录暂不可用：${error.message}`;
+  } finally {
+    state.capabilityCatalogBusy = false;
+    if (shouldRender) render();
+  }
+}
+
 async function loadAgentRuntime(shouldRender = true) {
   try {
     state.agentStatus = await api("/api/agent/status");
@@ -2813,6 +2924,7 @@ async function syncAgentState({ immediate = false } = {}) {
   state.agentSyncing = true;
   try {
     await loadAgentRuntime(false);
+    await loadCapabilityCatalog(false, false);
     await loadAgentTaskProjections(false);
     return true;
   } catch {
@@ -5899,6 +6011,9 @@ async function loadInitialData() {
     state.agentStatus = { state: "unavailable", ready: false, reason: "核心未连接" };
     state.agentDiagnostics = null;
     state.agentDiagnosticsBusy = false;
+    state.capabilityCatalog = null;
+    state.capabilityCatalogNotice = "核心未连接，能力目录暂不可用。";
+    state.capabilityCatalogBusy = false;
     state.browserStatus = { state: "unavailable", ready: false };
     state.browserProfiles = [];
     setAgentSessionId(null);

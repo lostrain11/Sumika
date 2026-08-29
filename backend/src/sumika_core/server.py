@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .audio import AudioRuntime, AudioRuntimeError
 from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, SkillCatalog, SkillCatalogError, create_agent_runtime
 from .avatar import AvatarError, AvatarManager
+from .capabilities import CapabilityCatalog, CapabilityCatalogError
 from .browser import (
     BrowserRuntime,
     BrowserRuntimeError,
@@ -229,6 +230,15 @@ class CoreApplication:
             self.provider_profiles,
             self.agent,
             self.configured_data_dir,
+            logger=self.logger,
+        )
+        self.capabilities = CapabilityCatalog(
+            self.modules,
+            agent=self.agent,
+            browser=self.browser,
+            plugins=self.plugins,
+            skills=self.skills,
+            model_policy=self.model_policy,
             logger=self.logger,
         )
         self.logger.info(
@@ -807,6 +817,24 @@ class CoreApplication:
                 )
             except ModelPolicyError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "capability.catalog":
+            raw_refresh = params.get("refresh", False)
+            if not isinstance(raw_refresh, bool):
+                raise JsonRpcError(-32602, "refresh must be a boolean")
+            raw_runtime = params.get("includeRuntime", params.get("include_runtime", True))
+            if not isinstance(raw_runtime, bool):
+                raise JsonRpcError(-32602, "includeRuntime must be a boolean")
+            raw_session = params.get("sessionId", params.get("session_id"))
+            if raw_session is not None and not isinstance(raw_session, (str, int)):
+                raise JsonRpcError(-32602, "sessionId must be a scalar identifier")
+            try:
+                return self.capabilities.catalog(
+                    refresh=raw_refresh,
+                    session_id=str(raw_session).strip() if raw_session is not None else None,
+                    include_runtime=raw_runtime,
+                )
+            except CapabilityCatalogError as exc:
+                raise JsonRpcError(-32034, str(exc)) from exc
         if method == "model.policy.route":
             raw_session = params.get("sessionId") or params.get("session_id")
             if raw_session is not None and not isinstance(raw_session, (str, int)):
@@ -3735,6 +3763,7 @@ class CoreApplication:
             "evolution_registry": self.evolution_registry.check(),
             "agent_observability": self.observability.status(),
             "model_policy": self._model_policy_diagnostics(),
+            "capabilities": self.capabilities.summary(),
         }
 
     def _model_policy_diagnostics(self) -> dict[str, Any]:
@@ -3798,6 +3827,19 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             if session_id:
                 request["sessionId"] = session_id
             self._send_json(self.application.rpc("model.policy.catalog", request))
+            return
+        if parsed.path == "/api/capabilities":
+            query = parse_qs(parsed.query)
+            refresh = (query.get("refresh") or ["false"])[0].lower() == "true"
+            include_runtime = (query.get("include_runtime") or ["true"])[0].lower() == "true"
+            session_id = (query.get("session_id") or [None])[0]
+            request = {"refresh": refresh, "includeRuntime": include_runtime}
+            if session_id:
+                request["sessionId"] = session_id
+            try:
+                self._send_json(self.application.rpc("capability.catalog", request))
+            except JsonRpcError as exc:
+                self._send_json({"error": exc.message, "code": exc.code}, HTTPStatus.BAD_REQUEST)
             return
         if parsed.path == "/api/model-policy/quota":
             query = parse_qs(parsed.query)
