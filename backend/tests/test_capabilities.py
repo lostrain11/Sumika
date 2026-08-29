@@ -231,6 +231,17 @@ class CapabilityCatalogTests(unittest.TestCase):
         self.assertIn("harness", {group["id"] for group in value["groups"]})
         self.assertGreaterEqual(value["summary"]["source_errors"], 1)
 
+    def test_plugin_and_skill_source_errors_are_reported_without_breaking_catalog(self):
+        class Broken:
+            def list(self, *args, **kwargs):
+                raise RuntimeError("private source details")
+
+        value = CapabilityCatalog(self.modules, plugins=Broken(), skills=Broken(), model_policy=self.models).catalog()
+        sources = {item["source"] for item in value["source_errors"]}
+        self.assertIn("plugin-projection", sources)
+        self.assertIn("skill-projection", sources)
+        self.assertNotIn("private", json.dumps(value, ensure_ascii=False).lower())
+
 
 class CapabilityHttpTests(unittest.TestCase):
     def test_rpc_validation_and_http_projection(self):

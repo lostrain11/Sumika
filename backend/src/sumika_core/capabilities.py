@@ -480,10 +480,7 @@ class CapabilityCatalog:
     def _plugin_entries(self, selected: Mapping[str, tuple[str, bool]]) -> list[CapabilityImplementationDescriptor]:
         if self.plugins is None:
             return []
-        try:
-            rows = self.plugins.list()
-        except Exception:
-            return []
+        rows = self.plugins.list()
         result: list[CapabilityImplementationDescriptor] = []
         for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict):
@@ -534,10 +531,7 @@ class CapabilityCatalog:
     def _skill_entries(self) -> list[CapabilityImplementationDescriptor]:
         if self.skills is None:
             return []
-        try:
-            rows = self.skills.list(refresh=False)
-        except Exception:
-            return []
+        rows = self.skills.list(refresh=False)
         result: list[CapabilityImplementationDescriptor] = []
         for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict):
