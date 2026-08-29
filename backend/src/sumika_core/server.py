@@ -33,6 +33,7 @@ from .evolution import EvolutionRegistry
 from .diagnostics import close_logging, configure_logging, redact_text, safe_error
 from .integrations import CCSwitchCompatibilityChecker
 from .memory import MemoryRuntime, MemoryRuntimeError
+from .model_policy import ModelPolicyError, ModelPolicyService
 from .modules import ModuleCatalog, ModuleError
 from .observability import AgentObservability, classify_rpc_method
 from .plugins import PluginCatalog, PluginCatalogError
@@ -224,6 +225,12 @@ class CoreApplication:
             self.modules.restore_runtime()
         except ModuleError as exc:
             self.logger.warning("module runtime restore skipped error_type=%s", type(exc).__name__)
+        self.model_policy = ModelPolicyService(
+            self.provider_profiles,
+            self.agent,
+            self.configured_data_dir,
+            logger=self.logger,
+        )
         self.logger.info(
             "core initialized modules=%d providers=%d avatars=%d",
             len(self.modules.list()),
@@ -786,6 +793,56 @@ class CoreApplication:
             }
         if method == "core.diagnostics":
             return self.diagnostics()
+        if method == "model.policy.catalog":
+            raw_refresh = params.get("refresh", False)
+            if not isinstance(raw_refresh, bool):
+                raise JsonRpcError(-32602, "refresh must be a boolean")
+            raw_session = params.get("sessionId") or params.get("session_id")
+            if raw_session is not None and not isinstance(raw_session, (str, int)):
+                raise JsonRpcError(-32602, "sessionId must be a scalar identifier")
+            try:
+                return self.model_policy.catalog(
+                    refresh=raw_refresh,
+                    session_id=str(raw_session).strip() if raw_session is not None else None,
+                )
+            except ModelPolicyError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "model.policy.route":
+            raw_session = params.get("sessionId") or params.get("session_id")
+            if raw_session is not None and not isinstance(raw_session, (str, int)):
+                raise JsonRpcError(-32602, "sessionId must be a scalar identifier")
+            request_params = dict(params)
+            request_params.pop("sessionId", None)
+            request_params.pop("session_id", None)
+            try:
+                result = self.model_policy.decide(
+                    request_params,
+                    session_id=str(raw_session).strip() if raw_session is not None else None,
+                )
+            except ModelPolicyError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            decision = result.get("decision") if isinstance(result, dict) else {}
+            self.events.publish(
+                EventEnvelope(
+                    "model.policy.decided",
+                    {
+                        "selected_route": decision.get("selected_route"),
+                        "status": decision.get("status"),
+                        "requires_confirmation": bool(decision.get("requires_confirmation")),
+                        "policy_version": decision.get("policy_version"),
+                    },
+                    session_id=str(raw_session).strip() if raw_session is not None else None,
+                )
+            )
+            return result
+        if method == "model.policy.quota":
+            raw_refresh = params.get("refresh", False)
+            if not isinstance(raw_refresh, bool):
+                raise JsonRpcError(-32602, "refresh must be a boolean")
+            try:
+                return self.model_policy.quota_status(refresh=raw_refresh)
+            except ModelPolicyError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
         if method == "agent.observability.status":
             return self.observability.status()
         if method == "agent.observability.daily":
@@ -3677,7 +3734,37 @@ class CoreApplication:
             "workspace_checkpoint_count": len(self.workspace.list_checkpoints()["checkpoints"]),
             "evolution_registry": self.evolution_registry.check(),
             "agent_observability": self.observability.status(),
+            "model_policy": self._model_policy_diagnostics(),
         }
+
+    def _model_policy_diagnostics(self) -> dict[str, Any]:
+        """Return a bounded, offline model-policy health summary."""
+
+        try:
+            catalog = self.model_policy.catalog(refresh=False)
+            entries = catalog.get("entries", []) if isinstance(catalog, dict) else []
+            return {
+                "version": catalog.get("policy_version"),
+                "entry_count": len(entries),
+                "routable_count": sum(
+                    1 for item in entries
+                    if isinstance(item, dict) and item.get("routable") is True
+                ),
+                "quota_count": len(catalog.get("quotas", [])) if isinstance(catalog, dict) else 0,
+                "checked_at": catalog.get("checked_at"),
+            }
+        except Exception as error:
+            self.logger.info(
+                "model policy diagnostics unavailable error_type=%s",
+                type(error).__name__,
+            )
+            return {
+                "version": None,
+                "entry_count": 0,
+                "routable_count": 0,
+                "quota_count": 0,
+                "status": "unavailable",
+            }
 
 
 class SumikaRequestHandler(BaseHTTPRequestHandler):
@@ -3702,6 +3789,20 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/diagnostics":
             self._send_json(self.application.rpc("core.diagnostics", {}))
+            return
+        if parsed.path == "/api/model-policy/catalog":
+            query = parse_qs(parsed.query)
+            refresh = (query.get("refresh") or ["false"])[0].lower() == "true"
+            session_id = (query.get("session_id") or [None])[0]
+            request = {"refresh": refresh}
+            if session_id:
+                request["sessionId"] = session_id
+            self._send_json(self.application.rpc("model.policy.catalog", request))
+            return
+        if parsed.path == "/api/model-policy/quota":
+            query = parse_qs(parsed.query)
+            refresh = (query.get("refresh") or ["false"])[0].lower() == "true"
+            self._send_json(self.application.rpc("model.policy.quota", {"refresh": refresh}))
             return
         if parsed.path == "/api/agent/status":
             self._send_json(self.application.rpc("agent.status", {}))
