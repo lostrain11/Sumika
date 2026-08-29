@@ -52,6 +52,29 @@ provider-specific fields from leaking across implementations.
 4. Add contract tests for selection, configuration validation, permissions, and
    failure behavior.
 
+## Unified capability catalog
+
+`CapabilityCatalog` is a read-only projection over `ModuleCatalog`, model policy,
+the active `AgentRuntime`, BrowserSkill, MCP, PluginCatalog and SkillCatalog. The
+HTTP endpoint `GET /api/capabilities` and JSON-RPC method `capability.catalog`
+share the versioned `capability-catalog/v1` shape. Entries are grouped by
+capability and expose only bounded metadata: source type, transport, processing
+location, status, permissions, and selected/selectable flags.
+
+The projection is intentionally not another configuration or routing store. A
+module, Provider profile, or Harness remains the authority for enablement and
+model selection; the catalog merely makes all real implementations visible in
+one place. `refresh` forwards only to existing read-only health/catalog calls,
+and `includeRuntime=false` skips BrowserSkill/MCP probes for cheap diagnostics.
+If one source fails, the response keeps the other groups and reports only a
+stable error class. Fake/Stub/Placeholder names and credential/path-like values
+are filtered at the projection boundary. Web-chat entries are marked as manual
+login and are never presented as API Providers.
+
+The UI renders this projection on Modules and Developer. The existing module
+toggle, Provider drawer, Skill approval and MCP/Preset controls remain the
+authoritative mutation paths.
+
 ASR, TTS and VAD expose explicitly configured external JSONL implementations
 through the same catalog. Their device permissions and explicit start/stop
 controls are owned by `AudioRuntime`. Memory exposes SQLite and external JSONL

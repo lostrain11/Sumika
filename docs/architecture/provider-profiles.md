@@ -92,6 +92,13 @@ module's `profile_id`.
 aggregate of enabled modules and their resolved connection locations, so a
 single cloud profile produces `云端处理` and a mixture produces `混合处理`.
 
+Provider profiles also appear in the read-only `capability-catalog/v1` projection
+(`GET /api/capabilities`). The projection exposes the profile id, model and
+health/auth/quota states needed for comparison, but never returns Base URL
+secrets, credential values, paths or arbitrary headers. It is a view of the
+profile and model-policy registries, not a second activation list; activation
+continues through the Provider drawer and module state.
+
 ## 相关文档
 
 - [Modules](modules.md)

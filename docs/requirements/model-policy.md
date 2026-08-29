@@ -55,6 +55,14 @@
 不保存账号秘密。`EvaluationSample` 只记录任务类别、版本、成功/失败、工具完成、重试、
 延迟、成本、额度消耗和有限质量标签，不记录请求正文或输出正文。
 
+### 能力目录投影
+
+模型策略目录通过 `capability-catalog/v1` 向 Modules 和 Developer 提供只读的实现投影。它
+可以同时列出 Provider profile、Harness model 和网页聊天候选，但不改变 `RoutingDecision`
+的选择结果，也不把网页会话当成 API endpoint。每一项必须携带可验证的来源类型、处理位置、
+认证/额度/健康状态和是否可选；网页聊天固定为 `needs-auth` 与人工登录边界。目录过滤 Fake、
+Stub、Placeholder 和敏感元数据，来源探测失败只影响对应条目并保留受限错误类型。
+
 ## 决策优先级
 
 路由器必须按以下顺序过滤和排序：

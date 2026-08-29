@@ -100,13 +100,14 @@ class CapabilityDescriptorTests(unittest.TestCase):
             permissions=("network", r"C:\private", "Bearer hidden"),
             metadata={
                 "safe": "value",
+                "profile_id": "profile-local",
                 "api_key": "hidden",
                 "path": r"D:\private",
                 "nested": {"mode": "read", "cookie": "hidden"},
             },
         ).to_dict()
         self.assertEqual(descriptor["permissions"], ["network"])
-        self.assertEqual(descriptor["metadata"], {"safe": "value", "nested": {"mode": "read"}})
+        self.assertEqual(descriptor["metadata"], {"safe": "value", "profile_id": "profile-local", "nested": {"mode": "read"}})
 
 
 class CapabilityCatalogTests(unittest.TestCase):

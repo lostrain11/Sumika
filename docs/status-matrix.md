@@ -12,6 +12,7 @@
 | `chat` | 已实现 | Chat | [protocol](architecture/protocol.md) | [server tests](../backend/tests/test_server.py)、[frontend shell](../frontend/main.js) | 持续完善流式状态与错误呈现 |
 | `characters` | 已实现 | Characters（身份 / 人格 / 高级设置） | [characters](architecture/characters.md) | [persona tests](../backend/tests/test_persona.py)、[server tests](../backend/tests/test_server.py)、[UI smoke](../frontend/tests/smoke.spec.js) | 角色导入，以及真实音频/立绘运行时完成后的对应配置 |
 | `modules` | 已实现 | Modules | [modules](architecture/modules.md) | [module tests](../backend/tests/test_modules.py)、[UI smoke](../frontend/tests/smoke.spec.js) | 继续增加真实可替换实现 |
+| `capability-catalog` | 已实现 | Modules > 统一能力目录、Developer > 统一能力目录 | [modules](architecture/modules.md) | [catalog implementation](../backend/src/sumika_core/capabilities.py)、[catalog tests](../backend/tests/test_capabilities.py)、[UI smoke](../frontend/tests/smoke.spec.js) | 接入第二个真实 Harness/插件后继续验证跨运行时和同类实现对比 |
 | `tasks` | 部分实现 | Tasks、Agent > Workspace 安全与回滚 | [tasks](architecture/tasks.md) | [task tests](../backend/tests/test_tasks.py)、[runner tests](../backend/tests/test_task_runner.py)、[WorkspaceRuntime tests](../backend/tests/test_workspace_runtime.py)、[Agent server tests](../backend/tests/test_agent_server.py)、[Playwright smoke](../frontend/tests/smoke.spec.js)、[daily acceptance](../tools/agent_daily_acceptance.py) | Execute 与 Plan Review 批准前 checkpoint、独立 worktree、patch 审阅、审批式本地 commit、turn/产物只读投影和 Sumika 自修改/恢复已闭环；真实 Provider 结果已进入重复验收，继续完成小型实际改动和浏览器人工接管 |
 | `avatar-vrm-desktop` | 已实现 | Chat、Characters、透明桌宠模式 | [Avatar](architecture/avatar.md)、[desktop shell](architecture/desktop-shell.md) | [avatar tests](../backend/tests/test_avatar.py)、[UI smoke](../frontend/tests/smoke.spec.js) | Live2D 驱动与更多动作资源审计 |
 | `plugins-manifest` | 部分实现 | Developer | [manifest](architecture/manifest.md) | [plugin tests](../backend/tests/test_plugins.py) | 隔离 Runner、签名与依赖管理 |
@@ -43,6 +44,7 @@
 | `chat` | `UX-001`, `CHAT-001` |
 | `characters` | `CHARACTER-001`, `CHARACTER-002` |
 | `modules` | `PROVIDER-001`, `PLUGIN-001` |
+| `capability-catalog` | `CAPABILITY-001`, `AGENT-001`, `PLUGIN-001`, `MODEL-002` |
 | `tasks` | `CORE-001`, `TASK-001`, `WORKSPACE-001` |
 | `avatar-vrm-desktop` | `AVATAR-001`, `AVATAR-002` |
 | `plugins-manifest` | `PLUGIN-001` |

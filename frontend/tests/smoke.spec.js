@@ -275,6 +275,84 @@ test.describe("Sumika UI shell", () => {
     expect(palette.task).toBe(palette.muted);
   });
 
+  test("能力目录展示真实实现、网页登录边界并适配窄窗口", async ({ page }) => {
+    await page.route("**/api/capabilities*", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema: "capability-catalog/v1",
+          checked_at: "2026-08-29T00:00:00Z",
+          groups: [
+            {
+              id: "llm",
+              name: "大语言模型",
+              entry_count: 2,
+              entries: [
+                {
+                  id: "llm:profile-local",
+                  name: "本地 Ollama · qwen3:4b",
+                  status: "available",
+                  selectable: true,
+                  selected: true,
+                  enabled: true,
+                  source_type: "provider-profile",
+                  transport: "http",
+                  processing_location: "local",
+                  metadata: { profile_id: "profile-local", model_id: "qwen3:4b" },
+                },
+                {
+                  id: "llm:web-chatgpt",
+                  name: "ChatGPT 网页聊天",
+                  status: "needs-auth",
+                  selectable: false,
+                  selected: false,
+                  enabled: false,
+                  source_type: "web-chat",
+                  transport: "browser-dom",
+                  processing_location: "cloud",
+                  metadata: { requires_user_login: true },
+                },
+              ],
+            },
+            {
+              id: "harness",
+              name: "Agent Harness",
+              entry_count: 1,
+              entries: [{
+                id: "harness:dsh",
+                name: "DSH",
+                status: "available",
+                selectable: false,
+                selected: true,
+                enabled: true,
+                source_type: "harness",
+                transport: "runtime",
+                processing_location: "local",
+                metadata: {},
+              }],
+            },
+          ],
+          entries: [],
+          summary: { group_count: 2, entry_count: 3, ready_count: 2, selectable_count: 1, source_errors: 0 },
+          source_errors: [],
+        }),
+      });
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.setViewportSize({ width: 560, height: 720 });
+    await page.locator('.nav-item[data-page="Modules"]').click();
+    const panel = page.locator("[data-capability-catalog]");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("本地 Ollama · qwen3:4b");
+    await expect(panel).toContainText("ChatGPT 网页聊天");
+    await expect(panel).toContainText("需要人工登录 / 隔离浏览器");
+    await expect(panel.locator('[data-capability-group="llm"] .capability-selected')).toHaveText("当前");
+    await expect(panel.locator('[data-capability-group="llm"] .capability-status.needs-auth')).toHaveText("需要登录");
+    await expect(panel).not.toContainText(/fake|stub|placeholder/i);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+    expect(overflow).toBe(false);
+  });
+
   test("LLM 模块开关是聊天的唯一启停入口", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('.nav-item[data-page="Modules"]').click();

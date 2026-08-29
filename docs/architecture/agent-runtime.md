@@ -21,6 +21,11 @@ unsupported，不允许伪造结果或回退到 Fake。
 `agent.status` 返回 `runtime_id` 与 `runtime_capabilities`。前端只渲染运行时声明的
 控制；新 adapter 不必实现 DSH 的 Preset、Goal revision 或 Queue/Steer。
 
+`CapabilityCatalog` 可把 Harness 自身、Harness model、Provider profile、Skill、MCP 和
+BrowserSkill 投影到同一只读目录。该目录不要求 adapter 实现 DSH 私有 API，也不改变
+Session、模型路由或审批事实源；未来 Harness 只需在 adapter 返回稳定状态/能力后即可复用
+同一 UI 投影。网页聊天属于需要人工登录的独立来源，不会被当作 Runtime Provider。
+
 ## 选择与构造
 
 `AgentRuntimeRegistry` 保存真实 adapter builder；`SUMIKA_AGENT_RUNTIME` 选择当前

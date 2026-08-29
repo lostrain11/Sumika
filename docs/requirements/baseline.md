@@ -121,6 +121,20 @@ Execute 和 Plan Review 批准前创建 checkpoint；修改在独立 Workspace/w
 同类型实现应能在 UI 中切换。社区插件先在隔离 Profile 中检查许可证、API、权限、卸载恢复
 和端到端行为，验证通过且用户批准后才进入生产列表；Sumika 自有插件尽量可独立发布。
 
+### `CAPABILITY-001` 统一能力实现目录
+
+同一个功能可以由本地服务、云端 Provider、外部软件、Harness、插件、Skill 或隔离浏览器
+实现。Sumika 应提供一个只读的统一目录，展示真实来源、传输方式、处理位置、状态、权限和
+当前选择；目录只是各注册表的安全投影，不创建第二套路由或配置事实源。名称含 Fake、Stub
+或 Placeholder 的条目，以及带有路径、Token、Cookie 或 Authorization 的元数据不得进入目录。
+网页聊天候选必须明确标记为需要人工登录，不能伪装成 API Provider。
+
+- 来源：用户关于“同一功能可由不同实现并在 UI 自由选择”的确认，结合现有模块、Provider、
+  Agent 和 Browser 边界归一化。
+- 验收：目录能按能力分组显示当前和可选真实实现；单个来源失败只显示受限错误；敏感字段
+  和 Fake/占位项不会出现在 HTTP、RPC 或 UI 投影中。
+- 当前实现：`capability-catalog` 状态行和 [Module catalog](../architecture/modules.md)。
+
 ## 浏览器、安全与可进化系统
 
 ### `BROWSER-001` 隔离浏览器能力

@@ -286,6 +286,32 @@
       "status_ref": "status-matrix:plugins-manifest"
     },
     {
+      "id": "CAPABILITY-001",
+      "category": "capability-catalog",
+      "statement": "A read-only unified catalog exposes real implementations for each capability across local and cloud providers, external software, Harnesses, plugins, Skills, MCP, and isolated browser sessions without becoming a second routing or configuration source.",
+      "acceptance": [
+        "Entries are grouped by capability and expose bounded source, transport, processing location, status, permissions, and selected/selectable metadata",
+        "A source failure leaves other groups available and reports only a stable error class",
+        "Fake/Stub/Placeholder entries and credential/path-like values are absent from RPC, HTTP, and UI projections",
+        "Web-chat candidates are marked as manual login and are never presented as API Providers"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context", "repository-docs"],
+      "excerpt_refs": [],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/capabilities.py",
+        "../../backend/src/sumika_core/server.py",
+        "../../frontend/main.js",
+        "../../frontend/styles.css"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_capabilities.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
+      "status_ref": "status-matrix:capability-catalog"
+    },
+    {
       "id": "BROWSER-001",
       "category": "browser",
       "statement": "BrowserSkill handles browser mechanics while Sumika enforces isolated profiles, sensitive-action approval, human handoff, and download quarantine.",
