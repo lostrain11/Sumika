@@ -21,7 +21,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `5143c44`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, and the unified capability catalog projection (verified in the current worktree on 2026-08-29)
+- Last verified commit: `5a8a4cb`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, and the unified capability catalog projection with source-failure reporting (verified in the current worktree on 2026-08-29)
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
