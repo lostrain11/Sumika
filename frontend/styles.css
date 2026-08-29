@@ -834,3 +834,41 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
   .workspace-worktree-form button, .workspace-commit-form button, .workspace-operation-preview button { justify-self: start; }
   .workspace-commit-actions { align-items: flex-start; flex-direction: column; }
 }
+
+/* Read-only projection of every real implementation source.  Keep this panel
+   dense and scannable because it can contain many plugin and runtime entries. */
+.capability-catalog-panel { grid-column: 1 / -1; min-width: 0; }
+.capability-catalog-panel .panel-heading > div { min-width: 0; }
+.capability-catalog-panel .panel-heading small { display: block; max-width: 760px; margin-top: 5px; color: var(--faint); font-size: 9px; line-height: 1.45; }
+.capability-catalog-summary { display: flex; flex-wrap: wrap; gap: 7px 16px; padding: 11px 0 2px; color: var(--faint); font-size: 9px; }
+.capability-catalog-summary span { white-space: nowrap; }
+.capability-catalog-summary .warn { color: var(--warn); }
+.capability-catalog-notice { margin-top: 10px; border-left: 2px solid var(--warn); background: rgba(117,93,54,.16); color: var(--muted); padding: 7px 9px; font-size: 9px; line-height: 1.45; }
+.capability-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 10px; margin-top: 9px; }
+.capability-group { min-width: 0; overflow: hidden; border: 1px solid rgba(42,52,60,.9); border-radius: 6px; background: rgba(16,24,28,.52); }
+.capability-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 9px 10px; border-bottom: 1px solid rgba(42,52,60,.85); color: var(--muted); }
+.capability-group-heading strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.capability-group-heading span { flex-shrink: 0; color: var(--faint); font-size: 9px; }
+.capability-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; min-width: 0; padding: 9px 10px; border-bottom: 1px solid rgba(42,52,60,.62); }
+.capability-entry:last-child { border-bottom: 0; }
+.capability-entry-main { min-width: 0; }
+.capability-entry-main strong, .capability-entry-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capability-entry-main strong { color: var(--text); font-size: 10px; }
+.capability-entry-main small { margin-top: 3px; color: var(--faint); font-size: 8px; }
+.capability-entry-main .capability-entry-warning { overflow: hidden; color: var(--warn); text-overflow: ellipsis; }
+.capability-entry-state { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; max-width: 112px; }
+.capability-status, .capability-selected, .capability-selectable { display: inline-block; white-space: nowrap; border-radius: 3px; padding: 3px 5px; font-size: 8px; line-height: 1; }
+.capability-status { color: var(--faint); background: rgba(51,64,71,.6); }
+.capability-status.available, .capability-status.ready, .capability-status.healthy, .capability-status.running { color: var(--accent-strong); background: rgba(53,108,99,.34); }
+.capability-status.needs-auth, .capability-status.error, .capability-status.unavailable, .capability-status.changed, .capability-status.invalid { color: var(--warn); background: rgba(117,93,54,.26); }
+.capability-status.disabled, .capability-status.unconfigured, .capability-status.draft, .capability-status.not-exposed, .capability-status.not-installed { color: var(--muted); }
+.capability-selected { color: var(--accent); border: 1px solid rgba(134,213,200,.38); }
+.capability-selectable { color: var(--muted); border: 1px solid rgba(136,151,157,.36); }
+.capability-group .empty-column { padding: 18px 8px; font-size: 9px; }
+@media (max-width: 900px) {
+  .capability-group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .capability-group-grid { grid-template-columns: 1fr; }
+  .capability-entry-state { max-width: 96px; }
+}

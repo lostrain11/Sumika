@@ -798,7 +798,7 @@ def _safe_metadata(value: Any, *, depth: int = 3) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, item in list(value.items())[:64]:
         name = _safe_text(key, 80).lower()
-        if not name or any(token in name for token in (*_SENSITIVE_KEY_TOKENS, "path", "file", "directory")):
+        if not name or _is_sensitive_key(name):
             continue
         if isinstance(item, (str, int, float, bool)) or item is None:
             if isinstance(item, str) and _looks_like_sensitive_value(item):
@@ -820,6 +820,20 @@ def _safe_metadata(value: Any, *, depth: int = 3) -> dict[str, Any]:
 def _contains_blocked_name(*values: Any) -> bool:
     text = " ".join(_safe_text(value, 300).lower() for value in values if value is not None)
     return any(token in text for token in _BLOCKED_NAME_TOKENS)
+
+
+def _is_sensitive_key(name: str) -> bool:
+    """Match credential/path fields without hiding ordinary IDs such as ``profile_id``."""
+
+    normalized = str(name or "").strip().lower()
+    if not normalized:
+        return True
+    parts = {part for part in re.split(r"[^a-z0-9]+", normalized) if part}
+    blocked_parts = set(_SENSITIVE_KEY_TOKENS) | {"path", "file", "directory"}
+    if parts & blocked_parts:
+        return True
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    return compact in {"apikey", "accesskey", "authheader", "authorizationheader", "filename"}
 
 
 def _looks_like_sensitive_value(value: str) -> bool:
