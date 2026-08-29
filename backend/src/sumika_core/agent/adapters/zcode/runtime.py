@@ -63,6 +63,7 @@ class _JsonRpcProcess:
         self._stderr_thread: threading.Thread | None = None
         self._closed = False
         self._last_error: str | None = None
+        self._generation = 0
 
     @property
     def alive(self) -> bool:
@@ -75,6 +76,12 @@ class _JsonRpcProcess:
                 return
             if self._closed:
                 raise AgentRuntimeError("ZCode runtime has been closed", transport=True)
+            previous = self.process
+            if previous is not None and previous.poll() is not None:
+                # A dead process may still have a reader thread draining its
+                # pipes.  Replacing the handle is safe because the reader's
+                # generation check prevents it from failing a new request.
+                self.process = None
             executable = (self.config.executable or "").strip()
             if not self.config.enabled:
                 raise AgentRuntimeError("ZCode runtime is disabled")
@@ -83,7 +90,7 @@ class _JsonRpcProcess:
             command = [executable, *self.config.arguments]
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
             try:
-                self.process = subprocess.Popen(
+                process = subprocess.Popen(
                     command,
                     cwd=self.config.working_directory or None,
                     stdin=subprocess.PIPE,
@@ -96,6 +103,9 @@ class _JsonRpcProcess:
                     shell=False,
                     creationflags=creationflags,
                 )
+                self.process = process
+                self._generation += 1
+                generation = self._generation
             except (OSError, ValueError) as exc:
                 self.process = None
                 raise AgentRuntimeError(
@@ -105,11 +115,13 @@ class _JsonRpcProcess:
             self._last_error = None
             self._reader_thread = threading.Thread(
                 target=self._read_stdout,
+                args=(process, generation),
                 name="sumika-zcode-jsonrpc",
                 daemon=True,
             )
             self._stderr_thread = threading.Thread(
                 target=self._read_stderr,
+                args=(process, generation),
                 name="sumika-zcode-stderr",
                 daemon=True,
             )
@@ -181,10 +193,13 @@ class _JsonRpcProcess:
             raise AgentRuntimeError("ZCode app-server notification could not be written", transport=True) from exc
 
     def respond(self, request_id: str, *, result: Any = None, error: dict[str, Any] | None = None) -> None:
-        self.start()
-        process = self.process
-        if process is None or process.stdin is None:
-            raise AgentRuntimeError("ZCode app-server stdin is unavailable", transport=True)
+        # Never start a replacement process for a response belonging to an old
+        # process.  Doing so could deliver an approval decision to an unrelated
+        # session after an app-server crash.
+        with self._state_lock:
+            process = self.process
+        if process is None or process.poll() is not None or process.stdin is None:
+            raise AgentRuntimeError("ZCode app-server connection is no longer alive", transport=True)
         body: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id}
         body["error" if error is not None else "result"] = error if error is not None else (result if result is not None else {})
         try:
@@ -235,14 +250,13 @@ class _JsonRpcProcess:
         if self.logger:
             self.logger.info("zcode app-server stopped")
 
-    def _read_stdout(self) -> None:
-        process = self.process
+    def _read_stdout(self, process: subprocess.Popen[str], generation: int) -> None:
         if process is None or process.stdout is None:
             return
         try:
             for line in process.stdout:
                 if len(line.encode("utf-8", errors="replace")) > _MAX_LINE_BYTES:
-                    self._fail_pending("response line too large")
+                    self._fail_pending("response line too large", process=process, generation=generation)
                     continue
                 try:
                     value = json.loads(line)
@@ -274,10 +288,9 @@ class _JsonRpcProcess:
                                 type(exc).__name__,
                             )
         finally:
-            self._fail_pending("stdout closed")
+            self._fail_pending("stdout closed", process=process, generation=generation)
 
-    def _read_stderr(self) -> None:
-        process = self.process
+    def _read_stderr(self, process: subprocess.Popen[str], generation: int) -> None:
         if process is None or process.stderr is None:
             return
         for line in process.stderr:
@@ -286,8 +299,18 @@ class _JsonRpcProcess:
                 # account or prompt data in diagnostics.  Keep only a bound.
                 self.logger.info("zcode app-server stderr line_length=%d", len(line))
 
-    def _fail_pending(self, detail: str) -> None:
+    def _fail_pending(
+        self,
+        detail: str,
+        *,
+        process: subprocess.Popen[str] | None = None,
+        generation: int | None = None,
+    ) -> None:
         with self._state_lock:
+            if process is not None and self.process is not process:
+                return
+            if generation is not None and generation != self._generation:
+                return
             self._last_error = detail
             pending = list(self._pending.values())
         for response_queue in pending:
@@ -295,6 +318,15 @@ class _JsonRpcProcess:
                 response_queue.put_nowait(_TransportFailure(detail))
             except queue.Full:
                 pass
+
+    def transport_info(self) -> dict[str, Any]:
+        with self._state_lock:
+            process = self.process
+            return {
+                "alive": bool(process is not None and process.poll() is None),
+                "returncode": process.poll() if process is not None else None,
+                "last_error": self._last_error,
+            }
 
 
 class ZCodeAgentRuntime(AgentRuntime):
@@ -339,13 +371,16 @@ class ZCodeAgentRuntime(AgentRuntime):
         self._transport = _JsonRpcProcess(self.config, logger=logger, on_message=self._on_message)
 
     def status(self) -> dict[str, Any]:
+        transport = self._transport.transport_info()
+        if not transport["alive"]:
+            self._reset_after_transport_loss()
         if not self.config.enabled:
             state = "disabled"
-        elif self._last_health and self._last_health.get("ok"):
+        elif transport["alive"] and self._last_health and self._last_health.get("ok"):
             state = "ready"
         else:
             state = "unavailable"
-        return {
+        result = {
             "runtime_id": self.runtime_id,
             "version": self.config.version,
             "state": state,
@@ -354,14 +389,20 @@ class ZCodeAgentRuntime(AgentRuntime):
             "configured": bool(self.config.executable),
             "managed": self.config.managed,
             "transport": "stdio-jsonrpc",
-            "process_alive": self._transport.alive,
+            "process_alive": transport["alive"],
             "profile_configured": bool(self.config.profile_dir),
             "runtime_capabilities": self.runtime_capabilities(),
         }
+        if state == "unavailable" and transport.get("last_error"):
+            result["transport_error"] = "ZCode app-server connection is unavailable"
+        if transport.get("returncode") is not None:
+            result["process_exit_code"] = transport["returncode"]
+        return result
 
     def health(self) -> dict[str, Any]:
         if not self.config.enabled:
             return {"ok": False, "state": "disabled", "error": "ZCode runtime is disabled"}
+        self._reset_after_transport_loss()
         try:
             self._initialize()
             try:
@@ -387,21 +428,28 @@ class ZCodeAgentRuntime(AgentRuntime):
     def diagnostics(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
         del params
         health = self.health()
+        ready = bool(health.get("ok") and self._transport.alive)
+        advertised = self._advertised_capabilities
         return {
             "checked_at": utc_now(),
             "runtime": {
                 "runtime_id": self.runtime_id,
                 "state": health.get("state"),
-                "ready": bool(health.get("ok")),
+                "ready": ready,
                 "transport": "stdio-jsonrpc",
                 "configured": bool(self.config.executable),
                 "profile_configured": bool(self.config.profile_dir),
+                "process_alive": self._transport.alive,
             },
             "capabilities": [
-                {"id": value, "available": True, "status": "declared"}
+                {
+                    "id": value,
+                    "available": bool(ready and (advertised is None or AgentCapability(value) in advertised)),
+                    "status": "available" if ready and (advertised is None or AgentCapability(value) in advertised) else "declared",
+                }
                 for value in self.runtime_capabilities()
             ],
-            "summary": {"available": len(self.runtime_capabilities())} if health.get("ok") else {"unavailable": 1},
+            "summary": {"available": len(self.runtime_capabilities())} if ready else {"unavailable": 1},
         }
 
     def create_session(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -634,12 +682,19 @@ class ZCodeAgentRuntime(AgentRuntime):
         request_id = _safe_text(params.get("rpcId") or params.get("rpc_id") or params.get("requestId"), 240)
         if not request_id:
             raise AgentRuntimeError("ZCode interaction id is required")
+        if not self._transport.alive:
+            self._reset_after_transport_loss()
+            raise AgentRuntimeError("ZCode interaction is no longer available", transport=True)
         with self._event_lock:
             if request_id not in self._pending_server_requests:
                 raise AgentRuntimeError("ZCode interaction is no longer pending")
             self._pending_server_requests.remove(request_id)
         approved = params.get("approved") is True
-        self._transport.respond(request_id, result={"approved": approved})
+        try:
+            self._transport.respond(request_id, result={"approved": approved})
+        except AgentRuntimeError:
+            self._reset_after_transport_loss()
+            raise
         return {"rpc_id": request_id, "accepted": True, "approved": approved}
 
     def interactions(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -691,18 +746,31 @@ class ZCodeAgentRuntime(AgentRuntime):
         with self._event_lock:
             self._pending_server_requests.clear()
 
+    def _reset_after_transport_loss(self) -> None:
+        if self._transport.alive:
+            return
+        self._initialized = False
+        self._advertised_capabilities = None
+        with self._event_lock:
+            self._pending_server_requests.clear()
+
     def _initialize(self) -> None:
         if self._initialized and self._transport.alive:
             return
-        value = self._transport.request(
-            "initialize",
-            {
-                "protocolVersion": "1",
-                "clientInfo": {"name": "sumika", "version": "2.x"},
-                "capabilities": {"events": True, "plans": True, "tools": True},
-            },
-            timeout=self.config.startup_timeout,
-        )
+        try:
+            value = self._transport.request(
+                "initialize",
+                {
+                    "protocolVersion": "1",
+                    "clientInfo": {"name": "sumika", "version": "2.x"},
+                    "capabilities": {"events": True, "plans": True, "tools": True},
+                },
+                timeout=self.config.startup_timeout,
+            )
+        except AgentRuntimeError:
+            self._initialized = False
+            self._advertised_capabilities = None
+            raise
         self._initialized = True
         self._advertised_capabilities = _capabilities_from(value)
         try:
