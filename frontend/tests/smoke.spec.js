@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { createServer } from "node:http";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 let providerStub;
@@ -168,6 +171,70 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("#chat-form .send-button")).toBeDisabled();
     await page.locator('.empty-chat [data-page="Modules"]').click();
     await expect(page.locator("body")).toContainText("自定义连接");
+  });
+
+  test("Developer manages metadata-only Skills and shows the MCP catalog", async ({ page }) => {
+    const skillRoot = await mkdtemp(join(tmpdir(), "sumika-skill-catalog-"));
+    const skillPath = join(skillRoot, "catalog-smoke", "SKILL.md");
+    await page.route("**/rpc", async (route) => {
+      const request = route.request();
+      if (request.method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      let body;
+      try { body = request.postDataJSON(); } catch { body = null; }
+      if (body?.method !== "agent.mcp.catalog") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            available: true,
+            status: "available",
+            catalog_available: true,
+            observation_source: "merged",
+            entries: [{
+              id: "github",
+              name: "github",
+              status: "available",
+              freshness: "live",
+              source: "runtime",
+              enabled: true,
+              tool_count: 1,
+              tools: [{ name: "search" }],
+            }],
+            server_count: 1,
+            tool_count: 1,
+          },
+        }),
+      });
+    });
+    try {
+      await mkdir(join(skillRoot, "catalog-smoke"), { recursive: true });
+      await writeFile(skillPath, "---\nname: Catalog Skill\ndescription: safe metadata\npermissions: read\n---\nsecret body must stay private\n", { encoding: "utf-8" });
+      await page.goto(baseUrl, { waitUntil: "networkidle" });
+      await page.locator('.nav-item[data-page="Developer"]').click();
+      await expect(page.locator("[data-agent-mcp-catalog-panel]")).toContainText("Runtime 在线");
+      await expect(page.locator('[data-agent-mcp-catalog-row="github"]')).toContainText("search");
+      await page.locator("#agent-skills-path").fill(join(skillRoot, "catalog-smoke"));
+      await page.locator("#discover-agent-skills").click();
+      const row = page.locator('[data-agent-skill-row]').filter({ hasText: "Catalog Skill" });
+      await expect(row).toContainText("待批准");
+      await expect(page.locator("body")).not.toContainText("secret body must stay private");
+      await page.once("dialog", (dialog) => dialog.accept());
+      await row.locator('[data-agent-skill-approve]').click();
+      await expect(row).toContainText("已批准");
+      await page.once("dialog", (dialog) => dialog.accept());
+      await row.locator('[data-agent-skill-revoke]').click();
+      await expect(row).toContainText("已撤销");
+    } finally {
+      await rm(skillRoot, { recursive: true, force: true });
+    }
   });
 
   test("顶部运行状态使用统一的扁平高度", async ({ page }) => {
@@ -387,7 +454,7 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".diagnostics-panel")).toContainText("核心诊断");
     await expect(page.locator(".diagnostics-panel")).toContainText("核心日志");
     await expect(page.locator(".diagnostics-panel")).toContainText("PID");
-    await expect(page.locator(".agent-diagnostics-panel")).toContainText("DSH 能力探针");
+    await expect(page.locator(".agent-diagnostics-panel")).toContainText("能力探针");
     await expect(page.locator(".agent-diagnostics-panel")).toContainText("MCP");
     await expect(page.locator("[data-agent-mcp-status]")).toHaveAttribute("data-agent-mcp-status", /disabled|unavailable|not-exposed/);
   });
@@ -411,6 +478,133 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".agent-status-line")).toContainText(/未连接|已关闭/);
     await expect(page.locator("#agent-send")).toBeDisabled();
     await expect(page.locator(".agent-panel").last()).toContainText("BrowserSkill");
+  });
+
+  test("Agent provider exposes the protected credential restart boundary", async ({ page }) => {
+    await page.route("**/api/agent/status", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          state: "ready",
+          ready: true,
+          runtime_id: "dsh",
+          runtime_capabilities: ["provider-bridge"],
+        }),
+      });
+    });
+    await page.route("**/api/agent/provider", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          state: "restart-required",
+          ready: false,
+          profile_id: "remote-provider",
+          route_id: "sumika-remote-provider",
+          model: "model-a",
+          profile: { name: "Remote provider" },
+          credential_mode: "launch-environment",
+          credential_source: "unconfigured",
+          credential_reload_required: true,
+          reason: "远程 Provider 凭据尚未由 Windows 安全存储加载到 DSH；重启 Sumika 后再同步。",
+        }),
+      });
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    const panel = page.locator(".agent-provider-panel");
+    await expect(panel).toHaveAttribute("data-agent-provider-state", "restart-required");
+    await expect(panel).toContainText("Windows 安全存储");
+    await expect(panel).toContainText("未加载");
+    await expect(panel).toContainText("需要重启");
+    await expect(panel.locator(".agent-provider-reason")).toContainText("重启 Sumika");
+    await expect(page.locator("#agent-provider-sync")).toBeDisabled();
+  });
+
+  test("task center projects Agent sessions as read-only runtime state", async ({ page }) => {
+    const sessionId = "projected-agent-session";
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, runtime_id: "dsh", runtime_capabilities: [] }),
+    }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "runtime-owned", ready: true, runtime_id: "dsh", profile: null }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      const snapshot = {
+        session_id: sessionId,
+        state: "completed",
+        title: "只读 Agent 任务",
+        plan: { active: false, steps: [] },
+        messages: [],
+        tools: [],
+        approvals: [],
+        artifacts: [{ type: "diff", label: "workspace diff" }],
+        timeline: [{ type: "turn/end", seq: 4 }],
+        stats: { turns: 1, steps: 1, decodeTokens: 20, llmMs: 250 },
+        token_usage: { uncachedInputTokens: 80, outputTokens: 20, cacheReadTokens: 12, cacheWriteTokens: 2 },
+        context: { projectedTokens: 120, contextWindow: 4096 },
+        context_breakdown: { systemTokens: 10, toolsTokens: 30, messageTokens: 80 },
+        turns: [{ id: "turn:1", turn: 1, status: "completed", mode: "execute", steps: 2, tools: 1, approvals: 1, artifacts: 1 }],
+      };
+      const result = {
+        "agent.sessions": { sessions: [{ id: sessionId, title: snapshot.title, state: "idle" }] },
+        "agent.session.snapshot": snapshot,
+        "agent.task.projections": {
+          available: true,
+          runtime_id: "dsh",
+          read_only: true,
+          errors: [],
+          tasks: [{
+            id: `agent:dsh:${sessionId}`,
+            title: snapshot.title,
+            status: "completed",
+            autonomy_level: "L2",
+            budget: {},
+            progress: 1,
+            result: { summary: "最近 Agent 回合已完成" },
+            turns: snapshot.turns,
+            permissions: [],
+            logs: [{ message: "turn/end" }],
+            artifacts: snapshot.artifacts,
+            source: "agent-runtime",
+            read_only: true,
+            runtime_id: "dsh",
+            session_id: sessionId,
+            metrics: { stats: snapshot.stats, token_usage: snapshot.token_usage, context: snapshot.context, context_breakdown: snapshot.context_breakdown },
+            workspace: { id: "ws-1", title: "Sumika", branch: "codex/test", dirty: true, checkpoint_count: 2 },
+          }],
+        },
+      }[body?.method];
+      if (result === undefined) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
+      });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Tasks"]').click();
+    const card = page.locator(`[data-task-open="agent:dsh:${sessionId}"]`).locator("..");
+    await expect(card).toContainText("只读 Agent 任务");
+    await card.locator("[data-task-open]").click();
+    await expect(card.locator('[data-task-read-only="true"]')).toBeVisible();
+    await expect(card).toContainText("20 输出 token");
+    await expect(card).toContainText("80 输入 token");
+    await expect(card).toContainText("缓存读 12");
+    await expect(card).toContainText("120 / 4,096 token");
+    await expect(card).toContainText("Runtime 未提供任务预算上限");
+    await expect(card).toContainText("2 checkpoint");
+    await expect(card).toContainText("最近回合");
+    await expect(card).toContainText("回合 1");
+    await expect(card.locator("[data-task-run], [data-task-status]")).toHaveCount(0);
+    await card.locator("[data-agent-task-session]").click();
+    await expect(page.locator(".page-layout h1")).toContainText("Agent 工作区");
+    await expect(page.locator(".agent-session-panel")).toContainText(sessionId);
   });
 
   test("Agent workspace hides capabilities not implemented by a portable runtime", async ({ page }) => {
@@ -470,11 +664,16 @@ test.describe("Sumika UI shell", () => {
     await page.locator("#agent-send").click();
     await expect.poll(() => submittedPrompt?.mode).toBe("execute");
     expect(submittedPrompt?.content).toEqual([{ type: "text", text: "执行最小任务" }]);
+    expect(submittedPrompt).not.toHaveProperty("leave_plan");
     await expect(page.locator(".agent-session-visible-title")).toHaveText("Minimal session");
     await expect(page.locator(".agent-session-panel .agent-subsection-heading strong", { hasText: "Plan" })).toHaveCount(0);
   });
 
   test("Agent workspace exposes a synced provider and submits a goal", async ({ page }) => {
+    const workspaceId = "workspace-provider";
+    const submittedPrompts = [];
+    let sessionCreated = false;
+    let sessionCapabilityRefreshes = 0;
     await page.route("**/api/agent/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -498,12 +697,22 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (body?.method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
+      if (body?.method === "agent.commands") {
+        if (body.params?.sessionId === "playwright-agent-session") sessionCapabilityRefreshes += 1;
+        const result = body.params?.sessionId === "playwright-agent-session"
+          ? { available: true, entries: [{ name: "plan", description: "Enter or leave plan mode" }] }
+          : { available: false, entries: [] };
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
+        return;
+      }
       const result = {
         "browser.profiles": { profiles: [] },
         "agent.skills": { skills: [{ id: "workspace" }] },
         "agent.mcp.inventory": { available: true, status: "observed", catalog_available: false, observation_source: "session-history", client_installed: true, client_version: "0.1.1-rc.2", server_count: 1, tool_count: 1, entries: [{ name: "github", tools: [{ name: "mcp__github__search" }] }] },
         "agent.subagents": { entries: [], parentAvailable: true },
-        "agent.commands": { available: true, entries: [{ name: "plan", description: "Enter or leave plan mode" }] },
+        "agent.workspaces": { workspaces: [{ id: workspaceId, title: "Provider test", path: "D:\\Repos\\sumika-provider-test", session_ids: sessionCreated ? ["playwright-agent-session"] : [] }], archived_session_ids: [] },
+        "agent.sessions": { sessions: sessionCreated ? [{ id: "playwright-agent-session", title: "Playwright Agent 会话", state: "idle" }] : [] },
         "browser.sessions": { sessions: [] },
         "agent.session.create": {
           sessionId: "playwright-agent-session",
@@ -513,16 +722,20 @@ test.describe("Sumika UI shell", () => {
           session_id: "playwright-agent-session",
           state: "idle",
           title: "Playwright Agent 会话",
-          plan: { active: false, pending: false, steps: [] },
+          plan: { active: true, pending: false, steps: [{ status: "done", title: "已生成计划" }] },
           messages: [],
           tools: [],
           approvals: [],
           artifacts: [],
           timeline: [],
-          stats: {},
+          stats: { turns: 1, steps: 2, ttftMs: 120, decodeMs: 900 },
+          token_usage: { uncachedInputTokens: 64, outputTokens: 18, cacheReadTokens: 8, cacheWriteTokens: 1 },
+          context: { projectedTokens: 256, pressureTokens: 192, contextWindow: 4096 },
+          context_breakdown: { systemTokens: 12, toolsTokens: 44, messageTokens: 200 },
         },
         "agent.session.prompt": { accepted: true },
       }[body?.method];
+      if (body?.method === "agent.session.prompt") submittedPrompts.push(body.params);
       if (result === undefined) {
         await route.continue();
         return;
@@ -537,18 +750,500 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".agent-status-line")).toContainText("DSH 已连接");
     await expect(page.locator(".agent-provider-panel")).toContainText("Playwright stub");
     await expect(page.locator(".agent-provider-panel")).toContainText("sumika-playwright-openai-stub-test");
-    await expect(page.locator(".agent-capability").filter({ hasText: "Commands" })).toContainText("plan");
+    await expect(page.locator("#agent-mode option[value='plan']")).toHaveCount(0);
     await expect(page.locator("[data-agent-mcp-inventory='observed']")).toContainText("mcp__github__search");
     await expect(page.locator("[data-agent-mcp-inventory='observed']")).toContainText("1 服务 · 1 工具");
+    await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
+    expect(sessionCreated).toBe(true);
+    await expect.poll(() => sessionCapabilityRefreshes).toBeGreaterThan(0);
     await expect(page.locator("body")).toContainText("Agent 会话已创建");
     await expect(page.locator(".agent-session-panel")).toContainText("当前会话");
+    await expect(page.locator("[data-agent-token-usage]")).toContainText("输入 64 token");
+    await expect(page.locator("[data-agent-token-usage]")).toContainText("输出 18 token");
+    await expect(page.locator("[data-agent-context-usage]")).toContainText("256 / 4,096 token");
+    await expect(page.locator("[data-agent-budget-status]")).toContainText("预算未提供");
+    await expect(page.locator(".agent-capability").filter({ hasText: "Commands" })).toContainText("plan");
+    await expect(page.locator("#agent-mode option[value='plan']")).toHaveCount(1);
+    await page.locator("#agent-mode").selectOption("plan");
+    await page.locator("#agent-prompt").fill("制定当前工作区计划");
+    await page.locator("#agent-send").click();
+    await expect.poll(() => submittedPrompts.length).toBe(1);
+    expect(submittedPrompts[0]).toMatchObject({ mode: "plan", workspaceId });
+    expect(submittedPrompts[0]).not.toHaveProperty("leave_plan");
+    await page.locator("#agent-mode").selectOption("execute");
     await page.locator("#agent-prompt").fill("检查当前工作区");
     await page.locator("#agent-send").click();
     await expect(page.locator("body")).toContainText("目标已提交");
+    await expect.poll(() => submittedPrompts.length).toBe(2);
+    expect(submittedPrompts[1]).toMatchObject({ mode: "execute", workspaceId, leave_plan: true });
+  });
+
+  test("Agent session history loads older pages without losing the current page", async ({ page }) => {
+    let olderCursor = null;
+    let currentPageRequests = 0;
+    const currentMessages = [
+      { role: "user", content: "当前目标", seq: 5 },
+      { role: "assistant", content: "当前回复", seq: 6 },
+    ];
+    const olderMessages = [
+      { role: "user", content: "更早目标", seq: 1 },
+      { role: "assistant", content: "更早回复", seq: 2 },
+    ];
+    await page.route("**/api/agent/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, runtime_id: "dsh", version: "0.1.1-rc.2", commit: "b150a551b8d4" }),
+    }));
+    await page.route("**/api/agent/provider", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, profile_id: "playwright-openai-stub", model: "playwright-model", profile: { name: "Playwright stub" } }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      const method = body?.method;
+      let result;
+      if (method === "agent.sessions") {
+        result = { sessions: [{ id: "history-session", title: "长会话", state: "idle", blank: false }] };
+      } else if (method === "agent.session.snapshot") {
+        if (body.params?.beforeSeq !== undefined) {
+          olderCursor = body.params.beforeSeq;
+          result = {
+            session_id: "history-session",
+            state: "idle",
+            title: "长会话",
+            plan: { active: false, pending: false, steps: [] },
+            messages: olderMessages,
+            tools: [],
+            approvals: [],
+            artifacts: [],
+            timeline: [],
+            stats: {},
+            has_more: false,
+            history_cursor: null,
+          };
+        } else {
+          currentPageRequests += 1;
+          result = {
+            session_id: "history-session",
+            state: "idle",
+            title: "长会话",
+            plan: { active: false, pending: false, steps: [] },
+            messages: currentMessages,
+            tools: [],
+            approvals: [],
+            artifacts: [],
+            timeline: [],
+            stats: {},
+            has_more: true,
+            history_cursor: 5,
+          };
+        }
+      } else if (method === "agent.workspaces") {
+        result = { workspaces: [], archived_session_ids: [] };
+      } else if (method === "agent.presets") {
+        result = { presets: [] };
+      } else if (method === "agent.session.queue") {
+        result = { session_id: "history-session", known: true, items: [], hidden_context_count: 0 };
+      } else if (method === "agent.session.models") {
+        result = { current: {}, routable: false, groups: [], failures: [] };
+      } else if (method === "agent.interactions") {
+        result = { interactions: [] };
+      } else if (method === "agent.skills" || method === "agent.subagents" || method === "agent.commands") {
+        result = { available: false, entries: [] };
+      } else if (method === "agent.mcp.inventory") {
+        result = { available: false, status: "not-observed", entries: [] };
+      } else if (method === "browser.profiles") {
+        result = { profiles: [] };
+      } else if (method === "browser.sessions") {
+        result = { sessions: [] };
+      } else if (method === "browser.downloads") {
+        result = { downloads: [] };
+      } else {
+        result = {};
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
+      });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator(".agent-session-panel")).toContainText("当前目标");
+    await expect(page.locator("#agent-load-older")).toBeVisible();
+    await page.locator("#agent-load-older").click();
+    await expect.poll(() => olderCursor).toBe(5);
+    await expect(page.locator(".agent-message-list")).toContainText("更早目标");
+    await expect(page.locator(".agent-message-list")).toContainText("当前目标");
+    await expect(page.locator("#agent-load-older")).toHaveCount(0);
+    const requestsBeforeRefresh = currentPageRequests;
+    await page.locator("#agent-refresh-session").click();
+    await expect.poll(() => currentPageRequests).toBeGreaterThan(requestsBeforeRefresh);
+    await expect(page.locator(".agent-message-list")).toContainText("更早目标");
+    await expect(page.locator(".agent-message-list")).toContainText("当前目标");
+    await expect(page.locator("#agent-load-older")).toHaveCount(0);
+  });
+
+  test("Workspace safety creates, previews, and restores an approved checkpoint", async ({ page }) => {
+    const workspacePath = "D:\\Repos\\sumika-workspace-test";
+    const privateArchiveRoot = "D:\\Private\\deprecated\\20260827T120000Z\\workspace-restore";
+    const checkpointId = `wschk-${"a".repeat(20)}`;
+    const preRestoreId = `wschk-${"c".repeat(20)}`;
+    const previewToken = "b".repeat(64);
+    let checkpointCreated = false;
+    let restoreParams = null;
+    const workspace = {
+      id: "ws-playwright",
+      title: "sumika-workspace-test",
+      path: workspacePath,
+      branch: "codex/workspace-test",
+      head: "1234567890abcdef",
+      dirty: true,
+      status_counts: { modified: 1 },
+      files: [{ path: "src/app.js", status: "modified" }],
+      file_count: 1,
+    };
+    const checkpoint = {
+      id: checkpointId,
+      name: "before Agent edit",
+      workspace_id: workspace.id,
+      branch: workspace.branch,
+      head: workspace.head,
+      created_at: "2026-08-27T12:00:00Z",
+      file_count: 4,
+      total_bytes: 128,
+    };
+    const diff = {
+      checkpoint,
+      workspace,
+      changed: true,
+      counts: { added: 0, removed: 1, changed: 1, changed_total: 2 },
+      files: [
+        { path: "src/app.js", status: "changed" },
+        { path: "scratch.txt", status: "removed" },
+      ],
+      preview_token: previewToken,
+    };
+
+    await page.route("**/api/agent/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "unavailable", ready: false, runtime_id: "dsh", runtime_capabilities: [] }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      let result;
+      if (body?.method === "workspace.inspect") {
+        result = { workspace, checkpoint_count: checkpointCreated ? 1 : 0 };
+      } else if (body?.method === "workspace.checkpoints") {
+        result = { checkpoints: checkpointCreated ? [checkpoint] : [] };
+      } else if (body?.method === "workspace.checkpoint.create") {
+        checkpointCreated = true;
+        result = { checkpoint };
+      } else if (body?.method === "workspace.checkpoint.diff") {
+        result = diff;
+      } else if (body?.method === "workspace.restore.preview") {
+        result = {
+          ...diff,
+          restore: {
+            archive_count: 1,
+            write_count: 2,
+            archive_paths: ["src/app.js"],
+            write_paths: ["src/app.js", "scratch.txt"],
+            preview_token: previewToken,
+          },
+        };
+      } else if (body?.method === "workspace.restore") {
+        restoreParams = body.params;
+        result = {
+          checkpoint,
+          pre_restore_checkpoint: { ...checkpoint, id: preRestoreId, name: "pre-restore" },
+          diff,
+          archive: {
+            root: privateArchiveRoot,
+            entries: [{ original_path: "src/app.js", archive_path: "deprecated/20260827T120000Z/workspace-restore/src/app.js" }],
+          },
+          restored: true,
+        };
+      } else {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
+      });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator("#workspace-runtime-path").fill(workspacePath);
+    await page.locator("#workspace-runtime-inspect").click();
+    await expect(page.locator(".workspace-runtime-panel")).toContainText("1 项变更");
+
+    await page.locator("#workspace-runtime-name").fill("before Agent edit");
+    await page.locator("#workspace-runtime-create").click();
+    await expect(page.locator(".workspace-runtime-notice")).toContainText("checkpoint 已创建");
+    await expect(page.locator(`[data-workspace-checkpoint="${checkpointId}"]`)).toContainText("before Agent edit");
+    await expect(page.locator(".workspace-runtime-diff")).toContainText("src/app.js");
+    await expect(page.locator(".workspace-runtime-diff")).toContainText("scratch.txt");
+
+    await page.locator(`[data-workspace-preview="${checkpointId}"]`).click();
+    await expect(page.locator(".workspace-restore-preview")).toContainText("将归档 1 项，写回 2 项");
+
+    const dialogTypes = [];
+    page.on("dialog", async (dialog) => {
+      dialogTypes.push(dialog.type());
+      await dialog.accept(dialog.type() === "prompt" ? checkpointId : undefined);
+    });
+    await page.locator(`[data-workspace-restore="${checkpointId}"]`).click();
+    await expect.poll(() => restoreParams).not.toBeNull();
+    expect(restoreParams).toMatchObject({
+      path: workspacePath,
+      checkpoint_id: checkpointId,
+      preview_token: previewToken,
+      approved: true,
+      confirm_checkpoint: checkpointId,
+    });
+    expect(dialogTypes).toEqual(["confirm", "prompt"]);
+    await expect(page.locator(".workspace-runtime-notice")).toContainText(`恢复前状态保存为 ${preRestoreId}`);
+    await expect(page.locator("body")).not.toContainText(privateArchiveRoot);
+  });
+
+  test("Workspace safety previews a linked worktree and an exact local commit", async ({ page }) => {
+    const sourcePath = "D:\\Repos\\sumika-source";
+    const destinationPath = "D:\\Worktrees\\sumika-agent-daily";
+    const branch = "codex/agent-daily";
+    const checkpointId = `wschk-${"e".repeat(20)}`;
+    const worktreeToken = "f".repeat(64);
+    const commitToken = "1".repeat(64);
+    let linkedCreated = false;
+    let committed = false;
+    let worktreeCreateParams = null;
+    let commitParams = null;
+    const source = {
+      id: "ws-source",
+      title: "sumika-source",
+      path: sourcePath,
+      branch: "codex/dsh-agent-runtime",
+      head: "a".repeat(40),
+      kind: "primary",
+      dirty: true,
+      total_file_count: 2,
+      file_count: 2,
+      status_counts: { modified: 2 },
+      files: [{ path: "frontend/main.js", status: "modified" }],
+      files_truncated: true,
+    };
+    const linked = {
+      id: "ws-linked",
+      title: "sumika-agent-daily",
+      path: destinationPath,
+      branch,
+      head: committed ? "b".repeat(40) : source.head,
+      kind: "linked",
+      dirty: !committed,
+      total_file_count: committed ? 0 : 1,
+      file_count: committed ? 0 : 1,
+      status_counts: committed ? {} : { modified: 1 },
+      files: committed ? [] : [{ path: "frontend/main.js", status: "modified" }],
+    };
+    const checkpoint = {
+      id: checkpointId,
+      name: "Agent execute baseline",
+      workspace_id: linked.id,
+      branch,
+      head: source.head,
+      baseline_clean: true,
+      created_at: "2026-08-28T10:00:00Z",
+      file_count: 8,
+      total_bytes: 512,
+    };
+    const diff = {
+      checkpoint,
+      workspace: linked,
+      changed: true,
+      counts: { added: 0, removed: 0, changed: 1, changed_total: 1 },
+      files: [{ path: "frontend/main.js", status: "changed" }],
+      files_truncated: false,
+      preview_token: "2".repeat(64),
+    };
+
+    await page.route("**/api/agent/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "unavailable", ready: false, runtime_id: "dsh", runtime_capabilities: [] }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      const path = body?.params?.path;
+      let result;
+      if (body?.method === "workspace.inspect") {
+        result = { workspace: path === destinationPath ? { ...linked, head: committed ? "b".repeat(40) : source.head, dirty: !committed } : source, checkpoint_count: path === destinationPath ? 1 : 0 };
+      } else if (body?.method === "workspace.checkpoints") {
+        result = { checkpoints: path === destinationPath ? [checkpoint] : [] };
+      } else if (body?.method === "workspace.checkpoint.diff") {
+        result = diff;
+      } else if (body?.method === "workspace.worktree.preview") {
+        result = { source, worktree: linked, preview_token: worktreeToken, requires_approval: true, includes_uncommitted_changes: false };
+      } else if (body?.method === "workspace.worktree.create") {
+        worktreeCreateParams = body.params;
+        linkedCreated = true;
+        result = { source, worktree: linked, created: true };
+      } else if (body?.method === "workspace.commit.preview") {
+        result = {
+          ...diff,
+          patch: "diff --git a/frontend/main.js b/frontend/main.js\n-old\n+after\n",
+          patch_truncated: false,
+          patch_omitted_files: [],
+          message_summary: "Implement daily Agent flow",
+          message_sha256: "3".repeat(64),
+          preview_token: commitToken,
+          requires_approval: true,
+          hooks: "disabled",
+          signing: "disabled",
+        };
+      } else if (body?.method === "workspace.commit") {
+        commitParams = body.params;
+        committed = true;
+        result = { workspace: { ...linked, head: "b".repeat(40), dirty: false }, checkpoint, commit: "b".repeat(40), branch, file_count: 1, files: ["frontend/main.js"], pushed: false };
+      } else {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator("#workspace-runtime-path").fill(sourcePath);
+    await page.locator("#workspace-runtime-inspect").click();
+    await expect(page.locator(".workspace-runtime-panel")).toContainText("2 项变更");
+    await page.locator("#workspace-worktree-destination").fill(destinationPath);
+    await page.locator("#workspace-worktree-branch").fill(branch);
+    await page.locator("#workspace-worktree-preview").click();
+    await expect(page.locator(".workspace-operation-preview")).toContainText("不会进入新 worktree");
+
+    const dialogTypes = [];
+    page.on("dialog", async (dialog) => {
+      dialogTypes.push(dialog.type());
+      if (dialog.type() === "prompt") {
+        await dialog.accept(dialog.message().includes("完整目标目录") ? destinationPath : branch);
+      } else {
+        await dialog.accept();
+      }
+    });
+    await page.locator("#workspace-worktree-create").click();
+    await expect.poll(() => linkedCreated).toBe(true);
+    expect(worktreeCreateParams).toMatchObject({
+      source_path: sourcePath,
+      destination_path: destinationPath,
+      branch,
+      approved: true,
+      confirm_branch: branch,
+      confirm_destination: destinationPath,
+      preview_token: worktreeToken,
+    });
+    await expect(page.locator("#workspace-runtime-path")).toHaveValue(destinationPath);
+
+    await page.locator("#workspace-commit-message").fill("Implement daily Agent flow");
+    await page.locator("#workspace-commit-preview").click();
+    await expect(page.locator(".workspace-patch")).toContainText("+after");
+    await expect(page.locator(".workspace-runtime-operation").last()).toContainText("不运行 hooks · 不签名 · 不 push");
+    await page.locator("#workspace-commit-create").click();
+    await expect.poll(() => commitParams).not.toBeNull();
+    expect(commitParams).toMatchObject({
+      path: destinationPath,
+      checkpoint_id: checkpointId,
+      message: "Implement daily Agent flow",
+      approved: true,
+      confirm_branch: branch,
+      preview_token: commitToken,
+    });
+    expect(dialogTypes).toEqual(["confirm", "prompt", "prompt", "confirm", "prompt"]);
+    await expect(page.locator(".workspace-runtime-notice")).toContainText("未 push");
+  });
+
+  test("workspace-bound Execute creates a protection checkpoint before the Agent turn", async ({ page }) => {
+    const workspacePath = "D:\\Repos\\sumika-daily-work";
+    const workspaceId = "workspace-daily";
+    const sessionId = "session-daily";
+    const checkpointId = `wschk-${"d".repeat(20)}`;
+    let registered = false;
+    let created = false;
+    let createParams = null;
+    let promptParams = null;
+
+    await page.route("**/api/agent/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "ready",
+        ready: true,
+        runtime_id: "dsh",
+        version: "0.1.1-rc.2",
+        runtime_capabilities: ["workspaces"],
+      }),
+    }));
+    await page.route("**/api/agent/provider", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "runtime-owned", ready: true }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      let result;
+      if (body?.method === "agent.workspace.create") {
+        registered = true;
+        result = { created: true, workspace: { id: workspaceId, title: "Daily", path: workspacePath, session_ids: [] } };
+      } else if (body?.method === "agent.workspaces") {
+        result = {
+          workspaces: registered
+            ? [{ id: workspaceId, title: "Daily", path: workspacePath, session_ids: created ? [sessionId] : [] }]
+            : [],
+          archived_session_ids: [],
+        };
+      } else if (body?.method === "agent.session.create") {
+        createParams = body.params;
+        created = true;
+        result = { sessionId };
+      } else if (body?.method === "agent.session.prompt") {
+        promptParams = body.params;
+        result = {
+          id: "turn-daily",
+          accepted: true,
+          workspace_checkpoint: { id: checkpointId, name: "Agent execute" },
+        };
+      } else {
+        result = {
+          "browser.profiles": { profiles: [] },
+          "browser.sessions": { sessions: [] },
+          "agent.sessions": { sessions: created ? [{ id: sessionId, title: "Daily", state: "idle" }] : [] },
+          "agent.session.snapshot": { session_id: sessionId, state: "idle", title: "Daily", plan: { active: false, pending: false, steps: [] }, messages: [], tools: [], approvals: [], artifacts: [], timeline: [], stats: {} },
+        }[body?.method];
+      }
+      if (result === undefined) return route.continue();
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator("#agent-create-session")).toBeDisabled();
+    await expect(page.locator("#agent-mode option[value='readonly']")).toHaveCount(0);
+    await page.locator("#agent-prompt").fill("尚未绑定 Workspace");
+    await expect(page.locator("#agent-send")).toBeDisabled();
+
+    await page.locator("#agent-workspace-path").fill(workspacePath);
+    await page.locator("#agent-register-workspace").click();
+    await expect(page.locator("#agent-create-session")).toBeEnabled();
+    await page.locator("#agent-create-session").click();
+    expect(createParams).toMatchObject({ workspaceId });
+
+    await page.locator("#agent-prompt").fill("修改并验证项目");
+    await page.locator("#agent-send").click();
+    await expect.poll(() => promptParams?.workspaceId).toBe(workspaceId);
+    await expect(page.locator(".agent-notice")).toContainText("执行前 checkpoint");
+    expect(promptParams).toMatchObject({ sessionId, workspaceId, mode: "execute" });
   });
 
   test("Agent preset lifecycle, Goal revision, and Subagent controls use the pinned DSH contract", async ({ page }) => {
+    const workspaceId = "workspace-preset";
     let createdParams;
     let selectedPreset;
     let goal;
@@ -556,7 +1251,11 @@ test.describe("Sumika UI shell", () => {
     let subagentPrompt;
     let copiedPreset;
     let openedPreset;
+    let validatedPreset;
     let removedPreset;
+    let mcpPreviewParams;
+    let mcpApplyParams;
+    const mcpConfigurations = new Map();
     const presets = [
       { id: "standard", name: "标准", trust: "system", is_default: true },
       { id: "advanced", name: "高级", trust: "user" },
@@ -588,11 +1287,70 @@ test.describe("Sumika UI shell", () => {
       } else if (method === "agent.preset.open") {
         openedPreset = body.params.agentPreset;
         result = { agent_preset: body.params.agentPreset, opened: true };
+      } else if (method === "agent.preset.validate") {
+        validatedPreset = body.params;
+        result = { agent_preset: body.params.agentPreset, mountable: true, validation_session_archived: true };
       } else if (method === "agent.preset.remove") {
         removedPreset = body.params;
         const index = presets.findIndex((preset) => preset.id === body.params.agentPreset);
         if (index >= 0) presets.splice(index, 1);
         result = { agent_preset: body.params.agentPreset, removed: true };
+      } else if (method === "agent.mcp.configurations") {
+        result = {
+          agent_preset: body.params.agentPreset,
+          configurations: mcpConfigurations.get(body.params.agentPreset) || [],
+          client_installed: true,
+          client_version: "0.1.1-rc.2",
+          credential_fields_supported: true,
+          credential_storage: "secure-store",
+          supported_transports: ["stdio", "streamable-http"],
+        };
+      } else if (method === "agent.mcp.configuration.preview") {
+        mcpPreviewParams = body.params;
+        const credential = body.params.configuration.credential;
+        result = {
+          agent_preset: body.params.agentPreset,
+          server_name: body.params.configuration.server_name,
+          action: body.params.action,
+          change: "create",
+          configuration: credential ? { ...body.params.configuration, enabled: false } : body.params.configuration,
+          preview_token: "mcp-preview-contract",
+          requires_approval: true,
+          credential_change: credential ? "create" : "none",
+          credential_requires_value: Boolean(credential),
+          restart_required: Boolean(credential),
+          deferred_enable: Boolean(credential),
+          client_installed: true,
+          client_version: "0.1.1-rc.2",
+        };
+      } else if (method === "agent.mcp.configuration.apply") {
+        mcpApplyParams = body.params;
+        const credential = mcpPreviewParams.configuration.credential;
+        mcpConfigurations.set(body.params.agentPreset, [{
+          ...mcpPreviewParams.configuration,
+          enabled: credential ? false : mcpPreviewParams.configuration.enabled,
+          ...(credential ? {
+            credential: {
+              target: credential.target,
+              prefix: credential.prefix,
+              configured: true,
+              loaded_at_launch: false,
+              restart_required: true,
+            },
+          } : {}),
+        }]);
+        result = {
+          agent_preset: body.params.agentPreset,
+          server_name: mcpPreviewParams.configuration.server_name,
+          change: "create",
+          applied: true,
+          mountable: true,
+          validation_session_archived: true,
+          backup_retained: true,
+          credential_changed: Boolean(credential),
+          restart_required: Boolean(credential),
+          deferred_enable: Boolean(credential),
+        };
       } else if (method === "agent.goal.create") {
         goal = { ref: { id: "goal-contract", revision: 0 }, objective: body.params.objective, phase: "active", max_goal_rounds: body.params.maxGoalRounds };
         result = { ref: goal.ref };
@@ -623,7 +1381,7 @@ test.describe("Sumika UI shell", () => {
       } else if (method === "agent.session.queue") {
         result = { session_id: "agent-contract", known: true, items: [], hidden_context_count: 0 };
       } else if (method === "agent.workspaces") {
-        result = { workspaces: [], archived_session_ids: [] };
+        result = { workspaces: [{ id: workspaceId, title: "Preset test", path: "D:\\Repos\\sumika-preset-test", session_ids: createdParams ? ["agent-contract"] : [] }], archived_session_ids: [] };
       } else if (method === "agent.interactions") {
         result = { interactions: [] };
       } else if (method === "agent.skills") {
@@ -642,9 +1400,11 @@ test.describe("Sumika UI shell", () => {
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
     await expect(page.locator(".agent-session-panel")).toContainText("契约测试会话");
     expect(createdParams.agentPreset).toBe("standard");
+    expect(createdParams.workspaceId).toBe(workspaceId);
 
     await page.locator("#agent-preset-select").selectOption("advanced");
     await expect(page.locator(".agent-notice")).toContainText("已选择 Preset");
@@ -658,9 +1418,60 @@ test.describe("Sumika UI shell", () => {
     expect(copiedPreset).toEqual({ from: "standard", agentPreset: "sumika-work", name: "Sumika 工作" });
     await expect(page.locator("#agent-preset-select")).toHaveValue("advanced");
     await expect(page.locator('[data-agent-preset-row="sumika-work"]')).toContainText("Sumika 工作");
+    await page.locator('[data-agent-preset-validate="sumika-work"]').click();
+    await expect(page.locator(".agent-notice")).toContainText("挂载已验证");
+    await expect(page.locator('[data-agent-preset-row="sumika-work"]')).toContainText("挂载已验证");
+    expect(validatedPreset).toEqual({ agentPreset: "sumika-work", workspaceId });
     await page.locator('[data-agent-preset-open="sumika-work"]').click();
     await expect(page.locator(".agent-notice")).toContainText("已打开用户 Preset 目录");
     expect(openedPreset).toBe("sumika-work");
+    await expect(page.locator("#agent-mcp-preset")).toHaveValue("sumika-work");
+    await page.locator('#agent-mcp-form input[name="server_name"]').fill("filesystem");
+    await page.locator('#agent-mcp-form input[name="command"]').fill("npx");
+    await page.locator('#agent-mcp-form textarea[name="args"]').fill('["-y","@modelcontextprotocol/server-filesystem","D:\\\\Code"]');
+    await page.locator('#agent-mcp-form input[name="enabled"]').check();
+    await page.locator('#agent-mcp-form button[type="submit"]').click();
+    await expect(page.locator("[data-agent-mcp-preview]")).toContainText("filesystem · 新增");
+    expect(mcpPreviewParams).toEqual({
+      agentPreset: "sumika-work",
+      action: "upsert",
+      configuration: {
+        server_name: "filesystem",
+        transport: "stdio",
+        enabled: true,
+        tool_call_timeout_ms: 60000,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "D:\\Code"],
+      },
+    });
+    await page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#agent-mcp-apply").click();
+    await expect(page.locator('[data-agent-mcp-row="filesystem"]')).toContainText("已启用");
+    expect(mcpApplyParams).toEqual({
+      agentPreset: "sumika-work",
+      previewToken: "mcp-preview-contract",
+      approved: true,
+      confirm_agent_preset: "sumika-work",
+    });
+    expect(JSON.stringify(mcpPreviewParams)).not.toContain("api_key");
+    expect(JSON.stringify(mcpPreviewParams)).not.toContain("headers");
+    await page.locator('[data-agent-mcp-edit="filesystem"]').click();
+    await page.locator('#agent-mcp-credential-enabled').check();
+    await page.locator('#agent-mcp-form input[name="credential_target"]').fill("GITHUB_TOKEN");
+    await page.locator('#agent-mcp-form input[name="credential_value"]').fill("playwright-mcp-secret");
+    await page.locator('#agent-mcp-form button[type="submit"]').click();
+    await expect(page.locator("[data-agent-mcp-preview]")).toContainText("需要随批准提交新密钥");
+    expect(mcpPreviewParams.configuration.credential).toEqual({
+      target: "GITHUB_TOKEN",
+      prefix: "",
+      rotate: false,
+    });
+    expect(JSON.stringify(mcpPreviewParams)).not.toContain("playwright-mcp-secret");
+    await page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#agent-mcp-apply").click();
+    expect(mcpApplyParams.credentialValue).toBe("playwright-mcp-secret");
+    await expect(page.locator('[data-agent-mcp-row="filesystem"]')).toContainText("凭据待重启");
+    await expect(page.locator("body")).not.toContainText("playwright-mcp-secret");
     await expect(page.locator('[data-agent-preset-remove="standard"]')).toHaveCount(0);
     const deletionDialogs = [];
     const handleDeletionDialog = async (dialog) => {
@@ -772,7 +1583,111 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".agent-session-row")).toHaveCount(2);
   });
 
+  test("Agent restores the selected runtime session and its scoped controls after reload", async ({ page }) => {
+    const recentSessionId = "session-recent";
+    const selectedSessionId = "session-selected";
+    const workspaceId = "workspace-continuity";
+    const scopedCalls = [];
+    const snapshotRequests = [];
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "ready",
+        ready: true,
+        runtime_id: "dsh",
+        version: "0.1.1-rc.2",
+        runtime_capabilities: ["workspaces", "history", "models", "queue", "subagents", "commands", "skills", "interactions", "plan"],
+      }),
+    }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "runtime-owned", ready: true }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      const method = body?.method;
+      if (["agent.skills", "agent.commands", "agent.interactions", "agent.session.snapshot"].includes(method)) {
+        scopedCalls.push({ method, params: body.params });
+      }
+      if (method === "agent.session.snapshot") snapshotRequests.push(body.params);
+      const sessionId = body?.params?.sessionId || selectedSessionId;
+      const title = sessionId === recentSessionId ? "最近会话" : "恢复会话";
+      const result = {
+        "browser.profiles": { profiles: [] },
+        "browser.sessions": { sessions: [] },
+        "browser.downloads": { downloads: [] },
+        "agent.workspaces": {
+          workspaces: [{
+            id: workspaceId,
+            title: "Continuity",
+            path: "D:\\Repos\\sumika-continuity",
+            session_ids: [recentSessionId, selectedSessionId],
+          }],
+          archived_session_ids: [],
+        },
+        "agent.sessions": {
+          sessions: [
+            { id: recentSessionId, title: "最近会话", state: "idle", updated_at: 2 },
+            { id: selectedSessionId, title: "恢复会话", state: "idle", updated_at: 1 },
+          ],
+        },
+        "agent.skills": { available: true, skills: [{ id: "workspace" }] },
+        "agent.commands": { available: true, entries: [{ name: "plan" }] },
+        "agent.interactions": { interactions: [] },
+        "agent.session.snapshot": {
+          session_id: sessionId,
+          state: "idle",
+          title,
+          plan: { active: false, pending: false, steps: [] },
+          messages: [],
+          tools: [],
+          approvals: [],
+          artifacts: [],
+          timeline: [],
+          stats: {},
+        },
+        "agent.session.models": {
+          current: { provider: "runtime", model: "daily" },
+          routable: true,
+          groups: [{ id: "runtime", name: "Runtime", models: [{ id: "daily", name: "Daily" }] }],
+          failures: [],
+        },
+        "agent.session.queue": { session_id: sessionId, known: true, items: [], hidden_context_count: 0 },
+        "agent.subagent.list": { entries: [] },
+      }[method] || {};
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
+      });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator(".agent-session-visible-title")).toHaveText("最近会话");
+    await page.locator(`[data-agent-session-select="${selectedSessionId}"]`).click();
+    await expect(page.locator(".agent-session-visible-title")).toHaveText("恢复会话");
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("sumika.agent.active-session.v1")))).toEqual({
+      runtime_id: "dsh",
+      session_id: selectedSessionId,
+    });
+
+    scopedCalls.length = 0;
+    snapshotRequests.length = 0;
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator(`[data-agent-session-select="${selectedSessionId}"]`)).toHaveClass(/active/);
+    await expect(page.locator(".agent-session-visible-title")).toHaveText("恢复会话");
+    await expect(page.locator('#agent-mode option[value="plan"]')).toHaveCount(1);
+    await expect(page.locator(".agent-workspace-current")).toContainText("Continuity");
+    await expect.poll(() => scopedCalls.some((call) => call.method === "agent.commands" && call.params.sessionId === selectedSessionId)).toBe(true);
+    await expect.poll(() => scopedCalls.some((call) => call.method === "agent.skills" && call.params.sessionId === selectedSessionId)).toBe(true);
+    await expect.poll(() => scopedCalls.some((call) => call.method === "agent.interactions" && call.params.sessionId === selectedSessionId)).toBe(true);
+    await expect.poll(() => snapshotRequests.some((params) => params.sessionId === selectedSessionId && params.maxMessages === 8)).toBe(true);
+  });
+
   test("Agent shows safe tool presentation and edits the transient DSH queue", async ({ page }) => {
+    const workspaceId = "workspace-queue";
+    let sessionCreated = false;
     let updatedQueue;
     await page.route("**/api/agent/status", async (route) => route.fulfill({
       contentType: "application/json",
@@ -784,12 +1699,14 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (body?.method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       const result = {
         "browser.profiles": { profiles: [] },
         "agent.skills": { skills: [] },
         "agent.mcp.inventory": { available: false, status: "not-observed", catalog_available: false, observation_source: "session-history", client_installed: true, entries: [] },
         "agent.subagents": { entries: [] },
         "agent.commands": { available: true, entries: [{ name: "plan" }] },
+        "agent.workspaces": { workspaces: [{ id: workspaceId, title: "Queue test", path: "D:\\Repos\\sumika-queue-test", session_ids: sessionCreated ? ["queue-session"] : [] }], archived_session_ids: [] },
         "agent.session.create": { sessionId: "queue-session", provider: { route_id: "sumika-test", model: "model-a" } },
         "agent.sessions": { sessions: [{ id: "queue-session", title: "队列会话", state: "idle" }] },
         "agent.session.snapshot": {
@@ -817,7 +1734,9 @@ test.describe("Sumika UI shell", () => {
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
+    expect(sessionCreated).toBe(true);
     await expect(page.locator(".agent-queue-subsection")).toContainText("检查文档");
     await expect(page.locator(".agent-tool-card")).toContainText("读取文件");
     await expect(page.locator(".agent-artifact-row")).toContainText("修改文件");
@@ -907,6 +1826,110 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".question-interaction")).toHaveCount(0);
   });
 
+  test("Agent renders Plan Review with DSH labels and submits the exact choice", async ({ page }) => {
+    let answered = false;
+    let answerBody;
+    let cancelBody;
+    const workspaceId = "plan-workspace";
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, runtime_id: "dsh", version: "0.1.1-rc.2", commit: "b150a551b8d4", runtime_capabilities: ["interactions", "plan", "commands", "workspaces"] }),
+    }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "runtime-owned", ready: true, profile_id: "playwright-openai-stub", model: "playwright-model" }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body?.method === "agent.interactions") {
+        const interactions = answered ? [] : [{
+          id: "plan-review-playwright",
+          kind: "question",
+          session_id: "playwright-plan-session",
+          plan_review: { approve: "Approve", keep_planning: "Keep planning" },
+          questions: [{
+            id: "plan-review",
+            header: "Plan review",
+            question: "Approve this plan and leave plan mode?",
+            detail: "# Update Sumika\n\n1. Run the focused tests.\n2. Review the diff.",
+            options: [
+              { label: "Approve", description: "Leave plan mode and execute." },
+              { label: "Keep planning", description: "Revise the plan." },
+            ],
+            intent: { kind: "plan-review", approve: "Approve" },
+          }],
+        }];
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { interactions } }) });
+        return;
+      }
+      if (body?.method === "agent.question.respond") {
+        answerBody = body;
+        answered = true;
+        const approved = body.params?.answer?.answers?.[0]?.selected?.[0] === "Approve";
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, kind: "question", ...(approved ? { workspace_checkpoint: { id: "checkpoint-plan" } } : {}) } }) });
+        return;
+      }
+      if (body?.method === "agent.question.cancel") {
+        cancelBody = body;
+        answered = true;
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, kind: "question", cancelled: true } }) });
+        return;
+      }
+      const result = {
+        "browser.profiles": { profiles: [] },
+        "agent.skills": { skills: [] },
+        "agent.mcp.inventory": { available: false, status: "not-observed", catalog_available: false, observation_source: "session-history", client_installed: true, entries: [] },
+        "agent.subagents": { entries: [] },
+        "agent.commands": { available: true, entries: [{ name: "plan" }] },
+        "agent.workspaces": { workspaces: [{ id: workspaceId, title: "Plan", path: "D:\\Repos\\plan", session_ids: ["playwright-plan-session"] }], archived_session_ids: [] },
+        "agent.sessions": { sessions: [{ id: "playwright-plan-session", title: "计划会话", state: "idle" }] },
+        "agent.session.snapshot": { session_id: "playwright-plan-session", state: "idle", title: "计划会话", plan: { active: true, pending: true, steps: [] }, messages: [], tools: [], approvals: [], artifacts: [], timeline: [], stats: {} },
+      }[body?.method];
+      if (result === undefined) {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator(".plan-review-interaction")).toContainText("Update Sumika");
+    await expect(page.locator('[data-agent-plan-review-action="approve"]')).toContainText("批准并执行");
+    await expect(page.locator('[data-agent-plan-review-action="keep-planning"]')).toContainText("继续规划");
+    await expect(page.locator('[data-agent-plan-review-action="cancel"]')).toContainText("直接讨论");
+    await page.locator('[data-agent-plan-review-action="keep-planning"]').click();
+    await expect(page.locator(".agent-notice")).toContainText("继续规划");
+    await expect.poll(() => answerBody?.params?.answer?.answers?.[0]?.selected).toEqual(["Keep planning"]);
+    await expect(page.locator(".plan-review-interaction")).toHaveCount(0);
+
+    answered = false;
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator('[data-agent-plan-review-action="cancel"]').click();
+    await expect(page.locator(".agent-notice")).toContainText("保持 Plan 模式");
+    await expect.poll(() => cancelBody?.params).toEqual({ rpcId: "plan-review-playwright", sessionId: "playwright-plan-session" });
+    await expect(page.locator(".plan-review-interaction")).toHaveCount(0);
+
+    answered = false;
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator('[data-agent-plan-review-feedback]').fill("先补充边界测试，再继续规划");
+    await page.locator('[data-agent-plan-review-action="keep-planning"]').click();
+    await expect.poll(() => answerBody?.params?.answer?.answers?.[0]).toEqual({
+      id: "plan-review",
+      selected: [],
+      custom: "先补充边界测试，再继续规划",
+    });
+
+    answered = false;
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator('[data-agent-plan-review-action="approve"]').click();
+    await expect.poll(() => answerBody?.params?.workspaceId).toBe(workspaceId);
+    await expect.poll(() => answerBody?.params?.answer?.answers?.[0]?.selected).toEqual(["Approve"]);
+    await expect(page.locator(".agent-notice")).toContainText("checkpoint checkpoint-plan");
+  });
+
   test("Agent session search and rename fail closed and escape titles", async ({ page }) => {
     let searchQuery = "";
     let searchDisabled = false;
@@ -976,6 +1999,8 @@ test.describe("Sumika UI shell", () => {
 
   test("Agent image attachments use content blocks and keep image data out of the UI audit", async ({ page }) => {
     const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const workspaceId = "workspace-image";
+    let sessionCreated = false;
     let promptBody;
     let includeAttachment = false;
     let attachmentRead = false;
@@ -990,6 +2015,7 @@ test.describe("Sumika UI shell", () => {
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
       const method = body?.method;
+      if (method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       if (method === "agent.session.prompt") {
         promptBody = body;
         includeAttachment = true;
@@ -1016,13 +2042,15 @@ test.describe("Sumika UI shell", () => {
         "agent.session.snapshot": { session_id: "image-session", state: "idle", title: "图片会话", plan: { active: false, pending: false, steps: [] }, messages: includeAttachment ? [{ role: "user", content: "图片目标", attachments: [{ attachment_id: "image-1", media_type: "image/png", name: "tiny.png" }] }] : [], tools: [], approvals: [], artifacts: [], timeline: [], stats: {} },
         "agent.session.queue": { session_id: "image-session", known: true, items: [], hidden_context_count: 0 },
         "agent.session.models": { current: { provider: "sumika-test", model: "model-a" }, routable: true, groups: [{ id: "sumika-test", name: "Sumika test", models: [{ id: "model-a", name: "Model A" }] }] },
-        "agent.workspaces": { workspaces: [], archived_session_ids: [] },
+        "agent.workspaces": { workspaces: [{ id: workspaceId, title: "Image test", path: "D:\\Repos\\sumika-image-test", session_ids: sessionCreated ? ["image-session"] : [] }], archived_session_ids: [] },
       }[method] || {};
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
+    expect(sessionCreated).toBe(true);
     await page.locator("#agent-image-input").setInputFiles({ name: "tiny.png", mimeType: "image/png", buffer: Buffer.from(tinyPng, "base64") });
     await expect(page.locator(".agent-attachment-chip")).toContainText("tiny.png");
     await page.locator("#agent-send").click();
@@ -1036,6 +2064,73 @@ test.describe("Sumika UI shell", () => {
     await page.locator("#agent-image-input").setInputFiles({ name: "bad.txt", mimeType: "text/plain", buffer: Buffer.from("not an image") });
     await expect(page.locator(".agent-attachment-notice")).toContainText("格式不支持");
     expect(promptBody.params.content.filter((item) => item.type === "image")).toHaveLength(1);
+  });
+
+  test("Agent failed text turns expose an approval-gated retry", async ({ page }) => {
+    const sessionId = "retry-session";
+    let retryParams = null;
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "ready",
+        ready: true,
+        runtime_id: "dsh",
+        version: "0.1.1-rc.2",
+        runtime_capabilities: ["retry", "history", "workspaces"],
+      }),
+    }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "runtime-owned", ready: true }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      const method = body?.method;
+      if (method === "agent.session.retry") {
+        retryParams = body.params;
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, session_id: sessionId } }),
+        });
+        return;
+      }
+      const result = {
+        "browser.profiles": { profiles: [] },
+        "browser.sessions": { sessions: [] },
+        "browser.downloads": { downloads: [] },
+        "agent.workspaces": { workspaces: [{ id: "retry-workspace", title: "Retry", path: "D:\\Repos\\retry", session_ids: [sessionId] }], archived_session_ids: [] },
+        "agent.sessions": { sessions: [{ id: sessionId, title: "失败回合", state: "error" }] },
+        "agent.session.snapshot": {
+          session_id: sessionId,
+          state: "error",
+          title: "失败回合",
+          plan: { active: false, pending: false, steps: [] },
+          messages: [{ role: "user", content: "重试这个目标", attachments: [] }],
+          tools: [],
+          approvals: [],
+          artifacts: [],
+          timeline: [],
+          stats: {},
+        },
+        "agent.task.projections": { available: true, tasks: [], errors: [] },
+      }[method] || {};
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
+      });
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator("#agent-retry-turn")).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#agent-retry-turn").click();
+    await expect.poll(() => retryParams).toEqual({
+      sessionId,
+      approved: true,
+      confirmSessionId: sessionId,
+      workspaceId: "retry-workspace",
+    });
+    await expect(page.locator(".agent-notice")).toContainText("重试已提交");
   });
 
   test("Agent workspace lists and stops isolated browser sessions", async ({ page }) => {

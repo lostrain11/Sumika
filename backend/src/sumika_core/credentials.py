@@ -8,9 +8,11 @@ an isolated store so tests never write to the user's credential vault.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 from ctypes import wintypes
+from pathlib import Path
 from typing import Protocol
 
 
@@ -162,3 +164,9 @@ def default_credential_store(*, in_memory: bool = False, namespace: str = "defau
     if os.name == "nt":
         return WindowsCredentialStore(namespace)
     return UnavailableCredentialStore()
+
+
+def credential_namespace_for_data_dir(data_dir: str | Path) -> str:
+    """Return the stable vault namespace used by one Sumika data directory."""
+
+    return hashlib.sha256(str(Path(data_dir).resolve()).encode("utf-8")).hexdigest()[:20]

@@ -14,6 +14,10 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 
+const DSH_CREDENTIAL_PROTOCOL_MAGIC: &[u8] = b"SUMIKA_DSH_CREDENTIAL_V2";
+const LOCAL_DSH_CREDENTIAL_REF: &str = "SUMIKA_LOCAL_PROVIDER_API_KEY";
+const LOCAL_DSH_CREDENTIAL_VALUE: &str = "sumika-local";
+
 #[derive(Clone)]
 struct CoreProcess {
     inner: Arc<CoreProcessInner>,
@@ -24,6 +28,7 @@ struct CoreProcessInner {
     log_path: PathBuf,
     host: String,
     port: u16,
+    mcp_credential_refs: Vec<String>,
     stopping: AtomicBool,
     restart_count: AtomicU32,
 }
@@ -42,6 +47,8 @@ struct AgentLaunchConfig {
     log_path: PathBuf,
     args: Vec<String>,
     environment: Vec<(String, String)>,
+    protected_credential_loaded: bool,
+    protected_credential_error: Option<String>,
     health_path: String,
     health_body: String,
     default_port: u16,
@@ -68,6 +75,44 @@ fn python_command() -> String {
     env::var("SUMIKA_PYTHON").unwrap_or_else(|_| "python".to_string())
 }
 
+fn browser_skill_environment() -> Option<(String, String)> {
+    let configured = env::var("SUMIKA_BSK_EXECUTABLE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from);
+    let executable = match configured {
+        Some(path) if path.is_file() => path,
+        Some(_) => return None,
+        None => {
+            let pinned = PathBuf::from(r"D:\Tools\BrowserSkill\0.1.11\bsk.exe");
+            if !pinned.is_file() {
+                return None;
+            }
+            pinned
+        }
+    };
+    let parent = executable.parent()?.to_path_buf();
+    let current = env::var_os("PATH").unwrap_or_default();
+    let already_present = env::split_paths(&current).any(|entry| {
+        entry
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .eq_ignore_ascii_case(parent.to_string_lossy().trim_end_matches(['\\', '/']))
+    });
+    let path_value = if already_present {
+        current.to_string_lossy().to_string()
+    } else {
+        let delimiter = if cfg!(windows) { ";" } else { ":" };
+        format!(
+            "{}{}{}",
+            parent.to_string_lossy(),
+            delimiter,
+            current.to_string_lossy()
+        )
+    };
+    Some((executable.to_string_lossy().to_string(), path_value))
+}
+
 fn core_endpoint() -> (String, u16) {
     let host = env::var("SUMIKA_CORE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("SUMIKA_CORE_PORT")
@@ -89,7 +134,12 @@ fn chrono_free_timestamp() -> String {
     format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or_default())
 }
 
-fn spawn_core(log_path: &PathBuf, host: &str, port: u16) -> Result<Child, String> {
+fn spawn_core(
+    log_path: &PathBuf,
+    host: &str,
+    port: u16,
+    mcp_credential_refs: &[String],
+) -> Result<Child, String> {
     let root = repository_root()?;
     let data_dir = root.join(".sumika-desktop");
     std::fs::create_dir_all(&data_dir).map_err(|error| format!("创建桌面数据目录失败: {error}"))?;
@@ -105,6 +155,7 @@ fn spawn_core(log_path: &PathBuf, host: &str, port: u16) -> Result<Child, String
         .current_dir(&root)
         .env("PYTHONPATH", python_path)
         .env("SUMIKA_DATA_DIR", &data_dir)
+        .env("BSK_AUTO_UPDATE", "off")
         .args([
             "-u",
             "-m",
@@ -117,6 +168,17 @@ fn spawn_core(log_path: &PathBuf, host: &str, port: u16) -> Result<Child, String
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(error_log));
+    if let Some((executable, path_value)) = browser_skill_environment() {
+        command
+            .env("SUMIKA_BSK_EXECUTABLE", executable)
+            .env("PATH", path_value);
+    }
+    if !mcp_credential_refs.is_empty() {
+        command.env(
+            "SUMIKA_DSH_MCP_CREDENTIAL_REFS",
+            mcp_credential_refs.join(","),
+        );
+    }
     command
         .spawn()
         .map_err(|error| format!("启动 Sumika Python 核心失败（可设置 SUMIKA_PYTHON 指向 Python）: {error}"))
@@ -271,7 +333,38 @@ fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchCon
     .unwrap_or_else(|| root.join(".sumika-desktop").join("dsh-profile"));
     let port = agent_port(&endpoint, 3080)
         .ok_or_else(|| format!("无法从 DSH endpoint 解析端口: {endpoint}"))?;
+    let (core_host, core_port) = core_endpoint();
     let profile_text = profile_dir.to_string_lossy().to_string();
+    let (protected_credentials, protected_credential_error) =
+        match load_dsh_launch_credentials(root, &profile_dir) {
+            Ok(value) => (value, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+    let protected_credential_loaded = !protected_credentials.is_empty();
+    let mut environment = vec![
+        ("DSH_HOME".to_string(), profile_text.clone()),
+        ("SUMIKA_DSH_HOME".to_string(), profile_text),
+        ("BSK_AUTO_UPDATE".to_string(), "off".to_string()),
+        ("SUMIKA_CORE_HOST".to_string(), core_host),
+        ("SUMIKA_CORE_PORT".to_string(), core_port.to_string()),
+        (
+            LOCAL_DSH_CREDENTIAL_REF.to_string(),
+            LOCAL_DSH_CREDENTIAL_VALUE.to_string(),
+        ),
+    ];
+    if let Some((browser_skill_executable, path_value)) = browser_skill_environment() {
+        // The official BrowserSkill DSH plugin resolves `bsk` from PATH. Keep
+        // the explicit executable reference for Core and pass both values only
+        // to this managed runtime child.
+        environment.push((
+            "SUMIKA_BSK_EXECUTABLE".to_string(),
+            browser_skill_executable,
+        ));
+        environment.push(("PATH".to_string(), path_value));
+    }
+    for (name, value) in protected_credentials {
+        environment.push((name, value));
+    }
     Ok(AgentLaunchConfig {
         runtime_id: "dsh".to_string(),
         executable,
@@ -287,14 +380,93 @@ fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchCon
             "--port".to_string(),
             port.to_string(),
         ],
-        environment: vec![
-            ("DSH_HOME".to_string(), profile_text.clone()),
-            ("SUMIKA_DSH_HOME".to_string(), profile_text),
-        ],
+        environment,
+        protected_credential_loaded,
+        protected_credential_error,
         health_path: "/api/host.describe".to_string(),
         health_body: r#"{"type":"client-request","rpcId":"sumika-health","method":"host.describe","payload":{}}"#.to_string(),
         default_port: 3080,
     })
+}
+
+fn load_dsh_launch_credentials(
+    root: &PathBuf,
+    profile_dir: &PathBuf,
+) -> Result<Vec<(String, String)>, String> {
+    let data_dir = root.join(".sumika-desktop");
+    let output = Command::new(python_command())
+        .current_dir(root)
+        .env("PYTHONPATH", root.join("backend").join("src"))
+        .args([
+            "-m",
+            "sumika_core.agent.credential_binding",
+            "--data-dir",
+            &data_dir.to_string_lossy(),
+            "--profile-dir",
+            &profile_dir.to_string_lossy(),
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|_| "protected credential bridge could not be started".to_string())?;
+    if !output.status.success() {
+        return Err("protected credential bridge failed closed".to_string());
+    }
+    parse_dsh_credential_bindings(&output.stdout)
+}
+
+fn parse_dsh_credential_bindings(payload: &[u8]) -> Result<Vec<(String, String)>, String> {
+    if payload.len() > 24 * 1024 {
+        return Err("protected credential bridge returned an oversized response".to_string());
+    }
+    let fields: Vec<&[u8]> = payload.split(|byte| *byte == 0).collect();
+    if fields.first().copied() != Some(DSH_CREDENTIAL_PROTOCOL_MAGIC) {
+        return Err("protected credential bridge returned an invalid protocol".to_string());
+    }
+    if fields.len() < 4 || fields[1] != b"loaded" || !fields.last().is_some_and(|value| value.is_empty()) {
+        return Err("protected credential bridge returned an invalid payload".to_string());
+    }
+    let count = std::str::from_utf8(fields[2])
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value <= 33)
+        .ok_or_else(|| "protected credential bridge returned an invalid count".to_string())?;
+    if fields.len() != 4 + count * 2 {
+        return Err("protected credential bridge returned an invalid payload".to_string());
+    }
+    let mut result = Vec::with_capacity(count);
+    let mut names = std::collections::HashSet::new();
+    for index in 0..count {
+        let name_field = fields[3 + index * 2];
+        let value_field = fields[4 + index * 2];
+        let name = std::str::from_utf8(name_field)
+            .map_err(|_| "protected credential bridge returned an invalid name".to_string())?;
+        if !valid_protected_environment_name(name)
+            || !names.insert(name.to_string())
+            || value_field.is_empty()
+            || value_field.len() > 8192
+        {
+            return Err("protected credential bridge returned invalid credential metadata".to_string());
+        }
+        let value = String::from_utf8(value_field.to_vec())
+            .map_err(|_| "protected credential bridge returned an invalid value".to_string())?;
+        result.push((name.to_string(), value));
+    }
+    Ok(result)
+}
+
+fn valid_protected_environment_name(name: &str) -> bool {
+    let safe = name.starts_with("SUMIKA_")
+        && name
+            .chars()
+            .enumerate()
+            .all(|(index, character)| character.is_ascii_alphanumeric() || character == '_' && index > 0);
+    let provider = name.ends_with("_API_KEY");
+    let mcp = name
+        .strip_prefix("SUMIKA_MCP_")
+        .and_then(|value| value.strip_suffix("_SECRET"))
+        .is_some_and(|digest| digest.len() == 24 && digest.chars().all(|character| character.is_ascii_hexdigit() && !character.is_ascii_lowercase()));
+    safe && (provider || mcp)
 }
 
 fn agent_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<(String, PathBuf, Option<AgentLaunchConfig>), String> {
@@ -595,7 +767,12 @@ fn supervise_core(state: CoreProcess) {
         if state.inner.stopping.load(Ordering::SeqCst) {
             return;
         }
-        match spawn_core(&state.inner.log_path, &state.inner.host, state.inner.port) {
+        match spawn_core(
+            &state.inner.log_path,
+            &state.inner.host,
+            state.inner.port,
+            &state.inner.mcp_credential_refs,
+        ) {
             Ok(mut child) => match core_ready(&mut child, &state.inner.host, state.inner.port) {
                 Ok(()) => {
                     let pid = child.id();
@@ -644,6 +821,8 @@ struct CoreStatus {
     agent_running: bool,
     agent_restart_count: u32,
     agent_managed: bool,
+    agent_protected_credential_loaded: bool,
+    agent_protected_credential_error: bool,
 }
 
 #[tauri::command]
@@ -677,6 +856,18 @@ fn core_status(state: State<'_, CoreProcess>, agent: State<'_, AgentProcess>) ->
         },
         agent_restart_count: agent.inner.restart_count.load(Ordering::SeqCst),
         agent_managed: agent.inner.child.lock().map(|guard| guard.is_some()).unwrap_or(false),
+        agent_protected_credential_loaded: agent
+            .inner
+            .launcher
+            .as_ref()
+            .map(|config| config.protected_credential_loaded)
+            .unwrap_or(false),
+        agent_protected_credential_error: agent
+            .inner
+            .launcher
+            .as_ref()
+            .and_then(|config| config.protected_credential_error.as_ref())
+            .is_some(),
     }
 }
 
@@ -729,12 +920,19 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         append_log(
             &agent_log_path,
             &format!(
-                "managed {} autostart requested; endpoint={}; profile={}",
+                "managed {} autostart requested; endpoint={}; profile={}; protected_credential_loaded={}",
                 config.runtime_id,
                 config.endpoint,
-                config.profile_dir.display()
+                config.profile_dir.display(),
+                config.protected_credential_loaded,
             ),
         );
+        if config.protected_credential_error.is_some() {
+            append_log(
+                &agent_log_path,
+                "one or more protected Agent credentials were not loaded; affected Provider or MCP connections will fail closed",
+            );
+        }
         let mut child = spawn_agent(config).map_err(std::io::Error::other)?;
         append_log(
             &agent_log_path,
@@ -768,6 +966,19 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map(|config| config.endpoint.clone())
         .unwrap_or_else(|| configured_agent_endpoint(&agent_runtime_id));
+    let mcp_credential_refs = agent_launcher
+        .as_ref()
+        .map(|config| {
+            config
+                .environment
+                .iter()
+                .filter_map(|(name, _)| {
+                    (name.starts_with("SUMIKA_MCP_") && name.ends_with("_SECRET"))
+                        .then(|| name.clone())
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let agent = AgentProcess {
         inner: Arc::new(AgentProcessInner {
             child: Mutex::new(managed_agent),
@@ -779,7 +990,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             restart_count: AtomicU32::new(0),
         }),
     };
-    let mut child = match spawn_core(&log_path, &host, port) {
+    let mut child = match spawn_core(&log_path, &host, port, &mcp_credential_refs) {
         Ok(child) => child,
         Err(error) => {
             append_log(&log_path, &format!("core spawn failed: {error}"));
@@ -800,6 +1011,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             log_path,
             host,
             port,
+            mcp_credential_refs,
             stopping: AtomicBool::new(false),
             restart_count: AtomicU32::new(0),
         }),
@@ -830,6 +1042,81 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     let _ = app.get_webview_window("main");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_dsh_credential_bindings, DSH_CREDENTIAL_PROTOCOL_MAGIC};
+
+    #[test]
+    fn parses_empty_and_multiple_credential_protocol() {
+        let none = [DSH_CREDENTIAL_PROTOCOL_MAGIC, b"loaded", b"0", b""].join(&0);
+        assert_eq!(parse_dsh_credential_bindings(&none).unwrap(), Vec::new());
+
+        let loaded = [
+            DSH_CREDENTIAL_PROTOCOL_MAGIC,
+            b"loaded",
+            b"2",
+            b"SUMIKA_1234_API_KEY",
+            b"secret-value",
+            b"SUMIKA_MCP_0123456789ABCDEF01234567_SECRET",
+            b"mcp-secret",
+            b"",
+        ]
+        .join(&0);
+        assert_eq!(
+            parse_dsh_credential_bindings(&loaded).unwrap(),
+            vec![
+                ("SUMIKA_1234_API_KEY".to_string(), "secret-value".to_string()),
+                (
+                    "SUMIKA_MCP_0123456789ABCDEF01234567_SECRET".to_string(),
+                    "mcp-secret".to_string(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_untrusted_environment_names() {
+        let payload = [
+            DSH_CREDENTIAL_PROTOCOL_MAGIC,
+            b"loaded",
+            b"1",
+            b"PATH",
+            b"value",
+            b"",
+        ]
+        .join(&0);
+        assert!(parse_dsh_credential_bindings(&payload).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_names_and_oversized_values() {
+        let duplicate = [
+            DSH_CREDENTIAL_PROTOCOL_MAGIC,
+            b"loaded",
+            b"2",
+            b"SUMIKA_1234_API_KEY",
+            b"first",
+            b"SUMIKA_1234_API_KEY",
+            b"second",
+            b"",
+        ]
+        .join(&0);
+        assert!(parse_dsh_credential_bindings(&duplicate).is_err());
+
+        let mut oversized = [
+            DSH_CREDENTIAL_PROTOCOL_MAGIC,
+            b"loaded",
+            b"1",
+            b"SUMIKA_1234_API_KEY",
+        ]
+        .join(&0);
+        oversized.push(0);
+        oversized.extend(vec![b'x'; 8193]);
+        oversized.push(0);
+        assert!(parse_dsh_credential_bindings(&oversized).is_err());
+    }
 }
 
 fn main() {

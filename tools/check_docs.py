@@ -8,6 +8,7 @@ status matrix, current execution contract, and references to archived documents.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -17,6 +18,33 @@ from urllib.parse import unquote
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)\n]+)\)")
 FENCE = re.compile(r"^\s*(```|~~~)")
 STATUS_VALUES = {"已实现", "部分实现", "规划中"}
+REQUIREMENT_PROVENANCE = {"confirmed", "normalized", "inferred", "external"}
+REQUIREMENT_INTENT_STATES = {"active", "deferred", "superseded", "historical"}
+REQUIREMENT_ID = re.compile(r"^(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{3}|HISTORY-[A-Z0-9-]+)$")
+REQUIREMENT_SENSITIVE = (
+    (re.compile(r"(?i)\b[a-z]:[\\/]+users[\\/]"), "Windows user path"),
+    (
+        re.compile(r"(?i)(?<![a-z0-9])/(?:users|home)/[^\s`\"'<>]+"),
+        "Unix user path",
+    ),
+    (
+        re.compile(r"(?i)(?<![a-z0-9])\\\\[^\s`\"'<>]+"),
+        "UNC path",
+    ),
+    (re.compile(r"(?i)\bsk-[a-z0-9_-]{8,}"), "API key-like token"),
+    (re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"), "Bearer token-like value"),
+    (
+        re.compile(r"(?i)\beyj[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}"),
+        "JWT-like token",
+    ),
+    (
+        re.compile(
+            r"(?i)(?<![a-z0-9])['\"]?(?:api[-_ ]?key|token|cookie|authorization)['\"]?"
+            r"\s*[:=]\s*['\"]?[^\s`\"',}]{8,}"
+        ),
+        "credential assignment",
+    ),
+)
 REQUIRED_STATUS_IDS = {
     "local-llm",
     "provider-profiles",
@@ -237,6 +265,244 @@ def check_status_matrix(root: Path) -> list[str]:
     return errors
 
 
+def _status_matrix_ids(root: Path) -> set[str]:
+    """Return IDs from the primary status table without duplicating validation."""
+
+    matrix = root / "docs" / "status-matrix.md"
+    if not matrix.exists():
+        return set()
+    lines = matrix.read_text(encoding="utf-8").splitlines()
+    header_index = next(
+        (index for index, line in enumerate(lines) if line.strip().startswith("| ID |")),
+        None,
+    )
+    if header_index is None:
+        return set()
+    identifiers: set[str] = set()
+    for line in lines[header_index + 2 :]:
+        if not line.strip().startswith("|"):
+            break
+        cells = _cell_values(line)
+        if cells and cells[0] not in {"---", ""}:
+            identifiers.add(cells[0].strip("`"))
+    return identifiers
+
+
+def _resolve_requirement_reference(root: Path, source: Path, target: str) -> Path | None:
+    """Resolve a requirement evidence path and reject paths outside the repo."""
+
+    if not isinstance(target, str) or not target.strip():
+        return None
+    candidate = (source.parent / target.split("#", 1)[0].split("?", 1)[0]).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _requirement_excerpt_ids(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return set(re.findall(r"`(EX-[A-Z0-9-]+)`", path.read_text(encoding="utf-8")))
+
+
+def _requirement_mapping(root: Path) -> tuple[set[str], dict[str, set[str]], list[str]]:
+    """Read the optional status-to-requirement mapping below the main table."""
+
+    path = root / "docs" / "status-matrix.md"
+    if not path.exists():
+        return set(), {}, ["docs/status-matrix.md: status matrix is missing"]
+    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == "## 需求基线映射")
+    except StopIteration:
+        return set(), {}, ["docs/status-matrix.md: missing 需求基线映射 section"]
+    header = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].strip().startswith("| 状态 ID |")),
+        None,
+    )
+    if header is None:
+        return set(), {}, ["docs/status-matrix.md: requirement mapping table header is missing"]
+    mapping: dict[str, set[str]] = {}
+    errors: list[str] = []
+    for index in range(header + 2, len(lines)):
+        line = lines[index]
+        if not line.strip().startswith("|"):
+            break
+        cells = _cell_values(line)
+        if len(cells) != 2:
+            errors.append(f"docs/status-matrix.md:{index + 1}: invalid requirement mapping row")
+            continue
+        status_id = cells[0].strip("`")
+        requirement_ids = set(re.findall(r"`?([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{3})`?", cells[1]))
+        if not status_id or not requirement_ids:
+            errors.append(f"docs/status-matrix.md:{index + 1}: mapping row must contain a status and requirement ID")
+        mapping[status_id] = requirement_ids
+    return _status_matrix_ids(root), mapping, errors
+
+
+def check_requirements(root: Path) -> list[str]:
+    """Validate the machine-readable requirements ledger and its evidence graph."""
+
+    root = root.resolve()
+    ledger = root / "docs" / "requirements" / "requirements.json"
+    if not ledger.exists():
+        return ["docs/requirements/requirements.json: requirements ledger is missing"]
+    errors: list[str] = []
+    try:
+        payload = json.loads(ledger.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return [f"docs/requirements/requirements.json: invalid JSON ({error})"]
+    if not isinstance(payload, dict) or payload.get("schema") != "sumika-requirements/v1":
+        errors.append("docs/requirements/requirements.json: schema must be sumika-requirements/v1")
+    rows = payload.get("requirements") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return errors + ["docs/requirements/requirements.json: requirements must be a non-empty list"]
+
+    required_fields = {
+        "id",
+        "category",
+        "statement",
+        "acceptance",
+        "provenance",
+        "intent_state",
+        "source_refs",
+        "excerpt_refs",
+        "implementation_refs",
+        "test_refs",
+    }
+    records: dict[str, dict] = {}
+    for index, row in enumerate(rows, start=1):
+        location = f"docs/requirements/requirements.json: requirement[{index}]"
+        if not isinstance(row, dict):
+            errors.append(f"{location} must be an object")
+            continue
+        missing = sorted(required_fields - set(row))
+        if missing:
+            errors.append(f"{location} missing fields: {', '.join(missing)}")
+        identifier = row.get("id")
+        if not isinstance(identifier, str) or not REQUIREMENT_ID.fullmatch(identifier):
+            errors.append(f"{location}: invalid requirement ID {identifier!r}")
+            continue
+        if identifier in records:
+            errors.append(f"{location}: duplicate requirement ID {identifier}")
+        records[identifier] = row
+        if row.get("provenance") not in REQUIREMENT_PROVENANCE:
+            errors.append(f"{location}: invalid provenance {row.get('provenance')!r}")
+        if row.get("intent_state") not in REQUIREMENT_INTENT_STATES:
+            errors.append(f"{location}: invalid intent_state {row.get('intent_state')!r}")
+        if not isinstance(row.get("statement"), str) or not row.get("statement", "").strip():
+            errors.append(f"{location}: statement must be a non-empty string")
+        acceptance = row.get("acceptance")
+        if not isinstance(acceptance, list) or not acceptance or not all(isinstance(item, str) and item.strip() for item in acceptance):
+            errors.append(f"{location}: acceptance must be a non-empty list of strings")
+        for field in ("implementation_refs", "test_refs", "source_refs", "excerpt_refs", "supersedes", "superseded_by"):
+            value = row.get(field, [])
+            if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+                errors.append(f"{location}: {field} must be a list of strings")
+            elif field == "source_refs" and not value:
+                errors.append(f"{location}: source_refs must not be empty")
+        if row.get("intent_state") != "historical" and not isinstance(row.get("status_ref"), str):
+            errors.append(f"{location}: active/deferred/superseded records require status_ref")
+
+    status_ids = _status_matrix_ids(root)
+    excerpt_path = root / "docs" / "requirements" / "original-excerpts.md"
+    excerpt_ids = _requirement_excerpt_ids(excerpt_path)
+    content_paths = [
+        root / "docs" / "requirements" / "README.md",
+        root / "docs" / "requirements" / "baseline.md",
+        root / "docs" / "requirements" / "model-policy.md",
+        excerpt_path,
+        ledger,
+    ]
+    human_paths = content_paths[:-1]
+    combined_content = "\n".join(path.read_text(encoding="utf-8") for path in human_paths if path.exists())
+    for path in content_paths:
+        if not path.exists():
+            errors.append(f"{path.relative_to(root).as_posix()}: requirements document is missing")
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for pattern, label in REQUIREMENT_SENSITIVE:
+                if pattern.search(line):
+                    errors.append(f"{path.relative_to(root).as_posix()}:{line_number}: contains {label}")
+
+    for identifier, row in records.items():
+        location = f"docs/requirements/requirements.json: {identifier}"
+        status_ref = row.get("status_ref")
+        if status_ref is not None:
+            if not isinstance(status_ref, str) or not status_ref.startswith("status-matrix:"):
+                errors.append(f"{location}: status_ref must start with status-matrix:")
+            elif status_ref.removeprefix("status-matrix:") not in status_ids:
+                errors.append(f"{location}: unknown status_ref {status_ref}")
+        for field in ("implementation_refs", "test_refs"):
+            for reference in row.get(field, []) if isinstance(row.get(field), list) else []:
+                resolved = _resolve_requirement_reference(root, ledger, reference)
+                if resolved is None or not resolved.exists():
+                    errors.append(f"{location}: missing {field} reference {reference}")
+        for excerpt in row.get("excerpt_refs", []) if isinstance(row.get("excerpt_refs"), list) else []:
+            if excerpt not in excerpt_ids:
+                errors.append(f"{location}: unknown excerpt_ref {excerpt}")
+        if not re.search(rf"`{re.escape(identifier)}`", combined_content):
+            errors.append(f"{location}: ID is not present in the human-readable requirements documents")
+
+    relation_graph: dict[str, set[str]] = {identifier: set() for identifier in records}
+    for identifier, row in records.items():
+        supersedes = row.get("supersedes", []) if isinstance(row.get("supersedes"), list) else []
+        superseded_by = row.get("superseded_by", []) if isinstance(row.get("superseded_by"), list) else []
+        for field, targets in (("supersedes", supersedes), ("superseded_by", superseded_by)):
+            for target in targets:
+                if target not in records:
+                    errors.append(f"docs/requirements/requirements.json: {identifier}: unknown relation target {target}")
+                elif target == identifier:
+                    errors.append(f"docs/requirements/requirements.json: {identifier}: self-referencing relation")
+        # Only ``supersedes`` is a directed edge.  ``superseded_by`` is its
+        # reverse declaration and must not create a false cycle.
+        for target in supersedes:
+            if target in records and identifier not in (records[target].get("superseded_by") or []):
+                errors.append(
+                    f"docs/requirements/requirements.json: {identifier}: relation is missing reverse superseded_by on {target}"
+                )
+            if target in records:
+                relation_graph[identifier].add(target)
+        for target in superseded_by:
+            if target in records and identifier not in (records[target].get("supersedes") or []):
+                errors.append(
+                    f"docs/requirements/requirements.json: {identifier}: relation is missing reverse supersedes on {target}"
+                )
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(identifier: str) -> None:
+        if identifier in visiting:
+            errors.append(f"docs/requirements/requirements.json: supersession cycle includes {identifier}")
+            return
+        if identifier in visited:
+            return
+        visiting.add(identifier)
+        for target in relation_graph.get(identifier, set()):
+            visit(target)
+        visiting.remove(identifier)
+        visited.add(identifier)
+
+    for identifier in relation_graph:
+        visit(identifier)
+
+    matrix_ids, mapping, mapping_errors = _requirement_mapping(root)
+    errors.extend(mapping_errors)
+    if matrix_ids:
+        for status_id in sorted(matrix_ids):
+            if status_id not in mapping:
+                errors.append(f"docs/status-matrix.md: missing requirement mapping for {status_id}")
+        for status_id, requirement_ids in mapping.items():
+            if status_id not in matrix_ids:
+                errors.append(f"docs/status-matrix.md: mapping references unknown status ID {status_id}")
+            for requirement_id in requirement_ids:
+                if requirement_id not in records:
+                    errors.append(f"docs/status-matrix.md: mapping references unknown requirement ID {requirement_id}")
+    return errors
+
+
 def check_current_execution(root: Path) -> list[str]:
     root = root.resolve()
     document = root / "docs" / "current-execution.md"
@@ -322,6 +588,7 @@ def run_checks(root: Path) -> list[str]:
         check_local_links(root)
         + check_index_coverage(root)
         + check_status_matrix(root)
+        + check_requirements(root)
         + check_current_execution(root)
         + check_archived_references(root)
     )

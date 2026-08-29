@@ -1,9 +1,12 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from sumika_core.agent import AgentRuntimeError
+from sumika_core.agent import AgentCapability, AgentRuntimeError
 from sumika_core.protocol.jsonrpc import JsonRpcError
 from sumika_core.server import CoreApplication
+from sumika_core.workspace import WorkspaceError
 
 
 class AgentServerTests(unittest.TestCase):
@@ -58,6 +61,156 @@ class AgentServerTests(unittest.TestCase):
         self.assertFalse(result["catalog_available"])
         self.assertNotIn("arguments", str(result))
         self.assertNotIn("result", str(result))
+
+    def test_skill_catalog_rpc_is_metadata_only_and_requires_exact_approval(self):
+        with TemporaryDirectory() as directory:
+            skill_dir = Path(directory) / "private-skill"
+            skill_dir.mkdir()
+            skill_path = skill_dir / "SKILL.md"
+            skill_path.write_text(
+                "---\nname: Private Skill\npermissions: read\n---\n"
+                "private instruction body\n",
+                encoding="utf-8",
+            )
+            discovered = self.application.rpc("agent.skills.discover", {"paths": [str(skill_dir)]})
+            candidate = discovered["skills"][0]
+            self.assertEqual(candidate["state"], "discovered")
+            self.assertNotIn(str(directory), str(candidate))
+            self.assertNotIn("private instruction body", str(candidate))
+
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "agent.skills.approve",
+                    {"candidate_id": candidate["candidate_id"], "approved": True},
+                )
+            self.assertEqual(error.exception.code, -32031)
+
+            approved = self.application.rpc(
+                "agent.skills.approve",
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "approved": True,
+                    "confirm_skill_id": candidate["candidate_id"],
+                },
+            )
+            self.assertEqual(approved["state"], "approved")
+            revoked = self.application.rpc(
+                "agent.skills.revoke",
+                {
+                    "candidate_id": candidate["candidate_id"],
+                    "approved": True,
+                    "confirm_skill_id": candidate["candidate_id"],
+                },
+            )
+            self.assertEqual(revoked["state"], "revoked")
+            self.assertTrue(skill_path.exists())
+            audit = str(self.application.storage.list_events(20))
+            self.assertNotIn(str(directory), audit)
+            self.assertNotIn("private instruction body", audit)
+
+    def test_agent_mcp_configuration_requires_preview_and_explicit_apply_approval(self):
+        configurations = {
+            "agent_preset": "sumika-work",
+            "configurations": [
+                {
+                    "server_name": "filesystem",
+                    "transport": "stdio",
+                    "enabled": False,
+                    "command": "npx",
+                    "args": ["-y", "server-filesystem"],
+                    "tool_call_timeout_ms": 60000,
+                }
+            ],
+            "credential_fields_supported": False,
+        }
+        with patch.object(
+            self.application.agent,
+            "list_mcp_configurations",
+            return_value=configurations,
+        ) as list_configurations:
+            listed = self.application.rpc(
+                "agent.mcp.configurations",
+                {"agentPreset": "sumika-work"},
+            )
+        list_configurations.assert_called_once_with({"agentPreset": "sumika-work"})
+        self.assertEqual(listed["configurations"][0]["server_name"], "filesystem")
+
+        preview_result = {
+            "agent_preset": "sumika-work",
+            "server_name": "filesystem",
+            "action": "upsert",
+            "change": "create",
+            "preview_token": "private-preview-token",
+            "requires_approval": True,
+            "configuration": configurations["configurations"][0],
+        }
+        request = {
+            "agentPreset": "sumika-work",
+            "action": "upsert",
+            "configuration": configurations["configurations"][0],
+        }
+        with patch.object(
+            self.application.agent,
+            "preview_mcp_configuration",
+            return_value=preview_result,
+        ) as preview:
+            result = self.application.rpc("agent.mcp.configuration.preview", request)
+        preview.assert_called_once_with(request)
+        self.assertEqual(result["preview_token"], "private-preview-token")
+
+        for params in (
+            {"agentPreset": "sumika-work", "previewToken": "private-preview-token"},
+            {
+                "agentPreset": "sumika-work",
+                "previewToken": "private-preview-token",
+                "approved": True,
+                "confirm_agent_preset": "other",
+            },
+        ):
+            with self.subTest(params=params), self.assertRaises(JsonRpcError):
+                self.application.rpc("agent.mcp.configuration.apply", params)
+
+        apply_result = {
+            "agent_preset": "sumika-work",
+            "server_name": "filesystem",
+            "change": "create",
+            "applied": True,
+            "mountable": True,
+            "validation_session_archived": True,
+            "backup_retained": True,
+            "credential_changed": True,
+            "credential_removed": False,
+            "restart_required": True,
+        }
+        with patch.object(
+            self.application.agent,
+            "apply_mcp_configuration",
+            return_value=apply_result,
+        ) as apply:
+            applied = self.application.rpc(
+                "agent.mcp.configuration.apply",
+                {
+                    "agentPreset": "sumika-work",
+                    "previewToken": "private-preview-token",
+                    "approved": True,
+                    "confirm_agent_preset": "sumika-work",
+                    "credentialValue": "private-mcp-secret",
+                },
+            )
+        apply.assert_called_once_with(
+            {
+                "agentPreset": "sumika-work",
+                "previewToken": "private-preview-token",
+                "credentialValue": "private-mcp-secret",
+            }
+        )
+        self.assertTrue(applied["backup_retained"])
+        audit = str(self.application.storage.list_events(20))
+        self.assertIn("agent.mcp.configuration.previewed", audit)
+        self.assertIn("agent.mcp.configuration.applied", audit)
+        self.assertNotIn("private-preview-token", audit)
+        self.assertNotIn("server-filesystem", audit)
+        self.assertNotIn("private-mcp-secret", audit)
 
     def test_browser_policy_and_agent_event_audit_are_fail_closed(self):
         session = self.application.rpc("browser.session.create", {"profile": "temporary", "character_id": "sumika"})
@@ -173,6 +326,94 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(result["session_id"], "s1")
         self.assertNotIn("events", result)
 
+    def test_agent_retry_requires_explicit_approval_and_exact_session_confirmation(self):
+        with patch.object(
+            self.application.agent,
+            "supports",
+            side_effect=lambda capability: capability == AgentCapability.RETRY,
+        ), patch.object(self.application.agent, "retry_prompt", return_value={
+            "accepted": True,
+            "session_id": "s1",
+            "source_turn": 3,
+            "mode": "execute",
+            "text_length": 11,
+            "prompt": "must never cross the boundary",
+        }) as retry:
+            for params in (
+                {"sessionId": "s1", "confirmSessionId": "s1"},
+                {"sessionId": "s1", "approved": True, "confirmSessionId": "other"},
+            ):
+                with self.subTest(params=params), self.assertRaises(JsonRpcError) as error:
+                    self.application.rpc("agent.session.retry", params)
+                self.assertEqual(error.exception.code, -32031)
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc("agent.session.retry", {"sessionId": "bad\nid", "approved": True, "confirmSessionId": "bad\nid"})
+            self.assertEqual(error.exception.code, -32602)
+
+            result = self.application.rpc(
+                "agent.session.retry",
+                {"sessionId": "s1", "approved": True, "confirmSessionId": "s1", "mode": "execute"},
+            )
+
+        retry.assert_called_once_with({"sessionId": "s1", "mode": "execute"})
+        self.assertEqual(result["session_id"], "s1")
+        self.assertNotIn("prompt", result)
+        audit = str(self.application.storage.list_events(20))
+        self.assertIn("agent.turn.retry_requested", audit)
+        self.assertIn("agent.turn.retry_rejected", audit)
+        self.assertIn("agent.turn.retry_accepted", audit)
+        self.assertNotIn("must never cross the boundary", audit)
+
+    def test_agent_retry_creates_workspace_checkpoint_and_filters_adapter_receipt(self):
+        checkpoint = {
+            "id": "wschk-0123456789abcdef0123",
+            "name": "Agent retry · s1",
+            "workspace_id": "ws-1",
+            "path": "D:\\private\\workspace",
+            "file_count": 2,
+        }
+        with patch.object(
+            self.application.agent,
+            "supports",
+            side_effect=lambda capability: capability in {AgentCapability.RETRY, AgentCapability.WORKSPACES},
+        ), patch.object(self.application, "_agent_workspace_safety_active", return_value=True), patch.object(
+            self.application,
+            "_agent_workspace_binding",
+            return_value=({"id": "ws-1", "path": "D:\\private\\workspace"}, "D:\\private\\workspace"),
+        ) as workspace_binding, patch.object(self.application.workspace, "create_checkpoint", return_value={"checkpoint": checkpoint}) as create_checkpoint, patch.object(
+            self.application.agent,
+            "retry_prompt",
+            return_value={
+                "accepted": True,
+                "session_id": "s1",
+                "source_turn": 4,
+                "mode": "execute",
+                "text_length": 9,
+                "prompt": "private target",
+                "raw_history": [{"content": "private target"}],
+            },
+        ) as retry:
+            result = self.application.rpc(
+                "agent.session.retry",
+                {
+                    "sessionId": "s1",
+                    "workspaceId": "ws-1",
+                    "approved": True,
+                    "confirmSessionId": "s1",
+                },
+            )
+
+        create_checkpoint.assert_called_once_with("D:\\private\\workspace", name="Agent retry · s1")
+        workspace_binding.assert_called_once_with(
+            {"sessionId": "s1", "workspaceId": "ws-1"},
+            session_id="s1",
+        )
+        retry.assert_called_once_with({"sessionId": "s1"})
+        self.assertEqual(result["workspace_checkpoint"], checkpoint)
+        self.assertNotIn("prompt", result)
+        self.assertNotIn("raw_history", result)
+        self.assertNotIn("private target", str(self.application.storage.list_events(20)))
+
     def test_agent_queue_endpoints_are_runtime_owned_and_audited_without_text(self):
         queue = {
             "session_id": "s1",
@@ -275,6 +516,25 @@ class AgentServerTests(unittest.TestCase):
         self.assertIn("agent.session.forked", str(events))
         self.assertIn("child-1", str(events))
 
+    def test_agent_task_projection_rpc_is_read_only_and_bounded(self):
+        projection = {
+            "available": True,
+            "runtime_id": "dsh",
+            "read_only": True,
+            "tasks": [{"id": "agent:dsh:s1", "session_id": "s1", "read_only": True}],
+            "errors": [],
+        }
+        with patch.object(self.application.agent_tasks, "project", return_value=projection) as project:
+            result = self.application.rpc("agent.task.projections", {"limit": 12})
+        project.assert_called_once_with(limit=12)
+        self.assertTrue(result["tasks"][0]["read_only"])
+        self.assertEqual(self.application.tasks.list()[0]["id"], "core-service")
+
+        for value in (0, 65, True, "12"):
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc("agent.task.projections", {"limit": value})
+            self.assertEqual(error.exception.code, -32602)
+
     def test_agent_presets_subagents_and_goals_are_exposed_as_runtime_capabilities(self):
         with patch.object(
             self.application.agent,
@@ -351,6 +611,40 @@ class AgentServerTests(unittest.TestCase):
         ):
             with self.assertRaises(JsonRpcError) as error:
                 self.application.rpc(method, params)
+            self.assertEqual(error.exception.code, -32602)
+
+    def test_agent_preset_mount_validation_is_path_free_and_audited(self):
+        workspace_path = str(Path.cwd().resolve())
+        with patch.object(
+            self.application.agent,
+            "validate_preset_mount",
+            return_value={
+                "agent_preset": "sumika-work",
+                "mountable": True,
+                "validation_session_archived": True,
+            },
+        ) as validate:
+            result = self.application.rpc(
+                "agent.preset.validate",
+                {"agentPreset": "sumika-work", "cwd": workspace_path},
+            )
+        self.assertTrue(result["mountable"])
+        self.assertTrue(result["validation_session_archived"])
+        validate.assert_called_once_with(
+            {"agentPreset": "sumika-work", "cwd": workspace_path}
+        )
+        events = str(self.application.storage.list_events(5))
+        self.assertIn("agent.preset.mount.validated", events)
+        self.assertIn("sumika-work", events)
+        self.assertNotIn(workspace_path, events)
+
+        for params in (
+            {"agentPreset": "D:\\secret"},
+            {"agentPreset": "sumika-work", "workspaceId": "workspace-1", "cwd": workspace_path},
+            {"agentPreset": "sumika-work", "cwd": "relative"},
+        ):
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc("agent.preset.validate", params)
             self.assertEqual(error.exception.code, -32602)
 
     def test_agent_preset_remove_requires_exact_confirmation_and_explicit_user_trust(self):
@@ -451,6 +745,241 @@ class AgentServerTests(unittest.TestCase):
         self.assertIn("workspace-1", serialized)
         self.assertNotIn("D:\\Code\\Sumika", serialized)
 
+    def test_workspace_checkpoint_rpc_is_separate_approval_gated_and_path_free_in_audit(self):
+        workspace_path = str(Path.cwd().resolve())
+        checkpoint_id = "wschk-" + "a" * 20
+        preview_token = "b" * 64
+        workspace = {
+            "id": "ws-safe",
+            "title": "Sumika",
+            "path": workspace_path,
+            "branch": "codex/dsh-agent-runtime",
+            "head": "2f0655d",
+            "dirty": True,
+            "files": [{"path": "frontend/main.js", "status": "modified"}],
+            "file_count": 1,
+        }
+        checkpoint = {
+            "id": checkpoint_id,
+            "name": "before Agent turn",
+            "workspace_id": "ws-safe",
+            "file_count": 2,
+            "total_bytes": 20,
+        }
+        diff = {
+            "checkpoint": checkpoint,
+            "workspace": workspace,
+            "changed": True,
+            "counts": {"added": 0, "removed": 0, "changed": 1, "changed_total": 1},
+            "files": [{"path": "frontend/main.js", "status": "changed"}],
+            "preview_token": preview_token,
+        }
+        preview = {
+            **diff,
+            "restore": {
+                "archive_count": 1,
+                "write_count": 1,
+                "archive_paths": ["frontend/main.js"],
+                "write_paths": ["frontend/main.js"],
+                "preview_token": preview_token,
+            },
+        }
+        restored = {
+            "checkpoint": checkpoint,
+            "pre_restore_checkpoint": {**checkpoint, "id": "wschk-" + "c" * 20},
+            "diff": diff,
+            "archive": {
+                "root": str(Path(workspace_path) / "deprecated" / "timestamp" / "workspace-restore"),
+                "entries": [{"original_path": "frontend/main.js", "archive_path": "deprecated/timestamp/workspace-restore/frontend/main.js"}],
+            },
+            "restored": True,
+        }
+        with (
+            patch.object(self.application.workspace, "inspect", return_value={"workspace": workspace, "checkpoint_count": 1}),
+            patch.object(self.application.workspace, "list_checkpoints", return_value={"checkpoints": [checkpoint]}),
+            patch.object(self.application.workspace, "create_checkpoint", return_value={"checkpoint": checkpoint}),
+            patch.object(self.application.workspace, "diff_checkpoint", return_value=diff),
+            patch.object(self.application.workspace, "restore_preview", return_value=preview),
+            patch.object(self.application.workspace, "restore", return_value=restored) as restore,
+        ):
+            self.assertEqual(self.application.rpc("workspace.inspect", {"path": workspace_path})["workspace"]["id"], "ws-safe")
+            self.assertEqual(self.application.rpc("workspace.checkpoints", {"path": workspace_path})["checkpoints"][0]["id"], checkpoint_id)
+            self.application.rpc("workspace.checkpoint.create", {"path": workspace_path, "name": "before Agent turn"})
+            self.application.rpc("workspace.checkpoint.diff", {"path": workspace_path, "checkpoint_id": checkpoint_id})
+            self.application.rpc("workspace.restore.preview", {"path": workspace_path, "checkpoint_id": checkpoint_id})
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "workspace.restore",
+                    {"path": workspace_path, "checkpoint_id": checkpoint_id},
+                )
+            self.assertEqual(error.exception.code, -32031)
+            result = self.application.rpc(
+                "workspace.restore",
+                {
+                    "path": workspace_path,
+                    "checkpoint_id": checkpoint_id,
+                    "preview_token": preview_token,
+                    "approved": True,
+                    "confirm_checkpoint": checkpoint_id,
+                },
+            )
+        self.assertTrue(result["restored"])
+        restore.assert_called_once_with(
+            checkpoint_id,
+            path=workspace_path,
+            approved=True,
+            confirm_checkpoint=checkpoint_id,
+            preview_token=preview_token,
+        )
+        events = str(self.application.storage.list_events(20))
+        self.assertIn("workspace.checkpoint.created", events)
+        self.assertIn("workspace.restore.previewed", events)
+        self.assertIn("workspace.restored", events)
+        self.assertIn(checkpoint_id, events)
+        self.assertNotIn(workspace_path, events)
+        self.assertNotIn("frontend/main.js", events)
+
+    def test_workspace_worktree_and_commit_rpc_require_preview_and_keep_audit_content_free(self):
+        source_path = str(Path.cwd().resolve())
+        destination_path = str((Path.cwd().resolve().parent / "sumika-agent-test-worktree").resolve())
+        checkpoint_id = "wschk-" + "d" * 20
+        worktree_token = "e" * 64
+        commit_token = "f" * 64
+        branch = "codex/agent-daily-test"
+        source = {
+            "id": "ws-source",
+            "title": "Sumika",
+            "path": source_path,
+            "branch": "codex/dsh-agent-runtime",
+            "head": "1" * 40,
+            "dirty": True,
+        }
+        worktree = {
+            "id": "ws-linked",
+            "title": "sumika-agent-test-worktree",
+            "path": destination_path,
+            "branch": branch,
+            "head": "1" * 40,
+            "kind": "linked",
+        }
+        worktree_preview = {
+            "source": source,
+            "worktree": worktree,
+            "preview_token": worktree_token,
+            "requires_approval": True,
+            "includes_uncommitted_changes": False,
+        }
+        checkpoint = {
+            "id": checkpoint_id,
+            "workspace_id": worktree["id"],
+            "branch": branch,
+            "head": worktree["head"],
+            "baseline_clean": True,
+        }
+        commit_preview = {
+            "checkpoint": checkpoint,
+            "workspace": {**worktree, "dirty": True, "file_count": 1},
+            "counts": {"added": 0, "removed": 0, "changed": 1, "changed_total": 1},
+            "files": [{"path": "private-change.txt", "status": "changed"}],
+            "patch": "PRIVATE PATCH BODY",
+            "message_summary": "Private commit title",
+            "message_sha256": "2" * 64,
+            "preview_token": commit_token,
+            "requires_approval": True,
+        }
+        committed = {
+            "workspace": {**worktree, "dirty": False, "file_count": 0},
+            "checkpoint": checkpoint,
+            "commit": "3" * 40,
+            "branch": branch,
+            "file_count": 1,
+            "files": ["private-change.txt"],
+            "pushed": False,
+        }
+        with (
+            patch.object(self.application.workspace, "preview_worktree", return_value=worktree_preview) as preview_worktree,
+            patch.object(self.application.workspace, "create_worktree", return_value={"source": source, "worktree": worktree, "created": True}) as create_worktree,
+            patch.object(self.application.workspace, "preview_commit", return_value=commit_preview) as preview_commit,
+            patch.object(self.application.workspace, "commit", return_value=committed) as commit,
+        ):
+            self.application.rpc(
+                "workspace.worktree.preview",
+                {"source_path": source_path, "destination_path": destination_path, "branch": branch},
+            )
+            with self.assertRaises(JsonRpcError) as worktree_error:
+                self.application.rpc(
+                    "workspace.worktree.create",
+                    {"source_path": source_path, "destination_path": destination_path, "branch": branch},
+                )
+            self.assertEqual(worktree_error.exception.code, -32031)
+            created = self.application.rpc(
+                "workspace.worktree.create",
+                {
+                    "source_path": source_path,
+                    "destination_path": destination_path,
+                    "branch": branch,
+                    "approved": True,
+                    "confirm_branch": branch,
+                    "confirm_destination": destination_path,
+                    "preview_token": worktree_token,
+                },
+            )
+            previewed = self.application.rpc(
+                "workspace.commit.preview",
+                {"path": destination_path, "checkpoint_id": checkpoint_id, "message": "Private commit title"},
+            )
+            with self.assertRaises(JsonRpcError) as commit_error:
+                self.application.rpc(
+                    "workspace.commit",
+                    {"path": destination_path, "checkpoint_id": checkpoint_id, "message": "Private commit title"},
+                )
+            self.assertEqual(commit_error.exception.code, -32031)
+            result = self.application.rpc(
+                "workspace.commit",
+                {
+                    "path": destination_path,
+                    "checkpoint_id": checkpoint_id,
+                    "message": "Private commit title",
+                    "approved": True,
+                    "confirm_branch": branch,
+                    "preview_token": commit_token,
+                },
+            )
+
+        self.assertTrue(created["created"])
+        self.assertEqual(previewed["patch"], "PRIVATE PATCH BODY")
+        self.assertEqual(result["commit"], "3" * 40)
+        preview_worktree.assert_called_once_with(source_path, destination_path, branch)
+        create_worktree.assert_called_once_with(
+            source_path,
+            destination_path,
+            branch,
+            approved=True,
+            confirm_branch=branch,
+            confirm_destination=destination_path,
+            preview_token=worktree_token,
+        )
+        preview_commit.assert_called_once_with(checkpoint_id, path=destination_path, message="Private commit title")
+        commit.assert_called_once_with(
+            checkpoint_id,
+            path=destination_path,
+            message="Private commit title",
+            approved=True,
+            confirm_branch=branch,
+            preview_token=commit_token,
+        )
+        events = str(self.application.storage.list_events(20))
+        self.assertIn("workspace.worktree.previewed", events)
+        self.assertIn("workspace.worktree.created", events)
+        self.assertIn("workspace.commit.previewed", events)
+        self.assertIn("workspace.committed", events)
+        self.assertIn(checkpoint_id, events)
+        self.assertNotIn(source_path, events)
+        self.assertNotIn(destination_path, events)
+        self.assertNotIn("PRIVATE PATCH BODY", events)
+        self.assertNotIn("Private commit title", events)
+        self.assertNotIn("private-change.txt", events)
+
     def test_agent_interactions_are_exposed_and_question_answers_are_audited_without_content(self):
         self.application.agent.normalize_event(
             {
@@ -476,6 +1005,325 @@ class AgentServerTests(unittest.TestCase):
         self.assertIn("agent.question.answered", str(events))
         self.assertNotIn('"selected"', str(events))
 
+    def test_agent_plan_review_approval_checkpoints_before_runtime_execution(self):
+        checkpoint = {
+            "id": "wschk-plan-0123456789",
+            "workspace_id": "workspace-plan",
+            "file_count": 3,
+            "total_bytes": 2048,
+        }
+        interaction = {
+            "id": "plan-review-1",
+            "kind": "question",
+            "session_id": "session-plan",
+            "plan_review": {"approve": "Approve", "keep_planning": "Keep planning"},
+            "questions": [
+                {
+                    "id": "plan-review",
+                    "intent": {"kind": "plan-review", "approve": "Approve"},
+                }
+            ],
+        }
+        call_order = []
+        with patch.object(
+            self.application,
+            "_agent_workspace_safety_active",
+            return_value=True,
+        ), patch.object(
+            self.application.agent,
+            "interactions",
+            return_value={"interactions": [interaction]},
+        ), patch.object(
+            self.application,
+            "_agent_workspace_binding",
+            return_value=({"id": "workspace-plan"}, "D:\\private\\plan-workspace"),
+        ) as workspace_binding, patch.object(
+            self.application.workspace,
+            "create_checkpoint",
+            side_effect=lambda *args, **kwargs: call_order.append("checkpoint") or {"checkpoint": checkpoint},
+        ) as create_checkpoint, patch.object(
+            self.application.agent,
+            "respond_interaction",
+            side_effect=lambda params: call_order.append("approve") or {"accepted": True, "kind": "question"},
+        ) as respond:
+            result = self.application.rpc(
+                "agent.question.respond",
+                {
+                    "rpcId": "plan-review-1",
+                    "sessionId": "session-plan",
+                    "workspaceId": "workspace-plan",
+                    "answer": {
+                        "answers": [
+                            {"id": "plan-review", "selected": ["Approve"]}
+                        ]
+                    },
+                },
+            )
+
+        self.assertEqual(call_order, ["checkpoint", "approve"])
+        workspace_binding.assert_called_once_with(
+            {
+                "rpcId": "plan-review-1",
+                "sessionId": "session-plan",
+                "workspaceId": "workspace-plan",
+                "answer": {
+                    "answers": [
+                        {"id": "plan-review", "selected": ["Approve"]}
+                    ]
+                },
+            },
+            session_id="session-plan",
+        )
+        create_checkpoint.assert_called_once_with(
+            "D:\\private\\plan-workspace",
+            name="Agent plan approval · session-plan",
+        )
+        respond.assert_called_once()
+        self.assertEqual(result["workspace_checkpoint"], checkpoint)
+        events = str(self.application.storage.list_events(10))
+        self.assertIn("workspace.checkpoint.created", events)
+        self.assertIn("agent.plan.approval", events)
+        self.assertIn("agent.question.answered", events)
+        self.assertNotIn('"selected"', events)
+
+    def test_agent_plan_review_checkpoint_failure_does_not_approve(self):
+        interaction = {
+            "id": "plan-review-1",
+            "kind": "question",
+            "session_id": "session-plan",
+            "plan_review": {"approve": "Approve"},
+            "questions": [
+                {
+                    "id": "plan-review",
+                    "intent": {"kind": "plan-review", "approve": "Approve"},
+                }
+            ],
+        }
+        with patch.object(
+            self.application,
+            "_agent_workspace_safety_active",
+            return_value=True,
+        ), patch.object(
+            self.application.agent,
+            "interactions",
+            return_value={"interactions": [interaction]},
+        ), patch.object(
+            self.application,
+            "_agent_workspace_binding",
+            return_value=({"id": "workspace-plan"}, "D:\\private\\plan-workspace"),
+        ), patch.object(
+            self.application.workspace,
+            "create_checkpoint",
+            side_effect=WorkspaceError("checkpoint unavailable"),
+        ), patch.object(self.application.agent, "respond_interaction") as respond:
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "agent.question.respond",
+                    {
+                        "rpcId": "plan-review-1",
+                        "sessionId": "session-plan",
+                        "workspaceId": "workspace-plan",
+                        "answer": {
+                            "answers": [
+                                {"id": "plan-review", "selected": ["Approve"]}
+                            ]
+                        },
+                    },
+                )
+
+        self.assertEqual(error.exception.code, -32033)
+        respond.assert_not_called()
+        self.assertIn("agent.plan.approval_rejected", str(self.application.storage.list_events(5)))
+
+    def test_agent_real_acceptance_evidence_is_bounded_and_correlates_restore(self):
+        session_id = "session-real-evidence"
+        checkpoint_id = "wschk-0123456789abcdef0123"
+        events = [
+            {
+                "event_type": "workspace.restored",
+                "session_id": None,
+                "timestamp": "2026-08-29T00:00:08+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "changed_total": 1, "archive_count": 1, "path": "D:\\private"},
+            },
+            {
+                "event_type": "workspace.restore.previewed",
+                "session_id": None,
+                "timestamp": "2026-08-29T00:00:07+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "archive_count": 1},
+            },
+            {
+                "event_type": "workspace.checkpoint.diffed",
+                "session_id": None,
+                "timestamp": "2026-08-29T00:00:06+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "changed": True, "changed_total": 1},
+            },
+            {
+                "event_type": "agent.session.event",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:05+00:00",
+                "payload": {"status": "turn/end", "content": "private output", "extensions": {"turn": {"state": "completed"}}},
+            },
+            {
+                "event_type": "agent.session.event",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:04.5+00:00",
+                "payload": {"status": "tool/result", "extensions": {"tool": {"status": "completed"}}},
+            },
+            {
+                "event_type": "agent.session.event",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:04+00:00",
+                "payload": {"status": "tool/call", "extensions": {"tool": {"name": "write", "path": "D:\\private"}}},
+            },
+            {
+                "event_type": "agent.question.answered",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:03+00:00",
+                "payload": {"request_id": "request-private", "plan_approved": True, "workspace_checkpoint_id": checkpoint_id},
+            },
+            {
+                "event_type": "workspace.checkpoint.created",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:02.9+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "trigger": "agent.plan.approval", "path": "D:\\private"},
+            },
+            {
+                "event_type": "agent.question.requested",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:01+00:00",
+                "payload": {"extensions": {"rpcId": "request-private"}, "detail": "private plan"},
+            },
+        ]
+        with patch.object(self.application.storage, "list_events", return_value=events) as list_events:
+            result = self.application.rpc("agent.acceptance.evidence", {"sessionId": session_id})
+
+        list_events.assert_called_once_with(1000)
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(result["plan_review"]["checkpoint_before_approval"])
+        self.assertEqual(result["execution"]["turn_state"], "completed")
+        self.assertTrue(result["execution"]["write_tool_seen"])
+        self.assertEqual(result["workspace"]["changed_file_count"], 1)
+        self.assertTrue(result["workspace"]["restored"])
+        serialized = str(result)
+        for forbidden in (session_id, checkpoint_id, "request-private", "private plan", "D:\\private"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_agent_real_acceptance_evidence_does_not_pass_an_empty_read_only_round(self):
+        session_id = "session-read-only-evidence"
+        checkpoint_id = "wschk-11111111111111111111"
+        events = [
+            {
+                "event_type": "workspace.restored",
+                "timestamp": "2026-08-29T00:00:08+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "archive_count": 0},
+            },
+            {
+                "event_type": "workspace.restore.previewed",
+                "timestamp": "2026-08-29T00:00:07+00:00",
+                "payload": {"checkpoint_id": checkpoint_id},
+            },
+            {
+                "event_type": "workspace.checkpoint.diffed",
+                "timestamp": "2026-08-29T00:00:06+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "changed_total": 0},
+            },
+            {
+                "event_type": "agent.session.event",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:05+00:00",
+                "payload": {
+                    "status": "turn/end",
+                    "extensions": {"turn": {"state": "completed"}},
+                },
+            },
+            {
+                "event_type": "agent.session.event",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:04.5+00:00",
+                "payload": {"status": "tool/result", "extensions": {"tool": {"status": "completed"}}},
+            },
+            {
+                "event_type": "agent.session.event",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:04+00:00",
+                "payload": {"status": "tool/call", "extensions": {"tool": {"name": "read"}}},
+            },
+            {
+                "event_type": "agent.question.answered",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:03+00:00",
+                "payload": {
+                    "request_id": "request-read-only",
+                    "plan_approved": True,
+                    "workspace_checkpoint_id": checkpoint_id,
+                },
+            },
+            {
+                "event_type": "workspace.checkpoint.created",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:02.9+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "trigger": "agent.plan.approval"},
+            },
+            {
+                "event_type": "agent.question.requested",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:01+00:00",
+                "payload": {"extensions": {"rpcId": "request-read-only"}},
+            },
+        ]
+
+        with patch.object(self.application.storage, "list_events", return_value=events):
+            result = self.application.rpc("agent.acceptance.evidence", {"sessionId": session_id})
+
+        self.assertEqual(result["status"], "needs-action")
+        self.assertFalse(result["execution"]["write_tool_seen"])
+        self.assertEqual(result["execution"]["tool_result_count"], 1)
+        self.assertEqual(result["workspace"]["changed_file_count"], 0)
+
+    def test_agent_real_acceptance_evidence_fails_when_checkpoint_follows_approval(self):
+        session_id = "session-order-failure"
+        checkpoint_id = "wschk-fedcba98765432100123"
+        events = [
+            {
+                "event_type": "agent.question.answered",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:03+00:00",
+                "payload": {"request_id": "request-1", "plan_approved": True, "workspace_checkpoint_id": checkpoint_id},
+            },
+            {
+                "event_type": "workspace.checkpoint.created",
+                "session_id": session_id,
+                "timestamp": "2026-08-29T00:00:04+00:00",
+                "payload": {"checkpoint_id": checkpoint_id, "trigger": "agent.plan.approval"},
+            },
+        ]
+        with patch.object(self.application.storage, "list_events", return_value=events):
+            result = self.application.rpc("agent.acceptance.evidence", {"sessionId": session_id})
+
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["plan_review"]["approved"])
+        self.assertTrue(result["plan_review"]["checkpoint_created"])
+        self.assertFalse(result["plan_review"]["checkpoint_before_approval"])
+
+    def test_agent_plan_review_cancel_is_explicitly_audited_without_question_content(self):
+        with patch.object(
+            self.application.agent,
+            "cancel_interaction",
+            return_value={"accepted": True, "kind": "question", "cancelled": True},
+        ) as cancel_interaction:
+            result = self.application.rpc(
+                "agent.question.cancel",
+                {"rpcId": "plan-review-1", "sessionId": "session-plan"},
+            )
+        self.assertTrue(result["accepted"])
+        cancel_interaction.assert_called_once_with(
+            {"rpcId": "plan-review-1", "sessionId": "session-plan"}
+        )
+        events = self.application.storage.list_events(5)
+        self.assertIn("agent.question.cancelled", str(events))
+        self.assertIn("plan-review-1", str(events))
+        self.assertNotIn("Approve this plan", str(events))
+
     def test_new_agent_session_binds_the_active_sumika_provider(self):
         profile = self.application.provider_profiles.save(
             {
@@ -490,15 +1338,346 @@ class AgentServerTests(unittest.TestCase):
         self.application.storage.update_provider_profile_state(profile["id"], status="available")
         self.application.storage.upsert_module_setting(
             "llm",
-            enabled=False,
+            enabled=True,
             implementation_id="openai-compatible",
             config={"profile_id": profile["id"]},
         )
-        with patch.object(self.application.agent, "sync_provider_profile", return_value={"profile_id": profile["id"], "route_id": "sumika-local-test", "model": "qwen3:4b", "changed": True, "active": True}), patch.object(self.application.agent, "create_session", return_value={"sessionId": "dsh-session"}), patch.object(self.application.agent, "select_model", return_value={"selected": {"provider": "sumika-local-test", "model": "qwen3:4b"}}):
+        with patch.object(self.application.provider_profiles, "health", return_value={"ok": True, "profile": profile}) as health, patch.object(self.application.agent, "sync_provider_profile", return_value={"profile_id": profile["id"], "route_id": "sumika-local-test", "model": "qwen3:4b", "changed": True, "active": True}), patch.object(self.application.agent, "create_session", return_value={"sessionId": "dsh-session"}), patch.object(self.application.agent, "select_model", return_value={"selected": {"provider": "sumika-local-test", "model": "qwen3:4b"}}):
             result = self.application.rpc("agent.session.create", {"cwd": "."})
+        health.assert_called_once_with(profile["id"])
         self.assertEqual(result["provider"]["route_id"], "sumika-local-test")
         self.assertEqual(result["selected_model"]["model"], "qwen3:4b")
         self.assertNotIn("secrets", result["provider"])
+
+    def test_agent_provider_status_rejects_an_unavailable_active_profile_before_runtime(self):
+        profile = self.application.provider_profiles.save(
+            {
+                "id": "offline-provider",
+                "name": "Offline provider",
+                "template_id": "openai-compatible",
+                "processing_location": "cloud",
+                "base_url": "https://example.test/v1",
+                "model": "model-a",
+                "api_key": "test-secret",
+            }
+        )
+        self.application.storage.upsert_module_setting(
+            "llm",
+            enabled=True,
+            implementation_id="openai-compatible",
+            config={"profile_id": profile["id"]},
+        )
+        with patch.object(self.application.agent, "provider_status") as provider_status:
+            result = self.application.rpc("agent.provider.status", {})
+        self.assertEqual(result["state"], "unavailable")
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["profile_id"], profile["id"])
+        self.assertIn("模块页测试连接", result["reason"])
+        self.assertNotIn("test-secret", str(result))
+        provider_status.assert_not_called()
+
+    def test_agent_provider_status_refreshes_a_stale_available_profile_before_runtime(self):
+        profile = self.application.provider_profiles.save(
+            {
+                "id": "stale-provider",
+                "name": "Stale provider",
+                "template_id": "ollama",
+                "processing_location": "local",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "model": "qwen3:4b",
+            }
+        )
+        self.application.storage.update_provider_profile_state(profile["id"], status="available")
+        self.application.storage.upsert_module_setting(
+            "llm",
+            enabled=True,
+            implementation_id="openai-compatible",
+            config={"profile_id": profile["id"]},
+        )
+
+        def mark_unavailable(profile_id):
+            updated = self.application.storage.update_provider_profile_state(
+                profile_id, status="unavailable"
+            )
+            return {"ok": False, "profile": updated, "error": "connection failed"}
+
+        with patch.object(
+            self.application.provider_profiles,
+            "health",
+            side_effect=mark_unavailable,
+        ) as health, patch.object(self.application.agent, "provider_status") as provider_status:
+            result = self.application.rpc("agent.provider.status", {})
+
+        health.assert_called_once_with(profile["id"])
+        self.assertEqual(result["state"], "unavailable")
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["profile"]["status"], "unavailable")
+        provider_status.assert_not_called()
+
+    def test_enabling_llm_rechecks_a_stale_provider_profile(self):
+        profile = self.application.provider_profiles.save(
+            {
+                "id": "stale-enable-provider",
+                "name": "Stale enable provider",
+                "template_id": "ollama",
+                "processing_location": "local",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "model": "qwen3:4b",
+            }
+        )
+        self.application.storage.update_provider_profile_state(profile["id"], status="available")
+
+        def mark_unavailable(profile_id):
+            updated = self.application.storage.update_provider_profile_state(
+                profile_id, status="unavailable"
+            )
+            return {"ok": False, "profile": updated, "error": "connection failed"}
+
+        with patch.object(
+            self.application.provider_profiles,
+            "health",
+            side_effect=mark_unavailable,
+        ) as health:
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc(
+                    "module.update",
+                    {
+                        "module_id": "llm",
+                        "enabled": True,
+                        "implementation_id": "openai-compatible",
+                        "config": {"profile_id": profile["id"]},
+                    },
+                )
+
+        health.assert_called_once_with(profile["id"])
+        self.assertEqual(error.exception.code, -32602)
+        self.assertFalse(self.application.storage.get_module_setting("llm")["enabled"])
+
+    def test_module_listing_refreshes_active_provider_reachability(self):
+        profile = self.application.provider_profiles.save(
+            {
+                "id": "stale-module-provider",
+                "name": "Stale module provider",
+                "template_id": "ollama",
+                "processing_location": "local",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "model": "qwen3:4b",
+            }
+        )
+        self.application.storage.update_provider_profile_state(profile["id"], status="available")
+        self.application.storage.upsert_module_setting(
+            "llm",
+            enabled=True,
+            implementation_id="openai-compatible",
+            config={"profile_id": profile["id"]},
+        )
+
+        def mark_unavailable(profile_id):
+            updated = self.application.storage.update_provider_profile_state(
+                profile_id, status="unavailable"
+            )
+            return {"ok": False, "profile": updated, "error": "connection failed"}
+
+        with patch.object(
+            self.application.provider_profiles,
+            "health",
+            side_effect=mark_unavailable,
+        ) as health:
+            modules = self.application.rpc("module.list", {})
+
+        health.assert_called_once_with(profile["id"])
+        llm = next(item for item in modules if item["id"] == "llm")
+        self.assertEqual(llm["status"], "error")
+        self.assertEqual(llm["profile"]["status"], "unavailable")
+
+    def test_workspace_capable_agent_requires_a_registered_git_workspace_for_new_sessions(self):
+        workspace_path = str(Path.cwd().resolve())
+        roster = {
+            "workspaces": [
+                {
+                    "id": "workspace-1",
+                    "path": workspace_path,
+                    "title": "Sumika",
+                    "session_ids": [],
+                }
+            ]
+        }
+
+        with (
+            patch.object(
+                self.application.agent,
+                "supports",
+                side_effect=lambda capability: capability == AgentCapability.WORKSPACES,
+            ),
+            patch.object(self.application.agent, "status", return_value={"ready": True}),
+            patch.object(self.application.agent, "list_workspaces", return_value=roster),
+            patch.object(
+                self.application.workspace,
+                "inspect",
+                return_value={"workspace": {"id": "git-workspace", "path": workspace_path}},
+            ) as inspect,
+            patch.object(
+                self.application.agent,
+                "create_session",
+                return_value={"sessionId": "session-1"},
+            ) as create,
+        ):
+            for params in ({}, {"cwd": workspace_path}, {"workspaceId": "missing"}):
+                with self.subTest(params=params), self.assertRaises(JsonRpcError) as error:
+                    self.application.rpc("agent.session.create", params)
+                self.assertIn(error.exception.code, {-32602, -32033})
+
+            result = self.application.rpc(
+                "agent.session.create",
+                {"workspaceId": "workspace-1", "characterId": "sumika"},
+            )
+
+        self.assertEqual(result["sessionId"], "session-1")
+        create.assert_called_once_with(
+            {"workspaceId": "workspace-1", "characterId": "sumika"}
+        )
+        inspect.assert_called_once_with(workspace_path)
+
+    def test_execute_turn_creates_a_checkpoint_for_the_bound_workspace(self):
+        workspace_path = str(Path.cwd().resolve())
+        roster = {
+            "workspaces": [
+                {
+                    "id": "workspace-1",
+                    "path": workspace_path,
+                    "title": "Sumika",
+                    "session_ids": ["session-1"],
+                }
+            ]
+        }
+        checkpoint = {
+            "id": "wschk-1234567890abcdef1234",
+            "workspace_id": "git-workspace",
+            "name": "Agent execute",
+        }
+        call_order = []
+
+        def create_checkpoint(path, *, name):
+            call_order.append(("checkpoint", path, name))
+            return {"checkpoint": checkpoint}
+
+        def prompt(params):
+            call_order.append(("prompt", params["sessionId"], params["mode"]))
+            return {"id": "turn-1", "accepted": True}
+
+        with (
+            patch.object(
+                self.application.agent,
+                "supports",
+                side_effect=lambda capability: capability == AgentCapability.WORKSPACES,
+            ),
+            patch.object(self.application.agent, "status", return_value={"ready": True}),
+            patch.object(self.application.agent, "list_workspaces", return_value=roster),
+            patch.object(self.application.workspace, "create_checkpoint", side_effect=create_checkpoint),
+            patch.object(self.application.agent, "prompt", side_effect=prompt),
+        ):
+            for params in (
+                {"sessionId": "session-1", "mode": "execute", "text": "edit"},
+                {
+                    "sessionId": "session-1",
+                    "workspaceId": "missing",
+                    "mode": "execute",
+                    "text": "edit",
+                },
+            ):
+                with self.subTest(params=params), self.assertRaises(JsonRpcError):
+                    self.application.rpc("agent.session.prompt", params)
+
+            result = self.application.rpc(
+                "agent.session.prompt",
+                {
+                    "sessionId": "session-1",
+                    "workspaceId": "workspace-1",
+                    "mode": "execute",
+                    "text": "edit",
+                },
+            )
+
+        self.assertEqual(result["workspace_checkpoint"], checkpoint)
+        self.assertEqual(call_order[0][0], "checkpoint")
+        self.assertEqual(call_order[1], ("prompt", "session-1", "execute"))
+        self.assertIn("agent.turn.started", str(self.application.storage.list_events(5)))
+        self.assertIn(checkpoint["id"], str(self.application.storage.list_events(5)))
+
+    def test_plan_turn_requires_the_bound_workspace_without_creating_a_checkpoint(self):
+        workspace_path = str(Path.cwd().resolve())
+        roster = {
+            "workspaces": [
+                {
+                    "id": "workspace-1",
+                    "path": workspace_path,
+                    "title": "Sumika",
+                    "session_ids": ["session-1"],
+                }
+            ]
+        }
+
+        with (
+            patch.object(
+                self.application.agent,
+                "supports",
+                side_effect=lambda capability: capability == AgentCapability.WORKSPACES,
+            ),
+            patch.object(self.application.agent, "status", return_value={"ready": True}),
+            patch.object(self.application.agent, "list_workspaces", return_value=roster),
+            patch.object(self.application.workspace, "create_checkpoint") as create_checkpoint,
+            patch.object(
+                self.application.agent,
+                "prompt",
+                return_value={"id": "plan-1", "accepted": True},
+            ) as prompt,
+        ):
+            with self.assertRaises(JsonRpcError):
+                self.application.rpc(
+                    "agent.session.prompt",
+                    {"sessionId": "session-1", "mode": "plan", "text": "plan"},
+                )
+
+            result = self.application.rpc(
+                "agent.session.prompt",
+                {
+                    "sessionId": "session-1",
+                    "workspaceId": "workspace-1",
+                    "mode": "plan",
+                    "text": "plan",
+                },
+            )
+
+        self.assertTrue(result["accepted"])
+        self.assertNotIn("workspace_checkpoint", result)
+        create_checkpoint.assert_not_called()
+        prompt.assert_called_once_with(
+            {
+                "sessionId": "session-1",
+                "workspaceId": "workspace-1",
+                "mode": "plan",
+                "text": "plan",
+            }
+        )
+        events = str(self.application.storage.list_events(5))
+        self.assertIn("agent.turn.started", events)
+        self.assertIn("workspace-1", events)
+
+    def test_workspace_registration_fails_before_runtime_mutation_when_git_check_fails(self):
+        workspace_path = str(Path.cwd().resolve())
+        with (
+            patch.object(
+                self.application.workspace,
+                "inspect",
+                side_effect=WorkspaceError("workspace is not a Git repository"),
+            ),
+            patch.object(self.application.agent, "create_workspace") as create,
+        ):
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc("agent.workspace.create", {"path": workspace_path})
+
+        self.assertEqual(error.exception.code, -32033)
+        create.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -25,4 +25,23 @@ $dataPath = if ([string]::IsNullOrWhiteSpace($DataDir)) {
     $DataDir
 }
 $env:PYTHONPATH = Join-Path $repoRoot 'backend/src'
+# Keep BrowserSkill updates explicit and user-controlled for this process.
+$env:BSK_AUTO_UPDATE = 'off'
+if ([string]::IsNullOrWhiteSpace([string]$env:SUMIKA_BSK_EXECUTABLE)) {
+    $pinnedBrowserSkillExecutable = 'D:\Tools\BrowserSkill\0.1.11\bsk.exe'
+    if (Test-Path -LiteralPath $pinnedBrowserSkillExecutable -PathType Leaf) {
+        $env:SUMIKA_BSK_EXECUTABLE = (Resolve-Path -LiteralPath $pinnedBrowserSkillExecutable).Path
+    }
+}
+$browserSkillPath = [string]$env:SUMIKA_BSK_EXECUTABLE
+if (-not [string]::IsNullOrWhiteSpace($browserSkillPath)) {
+    $browserSkillPath = [Environment]::ExpandEnvironmentVariables($browserSkillPath.Trim().Trim('"'))
+    if ([IO.Path]::IsPathRooted($browserSkillPath) -and (Test-Path -LiteralPath $browserSkillPath -PathType Leaf)) {
+        $browserSkillDirectory = (Resolve-Path -LiteralPath $browserSkillPath).Path | Split-Path -Parent
+        $pathEntries = @([Environment]::GetEnvironmentVariable('PATH', 'Process') -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if (-not ($pathEntries | Where-Object { $_.TrimEnd('\').Equals($browserSkillDirectory.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase) })) {
+            $env:Path = "$browserSkillDirectory;$env:Path"
+        }
+    }
+}
 & $pythonPath -m sumika_core --host 127.0.0.1 --port $Port --data-dir $dataPath

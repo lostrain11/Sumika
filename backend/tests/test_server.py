@@ -330,6 +330,62 @@ class ServerTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_chat_rechecks_active_provider_before_sending_after_endpoint_stops(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"lifecycle-model"}]}')
+
+            def do_POST(self):  # noqa: N802
+                self.send_response(500)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = self.application.rpc(
+                "provider.profile.save",
+                {
+                    "profile": {
+                        "name": "Lifecycle chat provider",
+                        "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+                        "model": "lifecycle-model",
+                        "processing_location": "local",
+                    }
+                },
+            )
+            health = self.application.rpc(
+                "provider.profile.health", {"profile_id": profile["id"]}
+            )
+            self.assertTrue(health["ok"])
+            self.application.rpc("provider.profile.activate", {"profile_id": profile["id"]})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        with self.assertRaises(JsonRpcError) as error:
+            self.application.rpc(
+                "chat.send",
+                {
+                    "session_id": "lifecycle-chat",
+                    "character_id": "sumika",
+                    "messages": [{"role": "user", "content": "不会发送"}],
+                },
+            )
+        self.assertEqual(error.exception.code, -32010)
+        self.assertEqual(
+            self.application.storage.get_provider_profile(profile["id"])["status"],
+            "unavailable",
+        )
+        self.assertEqual(self.application.storage.list_messages("lifecycle-chat"), [])
+
     def test_plugin_discovery_requires_explicit_approval_and_never_runs_entrypoint(self):
         with tempfile.TemporaryDirectory() as directory:
             plugin_dir = Path(directory) / "plugin"

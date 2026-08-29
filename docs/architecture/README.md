@@ -30,6 +30,8 @@ OpenAI-compatible / external-process providers
 - [Manifest](manifest.md) / [Tools](tools.md)：插件发现和外部软件调用。
 - [Security](security.md)：本地服务、凭据、权限和数据边界。
 - [Debugging](debugging.md)：日志、诊断、事件和恢复信号。
+- [Agent observability](agent-observability.md)：日用遥测、插件对比和自进化评估闸门。
+- [需求基线](../requirements/README.md)：长期产品意图、重构验收标准和模型策略契约。
 
 DSH 是当前 [Agent Runtime](agent-runtime.md) 的生产 adapter；其固定协议、隔离
 profile 和插件约束记录在[外部集成专题](../integrations/dsh-agent.md)。
@@ -90,5 +92,6 @@ operation.
 ## 相关文档
 
 - [文档总入口](../README.md)
+- [需求基线](../requirements/README.md)
 - [状态矩阵](../status-matrix.md)
 - [ADR 0001：依赖轻量的首版 Shell](../adr/0001-local-first-shell.md)

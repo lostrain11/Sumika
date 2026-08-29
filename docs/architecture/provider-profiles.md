@@ -7,8 +7,10 @@ or several remote endpoints without duplicating implementation code.
 
 New workspaces contain no automatic profile. Templates are editable starting
 points only: selecting Ollama does not install it, and its `qwen3:4b` value
-does not download a model. Activation always remains a separate, explicit
-health-checked action.
+does not download a model. The `智谱 BigModel` template likewise only offers
+the model IDs `glm-4.5-air`, `glm-4.7`, and `glm-4.6v`; it never contains a
+credential or claims that a model is enabled. Activation always remains a
+separate, explicit, health-checked action.
 
 ## Stored shape
 
@@ -44,6 +46,20 @@ The UI never reads a secret back. An empty password field preserves the current
 secret; an explicit clear checkbox removes it. Imported unknown sensitive
 fields remain inert credential entries named `source:<field>` until a future
 adapter is explicitly implemented.
+
+Health checks first request the adapter's model catalogue without spending a
+chat request. Some gateways (including compatible relays) do not expose
+`GET /models`; an explicit user-triggered `测试连接` or activation may then
+send one bounded `max_tokens=1` request to `/chat/completions`. Passive page
+refreshes never perform that probe, and a failed probe never falls back to a
+fake provider.
+
+Managed DSH MCP connections use the same `CredentialStore` boundary but a
+separate hashed reference namespace. Their Preset rows contain only a fixed
+`process.env` expression and non-sensitive target metadata. A new or rotated
+MCP secret remains disabled until a desktop restart injects its new environment
+reference; neither Provider profiles nor MCP configuration expose a read-back
+API.
 
 ## UI contract
 

@@ -11,6 +11,13 @@ API、协议、类名和代码标识保留 English identifier。
 
 - [当前执行契约](current-execution.md)：恢复当前目标、里程碑、阻塞和接下来的
   三个动作；不替代状态矩阵。
+- [需求基线](requirements/README.md)：记录长期产品意图、历史取代关系和未来
+  重构验收标准；不替代状态矩阵。
+- [完整需求基线](requirements/baseline.md)
+- [模型策略契约](requirements/model-policy.md)：记录 ZCode、智谱、Ollama、额度、
+  成本和自动路由的独立边界。
+- [脱敏原话摘录](requirements/original-excerpts.md)
+- [机器可读需求](requirements/requirements.json)
 
 ## 用户使用
 
@@ -39,6 +46,7 @@ API、协议、类名和代码标识保留 English identifier。
 - [外部工具](architecture/tools.md)
 - [安全边界](architecture/security.md)
 - [调试与恢复](architecture/debugging.md)
+- [Agent 日用遥测与评估](architecture/agent-observability.md)
 
 ## 开发接口与决策
 
@@ -62,10 +70,11 @@ API、协议、类名和代码标识保留 English identifier。
 ## 文档维护
 
 - 手动运行 `python tools/check_docs.py` 检查本地链接、索引覆盖、状态矩阵和
-  当前执行契约、归档引用。
+  当前执行契约、需求基线和归档引用。
 - 三端命令分别维护在根 README；未实现的启动器必须明确标为预留或实验性。
 - 新增产品专题时，同时加入本页、状态矩阵和对应专题文档的“相关文档”段落。
 - 功能状态只更新状态矩阵；README 和专题文档引用矩阵，不自行维护第二份状态。
+- 需求意图只在需求基线中新增或建立 supersession 关系；实现完成度仍只更新状态矩阵。
 - 外部项目只作行为或信息架构参考。复制代码、图标、模型或动画前，先更新
   来源与许可证台账及第三方声明。
 - 非产品过程资料进入归档区，不在产品文档索引中重新出现；归档内容保持原样。

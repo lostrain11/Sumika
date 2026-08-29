@@ -1,0 +1,7 @@
+- insert:
+    - id: sumika-browser-policy
+      name: "@sumika/dsh-browser-policy"
+      config:
+        endpoint: "http://127.0.0.1:8770/rpc"
+        policyTimeoutMs: 1500
+        helpTimeoutMs: 300000

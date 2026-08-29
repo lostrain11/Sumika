@@ -42,11 +42,14 @@ class AgentCapability(str, Enum):
     SUBAGENTS = "subagents"
     GOALS = "goals"
     PLAN = "plan"
+    READONLY = "readonly"
     COMMANDS = "commands"
     SKILLS = "skills"
     MCP = "mcp"
+    MCP_CONFIGURATION = "mcp-configuration"
     INTERACTIONS = "interactions"
     EVENT_INGEST = "event-ingest"
+    RETRY = "retry"
 
 
 class AgentRuntime(ABC):
@@ -87,6 +90,12 @@ class AgentRuntime(ABC):
     @abstractmethod
     def cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
+
+    def retry_prompt(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Retry the latest failed user target without exposing its body."""
+
+        del params
+        self._unsupported(AgentCapability.RETRY, "retrying the latest failed prompt")
 
     def supports(self, capability: AgentCapability | str) -> bool:
         try:
@@ -131,6 +140,10 @@ class AgentRuntime(ABC):
     def remove_preset(self, params: dict[str, Any]) -> dict[str, Any]:
         del params
         self._unsupported(AgentCapability.PRESETS, "preset removal")
+
+    def validate_preset_mount(self, params: dict[str, Any]) -> dict[str, Any]:
+        del params
+        self._unsupported(AgentCapability.PRESETS, "preset mount validation")
 
     def select_preset(self, params: dict[str, Any]) -> dict[str, Any]:
         del params
@@ -228,6 +241,28 @@ class AgentRuntime(ABC):
             "reason": f"Agent runtime '{self.runtime_id}' does not support MCP",
         }
 
+    def mcp_catalog(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return a runtime-neutral MCP catalog projection.
+
+        Older adapters may only know how to report observed tools.  Returning
+        that bounded inventory here keeps the new catalog RPC portable while
+        allowing capable adapters to add live and configured sources.
+        """
+
+        return self.mcp_inventory(params)
+
+    def list_mcp_configurations(self, params: dict[str, Any]) -> dict[str, Any]:
+        del params
+        self._unsupported(AgentCapability.MCP_CONFIGURATION, "managed MCP configuration listing")
+
+    def preview_mcp_configuration(self, params: dict[str, Any]) -> dict[str, Any]:
+        del params
+        self._unsupported(AgentCapability.MCP_CONFIGURATION, "managed MCP configuration preview")
+
+    def apply_mcp_configuration(self, params: dict[str, Any]) -> dict[str, Any]:
+        del params
+        self._unsupported(AgentCapability.MCP_CONFIGURATION, "managed MCP configuration apply")
+
     def respond(self, params: dict[str, Any]) -> dict[str, Any]:
         del params
         self._unsupported(AgentCapability.INTERACTIONS, "runtime response")
@@ -240,12 +275,19 @@ class AgentRuntime(ABC):
         del params
         self._unsupported(AgentCapability.INTERACTIONS, "interaction response")
 
+    def cancel_interaction(self, params: dict[str, Any]) -> dict[str, Any]:
+        del params
+        self._unsupported(AgentCapability.INTERACTIONS, "interaction cancellation")
+
     def normalize_event(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
         self._unsupported(AgentCapability.EVENT_INGEST, "event ingestion")
 
     def set_event_sink(self, sink: Any) -> None:
         del sink
+
+    def bind_credential_store(self, credential_store: Any) -> None:
+        del credential_store
 
     def close(self) -> None:
         return None

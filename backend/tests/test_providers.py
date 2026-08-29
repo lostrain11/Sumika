@@ -101,6 +101,14 @@ class ProviderTests(unittest.TestCase):
         output.extend(filter_.finish())
         self.assertEqual("".join(output), "prefix visible")
 
+    def test_ollama_hint_supports_non_default_local_port(self):
+        provider = OpenAICompatibleProvider(
+            "http://127.0.0.1:11435/v1",
+            "qwen3:4b",
+            ollama=True,
+        )
+        self.assertTrue(provider._is_ollama())
+
     def test_openai_compatible_health_check_requires_configured_model(self):
         received = {}
 
@@ -127,6 +135,44 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(result["status"], "unconfigured")
             self.assertEqual(result["available_models"], ["available-model"])
             self.assertEqual(received["authorization"], "Bearer health-secret")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_health_check_does_not_spend_a_chat_request_without_explicit_probe(self):
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                calls.append("GET")
+                self.send_response(404)
+                self.end_headers()
+
+            def do_POST(self):  # noqa: N802
+                calls.append("POST")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"choices":[{"message":{"content":"ok"}}]}')
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            provider = OpenAICompatibleProvider(
+                f"http://127.0.0.1:{server.server_address[1]}/v1", "test-model"
+            )
+            passive = provider.health_check()
+            self.assertFalse(passive["ok"])
+            self.assertEqual(calls, ["GET"])
+            active = provider.health_check(allow_chat_probe=True)
+            self.assertTrue(active["ok"])
+            self.assertEqual(calls, ["GET", "GET", "POST"])
+            self.assertEqual(active["health_probe"], "chat-completions")
         finally:
             server.shutdown()
             server.server_close()

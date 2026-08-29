@@ -30,10 +30,14 @@
       "url": "https://github.com/tencent/BrowserSkill",
       "commit": "a004291848e8641400b973b8d612b4c4b74cdc90",
       "license": "MIT",
-      "version": "extension 0.1.6 / DSH plugin 0.1.1",
+      "version": "CLI 0.1.11 / extension 0.1.7 / DSH plugin 0.1.1",
+      "cli_commit": "70b851a3e8408f4994a757e47137ef515bd82901",
+      "extension_commit": "f060a7c074cf1450e4d610aff2906141aebc6718",
+      "cli_archive_sha256": "041785147342a704fd576470e63307880043a15ad52e0553f12e6dcf360ccf74",
+      "extension_archive_sha256": "07de2310a6d4c218e017f788f30acbfe88564b0f466e96528d7411fd5bac9ac9",
       "capabilities": ["isolated-session", "dom-navigation", "manual-takeover", "screenshots"],
       "usage": "pinned backend candidate; automatic updates disabled",
-      "last_checked": "2026-08-25"
+      "last_checked": "2026-08-29"
     },
     {
       "id": "memory-systems-ranking-2026-08",

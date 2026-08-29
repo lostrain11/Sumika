@@ -1,13 +1,24 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from check_docs import (
-    check_archived_references,
-    check_current_execution,
-    check_local_links,
-    check_status_matrix,
-)
+try:
+    from check_docs import (
+        check_archived_references,
+        check_current_execution,
+        check_local_links,
+        check_requirements,
+        check_status_matrix,
+    )
+except ModuleNotFoundError:  # Running the test as ``tools.test_check_docs`` from the repository root.
+    from tools.check_docs import (
+        check_archived_references,
+        check_current_execution,
+        check_local_links,
+        check_requirements,
+        check_status_matrix,
+    )
 
 
 class DocumentationCheckerTests(unittest.TestCase):
@@ -105,6 +116,146 @@ class DocumentationCheckerTests(unittest.TestCase):
             self.write(root, "docs/current-execution.md", content)
             errors = check_current_execution(root)
             self.assertTrue(any("Windows user path" in error for error in errors))
+
+    def write_requirements_fixture(self, root: Path, rows: list[dict] | None = None) -> None:
+        requirements_dir = root / "docs" / "requirements"
+        requirements_dir.mkdir(parents=True, exist_ok=True)
+        self.write(root, "docs/requirements/README.md", "# Requirements\n`TEST-001`\n")
+        self.write(root, "docs/requirements/baseline.md", "# Baseline\n`TEST-001`\n")
+        self.write(root, "docs/requirements/model-policy.md", "# Model policy\n")
+        self.write(root, "docs/requirements/original-excerpts.md", "# Excerpts\n`EX-TEST-001`\n")
+        self.write(root, "impl.py", "pass\n")
+        self.write(root, "test.py", "pass\n")
+        self.write(
+            root,
+            "docs/status-matrix.md",
+            "# Status\n\n"
+            "| ID | 状态 | 当前入口 | 主文档 | 验证证据 | 下一步 |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| `local-llm` | 已实现 | x | [doc](requirements/README.md) | [test](requirements/README.md) | x |\n\n"
+            "## 需求基线映射\n\n"
+            "| 状态 ID | 需求 ID |\n| --- | --- |\n"
+            "| `local-llm` | `TEST-001` |\n",
+        )
+        if rows is None:
+            rows = [
+                {
+                    "id": "TEST-001",
+                    "category": "test",
+                    "statement": "A test requirement.",
+                    "acceptance": ["A bounded check passes"],
+                    "provenance": "confirmed",
+                    "intent_state": "active",
+                    "source_refs": ["test-source"],
+                    "excerpt_refs": ["EX-TEST-001"],
+                    "implementation_refs": ["../../impl.py"],
+                    "test_refs": ["../../test.py"],
+                    "status_ref": "status-matrix:local-llm",
+                }
+            ]
+        self.write(
+            root,
+            "docs/requirements/requirements.json",
+            json.dumps({"schema": "sumika-requirements/v1", "requirements": rows}, ensure_ascii=False),
+        )
+
+    def test_requirements_ledger_accepts_valid_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_requirements_fixture(root)
+            self.assertEqual(check_requirements(root), [])
+
+    def test_requirements_ledger_rejects_duplicate_id_and_bad_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            row = {
+                "id": "TEST-001",
+                "category": "test",
+                "statement": "A test requirement.",
+                "acceptance": ["A bounded check passes"],
+                "provenance": "unknown",
+                "intent_state": "active",
+                "source_refs": ["test-source"],
+                "excerpt_refs": [],
+                "implementation_refs": [],
+                "test_refs": [],
+                "status_ref": "status-matrix:missing",
+            }
+            self.write_requirements_fixture(root, [row, dict(row)])
+            errors = check_requirements(root)
+            self.assertTrue(any("duplicate requirement ID" in error for error in errors))
+            self.assertTrue(any("invalid provenance" in error for error in errors))
+            self.assertTrue(any("unknown status_ref" in error for error in errors))
+
+    def test_requirements_ledger_rejects_bad_reference_excerpt_and_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_requirements_fixture(root)
+            path = root / "docs" / "requirements" / "requirements.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["requirements"][0]["implementation_refs"] = ["../../missing.py"]
+            payload["requirements"][0]["excerpt_refs"] = ["EX-MISSING-001"]
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            (root / "docs" / "requirements" / "model-policy.md").write_text("api_key=sk-012345678901\n", encoding="utf-8")
+            errors = check_requirements(root)
+            self.assertTrue(any("missing implementation_refs reference" in error for error in errors))
+            self.assertTrue(any("unknown excerpt_ref" in error for error in errors))
+            self.assertTrue(any("API key-like token" in error for error in errors))
+
+    def test_requirements_requires_mapping_for_each_status_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_requirements_fixture(root)
+            self.write(
+                root,
+                "docs/status-matrix.md",
+                "# Status\n\n"
+                "| ID | 状态 | 当前入口 | 主文档 | 验证证据 | 下一步 |\n"
+                "| --- | --- | --- | --- | --- | --- |\n"
+                "| `local-llm` | 已实现 | x | [doc](requirements/README.md) | [test](requirements/README.md) | x |\n\n"
+                "## 需求基线映射\n\n"
+                "| 状态 ID | 需求 ID |\n| --- | --- |\n",
+            )
+            errors = check_requirements(root)
+            self.assertTrue(any("missing requirement mapping for local-llm" in error for error in errors))
+
+    def test_requirements_rejects_personal_unix_and_unc_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_requirements_fixture(root)
+            self.write(
+                root,
+                "docs/requirements/model-policy.md",
+                "/home/alice/private\n\\\\server\\share\\secret\n{\"apiKey\": \"abcdefgh123456\"}\n",
+            )
+            errors = check_requirements(root)
+            self.assertTrue(any("Unix user path" in error for error in errors))
+            self.assertTrue(any("UNC path" in error for error in errors))
+            self.assertTrue(any("credential assignment" in error for error in errors))
+
+    def test_requirements_ledger_rejects_supersession_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = {
+                "id": "TEST-001",
+                "category": "test",
+                "statement": "First.",
+                "acceptance": ["One"],
+                "provenance": "confirmed",
+                "intent_state": "superseded",
+                "source_refs": ["test-source"],
+                "excerpt_refs": [],
+                "implementation_refs": ["../../impl.py"],
+                "test_refs": ["../../test.py"],
+                "status_ref": "status-matrix:local-llm",
+                "supersedes": ["TEST-002"],
+            }
+            second = dict(first)
+            second.update({"id": "TEST-002", "statement": "Second.", "supersedes": ["TEST-001"]})
+            self.write_requirements_fixture(root, [first, second])
+            self.write(root, "docs/requirements/baseline.md", "# Baseline\n`TEST-001` `TEST-002`\n")
+            errors = check_requirements(root)
+            self.assertTrue(any("supersession cycle" in error for error in errors))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,11 @@ llama.cpp server、vLLM、LocalAI 或通用 OpenAI-compatible 模板。模板只
 可编辑示例，保存后仍需执行真实健康检查，检查通过并明确启用后才可聊天。
 `qwen3:4b` 只是 Ollama 模板中的示例模型，不代表推荐、预装或自动下载。
 
+对于协议、UI 和启动冒烟，可以另外登记一个更小的测试档案，例如
+`qwen3:1.7b`。它与 4B 使用同一个 OpenAI-compatible 适配器，适合快速确认端点、
+流式传输和基本请求；小模型的工具选择、长上下文规划和复杂代码修改质量不应据此
+判定为日用 Agent 可用。测试档案不会自动成为默认模型，日常档案应由用户明确选择。
+
 ## Optional Ollama helper
 
 `tools/setup-ollama.ps1` 是 Windows 专用、由用户主动运行的辅助工具。调用时
@@ -25,6 +30,28 @@ llama.cpp server、vLLM、LocalAI 或通用 OpenAI-compatible 模板。模板只
 模型缓存可通过 `-ModelsDir` 或 `SUMIKA_OLLAMA_MODELS` 指定，缓存不会进入
 仓库。下载可使用当前命令范围内的 `SUMIKA_DOWNLOAD_PROXY`；脚本结束后恢复
 调用者的代理环境，不修改系统代理、TUN、模式或节点。
+
+### Existing Ollama service
+
+`OLLAMA_MODELS` is read when the Ollama server process starts. Setting it in a
+later PowerShell window does not reconfigure an already running Ollama tray
+application. If `/api/tags` is empty while the requested model manifest exists
+in another directory, the helper now stops before pulling a duplicate model.
+After closing Ollama from its tray menu, start a fresh service with the existing
+cache:
+
+```powershell
+$env:OLLAMA_MODELS = 'E:\AI\OllamaModels'
+$env:OLLAMA_HOST = '127.0.0.1:11434'
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
+```
+
+Then verify `ollama list` or `GET /api/tags`. To leave the current service
+untouched, use a separate port and point the Sumika profile at that port:
+
+```powershell
+.\tools\setup-ollama.ps1 -Model 'qwen3:4b' -ModelsDir 'E:\AI\OllamaModels' -Port 11435 -SkipPull
+```
 
 Ollama profile 使用其 OpenAI-compatible endpoint。对于 Qwen3，适配器使用
 `think=low` 并丢弃 reasoning delta，只把可见回答流式发送给 UI。模型服务

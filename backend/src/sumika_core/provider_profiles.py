@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
+import re
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -14,6 +16,7 @@ from .storage import Storage
 
 
 PROFILE_FORMAT = "sumika-provider-profile/v1"
+CREDENTIAL_REVISION_KEY = "credential_revision"
 LEGACY_OLLAMA_PROFILE_ID = "local-ollama"
 LEGACY_OPENAI_PROFILE_ID = "legacy-openai-compatible"
 SENSITIVE_HEADER_NAMES = {
@@ -35,6 +38,14 @@ PROVIDER_TEMPLATES: tuple[dict[str, Any], ...] = (
     {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": "", "processing_location": "cloud"},
     {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "", "processing_location": "cloud"},
     {"id": "siliconflow", "name": "SiliconFlow", "base_url": "https://api.siliconflow.cn/v1", "model": "", "processing_location": "cloud"},
+    {
+        "id": "zhipu-bigmodel",
+        "name": "智谱 BigModel",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-4.5-air",
+        "model_options": ["glm-4.5-air", "glm-4.7", "glm-4.6v"],
+        "processing_location": "cloud",
+    },
     {"id": "openai-compatible", "name": "通用 OpenAI-compatible", "base_url": "", "model": "", "processing_location": "auto"},
 )
 _TEMPLATES = {item["id"]: item for item in PROVIDER_TEMPLATES}
@@ -122,7 +133,8 @@ class ProviderProfileManager:
             raise ProviderProfileError("processing_location must be auto, local, or cloud")
 
         credential_ref = str((existing or {}).get("credential_ref") or profile_id)
-        secrets = self._read_secrets(existing) if existing else {}
+        existing_secrets = self._read_secrets(existing) if existing else {}
+        secrets = dict(existing_secrets)
         supplied_secrets = payload.get("secrets") if isinstance(payload.get("secrets"), dict) else {}
         api_key = payload.get("api_key")
         if isinstance(api_key, str):
@@ -137,6 +149,13 @@ class ProviderProfileManager:
         if isinstance(clear_secrets, list):
             for key in clear_secrets:
                 secrets.pop(str(key), None)
+        if secrets:
+            if existing is not None and secrets == existing_secrets:
+                config[CREDENTIAL_REVISION_KEY] = provider_credential_revision(existing)
+            else:
+                config[CREDENTIAL_REVISION_KEY] = uuid4().hex
+        else:
+            config.pop(CREDENTIAL_REVISION_KEY, None)
         try:
             self.credentials.write(credential_ref, secrets)
         except CredentialError as exc:
@@ -158,7 +177,7 @@ class ProviderProfileManager:
         )
         return self.public(profile)
 
-    def health(self, profile_id: str) -> dict[str, Any]:
+    def health(self, profile_id: str, *, allow_chat_probe: bool = False) -> dict[str, Any]:
         profile = self.storage.get_provider_profile(profile_id)
         if profile is None or profile.get("archived_at"):
             raise ProviderProfileError(f"Unknown active provider profile: {profile_id}")
@@ -166,7 +185,23 @@ class ProviderProfileManager:
             updated = self.storage.update_provider_profile_state(profile_id, status="draft")
             return {"ok": False, "profile": self.public(updated or profile), "error": "Profile is incomplete"}
         provider = self.runtime(profile_id)
-        result = provider.health_check()
+        result = provider.health_check(allow_chat_probe=allow_chat_probe)
+        # Passive catalog refreshes must not invalidate a profile that passed
+        # an explicit chat probe merely because its gateway omits GET /models.
+        # Network/authentication failures still update the profile normally.
+        catalog_missing = (
+            result.get("status") == "unconfigured"
+            and result.get("error") == "model catalogue unavailable; run an explicit connection test"
+        )
+        if catalog_missing and profile.get("status") == "available":
+            return {
+                **result,
+                "ok": True,
+                "status": "available",
+                "model_catalog": "not-exposed",
+                "profile_id": profile_id,
+                "profile": self.public(profile),
+            }
         status = "available" if result.get("ok") else "unavailable"
         updated = self.storage.update_provider_profile_state(profile_id, status=status)
         return {**result, "profile_id": profile_id, "profile": self.public(updated or profile)}
@@ -189,6 +224,7 @@ class ProviderProfileManager:
             api_key=secrets.get("api_key"),
             timeout=float(config.get("timeout") or 60),
             headers=headers,
+            ollama=profile.get("template_id") == "ollama",
         )
 
     def mark_used(self, profile_id: str) -> dict[str, Any]:
@@ -269,6 +305,18 @@ def resolve_processing_location(selection: str, base_url: str) -> str:
         return "local" if address.is_loopback or address.is_private or address.is_link_local else "cloud"
     except ValueError:
         return "cloud"
+
+
+def provider_credential_revision(profile: dict[str, Any]) -> str:
+    """Return a non-secret revision that changes whenever profile secrets change."""
+
+    config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+    explicit = str(config.get(CREDENTIAL_REVISION_KEY) or "").strip().lower()
+    if re.fullmatch(r"[a-f0-9]{16,64}", explicit):
+        return explicit
+    profile_id = str(profile.get("id") or "")
+    created_at = str(profile.get("created_at") or "legacy")
+    return hashlib.sha256(f"{profile_id}\0{created_at}".encode("utf-8")).hexdigest()[:32]
 
 
 def _is_local_ollama_url(base_url: str) -> bool:

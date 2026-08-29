@@ -85,12 +85,14 @@ if (-not [string]::IsNullOrWhiteSpace($ModelsDir) -and -not (Test-Path -LiteralP
 
 $oldModels = $env:OLLAMA_MODELS
 $oldHost = $env:OLLAMA_HOST
+$startedHere = $false
 if (-not [string]::IsNullOrWhiteSpace($ModelsDir)) { $env:OLLAMA_MODELS = $ModelsDir }
 $env:OLLAMA_HOST = "127.0.0.1:$Port"
 try {
     if (-not (Test-OllamaService $baseUrl)) {
         Write-Host "Starting Ollama on $baseUrl"
         Start-Process -FilePath $ollama -ArgumentList 'serve' -WorkingDirectory (Split-Path -Parent $ollama) -WindowStyle Hidden -RedirectStandardOutput $serviceStdoutLog -RedirectStandardError $serviceLog | Out-Null
+        $startedHere = $true
         $deadline = (Get-Date).AddSeconds(30)
         do {
             Start-Sleep -Milliseconds 250
@@ -103,6 +105,9 @@ try {
 
     $tags = Get-OllamaTags $baseUrl
     if ($tags -notcontains $Model) {
+        if (-not $startedHere -and -not [string]::IsNullOrWhiteSpace($ModelsDir)) {
+            throw "Ollama is already running on $baseUrl but does not expose model '$Model'. The existing service may use a different OLLAMA_MODELS directory; no download was attempted. Close/restart Ollama with OLLAMA_MODELS='$ModelsDir', or choose another -Port so this script can start an isolated service."
+        }
         if ($SkipPull) {
             throw "Ollama is ready, but model '$Model' is not installed. Run this script without -SkipPull."
         }

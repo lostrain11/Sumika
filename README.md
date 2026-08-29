@@ -106,6 +106,11 @@ Windows-only helper can start/check Ollama and pull that explicit model:
 installation. The helper supports an explicit model cache through
 `-ModelsDir` or `SUMIKA_OLLAMA_MODELS`.
 
+The model directory is captured when the Ollama server starts. If Ollama is
+already running with another directory, the helper will not pull a duplicate;
+close and restart Ollama with `OLLAMA_MODELS` set, or use a separate port (see
+the local-model guide).
+
 The main window can open an optional always-on-top desktop-pet mode. The model
 area is a Tauri drag region, so the floating pet can be moved around the
 desktop. A compact chat input sits below the model and uses the same selected
@@ -123,12 +128,13 @@ or raw visual/audio data.
 The desktop core listens on `127.0.0.1:8771` by default, while the browser
 preview uses `127.0.0.1:8770`.
 
-To let the Tauri shell supervise an already installed DSH executable, opt in
-explicitly:
+The Windows launcher first checks `SUMIKA_AGENT_ENDPOINT` /
+`SUMIKA_DSH_ENDPOINT` (default `http://127.0.0.1:3080`). If an existing DSH
+passes its health check, Sumika reuses it without taking over its lifecycle.
+Otherwise the launcher discovers the already installed pinned runtime at the
+fixed path below and lets Tauri supervise it:
 
 ```powershell
-$env:SUMIKA_DSH_EXECUTABLE = 'D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd'
-$env:SUMIKA_DSH_AUTOSTART = '1'
 .\tools\run-desktop.ps1
 ```
 
@@ -138,15 +144,17 @@ If the pinned runtime is not installed yet, explicitly run:
 .\tools\setup-dsh.ps1 -Proxy 'http://127.0.0.1:6064'
 ```
 
-The helper writes only to `D:\Tools\DeepSeekHarness\0.1.1-rc.2`; it does not
-change `PATH` or the global DSH installation. Use the returned executable path
-for `SUMIKA_DSH_EXECUTABLE`. The desktop shell uses
-`.sumika-desktop\dsh-profile` as the isolated `DSH_HOME`.
+The setup helper writes only to `D:\Tools\DeepSeekHarness\0.1.1-rc.2`; it does
+not change `PATH` or the global DSH installation. `run-desktop.ps1` only
+discovers that existing, version-matched executable and never installs,
+updates, or downloads DSH. The desktop shell uses `.sumika-desktop\dsh-profile`
+as the isolated `DSH_HOME`. A custom install can still set
+`SUMIKA_AGENT_EXECUTABLE` and `SUMIKA_AGENT_AUTOSTART=1` explicitly.
 
 The shell writes DSH lifecycle output to `.sumika-desktop/logs/dsh.log` and
-uses `.sumika-desktop/dsh-profile` as `DSH_HOME`. Without both settings, DSH is
-not started; the Agent page can still connect to an externally started
-`SUMIKA_DSH_ENDPOINT`.
+uses `.sumika-desktop/dsh-profile` as `DSH_HOME`. If the pinned runtime is not
+installed and no external endpoint is healthy, the desktop still starts and
+the Agent page reports the unavailable runtime explicitly.
 
 ## Core capabilities
 
@@ -174,7 +182,10 @@ modifies a user's global DSH. Plan, Skills, MCP, Subagents, approvals and
 streaming events are exposed through the adapter as they become available.
 The current session can export DSH's original session-log ZIP, while diff cards
 show only a bounded file summary rather than raw patches. DSH does not yet
-expose an independent rollback RPC in the pinned Web API.
+expose an independent rollback RPC in the pinned Web API. New DSH sessions
+must select a registered Git workspace, and each Execute turn creates a
+recoverable checkpoint before the target reaches the runtime. Readonly stays
+hidden until a runtime exposes a verifiable read-only policy.
 The same page shows the BrowserSkill policy companion. The first browser slice
 only records isolated profiles, approvals, manual takeover and download
 quarantine; it does not control global desktop input.

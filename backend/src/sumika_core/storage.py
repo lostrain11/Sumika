@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -11,7 +14,7 @@ from typing import Any
 from .protocol.models import Message, utc_now
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 14
 
 SNAPSHOT_FORMAT_VERSION = 1
 
@@ -216,6 +219,31 @@ class Storage:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                -- Derived, discardable Agent task summaries.  This table is
+                -- intentionally absent from _SNAPSHOT_TABLE_COLUMNS: user
+                -- data restore must never rewind Runtime health or activity
+                -- projections.
+                CREATE TABLE IF NOT EXISTS agent_task_projections (
+                    id TEXT PRIMARY KEY,
+                    runtime_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    progress REAL NOT NULL,
+                    budget_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    permissions_json TEXT NOT NULL,
+                    logs_json TEXT NOT NULL,
+                    artifacts_json TEXT NOT NULL,
+                    metrics_json TEXT NOT NULL,
+                    workspace_json TEXT,
+                    runtime_updated_at TEXT,
+                    observed_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_task_projections_runtime_session
+                    ON agent_task_projections(runtime_id, session_id);
+                CREATE INDEX IF NOT EXISTS idx_agent_task_projections_observed
+                    ON agent_task_projections(observed_at DESC);
                 CREATE TABLE IF NOT EXISTS avatar_models (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -267,6 +295,26 @@ class Storage:
                  );
                  CREATE INDEX IF NOT EXISTS idx_plugin_registrations_plugin
                      ON plugin_registrations(plugin_id, version, state);
+                 CREATE TABLE IF NOT EXISTS skill_registrations (
+                     candidate_id TEXT PRIMARY KEY,
+                     skill_id TEXT NOT NULL,
+                     name TEXT NOT NULL,
+                     description TEXT NOT NULL,
+                     version TEXT NOT NULL,
+                     root_path TEXT NOT NULL,
+                     skill_path TEXT NOT NULL UNIQUE,
+                     source TEXT NOT NULL,
+                     permissions_json TEXT NOT NULL,
+                     metadata_json TEXT NOT NULL,
+                     manifest_sha256 TEXT NOT NULL,
+                     state TEXT NOT NULL,
+                     error TEXT,
+                     discovered_at TEXT NOT NULL,
+                     approved_at TEXT,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_skill_registrations_state
+                     ON skill_registrations(state, updated_at DESC);
                  CREATE TABLE IF NOT EXISTS browser_profiles (
                      id TEXT PRIMARY KEY,
                      name TEXT NOT NULL,
@@ -593,11 +641,105 @@ class Storage:
                 return None
         return self.get_plugin_registration(candidate_id)
 
+    def upsert_skill_registration(self, registration: dict[str, Any]) -> dict[str, Any]:
+        required = (
+            "candidate_id",
+            "skill_id",
+            "name",
+            "description",
+            "version",
+            "root_path",
+            "skill_path",
+            "source",
+            "permissions",
+            "metadata",
+            "manifest_sha256",
+            "state",
+            "discovered_at",
+            "updated_at",
+        )
+        if any(key not in registration for key in required):
+            raise ValueError("skill registration is missing required fields")
+        if registration["state"] not in {"discovered", "changed", "approved", "revoked", "invalid"}:
+            raise ValueError("invalid skill registration state")
+        if not isinstance(registration["permissions"], list) or not isinstance(registration["metadata"], dict):
+            raise ValueError("skill registration metadata must be JSON objects")
+        values = (
+            str(registration["candidate_id"]),
+            str(registration["skill_id"]),
+            str(registration["name"]),
+            str(registration["description"]),
+            str(registration.get("version") or ""),
+            str(registration["root_path"]),
+            str(registration["skill_path"]),
+            str(registration.get("source") or "local"),
+            json.dumps(registration["permissions"], ensure_ascii=False, sort_keys=True),
+            json.dumps(registration["metadata"], ensure_ascii=False, sort_keys=True),
+            str(registration.get("manifest_sha256") or ""),
+            str(registration["state"]),
+            registration.get("error"),
+            str(registration["discovered_at"]),
+            registration.get("approved_at"),
+            str(registration["updated_at"]),
+        )
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO skill_registrations(
+                    candidate_id, skill_id, name, description, version,
+                    root_path, skill_path, source, permissions_json, metadata_json,
+                    manifest_sha256, state, error, discovered_at, approved_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(candidate_id) DO UPDATE SET
+                    skill_id=excluded.skill_id,
+                    name=excluded.name,
+                    description=excluded.description,
+                    version=excluded.version,
+                    root_path=excluded.root_path,
+                    skill_path=excluded.skill_path,
+                    source=excluded.source,
+                    permissions_json=excluded.permissions_json,
+                    metadata_json=excluded.metadata_json,
+                    manifest_sha256=excluded.manifest_sha256,
+                    state=excluded.state,
+                    error=excluded.error,
+                    discovered_at=excluded.discovered_at,
+                    approved_at=excluded.approved_at,
+                    updated_at=excluded.updated_at
+                """,
+                values,
+            )
+        result = self.get_skill_registration(str(registration["candidate_id"]))
+        if result is None:
+            raise RuntimeError("skill registration was not persisted")
+        return result
+
+    def get_skill_registration(self, candidate_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM skill_registrations WHERE candidate_id=?", (candidate_id,)
+            ).fetchone()
+        return self._skill_row(row) if row is not None else None
+
+    def list_skill_registrations(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM skill_registrations ORDER BY updated_at DESC, rowid DESC"
+            ).fetchall()
+        return [self._skill_row(row) for row in rows]
+
     @staticmethod
     def _plugin_row(row: sqlite3.Row) -> dict[str, Any]:
         value = dict(row)
         value["manifest"] = json.loads(value.pop("manifest_json"))
         value["launcher"] = json.loads(value.pop("launcher_json", "{}"))
+        return value
+
+    @staticmethod
+    def _skill_row(row: sqlite3.Row) -> dict[str, Any]:
+        value = dict(row)
+        value["permissions"] = json.loads(value.pop("permissions_json"))
+        value["metadata"] = json.loads(value.pop("metadata_json"))
         return value
 
     @staticmethod
@@ -1278,6 +1420,154 @@ class Storage:
                 return None
         return self.get_task(task_id)
 
+    def replace_agent_task_projections(
+        self,
+        runtime_id: str,
+        projections: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Replace the bounded derived cache for one Agent runtime.
+
+        Agent sessions remain owned by the harness.  This cache is only a
+        discardable, redacted view used while the harness is temporarily
+        unavailable, so it is deliberately kept outside user snapshots.
+        """
+
+        if not isinstance(runtime_id, str) or not runtime_id.strip():
+            raise ValueError("runtime_id must not be empty")
+        if not isinstance(projections, list):
+            raise ValueError("agent projections must be an array")
+        clean_runtime_id = runtime_id.strip()[:120]
+        rows: list[dict[str, Any]] = []
+        for projection in projections[:64]:
+            rows.append(_normalize_agent_task_projection(projection, clean_runtime_id))
+        with self._lock, self._connection:
+            self._connection.execute(
+                "DELETE FROM agent_task_projections WHERE runtime_id=?", (clean_runtime_id,)
+            )
+            for row in rows:
+                self._insert_agent_task_projection(row)
+        return [self._agent_task_projection_row_from_normalized(row, stale=False) for row in rows]
+
+    def upsert_agent_task_projection(self, projection: dict[str, Any]) -> dict[str, Any]:
+        """Persist one redacted Agent session summary without user content."""
+
+        runtime_id = str(projection.get("runtime_id") or "").strip() if isinstance(projection, dict) else ""
+        if not runtime_id:
+            raise ValueError("agent projection runtime_id must not be empty")
+        row = _normalize_agent_task_projection(projection, runtime_id)
+        with self._lock, self._connection:
+            self._insert_agent_task_projection(row)
+        return self._agent_task_projection_row_from_normalized(row, stale=False)
+
+    def _insert_agent_task_projection(self, row: dict[str, Any]) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO agent_task_projections(
+                id, runtime_id, session_id, title, status, progress,
+                budget_json, result_json, permissions_json, logs_json,
+                artifacts_json, metrics_json, workspace_json,
+                runtime_updated_at, observed_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                runtime_id=excluded.runtime_id,
+                session_id=excluded.session_id,
+                title=excluded.title,
+                status=excluded.status,
+                progress=excluded.progress,
+                budget_json=excluded.budget_json,
+                result_json=excluded.result_json,
+                permissions_json=excluded.permissions_json,
+                logs_json=excluded.logs_json,
+                artifacts_json=excluded.artifacts_json,
+                metrics_json=excluded.metrics_json,
+                workspace_json=excluded.workspace_json,
+                runtime_updated_at=excluded.runtime_updated_at,
+                observed_at=excluded.observed_at
+            """,
+            (
+                row["id"],
+                row["runtime_id"],
+                row["session_id"],
+                row["title"],
+                row["status"],
+                row["progress"],
+                json.dumps(row["budget"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                json.dumps(row["result"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                json.dumps(row["permissions"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                json.dumps(row["logs"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                json.dumps(row["artifacts"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                json.dumps(row["metrics"], ensure_ascii=False, sort_keys=True, allow_nan=False),
+                json.dumps(row["workspace"], ensure_ascii=False, sort_keys=True, allow_nan=False)
+                if row["workspace"] is not None
+                else None,
+                row["runtime_updated_at"],
+                row["observed_at"],
+            ),
+        )
+
+    def list_agent_task_projections(
+        self,
+        runtime_id: str | None = None,
+        *,
+        limit: int = 24,
+        stale: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Read the redacted derived Agent projection cache.
+
+        ``stale`` is explicit so callers cannot accidentally present cached
+        state as a live Runtime snapshot.
+        """
+
+        bounded_limit = max(1, min(int(limit), 64))
+        clauses: list[str] = []
+        values: list[Any] = []
+        if runtime_id is not None:
+            if not isinstance(runtime_id, str) or not runtime_id.strip():
+                raise ValueError("runtime_id must not be empty")
+            clauses.append("runtime_id=?")
+            values.append(runtime_id.strip()[:120])
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        values.append(bounded_limit)
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM agent_task_projections"
+                f"{where} ORDER BY observed_at DESC, runtime_updated_at DESC LIMIT ?",
+                values,
+            ).fetchall()
+        return [self._agent_task_projection_row(row, stale=stale) for row in rows]
+
+    @staticmethod
+    def _agent_task_projection_row(row: sqlite3.Row, *, stale: bool) -> dict[str, Any]:
+        value = dict(row)
+        for key in ("budget_json", "result_json", "permissions_json", "logs_json", "artifacts_json", "metrics_json"):
+            value[key.removesuffix("_json")] = json.loads(value.pop(key))
+        workspace_json = value.pop("workspace_json")
+        value["workspace"] = json.loads(workspace_json) if workspace_json else None
+        value["progress"] = float(value["progress"])
+        value["stale"] = bool(stale)
+        value["projection_state"] = "stale" if stale else "live"
+        value["read_only"] = True
+        value["source"] = "agent-runtime-cache"
+        value["autonomy_level"] = "L2"
+        value["character_id"] = None
+        return value
+
+    @classmethod
+    def _agent_task_projection_row_from_normalized(
+        cls,
+        row: dict[str, Any],
+        *,
+        stale: bool,
+    ) -> dict[str, Any]:
+        value = dict(row)
+        value["stale"] = bool(stale)
+        value["projection_state"] = "stale" if stale else "live"
+        value["read_only"] = True
+        value["source"] = "agent-runtime-cache"
+        value["autonomy_level"] = "L2"
+        value["character_id"] = None
+        return value
+
     @staticmethod
     def _task_row(row: sqlite3.Row) -> dict[str, Any]:
         value = dict(row)
@@ -1378,6 +1668,235 @@ def _normalize_snapshot_scope(scope: str) -> str:
     if not isinstance(scope, str) or scope.strip().lower() not in _SNAPSHOT_SCOPE_ALIASES:
         raise ValueError("snapshot scope must be system, modules, characters, or memories")
     return _SNAPSHOT_SCOPE_ALIASES[scope.strip().lower()]
+
+
+def _normalize_agent_task_projection(value: Any, runtime_id: str) -> dict[str, Any]:
+    """Build a strictly bounded, content-free cache row.
+
+    This validation intentionally runs at the storage boundary as well as in
+    the projector.  A future caller must not be able to bypass the projector
+    and accidentally persist a title, prompt, command, path, or nested runtime
+    payload in the derived cache.
+    """
+
+    if not isinstance(value, dict):
+        raise ValueError("agent projection must be an object")
+    clean_runtime_id = _opaque_projection_id(runtime_id, "runtime")
+    raw_session = str(value.get("session_id") or value.get("id") or "").strip()
+    if raw_session.startswith("agent:"):
+        raw_session = raw_session.rsplit(":", 1)[-1]
+    session_id = _opaque_projection_id(raw_session, "session")
+    status_values = {
+        "pending", "queued", "running", "steering", "completed", "complete",
+        "success", "succeeded", "failed", "error", "cancelled", "canceled", "aborted",
+        "waiting_approval", "paused", "unknown",
+    }
+    status = str(value.get("status") or "unknown").strip().lower()
+    status = status if status in status_values else "unknown"
+    progress = value.get("progress", 0)
+    if isinstance(progress, bool) or not isinstance(progress, (int, float)) or not math.isfinite(progress):
+        progress = 0.0
+    progress = max(0.0, min(1.0, float(progress)))
+
+    def finite_count(candidate: Any, maximum: int = 1_000_000) -> int | None:
+        if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+            return None
+        if not math.isfinite(candidate) or candidate < 0 or candidate > maximum:
+            return None
+        return int(candidate)
+
+    def compact_numbers(candidate: Any) -> dict[str, int | float]:
+        if not isinstance(candidate, dict):
+            return {}
+        allowed = {
+            "turns", "steps", "llmMs", "toolMs", "ttftMs", "ttftSteps",
+            "decodeMs", "decodeTokens", "uncachedInputTokens", "outputTokens",
+            "cacheReadTokens", "cacheWriteTokens", "projectedTokens", "pressureTokens",
+            "contextWindow", "systemTokens", "toolsTokens", "messageTokens",
+        }
+        result: dict[str, int | float] = {}
+        for key in allowed:
+            number = candidate.get(key)
+            if isinstance(number, bool) or not isinstance(number, (int, float)):
+                continue
+            if not math.isfinite(number) or number < 0 or number > 10_000_000_000:
+                continue
+            result[key] = int(number) if isinstance(number, int) or number.is_integer() else float(number)
+        return result
+
+    raw_metrics = value.get("metrics") if isinstance(value.get("metrics"), dict) else {}
+    metrics = {
+        key: compact_numbers(raw_metrics.get(key))
+        for key in ("stats", "token_usage", "context", "context_breakdown")
+        if isinstance(raw_metrics.get(key), dict)
+    }
+    raw_budget = value.get("budget") if isinstance(value.get("budget"), dict) else {}
+    budget: dict[str, Any] = {"available": bool(raw_budget.get("available")), "source": "agent-runtime"}
+    for key in ("token_limit", "cost_limit", "time_limit_seconds", "disk_limit_bytes"):
+        number = finite_count(raw_budget.get(key), maximum=10_000_000_000_000)
+        if number is not None:
+            budget[key] = number
+    raw_result = value.get("result") if isinstance(value.get("result"), dict) else {}
+    raw_plan = raw_result.get("plan") if isinstance(raw_result.get("plan"), dict) else {}
+    turns = _normalize_agent_turns(raw_result.get("turns"))
+    step_count = finite_count(raw_plan.get("step_count"), maximum=64)
+    completed_steps = finite_count(raw_plan.get("completed_steps"), maximum=64)
+    if step_count is None:
+        raw_steps = raw_plan.get("steps")
+        step_count = min(64, sum(1 for item in raw_steps if isinstance(item, dict))) if isinstance(raw_steps, list) else 0
+    if completed_steps is None:
+        raw_steps = raw_plan.get("steps")
+        completed_steps = min(64, sum(
+            1 for item in raw_steps
+            if isinstance(item, dict)
+            and str(item.get("status") or "").lower() in {"completed", "complete", "done", "skipped"}
+        )) if isinstance(raw_steps, list) else 0
+    result = {
+        "summary": "",
+        "plan": {
+            "active": bool(raw_plan.get("active")),
+            "pending": bool(raw_plan.get("pending")),
+            "step_count": step_count,
+            "completed_steps": min(completed_steps, step_count),
+        },
+        "turns": turns,
+    }
+    allowed_actions = {
+        "read", "search", "edit", "write", "delete", "move", "shell", "pwsh", "bash",
+        "python", "network", "upload", "download", "login", "publish", "tool", "user-confirmation",
+    }
+    permissions = [
+        str(item).strip().lower() if str(item).strip().lower() in allowed_actions else "user-confirmation"
+        for item in (value.get("permissions") if isinstance(value.get("permissions"), list) else [])[:16]
+    ]
+
+    def compact_records(candidate: Any) -> list[dict[str, Any]]:
+        if not isinstance(candidate, list):
+            return []
+        records: list[dict[str, Any]] = []
+        event_types = {
+            "turn/start", "turn/end", "step/start", "step/end", "tool/call", "tool/result",
+            "approval/requested", "approval/resolved", "question/requested", "question/resolved",
+            "session/title", "runtime-event",
+        }
+        for item in candidate[:16]:
+            if not isinstance(item, dict):
+                continue
+            record: dict[str, Any] = {}
+            event_type = str(item.get("type") or "").strip().lower()
+            if event_type:
+                record["type"] = event_type if event_type in event_types else "runtime-event"
+            item_status = str(item.get("status") or "").strip().lower()
+            if item_status:
+                record["status"] = item_status if item_status in status_values else "unknown"
+            sequence = finite_count(item.get("sequence", item.get("seq")))
+            if sequence is not None:
+                record["sequence"] = sequence
+            file_count = finite_count(item.get("file_count"), maximum=100_000)
+            if file_count is not None:
+                record["file_count"] = file_count
+            identifier = str(item.get("id") or "").strip()
+            if identifier and re.fullmatch(r"[A-Za-z0-9._:-]{1,96}", identifier):
+                record["id"] = identifier
+            if record:
+                records.append(record)
+        return records
+
+    raw_workspace = value.get("workspace") if isinstance(value.get("workspace"), dict) else None
+    workspace = None
+    if raw_workspace is not None:
+        workspace = {
+            "id": _opaque_projection_id(str(raw_workspace.get("id") or "workspace"), "workspace"),
+            "dirty": bool(raw_workspace.get("dirty")),
+            "file_count": finite_count(raw_workspace.get("file_count"), maximum=100_000) or 0,
+            "checkpoint_count": finite_count(raw_workspace.get("checkpoint_count"), maximum=100_000) or 0,
+        }
+    runtime_updated_at = value.get("updated_at")
+    if runtime_updated_at is not None:
+        candidate_time = str(runtime_updated_at).strip()
+        runtime_updated_at = candidate_time[:120] if re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T[0-9:.+Z-]{1,40}", candidate_time
+        ) else None
+    return {
+        "id": f"agent:{clean_runtime_id}:{session_id}",
+        "runtime_id": clean_runtime_id,
+        "session_id": session_id,
+        # Never persist user-controlled session titles.  The UI reconstructs
+        # a generic label for stale rows.
+        "title": "Agent 会话（最后已知）",
+        "status": status,
+        "progress": progress,
+        "budget": budget,
+        "result": result,
+        "permissions": permissions,
+        "logs": compact_records(value.get("logs")),
+        "artifacts": compact_records(value.get("artifacts")),
+        "metrics": metrics,
+        "workspace": workspace,
+        "runtime_updated_at": runtime_updated_at,
+        "observed_at": utc_now(),
+    }
+
+
+def _normalize_agent_turns(value: Any) -> list[dict[str, Any]]:
+    """Normalize a content-free turn ledger at the persistence boundary."""
+
+    if not isinstance(value, list):
+        return []
+    statuses = {
+        "running", "completed", "cancelled", "aborted", "failed",
+        "error", "interrupted", "stopped",
+    }
+    modes = {"plan", "execute", "readonly"}
+
+    def bounded_count(candidate: Any) -> int:
+        if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+            return 0
+        if not math.isfinite(candidate):
+            return 0
+        return max(0, min(10_000, int(candidate)))
+
+    normalized: list[dict[str, Any]] = []
+    for item in value[-16:]:
+        if not isinstance(item, dict):
+            continue
+        identifier = str(item.get("id") or "").strip()
+        if not identifier or len(identifier) > 96 or re.fullmatch(r"[A-Za-z0-9._:-]+", identifier) is None:
+            continue
+        status = str(item.get("status") or "running").strip().lower()
+        record: dict[str, Any] = {
+            "id": identifier,
+            "status": status if status in statuses else "running",
+            "steps": bounded_count(item.get("steps")),
+            "tools": bounded_count(item.get("tools")),
+            "approvals": bounded_count(item.get("approvals")),
+            "artifacts": bounded_count(item.get("artifacts")),
+        }
+        turn = item.get("turn")
+        if isinstance(turn, int) and not isinstance(turn, bool) and 0 <= turn <= 10_000_000_000:
+            record["turn"] = turn
+        elif isinstance(turn, str) and turn.strip() and len(turn.strip()) <= 80 and not any(ord(char) < 32 or ord(char) == 127 for char in turn):
+            record["turn"] = turn.strip()
+        mode = str(item.get("mode") or "").strip().lower()
+        if mode in modes:
+            record["mode"] = mode
+        for key in ("start_seq", "end_seq"):
+            sequence = item.get(key)
+            if isinstance(sequence, int) and not isinstance(sequence, bool) and 0 <= sequence <= 10_000_000_000:
+                record[key] = sequence
+        normalized.append(record)
+    return normalized
+
+
+def _opaque_projection_id(value: str, label: str) -> str:
+    """Keep cache identifiers bounded without persisting arbitrary text."""
+
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 240 or any(ord(char) < 32 or ord(char) == 127 for char in candidate):
+        raise ValueError(f"agent projection {label}_id is invalid")
+    if re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", candidate):
+        return candidate
+    return f"{label}-{hashlib.sha256(candidate.encode('utf-8')).hexdigest()[:24]}"
 
 
 def _decode_snapshot_payload(value: str) -> dict[str, Any]:

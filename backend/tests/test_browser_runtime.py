@@ -12,7 +12,7 @@ class BrowserRuntimeTests(unittest.TestCase):
 
         def runner(args):
             calls.append(args)
-            return {"daemon_version": "0.1.10", "browsers": [], "sessions": []}
+            return {"daemon_version": "0.1.11", "browsers": [], "sessions": []}
 
         runtime = BrowserRuntime(browser_skill=BrowserSkillClient("bsk", runner=runner))
         status = runtime.status()
@@ -26,7 +26,7 @@ class BrowserRuntimeTests(unittest.TestCase):
 
         def runner(args):
             calls.append(args)
-            return {"daemon_version": "0.1.10", "browsers": [], "sessions": []}
+            return {"daemon_version": "0.1.11", "browsers": [], "sessions": []}
 
         runtime = BrowserRuntime(browser_skill=BrowserSkillClient("bsk", runner=runner))
         runtime.status()
@@ -39,7 +39,7 @@ class BrowserRuntimeTests(unittest.TestCase):
         def runner(args):
             calls.append(args)
             if args == ("status",):
-                return {"daemon_version": "0.1.10", "browsers": [{"id": "browser-1"}], "sessions": []}
+                return {"daemon_version": "0.1.11", "browsers": [{"id": "browser-1"}], "sessions": []}
             if args == ("session", "start"):
                 return {"id": "bsk-session-1"}
             if args == ("session", "stop", "bsk-session-1"):

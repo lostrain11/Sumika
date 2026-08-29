@@ -36,6 +36,18 @@ class ProviderProfileTests(unittest.TestCase):
         secrets = self.credentials.read(profile["id"])
         self.assertEqual(secrets["api_key"], "sk-secret-value")
         self.assertEqual(secrets["header:X-Api-Key"], "header-secret")
+        self.assertRegex(row["config"]["credential_revision"], r"^[a-f0-9]{32}$")
+
+        edited = self.profiles.save({**profile, "name": "Cloud test renamed"})
+        self.assertEqual(
+            edited["config"]["credential_revision"],
+            row["config"]["credential_revision"],
+        )
+        rotated = self.profiles.save({**edited, "api_key": "sk-new-secret-value"})
+        self.assertNotEqual(
+            rotated["config"]["credential_revision"],
+            edited["config"]["credential_revision"],
+        )
 
     def test_health_marks_profile_available_and_archive_is_recoverable(self):
         class Handler(BaseHTTPRequestHandler):
@@ -69,6 +81,39 @@ class ProviderProfileTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_health_marks_a_previously_available_profile_unavailable_after_endpoint_stops(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"ready-model"}]}')
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        profile = self.profiles.save(
+            {
+                "name": "Endpoint lifecycle",
+                "base_url": f"http://127.0.0.1:{server.server_address[1]}",
+                "model": "ready-model",
+            }
+        )
+        try:
+            first = self.profiles.health(profile["id"])
+            self.assertTrue(first["ok"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        second = self.profiles.health(profile["id"])
+        self.assertFalse(second["ok"])
+        self.assertEqual(second["profile"]["status"], "unavailable")
 
     def test_ccswitch_preview_masks_secrets_and_preserves_unknown_metadata(self):
         script = base64.urlsafe_b64encode(b"({request:{url:'{{baseUrl}}/usage'},extractor:function(r){return r}})").decode().rstrip("=")
@@ -141,6 +186,51 @@ class ProviderProfileTests(unittest.TestCase):
         self.assertEqual(profile["config"]["model"], "qwen3:4b")
         self.assertEqual(profile["config"]["timeout"], 45.0)
         self.assertEqual(self.credentials.read(profile["id"])["api_key"], "nested-secret")
+
+    def test_templates_include_zhipu_models_without_credentials(self):
+        template = next(
+            item for item in self.profiles.templates() if item["id"] == "zhipu-bigmodel"
+        )
+        self.assertEqual(template["base_url"], "https://open.bigmodel.cn/api/paas/v4")
+        self.assertEqual(template["model"], "glm-4.5-air")
+        self.assertEqual(template["model_options"], ["glm-4.5-air", "glm-4.7", "glm-4.6v"])
+        self.assertNotIn("api_key", template)
+
+    def test_explicit_chat_probe_keeps_catalog_less_profile_available(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(404)
+                self.end_headers()
+
+            def do_POST(self):  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"choices":[{"message":{"content":"ok"}}]}')
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = self.profiles.save({
+                "name": "Catalog-less test",
+                "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+                "model": "test-model",
+            })
+            first = self.profiles.health(profile["id"], allow_chat_probe=True)
+            self.assertTrue(first["ok"])
+            self.assertEqual(first["profile"]["status"], "available")
+            passive = self.profiles.health(profile["id"])
+            self.assertTrue(passive["ok"])
+            self.assertEqual(passive["profile"]["status"], "available")
+            self.assertEqual(passive["model_catalog"], "not-exposed")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

@@ -19,16 +19,22 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .audio import AudioRuntime, AudioRuntimeError
-from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, create_agent_runtime
+from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, SkillCatalog, SkillCatalogError, create_agent_runtime
 from .avatar import AvatarError, AvatarManager
-from .browser import BrowserRuntime, BrowserRuntimeError
-from .credentials import CredentialStore, default_credential_store
+from .browser import (
+    BrowserRuntime,
+    BrowserRuntimeError,
+    looks_like_secret_text,
+    normalize_domain,
+)
+from .credentials import CredentialStore, credential_namespace_for_data_dir, default_credential_store
 from .events import EventBus
 from .evolution import EvolutionRegistry
 from .diagnostics import close_logging, configure_logging, redact_text, safe_error
 from .integrations import CCSwitchCompatibilityChecker
 from .memory import MemoryRuntime, MemoryRuntimeError
 from .modules import ModuleCatalog, ModuleError
+from .observability import AgentObservability, classify_rpc_method
 from .plugins import PluginCatalog, PluginCatalogError
 from .persona import build_persona_context, normalize_persona
 from .provider_imports import ProviderImportError, ProviderImportRegistry
@@ -37,6 +43,7 @@ from .provider_profiles import (
     ProviderProfileManager,
 )
 from .vision import VisionRuntime, VisionRuntimeError
+from .workspace import WorkspaceError, WorkspaceRuntime
 from .protocol.jsonrpc import JsonRpcError, failure, parse_request, success
 from .protocol.models import ChatRequest, EventEnvelope, Message, utc_now
 from .providers import (
@@ -60,7 +67,7 @@ from .providers import (
     VisionProviderRegistry,
 )
 from .storage import Storage
-from .tasks import TaskError, TaskManager, TaskRunner
+from .tasks import AgentTaskProjector, TaskError, TaskManager, TaskRunner
 from .tools import ToolRuntime, ToolRuntimeError
 from .transport.websocket import accept_websocket, encode_text_frame
 
@@ -116,6 +123,10 @@ class CoreApplication:
         self.data_dir = Path(configured_dir) if str(configured_dir) != ":memory:" else Path(".")
         self.configured_data_dir = None if str(configured_dir) == ":memory:" else self.data_dir
         self.logger, self.log_path = configure_logging(self.configured_data_dir)
+        # The observability stream is intentionally separate from SQLite's
+        # product audit events.  It stores only bounded, content-independent
+        # receipts for offline maintenance analysis.
+        self.observability = AgentObservability(self.configured_data_dir, logger=self.logger)
         self._closed = False
         self.started_at = time.monotonic()
         self.logger.info("core initializing data_dir=%s", configured_dir)
@@ -124,7 +135,7 @@ class CoreApplication:
         else:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             self.storage = Storage(self.data_dir / "sumika.sqlite3")
-        credential_namespace = hashlib.sha256(str(Path(configured_dir).resolve()).encode("utf-8")).hexdigest()[:20]
+        credential_namespace = credential_namespace_for_data_dir(configured_dir)
         self.credentials = credential_store or default_credential_store(
             in_memory=str(configured_dir) == ":memory:",
             namespace=credential_namespace,
@@ -135,10 +146,12 @@ class CoreApplication:
             ROOT_DIR / "docs" / "integrations" / "cc-switch-compatibility.json"
         )
         self.events = EventBus(self.storage, self.logger)
+        self.workspace = WorkspaceRuntime(self.configured_data_dir, logger=self.logger)
         self.agent = agent_runtime if agent_runtime is not None else create_agent_runtime(
             self.configured_data_dir,
             logger=self.logger,
         )
+        self.agent.bind_credential_store(self.credentials)
         self.agent.set_event_sink(self._on_agent_runtime_event)
         self.browser = BrowserRuntime(
             self.configured_data_dir,
@@ -148,10 +161,21 @@ class CoreApplication:
         self.evolution_registry = EvolutionRegistry(ROOT_DIR / "docs" / "integrations" / "evolution-knowledge-registry.json")
         self.tasks = TaskManager(self.storage, self.events)
         self.task_runner = TaskRunner(self.tasks, self.events)
+        self.agent_tasks = AgentTaskProjector(
+            self.agent,
+            self.workspace,
+            storage=self.storage,
+            logger=self.logger,
+        )
         self.task_runner.register("core-health", self._run_core_health)
         self.avatar = AvatarManager(self.storage)
         self.plugins = PluginCatalog(self.storage)
         self.plugin_paths = _default_plugin_paths()
+        self.skills = SkillCatalog(
+            self.storage,
+            default_paths=_default_skill_paths(),
+            logger=self.logger,
+        )
         self._ensure_defaults()
         self._discover_plugins_at_startup()
         self.providers = ProviderRegistry()
@@ -645,9 +669,40 @@ class CoreApplication:
 
     def rpc(self, method: str, params: dict[str, Any]) -> Any:
         started = time.monotonic()
+        component, capability = classify_rpc_method(method)
+        operation_id = None
+        try:
+            operation_id = self.observability.start(
+                component=component,
+                capability=capability,
+                phase="accepted",
+                session_id=params.get("session_id") if isinstance(params, dict) else None,
+                turn_id=params.get("turn_id") if isinstance(params, dict) else None,
+                provider_kind=params.get("provider_id") if isinstance(params, dict) else None,
+            )
+        except Exception as error:
+            # Diagnostics must never make a product request fail.  The normal
+            # logger still records the operational failure type.
+            self.logger.warning("agent observability start failed error_type=%s", type(error).__name__)
         self.logger.info("rpc start method=%s", method)
         try:
-            return self._rpc(method, params)
+            result = self._rpc(method, params)
+            if operation_id:
+                try:
+                    self.observability.finish(
+                        operation_id,
+                        component=component,
+                        capability=capability,
+                        phase="completed",
+                        outcome="completed",
+                        duration_ms=(time.monotonic() - started) * 1000,
+                        session_id=params.get("session_id") if isinstance(params, dict) else None,
+                        turn_id=params.get("turn_id") if isinstance(params, dict) else None,
+                        provider_kind=params.get("provider_id") if isinstance(params, dict) else None,
+                    )
+                except Exception as error:
+                    self.logger.warning("agent observability finish failed error_type=%s", type(error).__name__)
+            return result
         except Exception as error:
             self.logger.error(
                 "rpc failed method=%s duration_ms=%d error_type=%s",
@@ -655,6 +710,22 @@ class CoreApplication:
                 round((time.monotonic() - started) * 1000),
                 type(error).__name__,
             )
+            if operation_id:
+                try:
+                    self.observability.finish(
+                        operation_id,
+                        component=component,
+                        capability=capability,
+                        phase="failed",
+                        outcome="rejected" if isinstance(error, JsonRpcError) and error.code in {-32600, -32601, -32602, -32010, -32031, -32033} else "failed",
+                        duration_ms=(time.monotonic() - started) * 1000,
+                        error_class=type(error).__name__,
+                        session_id=params.get("session_id") if isinstance(params, dict) else None,
+                        turn_id=params.get("turn_id") if isinstance(params, dict) else None,
+                        provider_kind=params.get("provider_id") if isinstance(params, dict) else None,
+                    )
+                except Exception as diagnostic_error:
+                    self.logger.warning("agent observability failure receipt failed error_type=%s", type(diagnostic_error).__name__)
             raise
         finally:
             self.logger.info("rpc end method=%s duration_ms=%d", method, round((time.monotonic() - started) * 1000))
@@ -673,6 +744,30 @@ class CoreApplication:
             "session/jobs": "agent.session.jobs",
         }.get(event_type, f"agent.{self.agent.runtime_id}.event")
         payload = _redact_agent_payload(event)
+        try:
+            event_outcome = _observability_event_outcome(event_type, event)
+            extensions = event.get("extensions") if isinstance(event.get("extensions"), dict) else {}
+            metrics = extensions.get("metrics") if isinstance(extensions.get("metrics"), dict) else {}
+            self.observability.record(
+                component="agent",
+                capability="runtime-event",
+                phase=_observability_event_phase(event_type),
+                outcome=event_outcome,
+                session_id=event.get("session_id"),
+                turn_id=event.get("turn_id"),
+                event_type=event_type,
+                error_class=(event.get("error", {}).get("name") if isinstance(event.get("error"), dict) else None),
+                duration_ms=metrics.get("duration_ms"),
+                queue_ms=metrics.get("queue_ms"),
+                retry_count=metrics.get("retry_count"),
+                input_units=metrics.get("input_units"),
+                output_units=metrics.get("output_units"),
+                cache_units=metrics.get("cache_units"),
+                estimated_cost=metrics.get("estimated_cost"),
+                approval_count=metrics.get("approval_count"),
+            )
+        except Exception as error:
+            self.logger.warning("agent observability event failed error_type=%s", type(error).__name__)
         self.events.publish(
             EventEnvelope(
                 projected_type,
@@ -691,6 +786,25 @@ class CoreApplication:
             }
         if method == "core.diagnostics":
             return self.diagnostics()
+        if method == "agent.observability.status":
+            return self.observability.status()
+        if method == "agent.observability.daily":
+            day = params.get("day") if isinstance(params, dict) else None
+            write = bool(params.get("write")) if isinstance(params, dict) else False
+            try:
+                return self.observability.write_daily_summary(day) if write else self.observability.aggregate(day)
+            except ValueError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "agent.acceptance.evidence":
+            session_id = _agent_session_id_param(
+                params.get("sessionId") or params.get("session_id"),
+                "sessionId",
+            )
+            return _agent_acceptance_evidence(
+                self.storage.list_events(1000),
+                session_id=session_id,
+                runtime_id=self.agent.runtime_id,
+            )
         if method in {"agent.status", "agent.health"}:
             result = self.agent.status() if method == "agent.status" else self.agent.health()
             result = {
@@ -748,6 +862,46 @@ class CoreApplication:
             return {
                 "agent_preset": result.get("agent_preset", preset),
                 "opened": bool(result.get("opened")),
+            }
+        if method == "agent.preset.validate":
+            preset = _agent_preset_id_param(
+                params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+                "agentPreset",
+            )
+            request: dict[str, Any] = {"agentPreset": preset}
+            raw_workspace_id = params.get("workspaceId") or params.get("workspace_id")
+            raw_cwd = params.get("cwd")
+            if raw_workspace_id not in (None, "") and raw_cwd not in (None, ""):
+                raise JsonRpcError(-32602, "preset validation accepts workspaceId or cwd, not both")
+            if raw_workspace_id not in (None, ""):
+                if (
+                    not isinstance(raw_workspace_id, str)
+                    or not raw_workspace_id.strip()
+                    or len(raw_workspace_id.strip()) > 160
+                    or any(ord(char) < 32 or ord(char) == 127 for char in raw_workspace_id)
+                ):
+                    raise JsonRpcError(-32602, "workspaceId must be a non-empty identifier")
+                request["workspaceId"] = raw_workspace_id.strip()
+            elif raw_cwd not in (None, ""):
+                request["cwd"] = _workspace_path_param(raw_cwd)
+            try:
+                result = self.agent.validate_preset_mount(request)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.preset.mount.validated",
+                    {
+                        "agent_preset": preset,
+                        "mountable": result.get("mountable") is True,
+                        "validation_session_archived": result.get("validation_session_archived") is True,
+                    },
+                )
+            )
+            return {
+                "agent_preset": preset,
+                "mountable": result.get("mountable") is True,
+                "validation_session_archived": result.get("validation_session_archived") is True,
             }
         if method == "agent.preset.remove":
             preset = _agent_preset_id_param(
@@ -807,15 +961,26 @@ class CoreApplication:
             )
             return result
         if method == "agent.session.create":
+            request = dict(params)
+            workspace = None
+            if self._agent_workspace_safety_active():
+                workspace, _ = self._agent_workspace_binding(request)
+                request.pop("workspace_id", None)
+                request.pop("cwd", None)
+                request["workspaceId"] = workspace["id"]
             provider_binding = None
             if self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
                 try:
-                    provider_profile = self._agent_provider_profile(params)
+                    provider_profile = self._agent_provider_profile(request, refresh_health=True)
+                    if provider_profile.get("status") != "available":
+                        raise ProviderProfileError(
+                            "Provider 档案当前不可用；请在模块页测试连接后再创建 Agent 会话"
+                        )
                     provider_binding = self.agent.sync_provider_profile(provider_profile)
                 except (AgentRuntimeError, ProviderProfileError) as exc:
                     raise JsonRpcError(-32032, str(exc)) from exc
             try:
-                result = self.agent.create_session(params)
+                result = self.agent.create_session(request)
             except AgentRuntimeError as exc:
                 raise JsonRpcError(-32030, str(exc)) from exc
             if provider_binding:
@@ -837,7 +1002,15 @@ class CoreApplication:
                     "provider": provider_binding,
                     "selected_model": selected.get("selected") if isinstance(selected, dict) else selected,
                 }
-            self.events.publish(EventEnvelope("agent.session.created", {"session": _redact_agent_payload(result)}))
+            self.events.publish(
+                EventEnvelope(
+                    "agent.session.created",
+                    {
+                        "session": _redact_agent_payload(result),
+                        "workspace_id": workspace.get("id") if workspace else None,
+                    },
+                )
+            )
             return result
         if method == "agent.sessions":
             try:
@@ -924,11 +1097,13 @@ class CoreApplication:
             except AgentRuntimeError as exc:
                 raise JsonRpcError(-32030, str(exc)) from exc
         if method == "agent.workspace.create":
-            path = params.get("path")
-            if not isinstance(path, str) or not path.strip() or len(path.strip()) > 4096 or any(ord(char) < 32 for char in path):
-                raise JsonRpcError(-32602, "workspace path must be a non-empty path without control characters")
+            path = _workspace_path_param(params.get("path"))
             try:
-                result = self.agent.create_workspace({"path": path.strip()})
+                self.workspace.inspect(path)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+            try:
+                result = self.agent.create_workspace({"path": path})
             except AgentRuntimeError as exc:
                 raise JsonRpcError(-32030, str(exc)) from exc
             workspace = result.get("workspace") if isinstance(result, dict) else {}
@@ -943,6 +1118,249 @@ class CoreApplication:
                 )
             )
             return result
+        if method == "workspace.inspect":
+            path = _workspace_path_param(params.get("path"))
+            try:
+                return self.workspace.inspect(path)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+        if method == "workspace.worktree.preview":
+            source_path = _workspace_path_param(params.get("source_path") or params.get("path"))
+            destination_path = _workspace_path_param(params.get("destination_path") or params.get("destination"))
+            branch = _workspace_branch_param(params.get("branch"))
+            try:
+                result = self.workspace.preview_worktree(source_path, destination_path, branch)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.worktree.previewed",
+                    {
+                        "source_workspace_id": result.get("source", {}).get("id"),
+                        "worktree_id": result.get("worktree", {}).get("id"),
+                        "branch": result.get("worktree", {}).get("branch"),
+                        "source_head": result.get("source", {}).get("head"),
+                        "source_dirty": bool(result.get("source", {}).get("dirty")),
+                        "preview_sha256": hashlib.sha256(str(result.get("preview_token") or "").encode("utf-8")).hexdigest(),
+                    },
+                )
+            )
+            return result
+        if method == "workspace.worktree.create":
+            preview_token = params.get("preview_token")
+            if (
+                params.get("approved") is not True
+                or not isinstance(preview_token, str)
+                or re.fullmatch(r"[0-9a-f]{64}", preview_token) is None
+            ):
+                raise JsonRpcError(-32031, "worktree creation requires a fresh preview and explicit approval")
+            source_path = _workspace_path_param(params.get("source_path") or params.get("path"))
+            destination_path = _workspace_path_param(params.get("destination_path") or params.get("destination"))
+            branch = _workspace_branch_param(params.get("branch"))
+            confirm_branch = _workspace_branch_param(params.get("confirm_branch"), "confirm_branch")
+            confirm_destination = _workspace_path_param(params.get("confirm_destination"))
+            try:
+                result = self.workspace.create_worktree(
+                    source_path,
+                    destination_path,
+                    branch,
+                    approved=True,
+                    confirm_branch=confirm_branch,
+                    confirm_destination=confirm_destination,
+                    preview_token=preview_token,
+                )
+            except WorkspaceError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "workspace.worktree.create_failed",
+                        {"branch": branch, "error_type": type(exc).__name__},
+                    )
+                )
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.worktree.created",
+                    {
+                        "source_workspace_id": result.get("source", {}).get("id"),
+                        "workspace_id": result.get("worktree", {}).get("id"),
+                        "branch": result.get("worktree", {}).get("branch"),
+                        "head": result.get("worktree", {}).get("head"),
+                    },
+                )
+            )
+            return result
+        if method == "workspace.checkpoints":
+            raw_path = params.get("path")
+            path = _workspace_path_param(raw_path) if raw_path not in (None, "") else None
+            try:
+                return self.workspace.list_checkpoints(path)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+        if method == "workspace.checkpoint.create":
+            path = _workspace_path_param(params.get("path"))
+            try:
+                result = self.workspace.create_checkpoint(path, name=params.get("name") or "Agent checkpoint")
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+            checkpoint = result["checkpoint"]
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.checkpoint.created",
+                    {
+                        "checkpoint_id": checkpoint.get("id"),
+                        "workspace_id": checkpoint.get("workspace_id"),
+                        "file_count": checkpoint.get("file_count"),
+                        "total_bytes": checkpoint.get("total_bytes"),
+                    },
+                )
+            )
+            return result
+        if method == "workspace.commit.preview":
+            checkpoint_id = _workspace_checkpoint_param(params.get("checkpoint_id") or params.get("id"))
+            path = _workspace_path_param(params.get("path"))
+            message = _workspace_commit_message_param(params.get("message"))
+            try:
+                result = self.workspace.preview_commit(checkpoint_id, path=path, message=message)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.commit.previewed",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "workspace_id": result.get("checkpoint", {}).get("workspace_id"),
+                        "branch": result.get("workspace", {}).get("branch"),
+                        "changed_total": result.get("counts", {}).get("changed_total", 0),
+                        "message_sha256": result.get("message_sha256"),
+                        "preview_sha256": hashlib.sha256(str(result.get("preview_token") or "").encode("utf-8")).hexdigest(),
+                    },
+                )
+            )
+            return result
+        if method == "workspace.commit":
+            checkpoint_id = _workspace_checkpoint_param(params.get("checkpoint_id") or params.get("id"))
+            preview_token = params.get("preview_token")
+            if (
+                params.get("approved") is not True
+                or not isinstance(preview_token, str)
+                or re.fullmatch(r"[0-9a-f]{64}", preview_token) is None
+            ):
+                raise JsonRpcError(-32031, "Git commit requires a fresh preview and explicit approval")
+            path = _workspace_path_param(params.get("path"))
+            message = _workspace_commit_message_param(params.get("message"))
+            confirm_branch = _workspace_branch_param(params.get("confirm_branch"), "confirm_branch")
+            try:
+                result = self.workspace.commit(
+                    checkpoint_id,
+                    path=path,
+                    message=message,
+                    approved=True,
+                    confirm_branch=confirm_branch,
+                    preview_token=preview_token,
+                )
+            except WorkspaceError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "workspace.commit.failed",
+                        {"checkpoint_id": checkpoint_id, "branch": confirm_branch, "error_type": type(exc).__name__},
+                    )
+                )
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.committed",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "workspace_id": result.get("workspace", {}).get("id"),
+                        "branch": result.get("branch"),
+                        "commit": result.get("commit"),
+                        "file_count": result.get("file_count"),
+                        "pushed": False,
+                    },
+                )
+            )
+            return result
+        if method == "workspace.checkpoint.diff":
+            checkpoint_id = _workspace_checkpoint_param(params.get("checkpoint_id") or params.get("id"))
+            raw_path = params.get("path")
+            path = _workspace_path_param(raw_path) if raw_path not in (None, "") else None
+            try:
+                result = self.workspace.diff_checkpoint(checkpoint_id, path=path)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.checkpoint.diffed",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "workspace_id": result.get("checkpoint", {}).get("workspace_id"),
+                        "changed": bool(result.get("changed")),
+                        "changed_total": result.get("counts", {}).get("changed_total", 0),
+                    },
+                )
+            )
+            return result
+        if method == "workspace.restore.preview":
+            checkpoint_id = _workspace_checkpoint_param(params.get("checkpoint_id") or params.get("id"))
+            raw_path = params.get("path")
+            path = _workspace_path_param(raw_path) if raw_path not in (None, "") else None
+            try:
+                result = self.workspace.restore_preview(checkpoint_id, path=path)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.restore.previewed",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "workspace_id": result.get("checkpoint", {}).get("workspace_id"),
+                        "archive_count": result.get("restore", {}).get("archive_count", 0),
+                        "write_count": result.get("restore", {}).get("write_count", 0),
+                    },
+                )
+            )
+            return result
+        if method == "workspace.restore":
+            checkpoint_id = _workspace_checkpoint_param(params.get("checkpoint_id") or params.get("id"))
+            preview_token = params.get("preview_token")
+            if (
+                params.get("approved") is not True
+                or params.get("confirm_checkpoint") != checkpoint_id
+                or not isinstance(preview_token, str)
+                or re.fullmatch(r"[0-9a-f]{64}", preview_token) is None
+            ):
+                raise JsonRpcError(-32031, "workspace restore requires a fresh preview, explicit approval, and exact checkpoint confirmation")
+            raw_path = params.get("path")
+            path = _workspace_path_param(raw_path) if raw_path not in (None, "") else None
+            try:
+                result = self.workspace.restore(
+                    checkpoint_id,
+                    path=path,
+                    approved=True,
+                    confirm_checkpoint=checkpoint_id,
+                    preview_token=preview_token,
+                )
+            except WorkspaceError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "workspace.restore.failed",
+                        {"checkpoint_id": checkpoint_id, "error_type": type(exc).__name__},
+                    )
+                )
+                raise JsonRpcError(-32033, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "workspace.restored",
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "workspace_id": result.get("checkpoint", {}).get("workspace_id"),
+                        "pre_restore_checkpoint_id": result.get("pre_restore_checkpoint", {}).get("id"),
+                        "changed_total": result.get("diff", {}).get("counts", {}).get("changed_total", 0),
+                        "archive_count": len(result.get("archive", {}).get("entries", [])),
+                    },
+                )
+            )
+            return result
         if method == "agent.provider.status":
             if not self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
                 status = self.agent.status()
@@ -953,18 +1371,31 @@ class CoreApplication:
                     "runtime_id": self.agent.runtime_id,
                 }
             try:
-                profile = self._agent_provider_profile(params, required=False)
+                profile = self._agent_provider_profile(
+                    params,
+                    required=False,
+                    refresh_health=True,
+                )
+                if profile is not None and profile.get("status") != "available":
+                    return {
+                        "profile": self._agent_provider_profile_public(profile),
+                        "profile_id": profile.get("id"),
+                        "state": "unavailable",
+                        "ready": False,
+                        "runtime_id": self.agent.runtime_id,
+                        "reason": "Provider 档案未就绪；请先在模块页测试连接",
+                    }
                 status = self.agent.provider_status(profile)
             except (AgentRuntimeError, ProviderProfileError) as exc:
                 raise JsonRpcError(-32032, str(exc)) from exc
             return {"profile": self._agent_provider_profile_public(profile), **status}
         if method == "agent.provider.sync":
             try:
-                profile = self._agent_provider_profile(params)
+                profile = self._agent_provider_profile(params, refresh_health=True)
                 if profile is None:
                     raise ProviderProfileError("没有可同步的 Sumika Provider 档案")
                 if profile.get("status") != "available":
-                    raise ProviderProfileError("Provider 档案尚未就绪，请先测试连接")
+                    raise ProviderProfileError("Provider 档案当前不可用；请在模块页测试连接后再同步到 DSH")
                 result = self.agent.sync_provider_profile(profile)
             except (AgentRuntimeError, ProviderProfileError) as exc:
                 raise JsonRpcError(-32032, str(exc)) from exc
@@ -1008,6 +1439,137 @@ class CoreApplication:
                 return self.agent.snapshot(params)
             except AgentRuntimeError as exc:
                 raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.session.retry":
+            session_id = _agent_session_id_param(
+                params.get("sessionId") or params.get("session_id"),
+                "sessionId",
+            )
+            confirmation = params.get("confirmSessionId")
+            if confirmation is None:
+                confirmation = params.get("confirm_session_id")
+            self.events.publish(
+                EventEnvelope(
+                    "agent.turn.retry_requested",
+                    {
+                        "session_id": session_id,
+                        "approved": params.get("approved") is True,
+                        "confirmed": confirmation == session_id,
+                    },
+                    session_id=session_id,
+                )
+            )
+            if params.get("approved") is not True or confirmation != session_id:
+                self.events.publish(
+                    EventEnvelope(
+                        "agent.turn.retry_rejected",
+                        {
+                            "session_id": session_id,
+                            "reason": "explicit approval and exact session confirmation are required",
+                        },
+                        session_id=session_id,
+                    )
+                )
+                raise JsonRpcError(
+                    -32031,
+                    "retrying an Agent turn requires explicit approval and an exact session id confirmation",
+                )
+            if not self.agent.supports(AgentCapability.RETRY):
+                self.events.publish(
+                    EventEnvelope(
+                        "agent.turn.retry_rejected",
+                        {"session_id": session_id, "reason": "runtime does not support retry"},
+                        session_id=session_id,
+                    )
+                )
+                raise JsonRpcError(-32030, "the current Agent runtime does not support retry")
+
+            # Forward only runtime controls.  Approval and confirmation
+            # fields belong to this Core policy gate and must never become
+            # adapter input that a future harness could interpret differently.
+            request = {"sessionId": session_id}
+            for key in ("mode", "transport_mode", "queue_mode"):
+                if key in params:
+                    request[key] = params[key]
+            if params.get("workspaceId") is not None:
+                request["workspaceId"] = params.get("workspaceId")
+            elif params.get("workspace_id") is not None:
+                request["workspaceId"] = params.get("workspace_id")
+            checkpoint = None
+            workspace = None
+            if self._agent_workspace_safety_active():
+                workspace, workspace_path = self._agent_workspace_binding(
+                    dict(request),
+                    session_id=session_id,
+                )
+                try:
+                    checkpoint = self.workspace.create_checkpoint(
+                        workspace_path,
+                        name=f"Agent retry · {session_id[:12]}",
+                    )["checkpoint"]
+                except WorkspaceError as exc:
+                    self.events.publish(
+                        EventEnvelope(
+                            "agent.turn.retry_rejected",
+                            {
+                                "session_id": session_id,
+                                "workspace_id": workspace.get("id"),
+                                "reason": "workspace checkpoint failed",
+                                "error_type": type(exc).__name__,
+                            },
+                            session_id=session_id,
+                        )
+                    )
+                    raise JsonRpcError(-32033, str(exc)) from exc
+                request.pop("workspaceId", None)
+                request.pop("workspace_id", None)
+
+            try:
+                result = self.agent.retry_prompt(request)
+            except AgentRuntimeError as exc:
+                self.events.publish(
+                    EventEnvelope(
+                        "agent.turn.retry_rejected",
+                        {
+                            "session_id": session_id,
+                            "workspace_checkpoint_id": checkpoint.get("id") if checkpoint else None,
+                            "reason": "runtime rejected retry",
+                            "error_type": type(exc).__name__,
+                        },
+                        session_id=session_id,
+                    )
+                )
+                raise JsonRpcError(-32030, str(exc)) from exc
+
+            # Only forward the adapter's bounded retry receipt.  A future
+            # adapter must not accidentally expose its recovered prompt body.
+            safe_result: dict[str, Any] = {}
+            if isinstance(result, dict):
+                for key in ("accepted", "session_id", "source_turn", "mode", "text_length", "id"):
+                    value = result.get(key)
+                    if isinstance(value, (str, int, float, bool)) or value is None:
+                        safe_result[key] = value
+            safe_result["session_id"] = session_id
+            if checkpoint:
+                safe_result["workspace_checkpoint"] = checkpoint
+            self.events.publish(
+                EventEnvelope(
+                    "agent.turn.retry_accepted",
+                    {
+                        "session_id": session_id,
+                        "source_turn": safe_result.get("source_turn"),
+                        "mode": safe_result.get("mode"),
+                        "text_length": safe_result.get("text_length"),
+                        "workspace_checkpoint_id": checkpoint.get("id") if checkpoint else None,
+                    },
+                    session_id=session_id,
+                )
+            )
+            return safe_result
+        if method == "agent.task.projections":
+            raw_limit = params.get("limit", 24)
+            if not isinstance(raw_limit, int) or isinstance(raw_limit, bool) or raw_limit < 1 or raw_limit > 64:
+                raise JsonRpcError(-32602, "agent task projection limit must be between 1 and 64")
+            return self.agent_tasks.project(limit=raw_limit)
         if method == "agent.session.queue":
             try:
                 return self.agent.queue(params)
@@ -1048,20 +1610,94 @@ class CoreApplication:
             )
             return result
         if method == "agent.session.prompt":
+            request = dict(params)
+            checkpoint = None
+            workspace = None
+            requested_mode = str(request.get("mode") or "execute").strip().lower()
+            if requested_mode == "readonly" and not self.agent.supports(AgentCapability.READONLY):
+                raise JsonRpcError(-32030, "the current Agent runtime does not support readonly mode")
+            if self._agent_workspace_safety_active():
+                session_id = request.get("sessionId") or request.get("session_id")
+                if (
+                    not isinstance(session_id, (str, int))
+                    or isinstance(session_id, bool)
+                    or not str(session_id).strip()
+                    or len(str(session_id).strip()) > 240
+                    or any(ord(char) < 32 or ord(char) == 127 for char in str(session_id))
+                ):
+                    raise JsonRpcError(-32602, "sessionId must be a non-empty identifier without control characters")
+                session_id = str(session_id).strip()
+                workspace, workspace_path = self._agent_workspace_binding(
+                    request,
+                    session_id=session_id,
+                )
+                if requested_mode == "execute":
+                    try:
+                        checkpoint = self.workspace.create_checkpoint(
+                            workspace_path,
+                            name=f"Agent execute · {session_id[:12]}",
+                        )["checkpoint"]
+                    except WorkspaceError as exc:
+                        self.events.publish(
+                            EventEnvelope(
+                                "agent.turn.rejected",
+                                {
+                                    "session_id": session_id,
+                                    "workspace_id": workspace.get("id"),
+                                    "reason": "workspace checkpoint failed",
+                                    "error_type": type(exc).__name__,
+                                },
+                                session_id=session_id,
+                            )
+                        )
+                        raise JsonRpcError(-32033, str(exc)) from exc
+                    self.events.publish(
+                        EventEnvelope(
+                            "workspace.checkpoint.created",
+                            {
+                                "checkpoint_id": checkpoint.get("id"),
+                                "workspace_id": checkpoint.get("workspace_id"),
+                                "file_count": checkpoint.get("file_count"),
+                                "total_bytes": checkpoint.get("total_bytes"),
+                                "trigger": "agent.execute",
+                            },
+                            session_id=session_id,
+                        )
+                    )
+                    # The checkpoint is an internal Core safety detail; do
+                    # not forward the workspace fields to the adapter for an
+                    # Execute request. Plan requests retain the verified
+                    # workspaceId so a Workspace-capable Harness can apply
+                    # its own session-scoped policy.
+                    request.pop("workspaceId", None)
+                    request.pop("workspace_id", None)
             try:
-                result = self.agent.prompt(params)
+                result = self.agent.prompt(request)
             except AgentRuntimeError as exc:
                 self.events.publish(
                     EventEnvelope(
                         "agent.turn.rejected",
                         {
-                            "session_id": params.get("sessionId") or params.get("session_id"),
+                            "session_id": request.get("sessionId") or request.get("session_id"),
+                            "workspace_checkpoint_id": checkpoint.get("id") if checkpoint else None,
                             "reason": redact_text(str(exc)),
                         },
                     )
                 )
                 raise JsonRpcError(-32030, str(exc)) from exc
-            self.events.publish(EventEnvelope("agent.turn.started", {"session_id": params.get("sessionId") or params.get("session_id")}))
+            if checkpoint:
+                result = {**result, "workspace_checkpoint": checkpoint}
+            self.events.publish(
+                EventEnvelope(
+                    "agent.turn.started",
+                    {
+                        "session_id": request.get("sessionId") or request.get("session_id"),
+                        "workspace_id": workspace.get("id") if workspace else None,
+                        "workspace_checkpoint_id": checkpoint.get("id") if checkpoint else None,
+                    },
+                    session_id=request.get("sessionId") or request.get("session_id"),
+                )
+            )
             return result
         if method == "agent.session.cancel":
             try:
@@ -1160,6 +1796,141 @@ class CoreApplication:
                 return self.agent.mcp_inventory(params)
             except AgentRuntimeError as exc:
                 raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.mcp.catalog":
+            try:
+                return self.agent.mcp_catalog(params)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method in {"agent.skills.catalog", "agent.skill.catalog"}:
+            refresh = bool(params.get("refresh", False))
+            try:
+                return {
+                    "skills": self.skills.list(refresh=refresh),
+                    "default_path_labels": self.skills.default_path_labels(),
+                    "metadata_only": True,
+                }
+            except SkillCatalogError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method in {"agent.skills.discover", "agent.skill.discover"}:
+            raw_paths = params.get("paths")
+            try:
+                paths = _skill_paths_param(raw_paths) if raw_paths is not None else None
+                discovered = self.skills.discover(paths)
+            except (SkillCatalogError, TypeError, ValueError) as exc:
+                self.events.publish(EventEnvelope("agent.skill.discovery.failed", {"error_type": type(exc).__name__}))
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.skill.discovered",
+                    {"count": len(discovered), "candidates": [_skill_summary(item) for item in discovered]},
+                )
+            )
+            return {"skills": discovered, "count": len(discovered), "metadata_only": True}
+        if method in {"agent.skills.approve", "agent.skill.approve", "agent.skills.revoke", "agent.skill.revoke"}:
+            candidate_id = str(params.get("candidate_id") or params.get("candidateId") or params.get("id") or "").strip()
+            if (
+                params.get("approved") is not True
+                or params.get("confirm_skill_id") != candidate_id
+                or not candidate_id
+            ):
+                raise JsonRpcError(
+                    -32031,
+                    "changing a Skill registration requires explicit approval and an exact candidate id confirmation",
+                )
+            try:
+                if method.endswith(".approve"):
+                    result = self.skills.approve(candidate_id)
+                    event_type = "agent.skill.approved"
+                else:
+                    result = self.skills.revoke(candidate_id)
+                    event_type = "agent.skill.revoked"
+            except SkillCatalogError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self.events.publish(EventEnvelope(event_type, {"skill": _skill_summary(result)}))
+            return result
+        if method == "agent.mcp.configurations":
+            preset = _agent_preset_id_param(
+                params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+                "agentPreset",
+            )
+            try:
+                return self.agent.list_mcp_configurations({"agentPreset": preset})
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+        if method == "agent.mcp.configuration.preview":
+            preset = _agent_preset_id_param(
+                params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+                "agentPreset",
+            )
+            action = str(params.get("action") or "upsert").strip().lower()
+            configuration = params.get("configuration")
+            if action not in {"upsert", "remove"} or not isinstance(configuration, dict):
+                raise JsonRpcError(-32602, "MCP preview requires an upsert/remove action and configuration object")
+            request = {
+                "agentPreset": preset,
+                "action": action,
+                "configuration": configuration,
+            }
+            try:
+                result = self.agent.preview_mcp_configuration(request)
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.mcp.configuration.previewed",
+                    {
+                        "agent_preset": preset,
+                        "server_name": result.get("server_name"),
+                        "change": result.get("change"),
+                        "requires_approval": result.get("requires_approval") is True,
+                    },
+                )
+            )
+            return result
+        if method == "agent.mcp.configuration.apply":
+            preset = _agent_preset_id_param(
+                params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+                "agentPreset",
+            )
+            token = params.get("previewToken") or params.get("preview_token")
+            if (
+                params.get("approved") is not True
+                or params.get("confirm_agent_preset") != preset
+                or not isinstance(token, str)
+                or not token.strip()
+                or len(token.strip()) > 256
+            ):
+                raise JsonRpcError(
+                    -32031,
+                    "applying MCP configuration requires approval, the exact preset id, and a preview token",
+                )
+            try:
+                result = self.agent.apply_mcp_configuration(
+                    {
+                        "agentPreset": preset,
+                        "previewToken": token.strip(),
+                        "credentialValue": params.get("credentialValue"),
+                    }
+                )
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.mcp.configuration.applied",
+                    {
+                        "agent_preset": preset,
+                        "server_name": result.get("server_name"),
+                        "change": result.get("change"),
+                        "applied": result.get("applied") is True,
+                        "mountable": result.get("mountable") is True,
+                        "backup_retained": result.get("backup_retained") is True,
+                        "credential_changed": result.get("credential_changed") is True,
+                        "credential_removed": result.get("credential_removed") is True,
+                        "restart_required": result.get("restart_required") is True,
+                    },
+                )
+            )
+            return result
         if method in {"agent.skills", "agent.mcp", "agent.subagents", "agent.commands"}:
             try:
                 values = self.agent.list_capabilities(params)
@@ -1196,25 +1967,118 @@ class CoreApplication:
             )
             return result
         if method == "agent.question.respond":
+            request_id = params.get("rpcId") or params.get("rpc_id")
+            session_id = params.get("sessionId") or params.get("session_id")
+            answer = params.get("answer")
+            plan_approved = False
+            checkpoint = None
+            workspace = None
+            if self._agent_workspace_safety_active():
+                try:
+                    plan_approved = self._agent_plan_review_approved(
+                        request_id,
+                        session_id,
+                        answer,
+                    )
+                except AgentRuntimeError as exc:
+                    raise JsonRpcError(-32030, str(exc)) from exc
+                if plan_approved:
+                    workspace, workspace_path = self._agent_workspace_binding(
+                        params,
+                        session_id=str(session_id),
+                    )
+                    try:
+                        checkpoint = self.workspace.create_checkpoint(
+                            workspace_path,
+                            name=f"Agent plan approval · {str(session_id)[:12]}",
+                        )["checkpoint"]
+                    except WorkspaceError as exc:
+                        self.events.publish(
+                            EventEnvelope(
+                                "agent.plan.approval_rejected",
+                                {
+                                    "session_id": session_id,
+                                    "workspace_id": workspace.get("id"),
+                                    "reason": "workspace checkpoint failed",
+                                    "error_type": type(exc).__name__,
+                                },
+                                session_id=session_id,
+                            )
+                        )
+                        raise JsonRpcError(-32033, str(exc)) from exc
+                    self.events.publish(
+                        EventEnvelope(
+                            "workspace.checkpoint.created",
+                            {
+                                "checkpoint_id": checkpoint.get("id"),
+                                "workspace_id": checkpoint.get("workspace_id"),
+                                "file_count": checkpoint.get("file_count"),
+                                "total_bytes": checkpoint.get("total_bytes"),
+                                "trigger": "agent.plan.approval",
+                            },
+                            session_id=session_id,
+                        )
+                    )
             try:
                 result = self.agent.respond_interaction(
                     {
-                        "rpcId": params.get("rpcId") or params.get("rpc_id"),
-                        "sessionId": params.get("sessionId") or params.get("session_id"),
-                        "answer": params.get("answer"),
+                        "rpcId": request_id,
+                        "sessionId": session_id,
+                        "answer": answer,
                     }
                 )
             except AgentRuntimeError as exc:
+                if checkpoint:
+                    self.events.publish(
+                        EventEnvelope(
+                            "agent.plan.approval_rejected",
+                            {
+                                "session_id": session_id,
+                                "workspace_id": workspace.get("id") if workspace else None,
+                                "workspace_checkpoint_id": checkpoint.get("id"),
+                                "reason": "runtime rejected plan approval",
+                                "error_type": type(exc).__name__,
+                            },
+                            session_id=session_id,
+                        )
+                    )
                 raise JsonRpcError(-32030, str(exc)) from exc
-            answers = params.get("answer", {}).get("answers", []) if isinstance(params.get("answer"), dict) else []
+            if checkpoint:
+                result = {**result, "workspace_checkpoint": checkpoint}
+            answers = answer.get("answers", []) if isinstance(answer, dict) else []
             self.events.publish(
                 EventEnvelope(
                     "agent.question.answered",
                     {
-                        "request_id": params.get("rpcId") or params.get("rpc_id"),
+                        "request_id": request_id,
                         "answer_count": len(answers),
+                        "plan_approved": plan_approved,
+                        "workspace_checkpoint_id": checkpoint.get("id") if checkpoint else None,
                     },
-                    session_id=params.get("sessionId") or params.get("session_id"),
+                    session_id=session_id,
+                )
+            )
+            return result
+        if method == "agent.question.cancel":
+            request_id = params.get("rpcId") or params.get("rpc_id")
+            session_id = params.get("sessionId") or params.get("session_id")
+            try:
+                result = self.agent.cancel_interaction(
+                    {
+                        "rpcId": request_id,
+                        "sessionId": session_id,
+                    }
+                )
+            except AgentRuntimeError as exc:
+                raise JsonRpcError(-32030, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.question.cancelled",
+                    {
+                        "request_id": request_id,
+                        "cancelled": result.get("cancelled") is True,
+                    },
+                    session_id=session_id,
                 )
             )
             return result
@@ -1236,6 +2100,37 @@ class CoreApplication:
             return event
         if method == "browser.status":
             return self.browser.status()
+        if method == "browser.policy.evaluate":
+            try:
+                result = self.browser.evaluate_policy(params)
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            # Policy RPC is consumed by the local DSH bridge.  Do not echo
+            # caller-controlled metadata beyond the validated projection.
+            decision = str(result.get("decision") or "deny")
+            event_type = {
+                "allow": "browser.policy.allowed",
+                "ask": "browser.policy.waiting_approval",
+                "deny": "browser.policy.denied",
+            }.get(decision, "browser.policy.denied")
+            self.events.publish(
+                EventEnvelope(
+                    event_type,
+                    {
+                        "audit_id": result.get("audit_id"),
+                        "tool_name": result.get("tool_name"),
+                        "action": result.get("action"),
+                        "session_id": result.get("session_id"),
+                        "domain": result.get("domain"),
+                        "decision": decision,
+                        "value_length": result.get("value_length", 0),
+                        "sensitive": bool(result.get("sensitive")),
+                        "requires_human": bool(result.get("requires_human")),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
         if method == "browser.profiles":
             return {
                 "profiles": self.browser.list_profiles(
@@ -1494,7 +2389,63 @@ class CoreApplication:
                 result = self.browser.request_help(session_id=str(params.get("session_id") or ""), domain=str(params.get("domain") or ""), reason=str(params.get("reason") or ""))
             except BrowserRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
-            self.events.publish(EventEnvelope("browser.request_help", {"session_id": result["session_id"], "domain": result["domain"], "reason": redact_text(result["reason"]), "credentials_excluded": True}))
+            self.events.publish(
+                EventEnvelope(
+                    "browser.request_help",
+                    {
+                        "session_id": result["session_id"],
+                        "domain": result["domain"],
+                        "reason_length": len(str(result.get("reason") or "")),
+                        "credentials_excluded": True,
+                    },
+                )
+            )
+            return result
+        if method == "browser.policy.request_help":
+            try:
+                help_params = _browser_external_help_params(params)
+            except ValueError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            try:
+                policy = self.browser.evaluate_policy(
+                    {
+                        "tool_name": "browser_request_help",
+                        "action": "request_help",
+                        "session_id": help_params["session_id"],
+                        "domain": help_params["domain"],
+                        "current_domain": help_params["domain"],
+                        "target_kind": "none",
+                        "value_length": 0,
+                        "sensitive": False,
+                        "session_known": True,
+                        "new_tab": False,
+                    }
+                )
+                if policy.get("decision") != "allow":
+                    raise BrowserRuntimeError(str(policy.get("reason") or "browser policy denied human takeover"))
+                result = self.browser.request_external_help(
+                    session_id=help_params["session_id"],
+                    domain=help_params["domain"],
+                    reason=help_params["reason"],
+                    title=help_params["title"],
+                    targets=help_params["targets"],
+                    timeout=help_params["timeout_ms"] / 1000.0,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.request_help",
+                    {
+                        "session_id": result["session_id"],
+                        "domain": result.get("domain"),
+                        "outcome": result.get("outcome"),
+                        "requires_human": True,
+                        "credentials_excluded": True,
+                    },
+                    session_id=result["session_id"],
+                )
+            )
             return result
         if method == "browser.download.quarantine":
             try:
@@ -1562,7 +2513,7 @@ class CoreApplication:
         if method == "provider.profile.health":
             profile_id = str(params.get("profile_id") or params.get("id") or "")
             try:
-                result = self.provider_profiles.health(profile_id)
+                result = self.provider_profiles.health(profile_id, allow_chat_probe=True)
             except ProviderProfileError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
             self.events.publish(
@@ -1575,7 +2526,7 @@ class CoreApplication:
         if method == "provider.profile.activate":
             profile_id = str(params.get("profile_id") or params.get("id") or "")
             try:
-                health = self.provider_profiles.health(profile_id)
+                health = self.provider_profiles.health(profile_id, allow_chat_probe=True)
                 if not health.get("ok"):
                     raise ProviderProfileError(str(health.get("error") or "Provider profile is not ready"))
                 profile = self.provider_profiles.get(profile_id)
@@ -1730,6 +2681,15 @@ class CoreApplication:
                 if profile_id is None:
                     profile_id = (current_llm.get("config") or {}).get("profile_id")
                 profile = self.storage.get_provider_profile(str(profile_id)) if profile_id else None
+                if selected_adapter == "openai-compatible" and profile is not None:
+                    try:
+                        # Re-check the passive model catalogue before enabling
+                        # the module; a stale SQLite "available" flag must not
+                        # make a stopped endpoint look usable.
+                        self.provider_profiles.health(str(profile_id))
+                    except ProviderProfileError as exc:
+                        raise JsonRpcError(-32602, str(exc)) from exc
+                    profile = self.storage.get_provider_profile(str(profile_id))
                 if selected_adapter == "openai-compatible" and (not profile or profile.get("status") != "available"):
                     raise JsonRpcError(-32602, "Test and activate a ready provider profile before enabling LLM")
             try:
@@ -2329,7 +3289,11 @@ class CoreApplication:
 
     def _active_provider_profile_id(self) -> str | None:
         setting = self.storage.get_module_setting("llm")
-        if not setting or setting.get("implementation_id") != "openai-compatible":
+        if (
+            not setting
+            or not bool(setting.get("enabled"))
+            or setting.get("implementation_id") != "openai-compatible"
+        ):
             return None
         profile_id = (setting.get("config") or {}).get("profile_id")
         return str(profile_id) if isinstance(profile_id, str) and profile_id else None
@@ -2339,6 +3303,7 @@ class CoreApplication:
         params: dict[str, Any] | None = None,
         *,
         required: bool = True,
+        refresh_health: bool = False,
     ) -> dict[str, Any] | None:
         params = params or {}
         requested = params.get("provider_profile_id") or params.get("profile_id")
@@ -2348,7 +3313,14 @@ class CoreApplication:
                 raise ProviderProfileError("没有启用的 Sumika Provider 档案")
             return None
         try:
-            return self.provider_profiles.get(profile_id, include_secrets=True)
+            profile = self.provider_profiles.get(profile_id, include_secrets=True)
+            if refresh_health:
+                # GET /models is passive and does not consume model tokens.
+                # Refresh before Agent operations so a stopped endpoint cannot
+                # remain falsely marked as ready in SQLite.
+                self.provider_profiles.health(profile_id)
+                profile = self.provider_profiles.get(profile_id, include_secrets=True)
+            return profile
         except ProviderProfileError:
             if required:
                 raise
@@ -2364,6 +3336,129 @@ class CoreApplication:
             if key not in {"secrets", "credential_ref"}
         }
 
+    def _agent_plan_review_approved(
+        self,
+        request_id: Any,
+        session_id: Any,
+        answer: Any,
+    ) -> bool:
+        """Recognize an exact approval of a pending runtime plan review."""
+
+        if not request_id or not session_id or not isinstance(answer, dict):
+            return False
+        pending = self.agent.interactions({"sessionId": str(session_id)})
+        entries = pending.get("interactions") if isinstance(pending, dict) else None
+        interaction = next(
+            (
+                item
+                for item in entries
+                if isinstance(item, dict)
+                and str(item.get("id") or "") == str(request_id)
+                and item.get("kind") == "question"
+                and isinstance(item.get("plan_review"), dict)
+            ),
+            None,
+        ) if isinstance(entries, list) else None
+        if interaction is None:
+            return False
+        questions = interaction.get("questions")
+        question = next(
+            (
+                item
+                for item in questions
+                if isinstance(item, dict)
+                and isinstance(item.get("intent"), dict)
+                and item["intent"].get("kind") == "plan-review"
+            ),
+            None,
+        ) if isinstance(questions, list) else None
+        if question is None:
+            return False
+        approve = str(
+            interaction["plan_review"].get("approve")
+            or question["intent"].get("approve")
+            or ""
+        ).strip()
+        question_id = str(question.get("id") or "").strip()
+        answers = answer.get("answers")
+        if not approve or not question_id or not isinstance(answers, list):
+            return False
+        selected = next(
+            (
+                item
+                for item in answers
+                if isinstance(item, dict)
+                and str(item.get("id") or "") == question_id
+            ),
+            None,
+        )
+        return bool(
+            isinstance(selected, dict)
+            and selected.get("selected") == [approve]
+            and not str(selected.get("custom") or "").strip()
+        )
+
+    def _agent_workspace_binding(
+        self,
+        params: dict[str, Any],
+        *,
+        session_id: str | None = None,
+    ) -> tuple[dict[str, Any], str]:
+        if params.get("cwd") not in (None, ""):
+            raise JsonRpcError(
+                -32602,
+                "workspace-capable Agent runtimes require workspaceId; cwd is not accepted",
+            )
+        raw_workspace_id = params.get("workspaceId") or params.get("workspace_id")
+        if (
+            not isinstance(raw_workspace_id, str)
+            or not raw_workspace_id.strip()
+            or len(raw_workspace_id.strip()) > 160
+            or any(ord(char) < 32 or ord(char) == 127 for char in raw_workspace_id)
+        ):
+            raise JsonRpcError(-32602, "workspaceId must be a non-empty identifier")
+        workspace_id = raw_workspace_id.strip()
+        try:
+            roster = self.agent.list_workspaces({})
+        except AgentRuntimeError as exc:
+            raise JsonRpcError(-32030, str(exc)) from exc
+        entries = roster.get("workspaces") if isinstance(roster, dict) else None
+        workspace = next(
+            (
+                item
+                for item in entries
+                if isinstance(item, dict) and item.get("id") == workspace_id
+            ),
+            None,
+        ) if isinstance(entries, list) else None
+        if workspace is None:
+            raise JsonRpcError(-32033, "the selected Agent Workspace is no longer registered")
+        if session_id is not None:
+            session_ids = workspace.get("session_ids")
+            if not isinstance(session_ids, list) or session_id not in session_ids:
+                raise JsonRpcError(
+                    -32033,
+                    "the Agent session is not bound to the selected Workspace",
+                )
+        try:
+            path = _workspace_path_param(workspace.get("path"))
+        except JsonRpcError as exc:
+            raise JsonRpcError(-32030, "Agent runtime returned an invalid Workspace path") from exc
+        if session_id is None:
+            try:
+                self.workspace.inspect(path)
+            except WorkspaceError as exc:
+                raise JsonRpcError(-32033, str(exc)) from exc
+        return workspace, path
+
+    def _agent_workspace_safety_active(self) -> bool:
+        if not self.agent.supports(AgentCapability.WORKSPACES):
+            return False
+        try:
+            return self.agent.status().get("ready") is True
+        except AgentRuntimeError:
+            return False
+
     def _provider_profile_list(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         active_profile_id = self._active_provider_profile_id()
         return [
@@ -2372,6 +3467,16 @@ class CoreApplication:
         ]
 
     def _module_list(self) -> list[dict[str, Any]]:
+        active_profile_id = self._active_provider_profile_id()
+        if active_profile_id:
+            try:
+                # Keep the module/privacy surfaces honest after an external
+                # Ollama or gateway process stops.  The adapter's passive
+                # health check only reads the model catalogue and consumes no
+                # chat tokens.
+                self.provider_profiles.health(active_profile_id)
+            except ProviderProfileError:
+                pass
         return [self._decorate_module(module) for module in self.modules.list()]
 
     def _module(self, module_id: str) -> dict[str, Any]:
@@ -2430,8 +3535,9 @@ class CoreApplication:
         event_provider_id = configured_provider_id
         if profile_id:
             try:
-                profile = self.provider_profiles.get(profile_id)
-                if profile.get("status") != "available":
+                health = self.provider_profiles.health(profile_id)
+                profile = health.get("profile") if isinstance(health, dict) else None
+                if not health.get("ok") or not isinstance(profile, dict) or profile.get("status") != "available":
                     raise ProviderProfileError("Provider profile is not ready; test it on the Modules page")
                 runtime_provider = self.provider_profiles.runtime(profile_id)
                 event_provider_id = profile_id
@@ -2543,6 +3649,11 @@ class CoreApplication:
             self.vision_providers.close()
             self.avatar.close()
             self.storage.close()
+            try:
+                self.observability.write_daily_summary()
+            except Exception as error:
+                self.logger.warning("agent observability close summary failed error_type=%s", type(error).__name__)
+            self.observability.close()
             self.logger.info("core shutdown complete")
         finally:
             # A failed provider close must not leave the rotating file handle
@@ -2563,7 +3674,9 @@ class CoreApplication:
             "event_count": self.storage.count_events(),
             "agent_runtime": self.agent.status(),
             "browser_runtime": self.browser.status(),
+            "workspace_checkpoint_count": len(self.workspace.list_checkpoints()["checkpoints"]),
             "evolution_registry": self.evolution_registry.check(),
+            "agent_observability": self.observability.status(),
         }
 
 
@@ -2595,6 +3708,22 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/agent/diagnostics":
             self._send_json(self.application.rpc("agent.diagnostics", {}))
+            return
+        if parsed.path == "/api/agent/mcp/catalog":
+            query = parse_qs(parsed.query)
+            session_id = (query.get("session_id") or [None])[0]
+            self._send_json(self.application.rpc("agent.mcp.catalog", {"sessionId": session_id} if session_id else {}))
+            return
+        if parsed.path == "/api/agent/skills":
+            query = parse_qs(parsed.query)
+            refresh = (query.get("refresh") or ["false"])[0].lower() == "true"
+            self._send_json(self.application.rpc("agent.skills.catalog", {"refresh": refresh}))
+            return
+        if parsed.path == "/api/agent/observability":
+            query = parse_qs(parsed.query)
+            day = (query.get("day") or [None])[0]
+            write = (query.get("write") or ["false"])[0].lower() == "true"
+            self._send_json(self.application.rpc("agent.observability.daily", {"day": day, "write": write}))
             return
         if parsed.path == "/api/agent/provider":
             self._send_json(self.application.rpc("agent.provider.status", {}))
@@ -2980,6 +4109,41 @@ def _safe_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def _observability_event_phase(event_type: str) -> str:
+    """Map a harness event to a bounded lifecycle phase."""
+
+    candidate = str(event_type or "").strip().lower()
+    if any(token in candidate for token in ("requested", "start", "queued", "accepted")):
+        return "start"
+    if any(token in candidate for token in ("resolved", "completed", "end", "finished", "succeeded")):
+        return "end"
+    if any(token in candidate for token in ("failed", "error", "rejected")):
+        return "failure"
+    if any(token in candidate for token in ("cancel", "abort")):
+        return "cancel"
+    return "event"
+
+
+def _observability_event_outcome(event_type: str, event: dict[str, Any]) -> str:
+    """Derive a stable outcome without inspecting event content."""
+
+    candidate = str(event.get("status") or event.get("outcome") or "").strip().lower()
+    if candidate in {"accepted", "queued", "running", "completed", "failed", "cancelled", "rejected"}:
+        return candidate
+    event_name = str(event_type or "").strip().lower()
+    if any(token in event_name for token in ("failed", "error")):
+        return "failed"
+    if any(token in event_name for token in ("rejected",)):
+        return "rejected"
+    if any(token in event_name for token in ("cancel", "abort")):
+        return "cancelled"
+    if any(token in event_name for token in ("complete", "resolved", "succeeded", "success")):
+        return "completed"
+    if any(token in event_name for token in ("request", "accepted", "queued")):
+        return "accepted"
+    return "unknown"
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -3000,6 +4164,29 @@ def _default_plugin_paths() -> list[Path]:
     return [path for path in paths if path.is_absolute() and path.exists()]
 
 
+def _default_skill_paths() -> list[Path]:
+    """Return explicit, user-owned Skill roots without scanning broad folders."""
+
+    configured = os.getenv("SUMIKA_SKILL_PATHS", "")
+    values = [item.strip() for item in configured.split(os.pathsep) if item.strip()]
+    paths = [Path(item) for item in values]
+    paths.extend((ROOT_DIR / ".agents" / "skills", Path.home() / ".agents" / "skills"))
+    result: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        if not path.is_absolute():
+            continue
+        try:
+            key = str(path.resolve(strict=False)).casefold()
+        except (OSError, RuntimeError):
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
 def _plugin_paths_param(value: Any) -> list[str | Path]:
     if isinstance(value, (str, Path)):
         return [value]
@@ -3007,6 +4194,16 @@ def _plugin_paths_param(value: Any) -> list[str | Path]:
         raise ValueError("plugin discovery paths must be a non-empty string or list")
     if not all(isinstance(item, (str, Path)) for item in value):
         raise ValueError("plugin discovery paths must be strings")
+    return value
+
+
+def _skill_paths_param(value: Any) -> list[str | Path]:
+    if isinstance(value, (str, Path)):
+        return [value]
+    if not isinstance(value, list) or not value:
+        raise ValueError("Skill discovery paths must be a non-empty string or list")
+    if not all(isinstance(item, (str, Path)) for item in value):
+        raise ValueError("Skill discovery paths must be strings")
     return value
 
 
@@ -3026,9 +4223,225 @@ def _plugin_summary(plugin: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _skill_summary(skill: dict[str, Any]) -> dict[str, Any]:
+    """Keep Skill audit events metadata-only and path-free."""
+
+    return {
+        "candidate_id": skill.get("candidate_id"),
+        "skill_id": skill.get("skill_id"),
+        "name": skill.get("name"),
+        "version": skill.get("version"),
+        "source": skill.get("source"),
+        "state": skill.get("state"),
+        "manifest_sha256": skill.get("manifest_sha256"),
+        "metadata_only": True,
+    }
+
+
 _AGENT_PRESET_ID_PARAM_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _MAX_AGENT_PRESET_ID_PARAM_LENGTH = 160
 _MAX_AGENT_PRESET_NAME_PARAM_LENGTH = 240
+_WORKSPACE_CHECKPOINT_ID_RE = re.compile(r"^wschk-[0-9a-f]{20}$")
+_MAX_AGENT_SESSION_ID_PARAM_LENGTH = 240
+
+
+def _event_datetime(event: dict[str, Any] | None) -> datetime | None:
+    if not isinstance(event, dict):
+        return None
+    value = event.get("timestamp")
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _bounded_event_count(value: Any, maximum: int = 10000) -> int:
+    try:
+        return max(0, min(maximum, int(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _agent_acceptance_evidence(
+    events: list[dict[str, Any]],
+    *,
+    session_id: str,
+    runtime_id: str,
+) -> dict[str, Any]:
+    """Correlate one completed real-provider run without exposing its content."""
+
+    bounded_events = [event for event in events[:1000] if isinstance(event, dict)]
+    approval_candidates = [
+        event
+        for event in bounded_events
+        if event.get("event_type") == "agent.question.answered"
+        and event.get("session_id") == session_id
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("plan_approved") is True
+        and isinstance(event["payload"].get("workspace_checkpoint_id"), str)
+    ]
+    approval = max(approval_candidates, key=lambda event: _event_datetime(event) or datetime.min.replace(tzinfo=timezone.utc), default=None)
+    approval_payload = approval.get("payload") if isinstance(approval, dict) else {}
+    approval_payload = approval_payload if isinstance(approval_payload, dict) else {}
+    checkpoint_id = approval_payload.get("workspace_checkpoint_id")
+    request_id = approval_payload.get("request_id")
+    approval_time = _event_datetime(approval)
+
+    def matching_event(event_type: str, *, session_scoped: bool = False) -> dict[str, Any] | None:
+        matches = []
+        for event in bounded_events:
+            if event.get("event_type") != event_type:
+                continue
+            if session_scoped and event.get("session_id") != session_id:
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if checkpoint_id and payload.get("checkpoint_id") != checkpoint_id:
+                continue
+            matches.append(event)
+        return min(matches, key=lambda event: _event_datetime(event) or datetime.max.replace(tzinfo=timezone.utc), default=None)
+
+    checkpoint = matching_event("workspace.checkpoint.created", session_scoped=True) if approval else None
+    checkpoint_payload = checkpoint.get("payload") if isinstance(checkpoint, dict) else {}
+    checkpoint_payload = checkpoint_payload if isinstance(checkpoint_payload, dict) else {}
+    checkpoint_time = _event_datetime(checkpoint)
+    checkpoint_before_approval = bool(
+        checkpoint_time is not None
+        and approval_time is not None
+        and checkpoint_time <= approval_time
+        and checkpoint_payload.get("trigger") == "agent.plan.approval"
+    )
+
+    requested = False
+    if approval and request_id:
+        for event in bounded_events:
+            if event.get("event_type") != "agent.question.requested" or event.get("session_id") != session_id:
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            extensions = payload.get("extensions") if isinstance(payload.get("extensions"), dict) else {}
+            if extensions.get("rpcId") == request_id:
+                requested = True
+                break
+
+    completion_candidates: list[dict[str, Any]] = []
+    if approval_time is not None:
+        for event in bounded_events:
+            if event.get("event_type") != "agent.session.event" or event.get("session_id") != session_id:
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            event_time = _event_datetime(event)
+            if payload.get("status") == "turn/end" and event_time is not None and event_time >= approval_time:
+                completion_candidates.append(event)
+    completion = min(completion_candidates, key=lambda event: _event_datetime(event) or datetime.max.replace(tzinfo=timezone.utc), default=None)
+    completion_time = _event_datetime(completion)
+    completion_payload = completion.get("payload") if isinstance(completion, dict) else {}
+    completion_extensions = completion_payload.get("extensions") if isinstance(completion_payload, dict) and isinstance(completion_payload.get("extensions"), dict) else {}
+    completion_turn = completion_extensions.get("turn") if isinstance(completion_extensions.get("turn"), dict) else {}
+    turn_state = str(completion_turn.get("state") or "unknown").lower()
+    if turn_state not in {"completed", "failed", "cancelled", "interrupted"}:
+        turn_state = "unknown"
+
+    tool_calls = 0
+    tool_results = 0
+    write_tool_seen = False
+    if approval_time is not None:
+        for event in bounded_events:
+            if event.get("event_type") != "agent.session.event" or event.get("session_id") != session_id:
+                continue
+            event_time = _event_datetime(event)
+            if event_time is None or event_time < approval_time or (completion_time is not None and event_time > completion_time):
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            status = payload.get("status")
+            extensions = payload.get("extensions") if isinstance(payload.get("extensions"), dict) else {}
+            tool = extensions.get("tool") if isinstance(extensions.get("tool"), dict) else {}
+            if status == "tool/call":
+                tool_calls += 1
+                write_tool_seen = write_tool_seen or str(tool.get("name") or "").lower() in {"write", "edit", "apply_patch"}
+            elif status == "tool/result":
+                tool_results += 1
+
+    diff = matching_event("workspace.checkpoint.diffed") if approval else None
+    preview = matching_event("workspace.restore.previewed") if approval else None
+    restored = matching_event("workspace.restored") if approval else None
+    diff_payload = diff.get("payload") if isinstance(diff, dict) and isinstance(diff.get("payload"), dict) else {}
+    restored_payload = restored.get("payload") if isinstance(restored, dict) and isinstance(restored.get("payload"), dict) else {}
+    changed_file_count = _bounded_event_count(diff_payload.get("changed_total"))
+    archive_count = _bounded_event_count(restored_payload.get("archive_count"))
+
+    safety_failed = bool(approval) and (checkpoint is None or not checkpoint_before_approval)
+    execution_failed = turn_state in {"failed", "cancelled", "interrupted"}
+    passed = bool(
+        approval
+        and requested
+        and checkpoint_before_approval
+        and turn_state == "completed"
+        and tool_results > 0
+        and write_tool_seen
+        and diff is not None
+        and changed_file_count > 0
+        and preview is not None
+        and restored is not None
+    )
+    status = "passed" if passed else ("failed" if safety_failed or execution_failed else "needs-action")
+
+    def elapsed_ms(start: datetime | None, end: datetime | None) -> int | None:
+        if start is None or end is None or end < start:
+            return None
+        return min(86_400_000, max(0, round((end - start).total_seconds() * 1000)))
+
+    safe_runtime_id = runtime_id if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", str(runtime_id or "")) else "unknown"
+    return {
+        "schema_version": "sumika.agent-real-evidence.v1",
+        "status": status,
+        "runtime_id": safe_runtime_id,
+        "plan_review": {
+            "requested": requested,
+            "approved": approval is not None,
+            "checkpoint_created": checkpoint is not None,
+            "checkpoint_before_approval": checkpoint_before_approval,
+        },
+        "execution": {
+            "turn_state": turn_state,
+            "tool_call_count": min(64, tool_calls),
+            "tool_result_count": min(64, tool_results),
+            "write_tool_seen": write_tool_seen,
+        },
+        "workspace": {
+            "diff_observed": diff is not None,
+            "changed_file_count": changed_file_count,
+            "restore_previewed": preview is not None,
+            "restored": restored is not None,
+            "archive_count": archive_count,
+        },
+        "timing": {
+            "approval_to_completion_ms": elapsed_ms(approval_time, completion_time),
+            "approval_to_restore_ms": elapsed_ms(approval_time, _event_datetime(restored)),
+        },
+        "evidence_window_events": min(1000, len(bounded_events)),
+    }
+
+
+def _agent_session_id_param(value: Any, field: str = "sessionId") -> str:
+    """Validate a session identifier before a mutating Agent operation.
+
+    Session ids are opaque values owned by the harness.  Keep the Core gate
+    deliberately small: accept only scalar ids, reject control characters and
+    bound their size before using the value in audit events or adapter calls.
+    """
+
+    if not isinstance(value, (str, int)) or isinstance(value, bool):
+        raise JsonRpcError(-32602, f"{field} must be a non-empty identifier without control characters")
+    candidate = str(value).strip()
+    if (
+        not candidate
+        or len(candidate) > _MAX_AGENT_SESSION_ID_PARAM_LENGTH
+        or any(ord(char) < 32 or ord(char) == 127 for char in candidate)
+    ):
+        raise JsonRpcError(-32602, f"{field} must be a non-empty identifier without control characters")
+    return candidate
 
 
 def _agent_preset_id_param(value: Any, field: str = "agentPreset") -> str:
@@ -3046,6 +4459,56 @@ def _agent_preset_id_param(value: Any, field: str = "agentPreset") -> str:
             -32602,
             f"{field} must use lowercase letters, digits, and hyphens; paths are not allowed",
         )
+    return candidate
+
+
+def _workspace_path_param(value: Any) -> str:
+    if not isinstance(value, str):
+        raise JsonRpcError(-32602, "workspace path must be an absolute path")
+    candidate = value.strip()
+    if (
+        not candidate
+        or len(candidate) > 4096
+        or any(ord(char) < 32 or ord(char) == 127 for char in candidate)
+    ):
+        raise JsonRpcError(-32602, "workspace path must be non-empty and contain no control characters")
+    if not Path(candidate).expanduser().is_absolute():
+        raise JsonRpcError(-32602, "workspace path must be absolute")
+    return candidate
+
+
+def _workspace_checkpoint_param(value: Any) -> str:
+    if not isinstance(value, str) or _WORKSPACE_CHECKPOINT_ID_RE.fullmatch(value.strip()) is None:
+        raise JsonRpcError(-32602, "checkpoint_id is invalid")
+    return value.strip()
+
+
+def _workspace_branch_param(value: Any, field: str = "branch") -> str:
+    if not isinstance(value, str):
+        raise JsonRpcError(-32602, f"{field} must be a Git branch name")
+    candidate = value.strip()
+    if (
+        not candidate
+        or len(candidate) > 240
+        or any(ord(char) < 32 or ord(char) == 127 for char in candidate)
+    ):
+        raise JsonRpcError(-32602, f"{field} must be non-empty and contain no control characters")
+    return candidate
+
+
+def _workspace_commit_message_param(value: Any) -> str:
+    if not isinstance(value, str):
+        raise JsonRpcError(-32602, "commit message must be text")
+    candidate = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if (
+        not candidate
+        or len(candidate) > 4000
+        or any(
+            (ord(char) < 32 and char not in {"\n", "\t"}) or ord(char) == 127
+            for char in candidate
+        )
+    ):
+        raise JsonRpcError(-32602, "commit message must be non-empty and contain no unsupported control characters")
     return candidate
 
 
@@ -3109,6 +4572,48 @@ def _redact_browser_payload(value: Any) -> Any:
         "lease_expires_at",
     }
     return {key: value[key] for key in allowed if key in value}
+
+
+def _browser_external_help_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Validate the DSH-to-Core human takeover request without retaining it."""
+
+    allowed = {"session_id", "domain", "reason", "title", "targets", "timeout_ms"}
+    if set(params) - allowed:
+        raise ValueError("browser human takeover contains unsupported fields")
+    session_id = str(params.get("session_id") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", session_id):
+        raise ValueError("external browser session id is invalid")
+    reason = params.get("reason")
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 2000:
+        raise ValueError("human takeover reason must be between 1 and 2000 characters")
+    reason = reason.strip()
+    if looks_like_secret_text(reason):
+        raise ValueError("human takeover reason must not contain credential values")
+    raw_domain = params.get("domain")
+    domain = normalize_domain(raw_domain)
+    title = params.get("title")
+    if title is not None and (not isinstance(title, str) or len(title.strip()) > 120):
+        raise ValueError("human takeover title is too long")
+    title = title.strip() if isinstance(title, str) and title.strip() else None
+    raw_targets = params.get("targets", [])
+    if not isinstance(raw_targets, list) or len(raw_targets) > 8:
+        raise ValueError("human takeover targets must be an array of at most 8 items")
+    targets: list[str] = []
+    for target in raw_targets:
+        if not isinstance(target, str) or not 1 <= len(target.strip()) <= 160:
+            raise ValueError("human takeover target is invalid")
+        targets.append(target.strip())
+    timeout_ms = params.get("timeout_ms", 300_000)
+    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1_000 <= timeout_ms <= 900_000:
+        raise ValueError("human takeover timeout_ms must be between 1000 and 900000")
+    return {
+        "session_id": session_id,
+        "domain": domain,
+        "reason": reason,
+        "title": title,
+        "targets": targets,
+        "timeout_ms": timeout_ms,
+    }
 
 
 def _snapshot_target(params: dict[str, Any]) -> tuple[str, str | None]:

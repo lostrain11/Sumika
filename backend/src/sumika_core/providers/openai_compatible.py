@@ -24,12 +24,19 @@ class OpenAICompatibleProvider(LLMProvider):
         api_key: str | None = None,
         timeout: float = 60.0,
         headers: dict[str, str] | None = None,
+        ollama: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.headers = dict(headers or {})
+        # A non-default Ollama port is common when the user's tray service is
+        # already occupied.  Provider profiles therefore pass an explicit
+        # template hint instead of making the protocol decision from port
+        # 11434 alone.  ``None`` keeps backwards-compatible URL inference for
+        # callers that construct this provider directly.
+        self._ollama_hint = ollama
         self.info = ProviderInfo(
             id="openai-compatible",
             name="OpenAI-compatible",
@@ -51,6 +58,8 @@ class OpenAICompatibleProvider(LLMProvider):
         return "127.0.0.1" in self.base_url or "localhost" in self.base_url
 
     def _is_ollama(self) -> bool:
+        if self._ollama_hint is not None:
+            return self._ollama_hint
         parsed = urlparse(self.base_url)
         return self._is_local() and parsed.port == 11434 and parsed.path.rstrip("/") in {"", "/v1"}
 
@@ -66,6 +75,7 @@ class OpenAICompatibleProvider(LLMProvider):
         timeout = config.get("timeout")
         api_key = config.get("api_key")
         headers = config.get("headers")
+        ollama = config.get("ollama")
         if isinstance(base_url, str) and base_url.strip():
             self.base_url = base_url.rstrip("/")
         if isinstance(model, str) and model.strip():
@@ -76,6 +86,8 @@ class OpenAICompatibleProvider(LLMProvider):
             self.api_key = api_key
         if isinstance(headers, dict) and all(isinstance(key, str) and isinstance(value, str) for key, value in headers.items()):
             self.headers = dict(headers)
+        if isinstance(ollama, bool):
+            self._ollama_hint = ollama
         self.info.status = "unconfigured"
 
     def _request_headers(self, *, accept: str, content_type: str | None = None) -> dict[str, str]:
@@ -87,8 +99,13 @@ class OpenAICompatibleProvider(LLMProvider):
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def health_check(self) -> dict[str, object]:
-        """Check both endpoint reachability and the configured model name."""
+    def health_check(self, *, allow_chat_probe: bool = False) -> dict[str, object]:
+        """Check endpoint/model availability without silently spending tokens.
+
+        Most services expose ``GET /models``.  A few compatible gateways do
+        not; only an explicit user-triggered check may send the bounded
+        ``max_tokens=1`` chat probe in that case.
+        """
         if not self.base_url or not self.model:
             self.info.status = "unconfigured"
             return {
@@ -103,6 +120,21 @@ class OpenAICompatibleProvider(LLMProvider):
             with self._open(request, timeout=min(self.timeout, 5.0)) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
+            # A number of legitimate OpenAI-compatible gateways intentionally
+            # omit GET /models.  A user-triggered health check may perform one
+            # bounded, content-free chat probe in that case.  Authentication
+            # and other HTTP failures remain errors and never fall back.
+            if allow_chat_probe and exc.code in {404, 405}:
+                return self._health_chat_probe(headers)
+            if exc.code in {404, 405}:
+                self.info.status = "unconfigured"
+                return {
+                    "ok": False,
+                    "provider_id": self.info.id,
+                    "status": "unconfigured",
+                    "model": self.model,
+                    "error": "model catalogue unavailable; run an explicit connection test",
+                }
             self.info.status = "error"
             return {
                 "ok": False,
@@ -142,6 +174,60 @@ class OpenAICompatibleProvider(LLMProvider):
             "status": "available",
             "model": self.model,
             "base_url": self.base_url,
+        }
+
+    def _health_chat_probe(self, headers: dict[str, str]) -> dict[str, object]:
+        """Validate a provider whose API does not expose a model catalogue."""
+
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
+        probe = Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=self._request_headers(accept="application/json", content_type="application/json"),
+            method="POST",
+        )
+        try:
+            with self._open(probe, timeout=min(self.timeout, 8.0)) as response:
+                body = response.read()
+                if response.status < 200 or response.status >= 300:
+                    raise RuntimeError(f"HTTP {response.status}")
+                # Validate JSON when the gateway advertises it, but do not
+                # require a particular response shape across vendors.
+                if body:
+                    content_type = str(response.headers.get("Content-Type") or "").lower()
+                    if "json" in content_type:
+                        json.loads(body.decode("utf-8"))
+        except HTTPError as exc:
+            self.info.status = "error"
+            return {
+                "ok": False,
+                "provider_id": self.info.id,
+                "status": "error",
+                "error": f"HTTP {exc.code}",
+            }
+        except (URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+            self.info.status = "error"
+            return {
+                "ok": False,
+                "provider_id": self.info.id,
+                "status": "error",
+                "error": "connection failed",
+                "detail": str(getattr(exc, "reason", exc))[:200],
+            }
+        self.info.status = "available"
+        return {
+            "ok": True,
+            "provider_id": self.info.id,
+            "status": "available",
+            "model": self.model,
+            "base_url": self.base_url,
+            "model_catalog": "not-exposed",
+            "health_probe": "chat-completions",
         }
 
     def stream(self, request: ChatRequest) -> Iterable[str]:

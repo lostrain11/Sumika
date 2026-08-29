@@ -20,7 +20,19 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import uuid4
 
-from .constants import BROWSERSKILL_COMMIT, BROWSERSKILL_DSH_PLUGIN_VERSION, BROWSERSKILL_EXTENSION_VERSION
+from .constants import (
+    BROWSERSKILL_CLI_COMMIT,
+    BROWSERSKILL_CLI_VERSION,
+    BROWSERSKILL_COMMIT,
+    BROWSERSKILL_DSH_PLUGIN_VERSION,
+    BROWSERSKILL_EXTENSION_COMMIT,
+    BROWSERSKILL_EXTENSION_VERSION,
+)
+from .policy import (
+    BrowserPolicyError,
+    BrowserPolicyEvaluator,
+    normalize_domain,
+)
 from ..protocol.models import utc_now
 from ..storage import Storage
 
@@ -134,12 +146,28 @@ class BrowserSkillClient:
         args.append(url)
         return self.runner(tuple(args))
 
-    def request_help(self, session_id: str, prompt: str, *, tab_id: str | None = None, title: str | None = None) -> Any:
+    def request_help(
+        self,
+        session_id: str,
+        prompt: str,
+        *,
+        tab_id: str | None = None,
+        title: str | None = None,
+        targets: list[str] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
         args = ["request-help", "--session", session_id, "--prompt", prompt]
         if tab_id:
             args.extend(["--tab-id", tab_id])
         if title:
             args.extend(["--title", title])
+        for target in targets or []:
+            args.extend(["--target", target])
+        # Test doubles intentionally keep the one-argument runner contract.
+        # The real client can use a longer timeout because human takeover may
+        # remain open for several minutes.
+        if timeout is not None and self.runner == self._run:
+            return self._run(tuple(args), timeout=timeout)
         return self.runner(tuple(args))
 
     def click(self, session_id: str, target: str, *, tab_id: str | None = None) -> Any:
@@ -174,7 +202,7 @@ class BrowserSkillClient:
         args.append(key)
         return self.runner(tuple(args))
 
-    def _run(self, args: tuple[str, ...]) -> Any:
+    def _run(self, args: tuple[str, ...], *, timeout: float | None = None) -> Any:
         if not self.executable:
             raise BrowserRuntimeError("BrowserSkill CLI is not installed or SUMIKA_BSK_EXECUTABLE is not set")
         try:
@@ -184,7 +212,7 @@ class BrowserSkillClient:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=self.timeout,
+                timeout=self.timeout if timeout is None else max(0.1, float(timeout)),
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
@@ -362,6 +390,7 @@ class BrowserRuntime:
         self.quarantine_dir = (self.data_dir / "browser" / "quarantine") if self.data_dir else None
         self.allowlist: set[str] = set()
         self.enabled = os.getenv("SUMIKA_BROWSER_ENABLED", "1").lower() not in {"0", "false", "no"}
+        self.policy = BrowserPolicyEvaluator(enabled=self.enabled, allowlist=self.allowlist)
         self.browser_skill = browser_skill or BrowserSkillClient(logger=logger)
         self._backend_status_cache: tuple[str, str | None, int] | None = None
         self._backend_status_at = 0.0
@@ -399,14 +428,23 @@ class BrowserRuntime:
             "backend": "BrowserSkill",
             "backend_repository": "https://github.com/tencent/BrowserSkill",
             "backend_commit": BROWSERSKILL_COMMIT,
+            "cli_version": BROWSERSKILL_CLI_VERSION,
+            "cli_commit": BROWSERSKILL_CLI_COMMIT,
             "dsh_plugin_version": BROWSERSKILL_DSH_PLUGIN_VERSION,
             "extension_version": BROWSERSKILL_EXTENSION_VERSION,
+            "extension_commit": BROWSERSKILL_EXTENSION_COMMIT,
             "auto_update": False,
             "global_desktop_control": False,
             "cli_available": bool(self.browser_skill.available),
             "cli_path": self.browser_skill.executable,
             "backend_state": backend_state,
             "backend_reason": backend_reason,
+            "policy_bridge": {
+                "rpc_method": "browser.policy.evaluate",
+                "fail_closed": True,
+                "metadata_only": True,
+                "dsh_plugin": "sumika-dsh-browser-policy",
+            },
             "browser_count": browser_count,
             "temporary_profile_retention_hours": 24,
             "active_sessions": len(self.sessions),
@@ -990,6 +1028,92 @@ class BrowserRuntime:
             "action": action,
             "domain": domain,
             "global_desktop_control": False,
+        }
+
+    def evaluate_policy(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Evaluate a redacted policy request from a Harness adapter.
+
+        A local Sumika session is authoritative when present.  External DSH
+        sessions may set ``session_known`` only after the DSH BrowserSkill
+        plugin has established ownership in its own process; no page payload
+        or credential value is accepted here.
+        """
+
+        if not isinstance(metadata, dict):
+            raise BrowserRuntimeError("browser policy metadata must be an object")
+        payload = dict(metadata)
+        session_id = payload.get("session_id")
+        if isinstance(session_id, str) and session_id.strip() in self.sessions:
+            payload["session_known"] = True
+        self.policy.enabled = self.enabled
+        self.policy.allowlist = set(self.allowlist)
+        try:
+            return self.policy.evaluate(payload)
+        except BrowserPolicyError as error:
+            raise BrowserRuntimeError(str(error)) from error
+
+    def request_external_help(
+        self,
+        *,
+        session_id: str,
+        domain: str | None,
+        reason: str,
+        title: str | None = None,
+        targets: list[str] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Ask BrowserSkill to show its human takeover surface for a DSH session.
+
+        The DSH policy plugin owns the session registry.  Core only accepts a
+        bounded identifier and forwards the request to the already configured
+        loopback BrowserSkill CLI; the prompt is never persisted or logged.
+        """
+
+        if not self.enabled:
+            raise BrowserRuntimeError("Browser runtime is disabled")
+        normalized_session = str(session_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", normalized_session):
+            raise BrowserRuntimeError("external browser session id is invalid")
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason or len(normalized_reason) > 2000:
+            raise BrowserRuntimeError("human takeover reason must be between 1 and 2000 characters")
+        if _BROWSER_SECRET_RE.search(normalized_reason):
+            raise BrowserRuntimeError("human takeover reason must not contain credential values")
+        try:
+            normalized_domain = normalize_domain(domain)
+        except BrowserPolicyError as error:
+            raise BrowserRuntimeError(str(error)) from error
+        normalized_title = str(title or "").strip() or None
+        if normalized_title is not None and len(normalized_title) > 120:
+            raise BrowserRuntimeError("human takeover title is too long")
+        normalized_targets: list[str] = []
+        for target in targets or []:
+            value = str(target or "").strip()
+            if not value or len(value) > 160:
+                raise BrowserRuntimeError("human takeover target is invalid")
+            normalized_targets.append(value)
+        try:
+            result = self.browser_skill.request_help(
+                normalized_session,
+                normalized_reason,
+                title=normalized_title,
+                targets=normalized_targets,
+                timeout=timeout,
+            )
+        except BrowserRuntimeError as error:
+            raise BrowserRuntimeError(f"BrowserSkill human takeover failed: {error}") from error
+        outcome = "requested"
+        if isinstance(result, dict) and isinstance(result.get("outcome"), str):
+            candidate = result["outcome"].strip().lower()
+            if candidate in {"continued", "cancelled", "timed_out", "completed", "disabled", "requested"}:
+                outcome = candidate
+        return {
+            "session_id": normalized_session,
+            "domain": normalized_domain,
+            "outcome": outcome,
+            "requires_human": True,
+            "credentials_excluded": True,
+            "backend_requested": True,
         }
 
     def request_help(self, *, session_id: str, domain: str, reason: str) -> dict[str, Any]:

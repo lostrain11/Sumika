@@ -35,6 +35,11 @@ The first slice is intentionally local-only:
   imported packages are validated and stored but never restored implicitly.
   Treat exported files as sensitive because they may contain conversations,
   persona settings and memory contents.
+- BrowserSkill is an external, loopback-only browser controller. The DSH
+  `browser_*` tools must pass through Sumika's `browser.policy.evaluate` bridge;
+  policy failure is a denial. The bridge receives only normalized host/action
+  metadata, while credentials and human takeover text stay out of durable
+  events. BrowserSkill never receives global desktop mouse/keyboard authority.
 
 This is not a safe remote deployment profile. Before enabling LAN or Android
 access, add pairing/authentication, origin checks, encrypted transport,

@@ -23,11 +23,15 @@ shell now wraps the same UI and local core, with:
 - an optional Agent Runtime child supervised through a runtime-specific launcher config;
 - isolated `.sumika-desktop` data and lifecycle logs.
 
-Provider secrets are stored by the Python core through the credential-store
-boundary; Windows currently uses Credential Manager. macOS Keychain and Linux
-Secret Service adapters are not implemented, so those platforms fail closed
-for profiles that need a persisted secret. The desktop shell does not
-duplicate or expose credentials.
+Provider and managed MCP secrets are stored by the Python core through the
+credential-store boundary; Windows currently uses Credential Manager. Before
+starting managed DSH, the shell invokes a private versioned helper protocol,
+validates every environment name plus the total binding count/size, and injects
+the values only into that child process. The Python core receives only the
+non-sensitive names of MCP bindings loaded for the launch. macOS Keychain and
+Linux Secret Service adapters are not implemented, so those platforms fail
+closed for profiles that need a persisted secret. The desktop shell does not
+persist, print, or return credential values.
 
 The overlay is a transparent desktop-pet surface: it paints only the Avatar and
 a compact chat composer. Open-main-window and hide-overlay controls are
@@ -64,6 +68,14 @@ currently only the real DSH launcher is registered. `SUMIKA_AGENT_*` selects the
 runtime and launcher settings, while existing `SUMIKA_DSH_*` names remain DSH
 compatibility aliases. An unknown runtime cannot enable managed autostart and
 must run externally until its real launcher is implemented.
+
+On Windows, `tools/run-desktop.ps1` first probes the configured DSH endpoint.
+It reuses a healthy external process without supervising or stopping it. When
+the endpoint is unavailable, it may auto-start only the already installed,
+version-matched executable at
+`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd`. This discovery
+does not install, update, or download DSH; an absent runtime leaves Agent in an
+explicit unavailable state while the rest of the desktop still starts.
 
 It does not move provider orchestration into Rust or frontend components. The
 browser client continues to use `127.0.0.1:8770` and `.sumika`. In a packaged

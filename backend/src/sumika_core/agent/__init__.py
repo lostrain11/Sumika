@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from .contracts import AgentCapability, AgentRuntime, AgentRuntimeError, UnavailableAgentRuntime
 from .models import AgentApproval, AgentEvent
 from .registry import AgentRuntimeRegistry, create_agent_runtime
+from .skill_catalog import SkillCatalog, SkillCatalogError
 
 if TYPE_CHECKING:
     from .adapters.dsh.config import DSHRuntimeConfig
@@ -29,6 +30,8 @@ __all__ = [
     "AgentRuntime",
     "AgentRuntimeError",
     "AgentRuntimeRegistry",
+    "SkillCatalog",
+    "SkillCatalogError",
     "DSHAgentRuntime",
     "DSHRuntimeConfig",
     "UnavailableAgentRuntime",

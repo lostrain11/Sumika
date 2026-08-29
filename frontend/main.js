@@ -1,3 +1,5 @@
+const AGENT_SESSION_PREFERENCE_KEY = "sumika.agent.active-session.v1";
+
 const state = {
   activePage: "Chat",
   overlayMode: new URLSearchParams(window.location.search).get("mode") === "overlay",
@@ -23,6 +25,7 @@ const state = {
   memories: [],
   snapshots: [],
   tasks: [],
+  agentTasks: [],
   avatarModels: [],
   avatarIgnored: [],
   avatarInspections: {},
@@ -96,6 +99,12 @@ const state = {
   browserDeveloperMode: false,
   browserDownloads: [],
   agentCapabilities: { skills: [], mcp: { status: "not-observed", entries: [] }, subagents: [], commands: [] },
+  agentMcpCatalog: { status: "not-observed", entries: [], catalog_available: false },
+  agentMcpCatalogBusy: false,
+  agentSkillsCatalog: [],
+  agentSkillsBusy: null,
+  agentSkillsPath: "",
+  agentSkillsNotice: "",
   agentPresets: [],
   agentPresetAuthorable: false,
   agentPresetHasDocument: false,
@@ -103,6 +112,33 @@ const state = {
   agentPresetCopySource: "",
   agentPresetCopyId: "",
   agentPresetCopyName: "",
+  agentPresetValidation: {},
+  agentMcpPresetId: "",
+  agentMcpConfigurations: [],
+  agentMcpClientInstalled: false,
+  agentMcpClientVersion: "",
+  agentMcpCredentialFieldsSupported: false,
+  agentMcpCredentialStorage: "unavailable",
+  agentMcpPendingSecret: "",
+  agentMcpDraft: {
+    server_name: "",
+    transport: "stdio",
+    enabled: false,
+    command: "",
+    args_text: "[]",
+    cwd: "",
+    url: "",
+    tool_call_timeout_ms: 60000,
+    credential_enabled: false,
+    credential_present: false,
+    credential_target: "",
+    credential_prefix: "",
+    credential_rotate: false,
+    credential_configured: false,
+    credential_loaded_at_launch: false,
+    credential_restart_required: false,
+  },
+  agentMcpPreview: null,
   agentSessions: [],
   agentSessionSearchQuery: "",
   agentSessionSearchResults: null,
@@ -112,8 +148,26 @@ const state = {
   agentWorkspaces: [],
   agentWorkspaceId: "",
   agentWorkspacePath: "",
+  workspaceRuntimePath: "",
+  workspaceRuntimeInspect: null,
+  workspaceRuntimeCheckpoints: [],
+  workspaceRuntimeSelectedId: null,
+  workspaceRuntimeDiff: null,
+  workspaceRuntimePreview: null,
+  workspaceRuntimeCheckpointName: "",
+  workspaceRuntimeWorktreeDestination: "",
+  workspaceRuntimeWorktreeBranch: "",
+  workspaceRuntimeWorktreePreview: null,
+  workspaceRuntimeCommitMessage: "",
+  workspaceRuntimeCommitPreview: null,
+  workspaceRuntimeBusy: null,
+  workspaceRuntimeNotice: "",
   agentSessionId: null,
   agentSnapshot: null,
+  agentHistoryBeforeSeq: null,
+  agentHistoryHasMore: false,
+  agentHistoryPagingStarted: false,
+  agentHistoryLoading: false,
   agentQueue: { known: false, items: [], hidden_context_count: 0, updated_at: null },
   agentQueueDrafts: {},
   agentModels: { current: {}, routable: false, groups: [], failures: [] },
@@ -131,6 +185,8 @@ const state = {
   agentAttachmentBusy: null,
   agentBusy: null,
   agentNotice: "",
+  agentSyncing: false,
+  agentSyncQueued: false,
   evolutionRegistry: [],
 };
 
@@ -181,6 +237,26 @@ let coreBaseUrl = isDesktopShell && !["http:", "https:"].includes(location.proto
   ? "http://127.0.0.1:8771"
   : "";
 let activeAudioCapture = null;
+let agentSyncTimer = null;
+let agentSyncInFlight = false;
+let agentWorkspaceRequestGeneration = 0;
+let agentSessionGeneration = 0;
+let agentCapabilitiesRequestGeneration = 0;
+let agentSnapshotRequestGeneration = 0;
+const AGENT_SYNC_INTERVAL_MS = 15_000;
+
+function invalidateAgentWorkspaceRequests() {
+  agentWorkspaceRequestGeneration += 1;
+}
+
+function setAgentSessionId(value) {
+  const next = value || null;
+  if (state.agentSessionId !== next) {
+    agentSessionGeneration += 1;
+    invalidateAgentWorkspaceRequests();
+  }
+  state.agentSessionId = next;
+}
 
 function coreUrl(path) {
   if (!coreBaseUrl) return path;
@@ -303,6 +379,7 @@ function currentAvatarPresentation() {
 
 function render() {
   rememberChatScrollPreference();
+  rememberFocusedAgentQueueDraft();
   if (state.activePage !== "Chat" && activeAudioCapture) {
     discardAudioCapture(activeAudioCapture);
     activeAudioCapture = null;
@@ -902,12 +979,15 @@ function renderProviderDrawer() {
   if (!state.providerDrawerOpen) return "";
   const profile = state.providerProfiles.find((item) => item.id === state.providerDrawerProfileId) || null;
   const config = profile?.config || {};
+  const selectedTemplate = state.providerTemplates.find((item) => item.id === (profile?.template_id || "openai-compatible")) || {};
   const templates = state.providerTemplates.map((template) => `<option value="${escapeHtml(template.id)}" ${template.id === (profile?.template_id || "openai-compatible") ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("");
+  const modelOptions = Array.isArray(selectedTemplate.model_options) ? selectedTemplate.model_options : [];
+  const modelDatalist = modelOptions.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
   const manual = `<form id="provider-profile-form" class="provider-drawer-form" data-profile-id="${escapeHtml(profile?.id || "")}">
     <div class="provider-form-grid"><label><span>连接名称</span><input name="name" value="${escapeHtml(profile?.name || "")}" maxlength="80" required autofocus /></label><label><span>连接模板</span><select name="template_id" id="provider-template-select">${templates}</select></label></div>
     <label><span>当前 Base URL</span><input name="active_base_url" type="url" value="${escapeHtml(config.active_base_url || "")}" placeholder="https://api.example.com/v1" required /></label>
     <label><span>备用端点（每行一个）</span><textarea name="alternate_urls" rows="3" placeholder="只保存，不自动故障转移">${escapeHtml((config.base_urls || []).filter((value) => value !== config.active_base_url).join("\n"))}</textarea></label>
-    <div class="provider-form-grid"><label><span>模型</span><input name="model" value="${escapeHtml(config.model || "")}" placeholder="模型 ID" required /></label><label><span>处理位置</span><select name="processing_location"><option value="auto" ${profile?.processing_location === "auto" ? "selected" : ""}>自动判断</option><option value="local" ${profile?.processing_location === "local" ? "selected" : ""}>本地处理</option><option value="cloud" ${profile?.processing_location === "cloud" ? "selected" : ""}>云端处理</option></select></label></div>
+    <div class="provider-form-grid"><label><span>模型</span><input name="model" list="provider-model-options" value="${escapeHtml(config.model || "")}" placeholder="模型 ID" required /><datalist id="provider-model-options">${modelDatalist}</datalist></label><label><span>处理位置</span><select name="processing_location"><option value="auto" ${profile?.processing_location === "auto" ? "selected" : ""}>自动判断</option><option value="local" ${profile?.processing_location === "local" ? "selected" : ""}>本地处理</option><option value="cloud" ${profile?.processing_location === "cloud" ? "selected" : ""}>云端处理</option></select></label></div>
     <label><span>API Key</span><input name="api_key" type="password" value="" autocomplete="new-password" placeholder="${profile?.has_secrets ? "已安全保存，留空保持不变" : "本地免鉴权服务可以留空"}" /></label>
     ${profile?.has_secrets ? `<label class="provider-clear-secret"><input name="clear_api_key" type="checkbox" /><span>清除已保存的 API Key</span></label>` : ""}
     <details class="provider-advanced"><summary>高级设置</summary><div><div class="provider-form-grid"><label><span>超时（秒）</span><input name="timeout" type="number" min="1" max="300" value="${escapeHtml(config.timeout || 60)}" /></label><label><span>Organization</span><input name="organization" value="${escapeHtml(config.organization || "")}" /></label></div><label><span>Project</span><input name="project" value="${escapeHtml(config.project || "")}" /></label><label><span>额外请求头（JSON）</span><textarea name="headers" rows="4">${escapeHtml(JSON.stringify(config.headers || {}, null, 2))}</textarea></label><label><span>声明式用量查询（JSON，可留空）</span><textarea name="usage_query" rows="4" placeholder='{"enabled":false,"method":"GET","url":"{{baseUrl}}/usage","fields":{}}'>${escapeHtml(config.usage_query ? JSON.stringify(config.usage_query, null, 2) : "")}</textarea></label></div></details>
@@ -961,7 +1041,7 @@ function renderModuleConfig(module) {
 }
 
 function renderTasks() {
-  const tasks = state.tasks;
+  const tasks = [...state.agentTasks, ...state.tasks];
   const columns = [
     ["running", "运行中", ["pending", "running"]],
     ["waiting", "等待批准", ["waiting_approval"]],
@@ -969,7 +1049,12 @@ function renderTasks() {
     ["attention", "失败 / 暂停", ["failed", "paused", "cancelled"]],
   ];
   const notice = state.taskNotice ? `<div class="task-notice" role="status">${escapeHtml(state.taskNotice)}</div>` : "";
-  const createButton = `<div class="task-toolbar"><span>任务状态、预算和产物均保存在本机事件记录中。</span><button class="outline-button" id="add-task">创建任务</button></div>`;
+  const liveCount = state.agentTasks.filter((task) => task.projection_state !== "stale" && task.stale !== true).length;
+  const staleCount = state.agentTasks.length - liveCount;
+  const projectionNotice = state.agentTasks.length
+    ? `<span class="task-projection-state ${staleCount ? "stale" : "live"}" data-agent-projection-state="${staleCount ? "stale" : "live"}">${staleCount ? `最后已知 · ${staleCount} 条` : `实时 · ${liveCount} 条`}</span>`
+    : (state.agentStatus?.ready ? "暂无 Agent Session 投影" : "Agent Runtime 未连接；暂无可恢复投影");
+  const createButton = `<div class="task-toolbar"><span>本地任务保存在事件记录中；Agent 会话为 Runtime 只读投影。${projectionNotice}</span><button class="outline-button" id="add-task">创建任务</button></div>`;
   const board = columns.map(([id, title, statuses]) => {
     const items = tasks.filter((task) => statuses.includes(task.status));
     return `<section class="task-column" data-task-column="${id}"><div class="column-title"><span>${title}</span><b>${items.length}</b></div>${items.length ? items.map(renderTaskCard).join("") : `<div class="empty-column">暂无任务</div>`}</section>`;
@@ -981,21 +1066,48 @@ function renderTaskCard(task) {
   const expanded = state.selectedTaskId === task.id;
   const progress = Math.round((Number(task.progress) || 0) * 100);
   const busy = state.taskBusy === task.id;
-  return `<article class="task-large-card ${expanded ? "task-expanded" : ""}">
-    <button class="task-open" type="button" data-task-open="${escapeHtml(task.id)}" aria-expanded="${expanded}"><div class="task-large-head"><span class="task-status ${taskStatusClass(task.status)}">${taskStatusIcon(task.status)}</span><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.id)} · ${taskAutonomyLabel(task.autonomy_level)}</small></div><span class="task-chevron">${expanded ? "⌄" : "›"}</span></div></button>
-    <div class="task-progress"><span style="width:${progress}%"></span></div><div class="task-large-foot"><span>${taskStatusLabel(task.status)} · ${progress}%</span><span>${formatBudget(task.budget)}</span></div>
+  const source = task.read_only ? `${String(task.runtime_id || "Agent").toUpperCase()} · 只读` : taskAutonomyLabel(task.autonomy_level);
+  const usage = task.read_only ? formatAgentTaskUsage(task.metrics) : formatBudget(task.budget);
+  const staleLabel = task.stale === true || task.projection_state === "stale" ? " · 最后已知" : "";
+  return `<article class="task-large-card ${expanded ? "task-expanded" : ""} ${staleLabel ? "task-stale" : ""}">
+    <button class="task-open" type="button" data-task-open="${escapeHtml(task.id)}" aria-expanded="${expanded}"><div class="task-large-head"><span class="task-status ${taskStatusClass(task.status)}">${taskStatusIcon(task.status)}</span><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.id)} · ${escapeHtml(source)}</small></div><span class="task-chevron">${expanded ? "⌄" : "›"}</span></div></button>
+    <div class="task-progress"><span style="width:${progress}%"></span></div><div class="task-large-foot"><span>${taskStatusLabel(task.status)} · ${progress}%${staleLabel}</span><span>${escapeHtml(usage)}</span></div>
     ${expanded ? renderTaskDetail(task, busy) : ""}
   </article>`;
 }
 
 function renderTaskDetail(task, busy) {
+  if (task.read_only) return renderAgentTaskDetail(task);
   const permissions = task.permissions?.length ? task.permissions.join(" · ") : "无额外权限";
   const logs = task.logs?.length ? task.logs.slice(-4).map((log) => `<li>${escapeHtml(log.message || JSON.stringify(log))}</li>`).join("") : "<li>暂无日志</li>";
   const artifacts = task.artifacts?.length ? task.artifacts.map((artifact) => `<li>${escapeHtml(artifact.name || artifact.path || JSON.stringify(artifact))}</li>`).join("") : "<li>暂无产物</li>";
   return `<div class="task-detail"><div class="task-detail-grid"><div><span>自治等级</span><strong>${taskAutonomyLabel(task.autonomy_level)}</strong></div><div><span>权限</span><strong>${escapeHtml(permissions)}</strong></div><div><span>预算</span><strong>${escapeHtml(formatBudget(task.budget))}</strong></div><div><span>结果</span><strong>${escapeHtml(task.result?.summary || "暂无")}</strong></div></div><div class="task-detail-lists"><div><span>最近日志</span><ul>${logs}</ul></div><div><span>产物 / diff</span><ul>${artifacts}</ul></div></div>${renderTaskActions(task, busy)}</div>`;
 }
 
+function renderAgentTaskDetail(task) {
+  const permissions = task.permissions?.length ? task.permissions.join(" · ") : "当前无待处理审批";
+  const logs = task.logs?.length ? task.logs.slice(-4).map((log) => `<li>${escapeHtml(log.message || JSON.stringify(log))}</li>`).join("") : "<li>暂无 Runtime 事件</li>";
+  const artifacts = task.artifacts?.length ? task.artifacts.map((artifact) => `<li>${escapeHtml(artifact.label || artifact.name || artifact.type || "Agent 产物")}</li>`).join("") : "<li>暂无产物</li>";
+  const workspace = task.workspace;
+  const workspaceLabel = workspace ? `${workspace.title || workspace.id || "Workspace"}${workspace.branch ? ` · ${workspace.branch}` : ""}${workspace.dirty ? " · 有未提交变更" : ""}${Number.isFinite(Number(workspace.checkpoint_count)) ? ` · ${Number(workspace.checkpoint_count)} checkpoint` : ""}` : "未关联 Workspace";
+  const metrics = task.metrics || {};
+  const turns = Array.isArray(task.turns) ? task.turns : (Array.isArray(task.result?.turns) ? task.result.turns : []);
+  const tokenUsage = formatAgentTokenUsage(metrics.token_usage || {});
+  const contextUsage = formatAgentContextUsage(metrics.context || {});
+  const budget = task.budget && typeof task.budget === "object" ? task.budget : {};
+  const budgetDetail = budget.available === false || Object.keys(budget).length === 0
+    ? (budget.reason || "Runtime 未提供任务预算上限")
+    : formatBudget(budget);
+  const isStale = task.stale === true || task.projection_state === "stale";
+  const freshness = isStale
+    ? `最后已知${task.stale_reason ? `：${task.stale_reason}` : "；Runtime 当前不可用"}`
+    : "实时 Runtime 投影";
+  const summary = task.result?.summary || (isStale ? "Runtime 暂不可用，以下为最后已知状态" : "暂无");
+  return `<div class="task-detail task-agent-projection" data-task-read-only="true" data-agent-projection="${isStale ? "stale" : "live"}"><div class="task-projection-banner ${isStale ? "stale" : "live"}" role="status">${escapeHtml(freshness)}；此卡片只读，不能据此执行或批准操作。</div><div class="task-detail-grid"><div><span>来源</span><strong>${escapeHtml(String(task.runtime_id || "Agent").toUpperCase())} Session（只读）</strong></div><div><span>会话</span><strong>${escapeHtml(task.session_id || "-")}</strong></div><div><span>真实消耗</span><strong>${escapeHtml(formatAgentTaskUsage(metrics))}</strong></div><div><span>Token 明细</span><strong>${escapeHtml(tokenUsage || "暂无")}</strong></div><div><span>上下文</span><strong>${escapeHtml(contextUsage || "暂无")}</strong></div><div><span>预算</span><strong>${escapeHtml(budgetDetail)}</strong></div><div><span>Workspace</span><strong>${escapeHtml(workspaceLabel)}</strong></div><div><span>待处理权限</span><strong>${escapeHtml(permissions)}</strong></div><div><span>结果</span><strong>${escapeHtml(summary)}</strong></div></div><div class="task-detail-lists"><div><span>最近 Runtime 事件</span><ul>${logs}</ul></div><div><span>产物 / diff</span><ul>${artifacts}</ul></div></div>${renderAgentTurnLedger(turns)}<div class="task-actions"><button class="small-button" type="button" data-agent-task-session="${escapeHtml(task.session_id || "")}">在 Agent 中打开</button></div></div>`;
+}
+
 function renderTaskActions(task, busy) {
+  if (task.read_only) return "";
   if (task.id === "core-service") return "";
   const actions = [];
   if (["pending", "running"].includes(task.status)) actions.push(["request", "请求批准", false]);
@@ -1023,10 +1135,84 @@ function taskAutonomyLabel(level) {
 }
 
 function formatBudget(budget = {}) {
+  if (budget && budget.available === false) return "预算未提供";
   const tokens = Number(budget.token_limit) || 0;
   const seconds = Number(budget.time_limit_seconds) || 0;
   if (!tokens && !seconds) return "无预算消耗";
   return `${tokens ? `${tokens} tokens` : "不限 token"}${seconds ? ` · ${seconds}s` : ""}`;
+}
+
+function finiteAgentMetric(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function formatAgentMetricNumber(value) {
+  const number = finiteAgentMetric(value);
+  if (number === null) return "-";
+  return Number.isInteger(number) ? number.toLocaleString("zh-CN") : number.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function agentMetricValue(source, key) {
+  if (!source || typeof source !== "object") return null;
+  return finiteAgentMetric(source[key]);
+}
+
+function formatAgentTokenUsage(usage = {}) {
+  const fields = [
+    ["uncachedInputTokens", "输入"],
+    ["outputTokens", "输出"],
+    ["cacheReadTokens", "缓存读"],
+    ["cacheWriteTokens", "缓存写"],
+  ];
+  const parts = fields
+    .map(([key, label]) => {
+      const value = agentMetricValue(usage, key);
+      return value === null ? "" : `${label} ${formatAgentMetricNumber(value)} token`;
+    })
+    .filter(Boolean);
+  return parts.join(" · ");
+}
+
+function formatAgentContextUsage(context = {}) {
+  const projected = agentMetricValue(context, "projectedTokens");
+  const pressure = agentMetricValue(context, "pressureTokens");
+  const window = agentMetricValue(context, "contextWindow");
+  const parts = [];
+  if (projected !== null && window !== null && window > 0) {
+    const percent = Math.min(100, (projected / window) * 100);
+    parts.push(`${formatAgentMetricNumber(projected)} / ${formatAgentMetricNumber(window)} token (${percent.toFixed(1)}%)`);
+  } else if (projected !== null) {
+    parts.push(`${formatAgentMetricNumber(projected)} token`);
+  } else if (window !== null) {
+    parts.push(`窗口 ${formatAgentMetricNumber(window)} token`);
+  }
+  if (pressure !== null) parts.push(`压力 ${formatAgentMetricNumber(pressure)} token`);
+  return parts.join(" · ");
+}
+
+function formatAgentTaskUsage(metrics = {}) {
+  const stats = metrics?.stats || {};
+  const context = metrics?.context || {};
+  const usage = metrics?.token_usage || {};
+  const parts = [];
+  const turns = agentMetricValue(stats, "turns");
+  const steps = agentMetricValue(stats, "steps");
+  const output = agentMetricValue(usage, "outputTokens") ?? agentMetricValue(stats, "outputTokens") ?? agentMetricValue(stats, "decodeTokens");
+  const input = agentMetricValue(usage, "uncachedInputTokens");
+  const cacheRead = agentMetricValue(usage, "cacheReadTokens");
+  const cacheWrite = agentMetricValue(usage, "cacheWriteTokens");
+  const projected = agentMetricValue(context, "projectedTokens");
+  if (turns !== null) parts.push(`${formatAgentMetricNumber(turns)} turn`);
+  if (steps !== null) parts.push(`${formatAgentMetricNumber(steps)} step`);
+  if (output !== null) parts.push(`${formatAgentMetricNumber(output)} 输出 token`);
+  if (input !== null) parts.push(`${formatAgentMetricNumber(input)} 输入 token`);
+  if (cacheRead !== null) parts.push(`${formatAgentMetricNumber(cacheRead)} 缓存读`);
+  if (cacheWrite !== null) parts.push(`${formatAgentMetricNumber(cacheWrite)} 缓存写`);
+  if (projected !== null) parts.push(`${formatAgentMetricNumber(projected)} 上下文 token`);
+  const elapsed = (agentMetricValue(stats, "llmMs") || 0) + (agentMetricValue(stats, "toolMs") || 0);
+  if (elapsed) parts.push(`${(elapsed / 1000).toFixed(2)}s`);
+  return parts.join(" · ") || "暂无运行统计";
 }
 
 function renderHistory() {
@@ -1116,16 +1302,68 @@ function agentRuntimeLabel(status = state.agentStatus) {
   return id;
 }
 
+function agentRuntimePreferenceId(status = state.agentStatus) {
+  const id = String(status?.runtime_id || "").trim().toLowerCase();
+  if (id) return id;
+  return status?.version && status?.commit ? "dsh" : "";
+}
+
+function readAgentSessionPreference() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(AGENT_SESSION_PREFERENCE_KEY) || "null");
+    const runtimeId = String(value?.runtime_id || "").trim().toLowerCase();
+    const sessionId = String(value?.session_id || "").trim();
+    if (!runtimeId || runtimeId.length > 80 || !sessionId || sessionId.length > 160) return null;
+    if (/\p{Cc}/u.test(runtimeId) || /\p{Cc}/u.test(sessionId)) return null;
+    return { runtime_id: runtimeId, session_id: sessionId };
+  } catch {
+    return null;
+  }
+}
+
+function rememberAgentSession(sessionId) {
+  const runtimeId = agentRuntimePreferenceId();
+  const value = String(sessionId || "").trim();
+  if (!runtimeId || !value || value.length > 160 || /\p{Cc}/u.test(value)) return;
+  try {
+    window.localStorage.setItem(AGENT_SESSION_PREFERENCE_KEY, JSON.stringify({ runtime_id: runtimeId, session_id: value }));
+  } catch {
+    // Session continuity is best-effort when browser storage is unavailable.
+  }
+}
+
+function clearAgentSessionPreference() {
+  try {
+    window.localStorage.removeItem(AGENT_SESSION_PREFERENCE_KEY);
+  } catch {
+    // An unavailable preference store must not block the Agent runtime.
+  }
+}
+
 function agentSupports(capability) {
   const values = state.agentStatus?.runtime_capabilities;
   if (Array.isArray(values)) return values.includes(capability);
   // Compatibility with a Core predating capability discovery.
+  if (capability === "readonly") return false;
   return state.agentStatus?.runtime_id === "dsh" || Boolean(state.agentStatus?.version && state.agentStatus?.commit);
 }
 
 function effectiveAgentMode() {
   const mode = ["plan", "execute", "readonly"].includes(state.agentMode) ? state.agentMode : "execute";
-  return mode === "plan" && !agentSupports("plan") ? "execute" : mode;
+  if (mode === "plan" && !agentPlanModeAvailable()) return "execute";
+  if (mode === "readonly" && !agentSupports("readonly")) return "execute";
+  return mode;
+}
+
+function agentPlanModeAvailable() {
+  if (!agentSupports("plan")) return false;
+  if (!state.agentSessionId) return false;
+  const commands = state.agentCapabilities?.commands;
+  if (commands?.available !== true || !Array.isArray(commands.entries)) return false;
+  return commands.entries.some((entry) => {
+    const name = typeof entry === "string" ? entry : entry?.name || entry?.id || entry?.command;
+    return String(name || "").replace(/^\//, "").trim().toLowerCase() === "plan";
+  });
 }
 
 function supportedAgentPromptAttachments() {
@@ -1146,19 +1384,67 @@ function renderAgentCapabilityCard(title, value, description) {
 }
 
 function renderAgentMcpCapability(value) {
-  const data = value && typeof value === "object" ? value : {};
+  const catalog = state.agentMcpCatalog && typeof state.agentMcpCatalog === "object" ? state.agentMcpCatalog : {};
+  const useCatalog = Array.isArray(catalog.entries) && (catalog.entries.length > 0 || catalog.catalog_available === true || catalog.status === "configured");
+  const data = useCatalog ? catalog : (value && typeof value === "object" ? value : {});
   const entries = Array.isArray(data.entries) ? data.entries : [];
   const tools = entries.flatMap((entry) => Array.isArray(entry?.tools) ? entry.tools : []);
-  const status = data.status === "observed"
+  const status = data.status === "available"
     ? `${Number(data.server_count || entries.length)} 服务 · ${Number(data.tool_count || tools.length)} 工具`
-    : data.status === "unavailable" ? "不可用" : "尚未观察";
+    : data.status === "configured"
+      ? `${Number(data.server_count || entries.length)} 项已配置`
+      : data.status === "observed"
+    ? `${Number(data.server_count || entries.length)} 服务 · ${Number(data.tool_count || tools.length)} 工具`
+    : data.status === "unavailable" ? "不可用" : data.status === "not-exposed" ? "未暴露目录" : "尚未观察";
   const dsh = state.agentStatus?.runtime_id === "dsh";
   const packageStatus = dsh
     ? (data.client_installed ? `dsh-mcp-client ${data.client_version || "版本未知"} 已安装` : "受管 profile 尚未发现 dsh-mcp-client")
     : (data.client_installed ? `MCP client ${data.client_version || "版本未知"} 已安装` : "Runtime 未报告 MCP client");
   const names = tools.slice(0, 4).map((tool) => escapeHtml(tool?.name || tool?.tool_name || "未命名")).join(" · ");
-  const detail = names || escapeHtml(data.reason || "选择会话后从近期工具事件中归纳；没有独立 MCP 目录 RPC");
-  return `<article class="agent-capability" data-agent-mcp-inventory="${escapeHtml(data.status || "not-observed")}"><div><strong>MCP</strong><span>${escapeHtml(status)}</span></div><small>${escapeHtml(packageStatus)}；仅显示会话中已观察的公开工具名，不作为实时健康状态。</small><code class="agent-capability-items">${detail}</code></article>`;
+  const detail = names || escapeHtml(data.reason || "配置、Runtime 目录和会话观察会分别标注，不会把配置存在当作健康");
+  return `<article class="agent-capability" data-agent-mcp-inventory="${escapeHtml(data.status || "not-observed")}" data-agent-mcp-catalog="${useCatalog ? "merged" : "legacy"}"><div><strong>MCP</strong><span>${escapeHtml(status)}</span></div><small>${escapeHtml(packageStatus)}；来源和新鲜度以 Developer 目录为准。</small><code class="agent-capability-items">${detail}</code></article>`;
+}
+
+function skillCatalogStatusLabel(status) {
+  return ({ discovered: "待批准", changed: "哈希已变化", approved: "已批准", revoked: "已撤销", invalid: "不可读" })[status] || status || "未知";
+}
+
+function mcpCatalogStatusLabel(status) {
+  return ({ available: "Runtime 在线", configured: "已配置", observed: "已观察", "not-exposed": "未暴露目录", unavailable: "不可用", rejected: "被拒绝", "not-observed": "尚未观察" })[status] || status || "未知";
+}
+
+function renderAgentMcpCatalogPanel() {
+  const data = state.agentMcpCatalog && typeof state.agentMcpCatalog === "object" ? state.agentMcpCatalog : {};
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  const rows = entries.length
+    ? entries.map((entry) => {
+      const tools = Array.isArray(entry.tools) ? entry.tools.slice(0, 8).map((tool) => tool?.name || tool?.tool_name).filter(Boolean).join(" · ") : "";
+      const source = entry.source || (Array.isArray(entry.sources) ? entry.sources.join(" + ") : "未知来源");
+      return `<div class="agent-catalog-row" data-agent-mcp-catalog-row="${escapeHtml(entry.id || entry.name || "")}"><div><strong>${escapeHtml(entry.name || entry.id || "未命名服务")}</strong><small>${escapeHtml(mcpCatalogStatusLabel(entry.status))} · ${escapeHtml(entry.freshness || "未知新鲜度")} · ${escapeHtml(source)}</small>${tools ? `<code>${escapeHtml(tools)}</code>` : ""}</div><span>${entry.enabled === false ? "已关闭" : `${Number(entry.tool_count || (entry.tools || []).length)} 工具`}</span></div>`;
+    }).join("")
+    : `<div class="empty-column">${escapeHtml(data.reason || "尚无 MCP 目录记录；可先在用户 Preset 中配置，或选择会话观察工具")}</div>`;
+  return `<section class="dev-panel agent-mcp-catalog-panel" data-agent-mcp-catalog-panel><div class="panel-heading"><div><strong>MCP 目录</strong><small>合并 Runtime 实时目录、用户 Preset 配置和会话历史；配置存在不等于连接健康。</small></div><button class="small-button" id="refresh-agent-mcp-catalog" type="button" ${state.agentMcpCatalogBusy ? "disabled" : ""}>${state.agentMcpCatalogBusy ? "读取中" : "刷新"}</button></div><div class="agent-catalog-summary"><span>状态</span><strong>${escapeHtml(mcpCatalogStatusLabel(data.status))}</strong><span>来源</span><strong>${escapeHtml(data.observation_source || "merged")}</strong><span>服务 / 工具</span><strong>${Number(data.server_count || entries.length)} / ${Number(data.tool_count || 0)}</strong></div><div class="agent-catalog-list">${rows}</div></section>`;
+}
+
+function renderAgentSkillCatalogPanel() {
+  const skills = Array.isArray(state.agentSkillsCatalog) ? state.agentSkillsCatalog : [];
+  const busy = Boolean(state.agentSkillsBusy);
+  const rows = skills.length
+    ? skills.map((skill) => {
+      let action = "";
+       if (["discovered", "revoked"].includes(skill.state)) {
+         action = `<button class="small-button" type="button" data-agent-skill-approve="${escapeHtml(skill.candidate_id)}" ${busy ? "disabled" : ""}>批准</button>`;
+       } else if (skill.state === "changed") {
+         action = `<span class="muted-text">请重新扫描后批准</span>`;
+       } else if (skill.state === "approved") {
+        action = `<button class="ghost-button" type="button" data-agent-skill-revoke="${escapeHtml(skill.candidate_id)}" ${busy ? "disabled" : ""}>撤销</button>`;
+      }
+      const permissions = Array.isArray(skill.permissions) && skill.permissions.length ? ` · 权限 ${skill.permissions.slice(0, 4).join(", ")}` : "";
+      return `<article class="agent-skill-row" data-agent-skill-row="${escapeHtml(skill.candidate_id || "")}"><div><div class="plugin-row-heading"><strong>${escapeHtml(skill.name || skill.skill_id || "未命名 Skill")}</strong><span class="plugin-state ${escapeHtml(skill.state || "invalid")}">${escapeHtml(skillCatalogStatusLabel(skill.state))}</span></div><small>${escapeHtml(skill.description || "无描述")}${escapeHtml(permissions)} · ${escapeHtml(skill.path_label || "SKILL.md")}</small><code title="SKILL.md SHA-256">${escapeHtml(String(skill.manifest_sha256 || "").slice(0, 16))}${skill.manifest_sha256 ? "…" : ""}</code>${skill.error ? `<p class="plugin-error">${escapeHtml(skill.error)}</p>` : ""}</div><div class="agent-skill-actions">${action}</div></article>`;
+    }).join("")
+    : `<div class="empty-column">尚未登记用户 Skill；扫描只读取 SKILL.md 元数据，不执行正文。</div>`;
+  const notice = state.agentSkillsNotice ? `<small class="agent-skill-notice" role="status">${escapeHtml(state.agentSkillsNotice)}</small>` : "";
+  return `<section class="dev-panel agent-skill-catalog-panel" data-agent-skill-catalog-panel><div class="panel-heading"><div><strong>用户 Skill 管理</strong><small>仅扫描元数据和 SHA-256；第三方 Skill 不会自动安装、升级或启用。</small></div><button class="small-button" id="refresh-agent-skills" type="button" ${busy ? "disabled" : ""}>${busy === "refresh" ? "读取中" : "刷新"}</button></div><div class="agent-skill-scan-form"><input id="agent-skills-path" type="text" value="${escapeHtml(state.agentSkillsPath)}" placeholder="可选：.agents/skills 或 SKILL.md 的绝对路径" aria-label="Skill 扫描路径" /><button class="outline-button" id="discover-agent-skills" type="button" ${busy ? "disabled" : ""}>${busy === "discover" ? "扫描中" : "扫描元数据"}</button></div>${notice}<div class="agent-skill-list">${rows}</div></section>`;
 }
 
 function renderAgentTool(tool) {
@@ -1216,11 +1502,102 @@ function renderAgentMessage(message) {
   return `<div class="agent-message-row"><span class="agent-message-role">${role}</span><div>${content ? `<p>${escapeHtml(content)}</p>` : ""}${mediaRows ? `<div class="agent-message-media">${mediaRows}</div>` : ""}</div></div>`;
 }
 
+function agentRetryState(snapshot) {
+  const stateValue = String(snapshot?.state || "").trim().toLowerCase();
+  const retryable = ["error", "failed", "failure", "cancelled", "canceled", "aborted", "interrupted", "stopped"].includes(stateValue);
+  if (!retryable || !agentSupports("retry")) return { retryable: false, imageTarget: false, missingTarget: false };
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  const target = [...messages].reverse().find((message) => message?.role === "user");
+  if (!target) return { retryable: true, imageTarget: false, missingTarget: true };
+  const attachments = Array.isArray(target.attachments) ? target.attachments : [];
+  return {
+    retryable: true,
+    imageTarget: attachments.length > 0,
+    missingTarget: !String(target.content || "").trim() && attachments.length === 0,
+  };
+}
+
 function renderAgentArtifact(item) {
   const locations = Array.isArray(item?.locations) ? item.locations.filter((entry) => entry?.path).slice(0, 6) : [];
   const fileCount = Number.isInteger(item?.file_count) ? item.file_count : locations.length;
   const detail = locations.map((entry) => entry.path).join(" · ");
   return `<div class="agent-artifact-row"><div><strong>${escapeHtml(item?.label || item?.type || "产物")}</strong><span>${escapeHtml(item?.status || "可用")}${fileCount ? ` · ${fileCount} 个文件` : ""}</span></div>${detail ? `<small title="${escapeHtml(detail)}">${escapeHtml(detail)}</small>` : ""}</div>`;
+}
+
+function renderAgentTurnLedger(turns) {
+  const values = Array.isArray(turns) ? turns.filter((item) => item && typeof item === "object").slice(-8) : [];
+  if (!values.length) return `<div class="agent-turn-empty muted-text">暂无回合摘要</div>`;
+  const statusLabels = {
+    running: "运行中",
+    completed: "已完成",
+    cancelled: "已停止",
+    aborted: "已中断",
+    failed: "失败",
+    error: "错误",
+    interrupted: "已中断",
+    stopped: "已停止",
+  };
+  const modeLabels = { plan: "Plan", execute: "Execute", readonly: "Readonly" };
+  const rows = values.map((item, index) => {
+    const status = String(item.status || "running").toLowerCase();
+    const mode = modeLabels[String(item.mode || "").toLowerCase()] || "";
+    const label = item.turn !== undefined && item.turn !== null ? `回合 ${item.turn}` : `回合 ${index + 1}`;
+    const counts = [
+      [`${Number(item.steps) || 0}`, "步骤"],
+      [`${Number(item.tools) || 0}`, "工具"],
+      [`${Number(item.approvals) || 0}`, "审批"],
+      [`${Number(item.artifacts) || 0}`, "产物"],
+    ].map(([value, name]) => `${value} ${name}`).join(" · ");
+    return `<li data-agent-turn-status="${escapeHtml(status)}"><div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(statusLabels[status] || "进行中")}${mode ? ` · ${escapeHtml(mode)}` : ""}</span></div><small>${escapeHtml(counts)}</small></li>`;
+  }).join("");
+  return `<div class="agent-turn-ledger" data-agent-turn-ledger><div class="agent-subsection-heading"><strong>最近回合</strong><span>${values.length} 个</span></div><ol>${rows}</ol></div>`;
+}
+
+function renderAgentRuntimeMetrics(snapshot) {
+  const stats = snapshot?.stats && typeof snapshot.stats === "object" ? snapshot.stats : {};
+  const usage = snapshot?.token_usage && typeof snapshot.token_usage === "object" ? snapshot.token_usage : {};
+  const context = snapshot?.context && typeof snapshot.context === "object" ? snapshot.context : {};
+  const breakdown = snapshot?.context_breakdown && typeof snapshot.context_breakdown === "object" ? snapshot.context_breakdown : {};
+  const statFields = [
+    ["turns", "回合"],
+    ["steps", "步骤"],
+    ["ttftMs", "首 token"],
+    ["decodeMs", "生成耗时"],
+    ["llmMs", "模型耗时"],
+    ["toolMs", "工具耗时"],
+    ["decodeTokens", "生成速率基数"],
+  ];
+  const statRows = statFields.map(([key, label]) => {
+    const value = agentMetricValue(stats, key);
+    if (value === null) return "";
+    const suffix = key.endsWith("Ms") ? " ms" : "";
+    return `<div><span>${label}</span><strong>${escapeHtml(`${formatAgentMetricNumber(value)}${suffix}`)}</strong></div>`;
+  }).filter(Boolean).join("");
+  const tokenText = formatAgentTokenUsage(usage);
+  const contextText = formatAgentContextUsage(context);
+  const breakdownFields = [
+    ["systemTokens", "系统"],
+    ["toolsTokens", "工具定义"],
+    ["messageTokens", "消息"],
+  ];
+  const breakdownText = breakdownFields.map(([key, label]) => {
+    const value = agentMetricValue(breakdown, key);
+    return value === null ? "" : `${label} ${formatAgentMetricNumber(value)}`;
+  }).filter(Boolean).join(" · ");
+  const budget = snapshot?.budget && typeof snapshot.budget === "object" ? snapshot.budget : null;
+  const budgetText = budget
+    ? formatBudget(budget)
+    : "预算未提供";
+  const reason = budget && budget.available === false ? budget.reason : "";
+  const statBody = statRows || `<div><span>运行统计</span><strong>暂无</strong></div>`;
+  const tokenBody = tokenText || "暂无 token 使用量";
+  const contextBody = contextText || "暂无上下文占用数据";
+  return `<div class="agent-metric-groups">
+    <div class="agent-metric-group agent-runtime-stats"><div class="agent-metric-label">运行统计</div><div class="diagnostic-grid">${statBody}</div></div>
+    <div class="agent-metric-group agent-token-usage" data-agent-token-usage><div class="agent-metric-label">Token 使用量</div><strong>${escapeHtml(tokenBody)}</strong></div>
+    <div class="agent-metric-group agent-context-usage" data-agent-context-usage><div class="agent-metric-label">上下文占用</div><strong>${escapeHtml(contextBody)}</strong>${breakdownText ? `<small>${escapeHtml(breakdownText)}</small>` : ""}</div>
+    <div class="agent-metric-group agent-budget-status" data-agent-budget-status><div class="agent-metric-label">任务预算</div><strong>${escapeHtml(budgetText)}</strong>${reason ? `<small>${escapeHtml(reason)}</small>` : ""}</div>
+  </div>`;
 }
 
 function renderAgentSessionPanel(snapshot) {
@@ -1233,15 +1610,24 @@ function renderAgentSessionPanel(snapshot) {
   const tools = Array.isArray(snapshot.tools) ? snapshot.tools : [];
   const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
   const artifacts = Array.isArray(snapshot.artifacts) ? snapshot.artifacts : [];
-  const stats = snapshot.stats && typeof snapshot.stats === "object" ? Object.entries(snapshot.stats).slice(0, 6) : [];
   const stateLabel = ({ running: "运行中", completed: "已完成", cancelled: "已停止", error: "失败", idle: "空闲", unavailable: "暂不可读" })[snapshot.state] || snapshot.state || "未知";
   const steps = Array.isArray(plan.steps) && plan.steps.length ? plan.steps.slice(0, 8).map((step) => `<li><span class="plan-step-status">${escapeHtml(step.status || "未知")}</span><span>${escapeHtml(step.title || "未命名步骤")}</span></li>`).join("") : `<li class="muted-text">Runtime 尚未返回可展示的计划步骤</li>`;
   const messageRows = messages.length ? messages.slice(-8).map((message) => renderAgentMessage({ ...message, session_id: snapshot.session_id })).join("") : `<div class="empty-column">尚未收到可展示的消息</div>`;
   const toolRows = tools.length ? tools.slice(-8).map(renderAgentTool).join("") : `<span class="muted-text">暂无工具调用</span>`;
   const approvalRows = approvals.length ? approvals.slice(-6).map((item) => `<span class="agent-chip ${item.status === "pending" ? "pending" : ""}">${escapeHtml(item.action || "需要确认")} · ${escapeHtml(item.status || "未知")}</span>`).join("") : `<span class="muted-text">暂无审批记录</span>`;
   const artifactRows = artifacts.length ? artifacts.slice(-6).map(renderAgentArtifact).join("") : `<span class="muted-text">当前会话没有可展示的 diff 摘要</span>`;
-  const statRows = stats.length ? stats.map(([key, value]) => `<div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") : `<div><span>事件</span><strong>${escapeHtml(snapshot.event_count ?? 0)}</strong></div>`;
   const running = snapshot.state === "running";
+  const retry = agentRetryState(snapshot);
+  const retryAction = retry.retryable
+    ? retry.imageTarget
+      ? `<span class="agent-retry-hint" role="status">最近目标含图片，请重新附加图片</span>`
+      : retry.missingTarget
+        ? `<span class="agent-retry-hint" role="status">未找到可重试的文本目标</span>`
+        : `<button class="small-button" id="agent-retry-turn" type="button" title="重新提交最近一次失败或停止的文本目标" ${state.agentBusy ? "disabled" : ""}>重试最近目标</button>`
+    : "";
+  const historyAction = state.agentHistoryHasMore && state.agentHistoryBeforeSeq !== null
+    ? `<button class="ghost-button agent-history-load-older" id="agent-load-older" type="button" ${state.agentHistoryLoading || state.agentBusy ? "disabled" : ""}>${state.agentHistoryLoading ? "加载中…" : "加载更早消息"}</button>`
+    : "";
   const sessionTitle = snapshot.title || snapshot.session_id || "Agent session";
   const titleDraft = state.agentSessionRenameDraft || sessionTitle;
   const renameEditor = agentSupports("session-rename") ? `<div class="agent-session-title-editor"><input id="agent-session-title" type="text" maxlength="240" value="${escapeHtml(titleDraft)}" aria-label="Agent 会话标题" /><button class="ghost-button" id="agent-session-rename" type="button" ${state.agentBusy ? "disabled" : ""}>保存名称</button></div>` : "";
@@ -1250,14 +1636,76 @@ function renderAgentSessionPanel(snapshot) {
   const forkAction = agentSupports("session-fork") ? `<button class="ghost-button" id="agent-fork-session" type="button" title="从最近完成回合创建新会话；原会话保持不变" ${!running && !state.agentBusy ? "" : "disabled"}>创建分支</button>` : "";
   const planSection = agentSupports("plan") ? `<div class="agent-subsection"><div class="agent-subsection-heading"><strong>Plan</strong><span>${plan.active ? "进行中" : plan.pending ? "待确认" : "无活动计划"}</span></div><ol class="agent-plan-list">${steps}</ol></div>` : "";
   const queueSection = agentSupports("queue") ? `<div class="agent-subsection agent-queue-subsection"><div class="agent-subsection-heading"><strong>待发送队列</strong><span>${state.agentQueue.known ? `${state.agentQueue.items.length} 项` : "等待快照"}</span></div><small class="agent-queue-intro">Runtime 的瞬时 inbox；编辑、移除和 steer 不会改写聊天历史。</small><div class="agent-queue-list">${renderAgentQueue(state.agentQueue)}</div></div>` : "";
-  return `<section class="agent-panel agent-session-panel"><div class="panel-heading"><div><strong>当前会话 · ${escapeHtml(stateLabel)}</strong><span class="agent-session-visible-title" aria-live="polite">${escapeHtml(sessionTitle)}</span><small>${escapeHtml(snapshot.session_id || "Agent session")}</small>${renameEditor}</div><div class="agent-session-actions"><button class="small-button" id="agent-refresh-session" type="button" ${state.agentBusy ? "disabled" : ""}>刷新</button>${exportAction}${forkAction}<button class="ghost-button" id="agent-cancel-turn" type="button" ${running && !state.agentBusy ? "" : "disabled"}>停止回合</button></div></div><div class="agent-session-grid"><div class="agent-session-main">${planSection}<div class="agent-subsection"><div class="agent-subsection-heading"><strong>最近消息</strong><span>${messages.length} 条</span></div><div class="agent-message-list">${messageRows}</div></div>${queueSection}</div><aside class="agent-session-meta"><div class="agent-subsection"><div class="agent-subsection-heading"><strong>运行统计</strong></div><div class="diagnostic-grid">${statRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>工具</strong></div><div class="agent-tool-list">${toolRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>审批</strong></div><div class="agent-chip-list">${approvalRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>产物 / diff</strong></div><div class="agent-artifact-list">${artifactRows}</div></div></aside></div></section>`;
+  return `<section class="agent-panel agent-session-panel"><div class="panel-heading"><div><strong>当前会话 · ${escapeHtml(stateLabel)}</strong><span class="agent-session-visible-title" aria-live="polite">${escapeHtml(sessionTitle)}</span><small>${escapeHtml(snapshot.session_id || "Agent session")}</small>${renameEditor}</div><div class="agent-session-actions">${retryAction}<button class="small-button" id="agent-refresh-session" type="button" ${state.agentBusy ? "disabled" : ""}>刷新</button>${exportAction}${forkAction}<button class="ghost-button" id="agent-cancel-turn" type="button" ${running && !state.agentBusy ? "" : "disabled"}>停止回合</button></div></div><div class="agent-session-grid"><div class="agent-session-main">${planSection}<div class="agent-subsection"><div class="agent-subsection-heading"><strong>最近消息</strong><span>${messages.length} 条</span>${historyAction}</div><div class="agent-message-list">${messageRows}</div></div>${queueSection}</div><aside class="agent-session-meta"><div class="agent-subsection">${renderAgentRuntimeMetrics(snapshot)}</div><div class="agent-subsection">${renderAgentTurnLedger(snapshot.turns)}</div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>工具</strong></div><div class="agent-tool-list">${toolRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>审批</strong></div><div class="agent-chip-list">${approvalRows}</div></div><div class="agent-subsection"><div class="agent-subsection-heading"><strong>产物 / diff</strong></div><div class="agent-artifact-list">${artifactRows}</div></div></aside></div></section>`;
 }
 
 function renderAgentWorkspacePanel(status) {
   if (!agentSupports("workspaces")) return "";
-  const options = [`<option value="">当前进程目录（未登记）</option>`, ...state.agentWorkspaces.map((workspace) => `<option value="${escapeHtml(workspace.id)}" ${workspace.id === state.agentWorkspaceId ? "selected" : ""}>${escapeHtml(workspace.title || workspace.path)} · ${escapeHtml(workspace.path)}</option>`)].join("");
+  const options = [`<option value="">请先登记并选择 Workspace</option>`, ...state.agentWorkspaces.map((workspace) => `<option value="${escapeHtml(workspace.id)}" ${workspace.id === state.agentWorkspaceId ? "selected" : ""}>${escapeHtml(workspace.title || workspace.path)} · ${escapeHtml(workspace.path)}</option>`)].join("");
   const selected = state.agentWorkspaces.find((workspace) => workspace.id === state.agentWorkspaceId);
   return `<section class="agent-panel agent-workspace-panel"><div class="panel-heading"><div><strong>Agent 工作区</strong><small>登记已有目录后，新会话会归入该 Workspace；Sumika 不创建、移动或删除目录。</small></div><button class="small-button" id="agent-refresh-workspaces" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div><label class="agent-workspace-select"><span>新会话位置</span><select id="agent-workspace-select" ${status.ready && !state.agentBusy ? "" : "disabled"}>${options}</select></label><div class="agent-workspace-form"><input id="agent-workspace-path" type="text" value="${escapeHtml(state.agentWorkspacePath)}" placeholder="输入已存在目录的绝对路径" aria-label="登记已有 Agent 工作区路径" /><button class="outline-button" id="agent-register-workspace" type="button" ${status.ready && state.agentWorkspacePath.trim() && !state.agentBusy ? "" : "disabled"}>登记目录</button></div>${selected ? `<small class="agent-workspace-current">当前：${escapeHtml(selected.title)} · ${escapeHtml(selected.session_ids?.length || 0)} 个会话</small>` : ""}</section>`;
+}
+
+function selectedAgentWorkspace() {
+  return state.agentWorkspaces.find((workspace) => workspace.id === state.agentWorkspaceId) || null;
+}
+
+function currentAgentSessionWorkspace() {
+  if (!state.agentSessionId) return null;
+  return state.agentWorkspaces.find((workspace) => (workspace.session_ids || []).includes(state.agentSessionId)) || null;
+}
+
+function agentWorkspaceForPrompt() {
+  return state.agentSessionId ? currentAgentSessionWorkspace() : selectedAgentWorkspace();
+}
+
+function agentPromptCanSend(status, hasContent, mode) {
+  if (!status.ready || !hasContent || state.agentBusy) return false;
+  if (!agentSupports("workspaces")) return true;
+  if (!state.agentSessionId) return Boolean(selectedAgentWorkspace());
+  return Boolean(currentAgentSessionWorkspace());
+}
+
+function workspaceRuntimePath() {
+  const selected = state.agentWorkspaces.find((workspace) => workspace.id === state.agentWorkspaceId);
+  return String(state.workspaceRuntimePath || selected?.path || state.agentWorkspacePath || "").trim();
+}
+
+function workspaceRuntimeStatusLabel(workspace) {
+  if (!workspace) return "尚未检查";
+  const counts = workspace.status_counts || {};
+  const changed = Number(workspace.total_file_count ?? workspace.file_count ?? 0);
+  if (!workspace.dirty) return "干净";
+  const details = Object.entries(counts).map(([key, value]) => `${key} ${value}`).join(" · ");
+  return `${changed} 项变更${details ? ` · ${details}` : ""}`;
+}
+
+function renderWorkspaceRuntimePanel() {
+  const path = workspaceRuntimePath();
+  const inspect = state.workspaceRuntimeInspect;
+  const workspace = inspect?.workspace;
+  const checkpoints = Array.isArray(state.workspaceRuntimeCheckpoints) ? state.workspaceRuntimeCheckpoints : [];
+  const selected = checkpoints.find((item) => item.id === state.workspaceRuntimeSelectedId);
+  const diff = state.workspaceRuntimeDiff;
+  const preview = state.workspaceRuntimePreview;
+  const busy = Boolean(state.workspaceRuntimeBusy);
+  const notice = state.workspaceRuntimeNotice ? `<div class="workspace-runtime-notice" role="status">${escapeHtml(state.workspaceRuntimeNotice)}</div>` : "";
+  const rows = checkpoints.length
+    ? checkpoints.map((item) => `<button class="workspace-checkpoint-row ${item.id === state.workspaceRuntimeSelectedId ? "active" : ""}" type="button" data-workspace-checkpoint="${escapeHtml(item.id)}"><span><strong>${escapeHtml(item.name || "Agent checkpoint")}</strong><small>${escapeHtml(formatTime(item.created_at))} · ${escapeHtml(item.branch || "(detached)")}</small></span><span><em>${escapeHtml(item.file_count ?? 0)} 文件</em><code>${escapeHtml(String(item.id || "").slice(0, 16))}</code></span></button>`).join("")
+    : `<div class="workspace-runtime-empty">尚未创建 checkpoint</div>`;
+  const diffRows = diff?.files?.length
+    ? diff.files.map((item) => `<div class="workspace-diff-row"><code>${escapeHtml(item.path)}</code><span class="workspace-diff-${escapeHtml(item.status)}">${escapeHtml(({ added: "新增", removed: "移除", changed: "修改" })[item.status] || item.status || "变化")}</span></div>`).join("")
+    : `<div class="workspace-runtime-empty">当前 checkpoint 与工作区一致</div>`;
+  const diffSection = selected && diff ? `<div class="workspace-runtime-diff"><div class="workspace-runtime-subheading"><strong>摘要 diff</strong><span>${diff.changed ? `变更 ${escapeHtml(diff.counts?.changed_total ?? 0)} 项${diff.files_truncated ? " · 列表已截断" : ""}` : "无变更"}</span></div><div class="workspace-diff-list">${diffRows}</div>${preview ? `<div class="workspace-restore-preview"><strong>恢复预览</strong><span>将归档 ${escapeHtml(preview.restore?.archive_count ?? 0)} 项，写回 ${escapeHtml(preview.restore?.write_count ?? 0)} 项</span><button class="small-button" type="button" data-workspace-restore="${escapeHtml(selected.id)}" ${busy ? "disabled" : ""}>批准并恢复</button></div>` : `<button class="ghost-button workspace-preview-button" type="button" data-workspace-preview="${escapeHtml(selected.id)}" ${busy ? "disabled" : ""}>预览恢复影响</button>`}</div>` : "";
+  const worktreePreview = state.workspaceRuntimeWorktreePreview;
+  const worktreeReady = path && state.workspaceRuntimeWorktreeDestination.trim() && state.workspaceRuntimeWorktreeBranch.trim() && !busy;
+  const worktreeSection = `<div class="workspace-runtime-operation"><div class="workspace-runtime-subheading"><strong>独立 worktree</strong><span>从当前 HEAD 创建，不带入源目录未提交变更</span></div><div class="workspace-worktree-form"><label><span>目标目录</span><input id="workspace-worktree-destination" type="text" value="${escapeHtml(state.workspaceRuntimeWorktreeDestination)}" placeholder="输入尚不存在的绝对路径" /></label><label><span>新分支</span><input id="workspace-worktree-branch" type="text" maxlength="240" value="${escapeHtml(state.workspaceRuntimeWorktreeBranch)}" placeholder="codex/feature-name" /></label><button class="ghost-button" id="workspace-worktree-preview" type="button" ${worktreeReady ? "" : "disabled"}>预览创建</button></div>${worktreePreview ? `<div class="workspace-operation-preview"><div><strong>${escapeHtml(worktreePreview.worktree?.branch || "新分支")}</strong><code>${escapeHtml(worktreePreview.worktree?.path || "")}</code><small>${worktreePreview.source?.dirty ? "源目录有未提交变更；这些内容不会进入新 worktree。" : "源目录干净；新 worktree 从当前 HEAD 创建。"}</small></div><button class="small-button" id="workspace-worktree-create" type="button" ${busy ? "disabled" : ""}>批准创建</button></div>` : ""}</div>`;
+  const commitPreview = state.workspaceRuntimeCommitPreview;
+  const commitReady = selected?.baseline_clean === true && state.workspaceRuntimeCommitMessage.trim() && !busy;
+  const omittedFiles = Array.isArray(commitPreview?.patch_omitted_files) ? commitPreview.patch_omitted_files : [];
+  const patchBody = commitPreview?.patch || "没有可展示的 UTF-8 文本 patch；请检查上方文件摘要和省略项。";
+  const commitSection = `<div class="workspace-runtime-operation"><div class="workspace-runtime-subheading"><strong>本地 Git 提交</strong><span>仅限干净 checkpoint 后的变化 · 不运行 hooks · 不签名 · 不 push</span></div><div class="workspace-commit-form"><textarea id="workspace-commit-message" rows="2" maxlength="4000" placeholder="输入 commit message" ${selected?.baseline_clean === true ? "" : "disabled"}>${escapeHtml(state.workspaceRuntimeCommitMessage)}</textarea><button class="ghost-button" id="workspace-commit-preview" type="button" ${commitReady ? "" : "disabled"}>审阅 patch</button></div>${selected && selected.baseline_clean !== true ? `<small class="workspace-operation-warning">当前 checkpoint 不是干净 Git 基线，不能用于提交；请在干净 worktree 中重新创建 checkpoint。</small>` : ""}${commitPreview ? `<div class="workspace-commit-preview"><div class="workspace-runtime-subheading"><strong>${escapeHtml(commitPreview.message_summary || "Commit preview")}</strong><span>${escapeHtml(commitPreview.counts?.changed_total ?? 0)} 个路径${commitPreview.patch_truncated ? " · patch 已截断" : ""}${omittedFiles.length ? ` · ${escapeHtml(omittedFiles.length)} 个文件未展示正文` : ""}</span></div>${omittedFiles.length ? `<div class="workspace-patch-omitted">未展示：${omittedFiles.map((item) => `<code>${escapeHtml(item)}</code>`).join(" ")}</div>` : ""}<pre class="workspace-patch" tabindex="0">${escapeHtml(patchBody)}</pre><div class="workspace-commit-actions"><span>分支 <code>${escapeHtml(commitPreview.workspace?.branch || "")}</code></span><button class="small-button" id="workspace-commit-create" type="button" ${busy ? "disabled" : ""}>批准本地提交</button></div></div>` : ""}</div>`;
+  return `<section class="agent-panel workspace-runtime-panel"><div class="panel-heading"><div><strong>Workspace 安全与回滚</strong><small>与 DSH Workspace 登记分开；只记录 Git 文件摘要。恢复前会自动保存当前状态，并把将被覆盖的文件可恢复归档。</small></div><span class="agent-chip ${workspace?.dirty ? "pending" : ""}">${escapeHtml(workspaceRuntimeStatusLabel(workspace))}</span></div>${notice}<div class="workspace-runtime-path"><label><span>Git 工作区路径</span><input id="workspace-runtime-path" type="text" value="${escapeHtml(path)}" placeholder="输入已有 Git 仓库的绝对路径" aria-label="Workspace 安全操作路径" /></label><div class="workspace-runtime-actions"><button class="small-button" id="workspace-runtime-inspect" type="button" ${path && !busy ? "" : "disabled"}>检查状态</button><button class="outline-button" id="workspace-runtime-create" type="button" ${path && !busy ? "" : "disabled"}>创建 checkpoint</button></div></div>${workspace ? `<div class="workspace-runtime-meta"><span>${escapeHtml(workspace.title || "Git workspace")}</span><code>${escapeHtml(workspace.branch || "(detached)")}</code><span>HEAD ${escapeHtml(String(workspace.head || "").slice(0, 12) || "-")}</span><span>${escapeHtml(inspect?.checkpoint_count ?? checkpoints.length)} 个 checkpoint</span></div>` : ""}<div class="workspace-checkpoint-form"><input id="workspace-runtime-name" type="text" maxlength="200" value="${escapeHtml(state.workspaceRuntimeCheckpointName)}" placeholder="checkpoint 名称（可选）" aria-label="Checkpoint 名称" /><button class="ghost-button" id="workspace-runtime-refresh" type="button" ${path && !busy ? "" : "disabled"}>刷新列表</button></div><div class="workspace-checkpoint-list">${rows}</div>${diffSection}${worktreeSection}${commitSection}</section>`;
 }
 
 function renderAgentModelPanel(status) {
@@ -1281,6 +1729,17 @@ function renderAgentModelPanel(status) {
   return `<section class="agent-panel agent-model-panel"><div class="panel-heading"><div><strong>会话模型</strong><small>目录来自 ${escapeHtml(runtimeLabel)} <code>session.models</code>；切换只影响当前 Agent 会话。</small></div><span class="agent-chip ${catalog.routable ? "" : "pending"}">${escapeHtml(stateLabel)}</span></div><label class="agent-model-select"><span>Provider / Model</span><select id="agent-model-select" ${status.ready && state.agentSessionId && rows.length && !state.agentBusy ? "" : "disabled"}>${rows.join("") || `<option>暂无可用模型</option>`}</select></label>${catalog.failures?.length ? `<small class="agent-mode-warning">${escapeHtml(catalog.failures.length)} 个 Provider 目录加载失败；其余可用项不受影响。</small>` : ""}</section>`;
 }
 
+function renderAgentPlanReviewInteraction(item) {
+  const questions = Array.isArray(item.questions) ? item.questions : [];
+  const question = questions.find((entry) => entry?.intent?.kind === "plan-review") || questions[0] || {};
+  const planReview = item.plan_review || {};
+  const approve = String(planReview.approve || question.intent?.approve || "Approve");
+  const keepPlanning = String(planReview.keep_planning || "Keep planning");
+  const drafts = state.agentInteractionDrafts[item.id] || {};
+  const detail = question.detail || question.question || "运行时没有提供计划详情。";
+  return `<article class="agent-interaction plan-review-interaction" data-agent-plan-review data-agent-interaction-id="${escapeHtml(item.id)}" data-agent-interaction-session="${escapeHtml(item.session_id)}"><div class="agent-interaction-heading"><div><strong>计划审查</strong><small>${escapeHtml(agentRuntimeLabel())} 已暂停，等待确认后才会离开 Plan 模式。</small></div><span class="agent-chip pending">待确认</span></div><div class="agent-plan-review-question">${question.header ? `<strong>${escapeHtml(question.header)}</strong>` : ""}${question.question ? `<p>${escapeHtml(question.question)}</p>` : ""}</div><div class="agent-plan-review-body"><pre class="agent-plan-review-detail">${escapeHtml(detail)}</pre></div><label class="agent-plan-review-feedback"><span>规划意见（可选）</span><input data-agent-plan-review-feedback type="text" maxlength="2000" value="${escapeHtml(drafts.plan_review_feedback || "")}" placeholder="继续规划时可补充修改意见" /></label><div class="agent-plan-review-actions"><button class="small-button" type="button" data-agent-plan-review-action="approve" ${state.agentBusy ? "disabled" : ""}>批准并执行</button><button class="ghost-button" type="button" data-agent-plan-review-action="keep-planning" ${state.agentBusy ? "disabled" : ""}>继续规划</button><button class="ghost-button" type="button" data-agent-plan-review-action="cancel" ${state.agentBusy ? "disabled" : ""}>直接讨论</button></div></article>`;
+}
+
 function renderAgentInteractions(interactions) {
   const runtimeLabel = agentRuntimeLabel();
   if (!Array.isArray(interactions) || !interactions.length) {
@@ -1290,6 +1749,7 @@ function renderAgentInteractions(interactions) {
     if (item.kind === "approval") {
       return `<article class="agent-interaction approval-interaction"><div class="agent-interaction-copy"><strong>需要批准：${escapeHtml(item.action || "工具操作")}</strong><small>${escapeHtml(item.reason || `${runtimeLabel} 请求用户确认后才能继续`)}</small></div><div class="agent-approval-actions"><button class="small-button" type="button" data-agent-approval="${escapeHtml(item.id)}" data-agent-approval-session="${escapeHtml(item.session_id)}" data-agent-approval-id="${escapeHtml(item.approval_id)}" data-agent-approval-outcome="allowed-once" ${state.agentBusy ? "disabled" : ""}>允许一次</button><button class="ghost-button" type="button" data-agent-approval="${escapeHtml(item.id)}" data-agent-approval-session="${escapeHtml(item.session_id)}" data-agent-approval-id="${escapeHtml(item.approval_id)}" data-agent-approval-outcome="rejected" ${state.agentBusy ? "disabled" : ""}>拒绝</button></div></article>`;
     }
+    if (item.kind === "question" && item.plan_review) return renderAgentPlanReviewInteraction(item);
     const questions = Array.isArray(item.questions) ? item.questions : [];
     const drafts = state.agentInteractionDrafts[item.id] || {};
     const questionRows = questions.map((question) => {
@@ -1328,7 +1788,11 @@ function renderAgentPresetPanel(status) {
   const copySourceOptions = usable.map((preset) => `<option value="${escapeHtml(preset.id)}" ${preset.id === copySource ? "selected" : ""}>${escapeHtml(preset.name || preset.id)} · ${preset.trust === "system" ? "系统" : preset.trust === "user" ? "用户" : "未知来源"}</option>`).join("");
   const userPresets = presets.filter((preset) => preset.trust === "user");
   const userPresetRows = userPresets.length
-    ? userPresets.map((preset) => `<div class="agent-preset-user-row" data-agent-preset-row="${escapeHtml(preset.id)}"><div><strong>${escapeHtml(preset.name || preset.id)}</strong><small><code>${escapeHtml(preset.id)}</code>${preset.broken ? ` · 不可用：${escapeHtml(preset.broken)}` : " · 用户 Preset"}</small></div><div class="agent-preset-user-actions">${state.agentPresetHasDocument ? `<button class="ghost-button" type="button" data-agent-preset-open="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>打开目录</button>` : `<span class="muted-text">未配置目录打开器</span>`}<button class="ghost-button danger-text" type="button" data-agent-preset-remove="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>删除</button></div></div>`).join("")
+    ? userPresets.map((preset) => {
+      const validation = state.agentPresetValidation[preset.id];
+      const validationLabel = validation?.mountable ? " · 挂载已验证" : "";
+      return `<div class="agent-preset-user-row" data-agent-preset-row="${escapeHtml(preset.id)}"><div><strong>${escapeHtml(preset.name || preset.id)}</strong><small><code>${escapeHtml(preset.id)}</code>${preset.broken ? ` · 不可用：${escapeHtml(preset.broken)}` : ` · 用户 Preset${validationLabel}`}</small></div><div class="agent-preset-user-actions"><button class="ghost-button" type="button" data-agent-preset-validate="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy && !preset.broken ? "" : "disabled"}>验证挂载</button>${state.agentPresetHasDocument ? `<button class="ghost-button" type="button" data-agent-preset-open="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>打开目录</button>` : `<span class="muted-text">未配置目录打开器</span>`}<button class="ghost-button danger-text" type="button" data-agent-preset-remove="${escapeHtml(preset.id)}" ${status.ready && !state.agentBusy ? "" : "disabled"}>删除</button></div></div>`;
+    }).join("")
     : `<small class="muted-text">还没有用户 Preset；复制系统 Preset 后可在 ${escapeHtml(runtimeLabel)} 管理的目录中编辑。</small>`;
   const broken = presets.filter((preset) => preset.broken).length;
   const note = !status.ready
@@ -1340,7 +1804,52 @@ function renderAgentPresetPanel(status) {
   const copyPanel = authoring
     ? `<form id="agent-preset-copy-form" class="agent-preset-copy-form"><label><span>复制来源</span><select id="agent-preset-copy-source" ${state.agentBusy ? "disabled" : ""}>${copySourceOptions || "<option value=\"\">暂无可复制 Preset</option>"}</select></label><label><span>新 Preset ID</span><input id="agent-preset-copy-id" type="text" maxlength="160" pattern="[a-z0-9][a-z0-9-]*" value="${escapeHtml(state.agentPresetCopyId)}" placeholder="例如 sumika-work" ${state.agentBusy || !usable.length ? "disabled" : ""} /></label><label><span>显示名称（可选）</span><input id="agent-preset-copy-name" type="text" maxlength="240" value="${escapeHtml(state.agentPresetCopyName)}" placeholder="例如 Sumika 工作" ${state.agentBusy || !usable.length ? "disabled" : ""} /></label><button class="outline-button" type="submit" ${state.agentBusy || !copySource || !usable.length ? "disabled" : ""}>复制为用户 Preset</button></form>`
     : `<small class="muted-text">当前 ${escapeHtml(runtimeLabel)} profile 不允许通过 API 创建用户 Preset；请在 Runtime 配置中启用 authorable 后刷新。</small>`;
-  return `<section class="agent-panel agent-preset-panel"><div class="panel-heading"><div><strong>Agent Preset</strong><small>${escapeHtml(note)}</small></div><span class="agent-chip ${presets.length ? "" : "pending"}">${presets.length ? `${presets.length} 项` : "未读取"}</span></div><label class="agent-preset-select"><span>${session ? "当前空白会话" : "新会话默认"}</span><select id="agent-preset-select" ${status.ready && !state.agentBusy && !locked && presets.some((item) => !item.broken) ? "" : "disabled"}><option value="">使用 ${escapeHtml(runtimeLabel)} 默认</option>${options}</select></label>${broken ? `<small class="agent-mode-warning">${broken} 个 Preset 因组合错误被保留为不可选状态。</small>` : ""}<div class="agent-preset-authoring"><div class="agent-subsection-heading"><strong>用户 Preset</strong><span>${userPresets.length} 项</span></div><div class="agent-preset-user-list">${userPresetRows}</div><div class="agent-preset-copy-heading"><strong>复制为用户 Preset</strong><small>复制完成后由 ${escapeHtml(runtimeLabel)} 管理文件；Sumika 不展示原始 composition 内容。</small></div>${copyPanel}</div></section>`;
+  return `<section class="agent-panel agent-preset-panel"><div class="panel-heading"><div><strong>Agent Preset</strong><small>${escapeHtml(note)}</small></div><span class="agent-chip ${presets.length ? "" : "pending"}">${presets.length ? `${presets.length} 项` : "未读取"}</span></div><label class="agent-preset-select"><span>${session ? "当前空白会话" : "新会话默认"}</span><select id="agent-preset-select" ${status.ready && !state.agentBusy && !locked && presets.some((item) => !item.broken) ? "" : "disabled"}><option value="">使用 ${escapeHtml(runtimeLabel)} 默认</option>${options}</select></label>${broken ? `<small class="agent-mode-warning">${broken} 个 Preset 因组合错误被保留为不可选状态。</small>` : ""}<div class="agent-preset-authoring"><div class="agent-subsection-heading"><strong>用户 Preset</strong><span>${userPresets.length} 项</span></div><div class="agent-preset-user-list">${userPresetRows}</div><div class="agent-preset-copy-heading"><strong>复制为用户 Preset</strong><small>复制完成后由 ${escapeHtml(runtimeLabel)} 管理文件；Sumika 不展示原始 composition 内容。</small></div>${copyPanel}${renderAgentMcpConfigurationPanel(status, userPresets)}</div></section>`;
+}
+
+function renderAgentMcpConfigurationPanel(status, userPresets) {
+  if (!agentSupports("mcp-configuration")) return "";
+  const selectedPreset = userPresets.some((preset) => preset.id === state.agentMcpPresetId)
+    ? state.agentMcpPresetId
+    : userPresets[0]?.id || "";
+  const presetOptions = userPresets.map((preset) => `<option value="${escapeHtml(preset.id)}" ${preset.id === selectedPreset ? "selected" : ""}>${escapeHtml(preset.name || preset.id)}</option>`).join("");
+  const rows = state.agentMcpConfigurations.length
+    ? state.agentMcpConfigurations.map((configuration) => {
+      const target = configuration.transport === "stdio"
+        ? `${configuration.command || "-"} · ${(configuration.args || []).length} 参数`
+        : configuration.url || "-";
+      const credential = configuration.credential;
+      const credentialStatus = credential
+        ? credential.configured
+          ? credential.loaded_at_launch ? `凭据已加载 · ${credential.target}` : `凭据待重启 · ${credential.target}`
+          : `凭据未保存 · ${credential.target}`
+        : "无凭据";
+      return `<div class="agent-mcp-row" data-agent-mcp-row="${escapeHtml(configuration.server_name)}"><div><strong>${escapeHtml(configuration.server_name)}</strong><small>${escapeHtml(configuration.transport)} · ${configuration.enabled ? "已启用" : "未启用"} · ${escapeHtml(credentialStatus)} · ${escapeHtml(target)}</small></div><div class="agent-mcp-row-actions"><button class="ghost-button" type="button" data-agent-mcp-edit="${escapeHtml(configuration.server_name)}" ${state.agentBusy ? "disabled" : ""}>编辑</button><button class="ghost-button danger-text" type="button" data-agent-mcp-remove="${escapeHtml(configuration.server_name)}" ${state.agentBusy ? "disabled" : ""}>移除</button></div></div>`;
+    }).join("")
+    : `<div class="empty-column">此 Preset 尚无 Sumika 管理的 MCP 连接</div>`;
+  const draft = state.agentMcpDraft || {};
+  const transport = draft.transport === "streamable-http" ? "streamable-http" : "stdio";
+  const targetFields = transport === "stdio"
+    ? `<label><span>启动命令</span><input name="command" type="text" maxlength="1024" value="${escapeHtml(draft.command || "")}" placeholder="npx" required /></label><label><span>参数（JSON 数组）</span><textarea name="args" rows="2" maxlength="16384">${escapeHtml(draft.args_text || "[]")}</textarea></label><label><span>工作目录（可选）</span><input name="cwd" type="text" maxlength="4096" value="${escapeHtml(draft.cwd || "")}" /></label>`
+    : `<label class="agent-mcp-wide"><span>MCP URL</span><input name="url" type="url" maxlength="2048" value="${escapeHtml(draft.url || "")}" placeholder="http://127.0.0.1:3000/mcp" required /></label>`;
+  const credentialFields = state.agentMcpCredentialFieldsSupported
+    ? `<div class="agent-mcp-credential agent-mcp-wide"><label class="checkbox-row"><input id="agent-mcp-credential-enabled" name="credential_enabled" type="checkbox" ${draft.credential_enabled ? "checked" : ""} /><span>使用受保护凭据</span></label>${draft.credential_enabled ? `<label><span>${transport === "stdio" ? "目标环境变量" : "目标请求头"}</span><input name="credential_target" type="text" maxlength="64" value="${escapeHtml(draft.credential_target || "")}" placeholder="${transport === "stdio" ? "GITHUB_TOKEN" : "Authorization"}" required /></label>${transport === "streamable-http" ? `<label><span>非敏感前缀（可选）</span><input name="credential_prefix" type="text" maxlength="128" value="${escapeHtml(draft.credential_prefix || "")}" placeholder="Bearer " /></label>` : ""}<label><span>密钥${draft.credential_configured ? "（留空保留）" : ""}</span><input name="credential_value" type="password" maxlength="1800" autocomplete="new-password" value="${escapeHtml(state.agentMcpPendingSecret)}" ${draft.credential_configured ? "" : "required"} /></label>${draft.credential_configured ? `<label class="checkbox-row"><input name="credential_rotate" type="checkbox" ${draft.credential_rotate ? "checked" : ""} /><span>轮换已保存密钥</span></label>` : ""}<small>${draft.credential_configured ? draft.credential_loaded_at_launch ? "密钥已注入当前 DSH；保留密钥时可直接启用。" : "密钥已保存但尚未注入；重启 Sumika 后才能启用。" : "密钥只写入系统凭据库；首次保存后连接会保持关闭，等待重启注入。"}</small>` : `<small>未配置凭据；取消勾选并应用会移除现有受保护凭据。</small>`}</div>`
+    : `<small class="agent-mcp-wide muted-text">当前平台没有可用的受保护凭据存储；只能配置无鉴权 MCP。</small>`;
+  const preview = state.agentMcpPreview;
+  const previewTarget = preview?.configuration?.transport === "stdio"
+    ? `${preview.configuration.command || "-"} ${JSON.stringify(preview.configuration.args || [])}`
+    : preview?.configuration?.url || "";
+  const changeLabel = ({ create: "新增", update: "更新", remove: "移除", noop: "无变化" })[preview?.change] || preview?.change || "";
+  const previewCredential = preview?.credential_requires_value
+    ? "需要随批准提交新密钥；应用后请重启 Sumika，再次编辑并启用。"
+    : preview?.restart_required ? "凭据边界已变化；重启 Sumika 后生效。" : "";
+  const previewPanel = preview
+    ? `<div class="agent-mcp-preview" data-agent-mcp-preview><div><strong>${escapeHtml(preview.server_name)} · ${escapeHtml(changeLabel)}</strong><span>${preview.configuration?.enabled ? "启用" : preview.action === "remove" ? "移除" : "保持关闭"}</span></div>${previewTarget ? `<code>${escapeHtml(previewTarget)}</code>` : ""}<small>批准后写入受管用户 Preset，保留原文备份并执行真实挂载验证；失败会恢复原文。${previewCredential ? ` ${escapeHtml(previewCredential)}` : ""}</small>${preview.requires_approval ? `<button class="outline-button" id="agent-mcp-apply" type="button" ${state.agentBusy || (preview.credential_requires_value && !state.agentMcpPendingSecret) ? "disabled" : ""}>批准并应用</button>` : `<span class="muted-text">配置与当前文件一致，无需写入。</span>`}</div>`
+    : "";
+  const packageStatus = state.agentMcpClientInstalled
+    ? `dsh-mcp-client ${state.agentMcpClientVersion || "版本未知"}`
+    : "受管 profile 未安装 dsh-mcp-client";
+  return `<div class="agent-mcp-configuration"><div class="agent-preset-copy-heading"><strong>MCP 连接</strong><small>${escapeHtml(packageStatus)} · 鉴权值保存在系统凭据库，并只在受管 DSH 启动时注入</small></div>${userPresets.length ? `<label class="agent-mcp-preset-select"><span>用户 Preset</span><select id="agent-mcp-preset" ${status.ready && !state.agentBusy ? "" : "disabled"}>${presetOptions}</select></label><div class="agent-mcp-list">${rows}</div><form id="agent-mcp-form" class="agent-mcp-form"><label><span>服务名称</span><input name="server_name" type="text" maxlength="32" pattern="[A-Za-z0-9_-]{1,32}" value="${escapeHtml(draft.server_name || "")}" placeholder="filesystem" required /></label><label><span>传输方式</span><select name="transport"><option value="stdio" ${transport === "stdio" ? "selected" : ""}>stdio</option><option value="streamable-http" ${transport === "streamable-http" ? "selected" : ""}>streamable-http</option></select></label><label><span>工具超时（毫秒）</span><input name="tool_call_timeout_ms" type="number" min="1000" max="600000" step="1000" value="${escapeHtml(draft.tool_call_timeout_ms || 60000)}" /></label>${targetFields}${credentialFields}<label class="checkbox-row agent-mcp-enabled"><input name="enabled" type="checkbox" ${draft.enabled ? "checked" : ""} /><span>写入后启用并验证连接</span></label><button class="outline-button" type="submit" ${status.ready && state.agentMcpClientInstalled && !state.agentBusy ? "" : "disabled"}>生成变更预览</button></form>${previewPanel}` : `<div class="empty-column">先复制一个用户 Preset，再为它配置 MCP。</div>`}</div>`;
 }
 
 function renderAgentGoalPanel(status) {
@@ -1470,10 +1979,26 @@ function renderAgent() {
   const provider = state.agentProvider || {};
   const browser = state.browserStatus || {};
   const statusLabel = ({ ready: "已连接", unavailable: "未连接", disabled: "已关闭", "policy-only": "策略层已加载" })[status.state] || status.state || "未知";
-  const providerLabel = ({ ready: "已同步", "not-synced": "待同步", unavailable: "不可用", unconfigured: "未配置" })[provider.state] || provider.state || "未知";
+  const providerLabel = ({ ready: "已同步", "not-synced": "待同步", "restart-required": "需要重启", unavailable: "不可用", unconfigured: "未配置" })[provider.state] || provider.state || "未知";
+  const providerRestartRequired = provider.state === "restart-required" || provider.credential_reload_required === true;
+  const providerCanSync = provider.state === "ready" || provider.state === "not-synced";
+  const credentialStorageLabel = provider.credential_mode === "launch-environment"
+    ? "Windows 安全存储"
+    : provider.credential_mode === "local-placeholder"
+      ? "无敏感凭据"
+      : "未使用";
+  const credentialSourceLabel = provider.credential_source === "env"
+    ? "启动环境 · 只读"
+    : provider.credential_source === "file"
+      ? "DSH 文件 · 已拒绝"
+      : provider.credential_source === "not-required"
+        ? "不需要"
+        : "未加载";
+  const providerReason = provider.reason || provider.error || "";
   const browserLabel = ({ ready: "可执行", "awaiting-extension": "等待扩展", "not-installed": "未安装", unavailable: "不可用", "policy-only": "策略层" })[browser.state] || browser.state || "未知";
   const browserDetail = browser.backend_reason || "敏感操作仍需用户批准；不控制系统级鼠标键盘。";
   const browserPanel = renderBrowserPanel(browser, browserLabel, browserDetail);
+  const catalogManagement = `<details class="agent-catalog-management"><summary>目录与批准（MCP / Skills）</summary><div class="agent-catalog-management-body">${renderAgentMcpCatalogPanel()}${renderAgentSkillCatalogPanel()}</div></details>`;
   const notice = state.agentNotice ? `<div class="agent-notice" role="status">${escapeHtml(state.agentNotice)}</div>` : "";
   const capabilities = [
     agentSupports("skills") ? renderAgentCapabilityCard("Skills", state.agentCapabilities.skills, `可复用技能由 ${runtimeLabel} 管理，未经批准不会安装`) : "",
@@ -1483,15 +2008,28 @@ function renderAgent() {
   ].filter(Boolean).join("");
   const events = state.agentEvents.length ? state.agentEvents.slice(0, 10).map(renderAgentEventRow).join("") : `<div class="empty-column">尚未收到 Agent 事件</div>`;
   const commandPlane = state.agentCapabilities.commands;
-  const commandNotice = agentSupports("commands") && commandPlane?.available === false
-    ? `<small class="agent-mode-warning">当前 ${escapeHtml(runtimeLabel)} 会话没有可用的 command plane；Plan/执行切换会安全拒绝，不会把命令当普通消息发送。</small>`
+  const planModeAvailable = agentPlanModeAvailable();
+  const commandNotice = agentSupports("commands") && state.agentSessionId && !planModeAvailable
+    ? `<small class="agent-mode-warning">当前会话或 Preset 未提供 Plan 命令；普通执行仍可用，也不会发送多余的 /plan off。</small>`
     : "";
-  const providerPanel = agentSupports("provider-bridge") ? `<section class="agent-panel agent-provider-panel"><div class="panel-heading"><div><strong>当前 Agent Provider</strong><small>新建 Agent 会话时，当前 Sumika 档案会映射到 ${escapeHtml(runtimeLabel)}；运行时原有 Provider 不会被覆盖。</small></div><button class="small-button" id="agent-provider-sync" type="button" ${status.ready && provider.profile_id ? "" : "disabled"}>同步当前档案</button></div><div class="diagnostic-grid"><div><span>状态</span><strong>${escapeHtml(providerLabel)}</strong></div><div><span>档案</span><strong>${escapeHtml(provider.profile?.name || "未选择")}</strong></div><div><span>模型</span><strong>${escapeHtml(provider.model || provider.profile?.config?.model || "未配置")}</strong></div><div><span>Runtime binding</span><strong><code>${escapeHtml(provider.route_id || provider.binding_id || "未同步")}</code></strong></div></div></section>` : "";
+  const providerPanel = agentSupports("provider-bridge") ? `<section class="agent-panel agent-provider-panel" data-agent-provider-state="${escapeHtml(provider.state || "unknown")}"><div class="panel-heading"><div><strong>当前 Agent Provider</strong><small>新建 Agent 会话时，当前 Sumika 档案会映射到 ${escapeHtml(runtimeLabel)}；远程密钥只从 Windows 安全存储注入受管 Runtime。</small></div><button class="small-button" id="agent-provider-sync" type="button" ${status.ready && provider.profile_id && providerCanSync && !providerRestartRequired ? "" : "disabled"}>${providerRestartRequired ? "重启后同步" : "同步当前档案"}</button></div><div class="diagnostic-grid"><div><span>状态</span><strong>${escapeHtml(providerLabel)}</strong></div><div><span>档案</span><strong>${escapeHtml(provider.profile?.name || "未选择")}</strong></div><div><span>模型</span><strong>${escapeHtml(provider.model || provider.profile?.config?.model || "未配置")}</strong></div><div><span>Runtime binding</span><strong><code>${escapeHtml(provider.route_id || provider.binding_id || "未同步")}</code></strong></div><div><span>凭据持久化</span><strong>${escapeHtml(credentialStorageLabel)}</strong></div><div><span>Runtime 凭据</span><strong>${escapeHtml(credentialSourceLabel)}</strong></div><div><span>Runtime 重载</span><strong>${providerRestartRequired ? "需要重启" : "无需重启"}</strong></div></div>${providerReason ? `<small class="agent-mode-warning agent-provider-reason" role="status">${escapeHtml(providerReason)}</small>` : ""}</section>` : "";
   const mode = effectiveAgentMode();
   const promptAttachments = supportedAgentPromptAttachments();
-  const modeOptions = `${agentSupports("plan") ? `<option value="plan" ${mode === "plan" ? "selected" : ""}>Plan</option>` : ""}<option value="execute" ${mode === "execute" ? "selected" : ""}>执行</option><option value="readonly" ${mode === "readonly" ? "selected" : ""}>只读</option>`;
+  const modeOptions = `${planModeAvailable ? `<option value="plan" ${mode === "plan" ? "selected" : ""}>Plan</option>` : ""}<option value="execute" ${mode === "execute" ? "selected" : ""}>执行</option>${agentSupports("readonly") ? `<option value="readonly" ${mode === "readonly" ? "selected" : ""}>只读</option>` : ""}`;
+  const hasPromptContent = Boolean(state.agentPromptDraft.trim() || promptAttachments.length);
+  const canCreateSession = status.ready && (!agentSupports("workspaces") || Boolean(selectedAgentWorkspace()));
+  const canSendPrompt = agentPromptCanSend(status, hasPromptContent, mode);
+  const workspaceModeNotice = agentSupports("workspaces")
+    ? (!state.agentSessionId && !selectedAgentWorkspace()
+      ? `<small class="agent-mode-warning">先登记并选择 Git Workspace，才能新建会话或发送目标。</small>`
+      : state.agentSessionId && mode === "execute" && !currentAgentSessionWorkspace()
+        ? `<small class="agent-mode-warning">当前会话没有可验证的 Workspace 绑定；请新建一个绑定 Workspace 的会话后再执行。</small>`
+        : mode === "execute"
+          ? `<small class="agent-execution-safety">执行目标发送前会自动创建可恢复 checkpoint。</small>`
+          : "")
+    : "";
   const attachmentTools = agentSupports("attachments") ? `<div class="agent-attachment-tools"><input id="agent-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden /><button class="ghost-button" id="agent-attach-image" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>添加图片</button><div class="agent-attachment-list">${renderAgentPromptAttachments()}</div>${state.agentAttachmentNotice ? `<small class="agent-attachment-notice" role="status">${escapeHtml(state.agentAttachmentNotice)}</small>` : ""}</div>` : "";
-  return renderPageFrame("Agent 工作区", `以 ${runtimeLabel} 为运行时，统一展示会话、计划、工具、审批和可选能力。`, `${notice}<div class="agent-toolbar"><div class="agent-status-line"><span class="status-dot ${status.state === "ready" ? "online" : status.state === "disabled" ? "offline" : "warning"}"></span><strong>${escapeHtml(runtimeLabel)} ${escapeHtml(statusLabel)}</strong><code>${escapeHtml(status.version || status.runtime_id || "未配置")}${status.commit ? ` · ${String(status.commit).slice(0, 12)}` : ""}</code></div><div class="agent-actions"><button class="small-button" id="agent-health" type="button" ${state.agentBusy ? "disabled" : ""}>检查连接</button><button class="outline-button" id="agent-create-session" type="button" ${status.ready ? "" : "disabled"}>新建 Agent 会话</button></div></div>${renderAgentPresetPanel(status)}${providerPanel}${renderAgentWorkspacePanel(status)}${renderAgentModelPanel(status)}<section class="agent-panel agent-sessions-panel"><div class="panel-heading"><div><strong>受管 Agent 会话</strong><small>只显示当前 Sumika 受管 ${escapeHtml(runtimeLabel)} 实例的会话元数据；旧聊天会话不会混入。</small></div><button class="small-button" id="agent-refresh-sessions" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div>${renderAgentSessionSearch()}</section>${renderAgentSessionPanel(state.agentSnapshot)}${renderAgentGoalPanel(status)}${renderAgentSubagentPanel(status)}${agentSupports("interactions") ? renderAgentInteractions(state.agentInteractions) : ""}<section class="agent-panel"><div class="panel-heading"><div><strong>运行模式</strong><small>执行能力由 ${escapeHtml(runtimeLabel)} 与 Sumika policy companion 共同决定。</small>${commandNotice}</div><select id="agent-mode" aria-label="Agent 模式">${modeOptions}</select></div><div class="agent-composer"><textarea id="agent-prompt" rows="3" maxlength="48000" placeholder="输入 Agent 目标；Runtime 未连接时不会发送或生成回复">${escapeHtml(state.agentPromptDraft)}</textarea><div class="agent-composer-footer">${attachmentTools}<button class="outline-button" id="agent-send" type="button" ${status.ready && (state.agentPromptDraft.trim() || promptAttachments.length) ? "" : "disabled"}>发送目标</button></div></div></section>${capabilities ? `<section class="agent-capability-grid">${capabilities}</section>` : ""}<div class="agent-two-column"><section class="agent-panel"><div class="panel-heading"><div><strong>事件审计</strong><small>敏感动作默认拒绝，登录凭据和 OTP 不进入模型上下文。</small></div></div><div class="agent-event-list">${events}</div></section>${browserPanel}</div>`);
+  return renderPageFrame("Agent 工作区", `以 ${runtimeLabel} 为运行时，统一展示会话、计划、工具、审批和可选能力。`, `${notice}<div class="agent-toolbar"><div class="agent-status-line"><span class="status-dot ${status.state === "ready" ? "online" : status.state === "disabled" ? "offline" : "warning"}"></span><strong>${escapeHtml(runtimeLabel)} ${escapeHtml(statusLabel)}</strong><code>${escapeHtml(status.version || status.runtime_id || "未配置")}${status.commit ? ` · ${String(status.commit).slice(0, 12)}` : ""}</code></div><div class="agent-actions"><button class="small-button" id="agent-health" type="button" ${state.agentBusy ? "disabled" : ""}>检查连接</button><button class="outline-button" id="agent-create-session" type="button" ${canCreateSession ? "" : "disabled"}>新建 Agent 会话</button></div></div>${renderAgentPresetPanel(status)}${catalogManagement}${providerPanel}${renderAgentWorkspacePanel(status)}${renderWorkspaceRuntimePanel()}${renderAgentModelPanel(status)}<section class="agent-panel agent-sessions-panel"><div class="panel-heading"><div><strong>受管 Agent 会话</strong><small>只显示当前 Sumika 受管 ${escapeHtml(runtimeLabel)} 实例的会话元数据；旧聊天会话不会混入。</small></div><button class="small-button" id="agent-refresh-sessions" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div>${renderAgentSessionSearch()}</section>${renderAgentSessionPanel(state.agentSnapshot)}${renderAgentGoalPanel(status)}${renderAgentSubagentPanel(status)}${agentSupports("interactions") ? renderAgentInteractions(state.agentInteractions) : ""}<section class="agent-panel"><div class="panel-heading"><div><strong>运行模式</strong><small>执行能力由 ${escapeHtml(runtimeLabel)} 与 Sumika policy companion 共同决定。</small>${commandNotice}${workspaceModeNotice}</div><select id="agent-mode" aria-label="Agent 模式">${modeOptions}</select></div><div class="agent-composer"><textarea id="agent-prompt" rows="3" maxlength="48000" placeholder="输入 Agent 目标；Runtime 未连接时不会发送或生成回复">${escapeHtml(state.agentPromptDraft)}</textarea><div class="agent-composer-footer">${attachmentTools}<button class="outline-button" id="agent-send" type="button" ${canSendPrompt ? "" : "disabled"}>发送目标</button></div></div></section>${capabilities ? `<section class="agent-capability-grid">${capabilities}</section>` : ""}<div class="agent-two-column"><section class="agent-panel"><div class="panel-heading"><div><strong>事件审计</strong><small>敏感动作默认拒绝，登录凭据和 OTP 不进入模型上下文。</small></div></div><div class="agent-event-list">${events}</div></section>${browserPanel}</div>`);
 }
 
 function renderAgentEventRow(event) {
@@ -1522,7 +2060,7 @@ function renderDeveloper() {
   const avatarAuditPanel = renderAvatarAssetAudit();
   const evolutionPanel = `<section class="dev-panel evolution-panel"><div class="panel-heading"><div><strong>Evolution Knowledge Registry</strong><small>只读参考索引；安装、升级和正式启用仍需用户批准。</small></div><button class="small-button" id="refresh-evolution-registry" type="button">刷新</button></div><div class="evolution-list">${state.evolutionRegistry.length ? state.evolutionRegistry.map((entry) => `<div class="evolution-row"><div><strong>${escapeHtml(entry.id)}</strong><small>${escapeHtml(entry.kind || "reference")} · ${escapeHtml(entry.license || "未登记许可证")}</small></div><code>${escapeHtml(entry.commit || entry.version || "未固定")}</code></div>`).join("") : `<div class="empty-column">尚未加载参考登记</div>`}</div></section>`;
   const profileRows = state.providerProfiles.map((profile) => `<div class="provider-row"><span class="status-dot ${profile.status === "available" ? "online" : "offline"}"></span><div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.adapter_id)} · ${escapeHtml(providerProfileStatusLabel(profile.status))}</small></div>${profile.status === "archived" ? `<button class="ghost-button" type="button" data-provider-restore="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>恢复</button>` : `<button class="ghost-button" type="button" data-provider-health="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>测试</button>`}</div>`).join("") || `<div class="empty-column">暂无 Provider 档案</div>`;
-  return renderPageFrame("开发者", "查看 manifest、事件、健康检查和 provider 运行边界。", `<div class="developer-grid">${providerNotice}<section class="dev-panel"><div class="panel-heading"><strong>Provider 健康</strong><button class="small-button" id="refresh-health">刷新</button></div>${profileRows}</section>${renderCcsCompatibilityPanel()}${evolutionPanel}${pluginPanel}${diagnosticPanel}${agentDiagnosticPanel}${desktopPanel}${avatarAuditPanel}<section class="dev-panel"><div class="panel-heading"><strong>事件流</strong><span class="muted-text">${state.events.length} 条</span></div><div class="event-log">${state.events.slice(0, 12).map((event) => `<div class="log-row"><code>${escapeHtml(event.event_type)}</code><span>${escapeHtml(JSON.stringify(event.payload).slice(0, 100))}</span></div>`).join("") || `<div class="empty-column">暂无事件</div>`}</div></section></div>`);
+  return renderPageFrame("开发者", "查看 manifest、事件、健康检查和 provider 运行边界。", `<div class="developer-grid">${providerNotice}<section class="dev-panel"><div class="panel-heading"><strong>Provider 健康</strong><button class="small-button" id="refresh-health">刷新</button></div>${profileRows}</section>${renderCcsCompatibilityPanel()}${evolutionPanel}${pluginPanel}${renderAgentMcpCatalogPanel()}${renderAgentSkillCatalogPanel()}${diagnosticPanel}${agentDiagnosticPanel}${desktopPanel}${avatarAuditPanel}<section class="dev-panel"><div class="panel-heading"><strong>事件流</strong><span class="muted-text">${state.events.length} 条</span></div><div class="event-log">${state.events.slice(0, 12).map((event) => `<div class="log-row"><code>${escapeHtml(event.event_type)}</code><span>${escapeHtml(JSON.stringify(event.payload).slice(0, 100))}</span></div>`).join("") || `<div class="empty-column">暂无事件</div>`}</div></section></div>`);
 }
 
 function renderAgentDiagnosticsPanel() {
@@ -1620,7 +2158,8 @@ function bindEvents() {
     if (state.activePage === "Developer") void loadProviderProfiles(true, true);
     if (state.activePage === "Developer") void loadEvolutionRegistry(true);
     if (state.activePage === "Developer") void loadAgentDiagnostics(true);
-    if (state.activePage === "Agent") void loadAgentRuntime(true);
+    if (state.activePage === "Developer" || state.activePage === "Agent") void loadAgentRuntime(true);
+    if (state.activePage === "Tasks") void loadTasks(true);
     render();
   }));
   document.querySelector("#character-select")?.addEventListener("change", (event) => {
@@ -1692,6 +2231,24 @@ function bindEvents() {
   document.querySelector("#refresh-health")?.addEventListener("click", refreshProviderHealth);
   document.querySelector("#agent-health")?.addEventListener("click", checkAgentHealth);
   document.querySelector("#agent-provider-sync")?.addEventListener("click", syncAgentProvider);
+  document.querySelector("#refresh-agent-mcp-catalog")?.addEventListener("click", () => {
+    void loadAgentMcpCatalog();
+  });
+  document.querySelector("#refresh-agent-skills")?.addEventListener("click", () => {
+    void loadAgentSkills(true, true);
+  });
+  document.querySelector("#discover-agent-skills")?.addEventListener("click", () => {
+    void discoverAgentSkills();
+  });
+  document.querySelector("#agent-skills-path")?.addEventListener("input", (event) => {
+    state.agentSkillsPath = event.target.value;
+  });
+  document.querySelectorAll("[data-agent-skill-approve]").forEach((element) => element.addEventListener("click", () => {
+    void approveAgentSkill(element.dataset.agentSkillApprove);
+  }));
+  document.querySelectorAll("[data-agent-skill-revoke]").forEach((element) => element.addEventListener("click", () => {
+    void revokeAgentSkill(element.dataset.agentSkillRevoke);
+  }));
   document.querySelector("#refresh-evolution-registry")?.addEventListener("click", loadEvolutionRegistry);
   document.querySelector("#agent-mode")?.addEventListener("change", (event) => {
     state.agentMode = event.target.value;
@@ -1711,7 +2268,19 @@ function bindEvents() {
   });
   document.querySelector("#agent-session-rename")?.addEventListener("click", renameAgentSession);
   document.querySelector("#agent-workspace-select")?.addEventListener("change", (event) => {
+    invalidateAgentWorkspaceRequests();
     state.agentWorkspaceId = event.target.value;
+    const selected = state.agentWorkspaces.find((workspace) => workspace.id === state.agentWorkspaceId);
+    state.workspaceRuntimePath = selected?.path || "";
+    state.workspaceRuntimeInspect = null;
+    state.workspaceRuntimeCheckpoints = [];
+    state.workspaceRuntimeSelectedId = null;
+    state.workspaceRuntimeDiff = null;
+    state.workspaceRuntimePreview = null;
+    state.workspaceRuntimeWorktreePreview = null;
+    state.workspaceRuntimeCommitPreview = null;
+    state.workspaceRuntimeNotice = selected ? "已切换 Workspace；检查状态后可创建 checkpoint。" : "";
+    render();
   });
   document.querySelector("#agent-workspace-path")?.addEventListener("input", (event) => {
     state.agentWorkspacePath = event.target.value;
@@ -1719,6 +2288,69 @@ function bindEvents() {
     if (button) button.disabled = !state.agentStatus?.ready || !state.agentWorkspacePath.trim() || Boolean(state.agentBusy);
   });
   document.querySelector("#agent-register-workspace")?.addEventListener("click", registerAgentWorkspace);
+  document.querySelector("#workspace-runtime-path")?.addEventListener("input", (event) => {
+    state.workspaceRuntimePath = event.target.value;
+    state.workspaceRuntimeWorktreePreview = null;
+    state.workspaceRuntimeCommitPreview = null;
+    const worktreeCreate = document.querySelector("#workspace-worktree-create");
+    const commitCreate = document.querySelector("#workspace-commit-create");
+    if (worktreeCreate) worktreeCreate.disabled = true;
+    if (commitCreate) commitCreate.disabled = true;
+    const ready = Boolean(state.workspaceRuntimePath.trim()) && !state.workspaceRuntimeBusy;
+    const inspect = document.querySelector("#workspace-runtime-inspect");
+    const create = document.querySelector("#workspace-runtime-create");
+    const refresh = document.querySelector("#workspace-runtime-refresh");
+    if (inspect) inspect.disabled = !ready;
+    if (create) create.disabled = !ready;
+    if (refresh) refresh.disabled = !ready;
+    const worktreePreview = document.querySelector("#workspace-worktree-preview");
+    if (worktreePreview) worktreePreview.disabled = !ready || !state.workspaceRuntimeWorktreeDestination.trim() || !state.workspaceRuntimeWorktreeBranch.trim();
+  });
+  document.querySelector("#workspace-runtime-inspect")?.addEventListener("click", inspectWorkspaceRuntime);
+  document.querySelector("#workspace-runtime-create")?.addEventListener("click", createWorkspaceRuntimeCheckpoint);
+  document.querySelector("#workspace-runtime-refresh")?.addEventListener("click", () => loadWorkspaceRuntime());
+  document.querySelector("#workspace-runtime-name")?.addEventListener("input", (event) => {
+    state.workspaceRuntimeCheckpointName = event.target.value;
+  });
+  document.querySelector("#workspace-worktree-destination")?.addEventListener("input", (event) => {
+    state.workspaceRuntimeWorktreeDestination = event.target.value;
+    state.workspaceRuntimeWorktreePreview = null;
+    const create = document.querySelector("#workspace-worktree-create");
+    if (create) create.disabled = true;
+    const button = document.querySelector("#workspace-worktree-preview");
+    if (button) button.disabled = !workspaceRuntimePath() || !state.workspaceRuntimeWorktreeDestination.trim() || !state.workspaceRuntimeWorktreeBranch.trim() || Boolean(state.workspaceRuntimeBusy);
+  });
+  document.querySelector("#workspace-worktree-branch")?.addEventListener("input", (event) => {
+    state.workspaceRuntimeWorktreeBranch = event.target.value;
+    state.workspaceRuntimeWorktreePreview = null;
+    const create = document.querySelector("#workspace-worktree-create");
+    if (create) create.disabled = true;
+    const button = document.querySelector("#workspace-worktree-preview");
+    if (button) button.disabled = !workspaceRuntimePath() || !state.workspaceRuntimeWorktreeDestination.trim() || !state.workspaceRuntimeWorktreeBranch.trim() || Boolean(state.workspaceRuntimeBusy);
+  });
+  document.querySelector("#workspace-worktree-preview")?.addEventListener("click", previewWorkspaceRuntimeWorktree);
+  document.querySelector("#workspace-worktree-create")?.addEventListener("click", createWorkspaceRuntimeWorktree);
+  document.querySelector("#workspace-commit-message")?.addEventListener("input", (event) => {
+    state.workspaceRuntimeCommitMessage = event.target.value;
+    state.workspaceRuntimeCommitPreview = null;
+    const create = document.querySelector("#workspace-commit-create");
+    if (create) create.disabled = true;
+    const selected = state.workspaceRuntimeCheckpoints.find((item) => item.id === state.workspaceRuntimeSelectedId);
+    const button = document.querySelector("#workspace-commit-preview");
+    if (button) button.disabled = selected?.baseline_clean !== true || !state.workspaceRuntimeCommitMessage.trim() || Boolean(state.workspaceRuntimeBusy);
+  });
+  document.querySelector("#workspace-commit-preview")?.addEventListener("click", previewWorkspaceRuntimeCommit);
+  document.querySelector("#workspace-commit-create")?.addEventListener("click", commitWorkspaceRuntimeChanges);
+  document.querySelectorAll("[data-workspace-checkpoint]").forEach((element) => element.addEventListener("click", () => {
+    state.workspaceRuntimeCommitPreview = null;
+    void loadWorkspaceRuntimeDiff(element.dataset.workspaceCheckpoint);
+  }));
+  document.querySelectorAll("[data-workspace-preview]").forEach((element) => element.addEventListener("click", () => {
+    void previewWorkspaceRuntimeRestore(element.dataset.workspacePreview);
+  }));
+  document.querySelectorAll("[data-workspace-restore]").forEach((element) => element.addEventListener("click", () => {
+    void restoreWorkspaceRuntime(element.dataset.workspaceRestore);
+  }));
   document.querySelector("#agent-model-select")?.addEventListener("change", selectAgentModel);
   document.querySelector("#agent-preset-select")?.addEventListener("change", selectAgentPreset);
   document.querySelector("#agent-preset-copy-form")?.addEventListener("submit", copyAgentPreset);
@@ -1734,14 +2366,62 @@ function bindEvents() {
   document.querySelectorAll("[data-agent-preset-open]").forEach((element) => element.addEventListener("click", () => {
     void openAgentPresetDocument(element.dataset.agentPresetOpen);
   }));
+  document.querySelectorAll("[data-agent-preset-validate]").forEach((element) => element.addEventListener("click", () => {
+    void validateAgentPresetMount(element.dataset.agentPresetValidate);
+  }));
   document.querySelectorAll("[data-agent-preset-remove]").forEach((element) => element.addEventListener("click", () => {
     void removeAgentPreset(element.dataset.agentPresetRemove);
   }));
+  document.querySelector("#agent-mcp-preset")?.addEventListener("change", (event) => {
+    state.agentMcpPresetId = event.target.value;
+    state.agentMcpPreview = null;
+    state.agentMcpPendingSecret = "";
+    state.agentMcpDraft = emptyAgentMcpDraft();
+    void loadAgentMcpConfigurations();
+  });
+  document.querySelector("#agent-mcp-form")?.addEventListener("submit", previewAgentMcpConfiguration);
+  document.querySelector('#agent-mcp-form select[name="transport"]')?.addEventListener("change", (event) => {
+    state.agentMcpDraft.transport = event.target.value;
+    state.agentMcpDraft.credential_target = "";
+    state.agentMcpDraft.credential_prefix = "";
+    state.agentMcpPendingSecret = "";
+    state.agentMcpPreview = null;
+    render();
+  });
+  document.querySelectorAll("#agent-mcp-form input, #agent-mcp-form textarea").forEach((element) => element.addEventListener("input", (event) => {
+    if (event.target.name === "credential_value") {
+      state.agentMcpPendingSecret = event.target.value;
+      state.agentMcpPreview = null;
+      return;
+    }
+    const key = event.target.name === "args" ? "args_text" : event.target.name;
+    state.agentMcpDraft[key] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
+    state.agentMcpPreview = null;
+  }));
+  document.querySelector("#agent-mcp-credential-enabled")?.addEventListener("change", (event) => {
+    state.agentMcpDraft.credential_enabled = event.target.checked;
+    if (!event.target.checked) state.agentMcpPendingSecret = "";
+    state.agentMcpPreview = null;
+    render();
+  });
+  document.querySelectorAll("[data-agent-mcp-edit]").forEach((element) => element.addEventListener("click", () => {
+    editAgentMcpConfiguration(element.dataset.agentMcpEdit);
+  }));
+  document.querySelectorAll("[data-agent-mcp-remove]").forEach((element) => element.addEventListener("click", () => {
+    void previewAgentMcpRemoval(element.dataset.agentMcpRemove);
+  }));
+  document.querySelector("#agent-mcp-apply")?.addEventListener("click", applyAgentMcpPreview);
   document.querySelector("#agent-send")?.addEventListener("click", sendAgentPrompt);
   document.querySelector("#agent-prompt")?.addEventListener("input", (event) => {
     state.agentPromptDraft = event.target.value;
     const button = document.querySelector("#agent-send");
-    if (button) button.disabled = !state.agentStatus?.ready || (!state.agentPromptDraft.trim() && !supportedAgentPromptAttachments().length) || Boolean(state.agentBusy);
+    if (button) {
+      button.disabled = !agentPromptCanSend(
+        state.agentStatus,
+        Boolean(state.agentPromptDraft.trim() || supportedAgentPromptAttachments().length),
+        effectiveAgentMode(),
+      );
+    }
   });
   document.querySelector("#agent-attach-image")?.addEventListener("click", () => document.querySelector("#agent-image-input")?.click());
   document.querySelector("#agent-image-input")?.addEventListener("change", handleAgentImageSelection);
@@ -1749,7 +2429,9 @@ function bindEvents() {
   document.querySelectorAll("[data-agent-attachment-load]").forEach((element) => element.addEventListener("click", () => {
     void loadAgentAttachment(element.dataset.agentAttachmentSession, element.dataset.agentAttachmentLoad);
   }));
+  document.querySelector("#agent-retry-turn")?.addEventListener("click", retryAgentTurn);
   document.querySelector("#agent-refresh-session")?.addEventListener("click", () => loadAgentSnapshot());
+  document.querySelector("#agent-load-older")?.addEventListener("click", loadOlderAgentHistory);
   document.querySelector("#agent-refresh-subagents")?.addEventListener("click", () => loadAgentSubagents());
   document.querySelector("#agent-goal-form")?.addEventListener("submit", createAgentGoal);
   document.querySelectorAll("[data-agent-goal-action]").forEach((element) => element.addEventListener("click", () => {
@@ -1768,7 +2450,7 @@ function bindEvents() {
     const row = element.closest("[data-agent-queue-row]");
     const input = row?.querySelector("[data-agent-queue-input]");
     const itemId = element.dataset.agentQueueId;
-    const text = Object.prototype.hasOwnProperty.call(state.agentQueueDrafts, itemId) ? state.agentQueueDrafts[itemId] : (input?.value || "");
+    const text = input?.value ?? (Object.prototype.hasOwnProperty.call(state.agentQueueDrafts, itemId) ? state.agentQueueDrafts[itemId] : "");
     void updateAgentQueue(itemId, element.dataset.agentQueueAction, text);
   }));
   document.querySelectorAll("[data-agent-queue-input]").forEach((element) => element.addEventListener("input", (event) => {
@@ -1793,6 +2475,19 @@ function bindEvents() {
   }));
   document.querySelectorAll("[data-agent-interaction-form] input").forEach((element) => element.addEventListener("change", () => captureAgentInteractionDraft(element.closest("[data-agent-interaction-form]"))));
   document.querySelectorAll("[data-agent-interaction-form] [data-agent-custom]").forEach((element) => element.addEventListener("input", () => captureAgentInteractionDraft(element.closest("[data-agent-interaction-form]"))));
+  document.querySelectorAll("[data-agent-plan-review-action]").forEach((element) => element.addEventListener("click", () => {
+    const interaction = element.closest("[data-agent-plan-review]");
+    const action = element.dataset.agentPlanReviewAction;
+    if (action === "cancel") void cancelAgentInteraction(interaction);
+    else void respondAgentPlanReview(interaction, action);
+  }));
+  document.querySelectorAll("[data-agent-plan-review-feedback]").forEach((element) => element.addEventListener("input", () => {
+    const interaction = element.closest("[data-agent-plan-review]");
+    if (!interaction) return;
+    const id = interaction.dataset.agentInteractionId;
+    const existing = state.agentInteractionDrafts[id] || {};
+    state.agentInteractionDrafts = { ...state.agentInteractionDrafts, [id]: { ...existing, plan_review_feedback: element.value } };
+  }));
   document.querySelector("#browser-new-session")?.addEventListener("click", createBrowserSession);
   document.querySelectorAll("[data-browser-session-close]").forEach((element) => element.addEventListener("click", () => closeBrowserSession(element.dataset.browserSessionClose)));
   document.querySelector("#browser-new-named-profile")?.addEventListener("click", createNamedBrowserProfile);
@@ -1907,6 +2602,9 @@ function bindEvents() {
   }));
   document.querySelectorAll("[data-task-run]").forEach((element) => element.addEventListener("click", () => {
     runTask(element.dataset.taskRun, element.dataset.taskApproved === "true");
+  }));
+  document.querySelectorAll("[data-agent-task-session]").forEach((element) => element.addEventListener("click", () => {
+    void openAgentTask(element.dataset.agentTaskSession);
   }));
   document.querySelectorAll("[data-module-toggle]").forEach((element) => element.addEventListener("click", () => {
     const module = state.modules.find((item) => item.id === element.dataset.moduleToggle);
@@ -2051,22 +2749,44 @@ async function loadAgentRuntime(shouldRender = true) {
     state.browserSessions = [];
   }
   await Promise.all([loadBrowserDownloads(false), ...state.browserSessions.map((session) => loadBrowserTabs(session.id, false))]);
-  await loadAgentInteractions(false);
   try {
     state.agentProvider = await api("/api/agent/provider");
   } catch {
     state.agentProvider = { state: "unavailable", ready: false };
   }
+  // Directory views are useful even when DSH is offline.  MCP is queried only
+  // while its page is visible because the catalog may require several runtime
+  // probes; Skill discovery itself remains local metadata-only bookkeeping.
+  if (state.activePage === "Agent" || state.activePage === "Developer") {
+    await Promise.all([
+      loadAgentSkills(false),
+      loadAgentMcpCatalog(false),
+    ]);
+  }
   if (state.agentStatus?.ready) {
-    await Promise.all([loadAgentCapabilities(false), loadAgentWorkspaces(false), loadAgentSessions(false), loadAgentPresets(false)]);
+    await Promise.all([loadAgentWorkspaces(false), loadAgentSessions(false)]);
+    if (state.agentSessionId) await loadAgentWorkspaces(false);
+    await loadAgentPresets(false);
+    await Promise.all([loadAgentCapabilities(false), loadAgentInteractions(false)]);
+    await loadAgentMcpConfigurations(false);
   } else {
     state.agentPresets = [];
     state.agentPresetAuthorable = false;
     state.agentPresetHasDocument = false;
     state.agentPresetId = "";
+    state.agentPresetValidation = {};
+    state.agentMcpPresetId = "";
+    state.agentMcpConfigurations = [];
+    state.agentMcpClientInstalled = false;
+    state.agentMcpClientVersion = "";
+    state.agentMcpCredentialFieldsSupported = false;
+    state.agentMcpCredentialStorage = "unavailable";
+    state.agentMcpPendingSecret = "";
+    state.agentMcpPreview = null;
     state.agentSubagents = [];
     state.agentSubagentHistories = {};
     state.agentGoal = null;
+    state.agentInteractions = [];
     state.agentWorkspaces = [];
     state.agentQueue = { known: false, items: [], hidden_context_count: 0, updated_at: null };
     state.agentModels = { current: {}, routable: false, groups: [], failures: [] };
@@ -2075,6 +2795,50 @@ async function loadAgentRuntime(shouldRender = true) {
     await Promise.all([loadAgentSnapshot(false), loadAgentModels(false), loadAgentQueue(false), loadAgentSubagents(false)]);
   }
   if (shouldRender) render();
+}
+
+async function syncAgentState({ immediate = false } = {}) {
+  // A refresh must never rebuild the Agent surface while a user mutation is
+  // in flight. Queue one follow-up instead; the operation's own render keeps
+  // the current draft and confirmation state visible meanwhile.
+  if (state.agentBusy) {
+    state.agentSyncQueued = true;
+    return false;
+  }
+  if (agentSyncInFlight) {
+    state.agentSyncQueued = true;
+    return false;
+  }
+  agentSyncInFlight = true;
+  state.agentSyncing = true;
+  try {
+    await loadAgentRuntime(false);
+    await loadAgentTaskProjections(false);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    agentSyncInFlight = false;
+    state.agentSyncing = false;
+    const rerun = state.agentSyncQueued && !state.agentBusy;
+    state.agentSyncQueued = false;
+    if (!state.agentBusy) render();
+    if (rerun) {
+      window.setTimeout(() => { void syncAgentState({ immediate: true }); }, 0);
+    }
+    // `immediate` is intentionally a scheduling hint for callers (focus,
+    // reconnect, visibility); it does not bypass the busy guard above.
+    void immediate;
+  }
+}
+
+function scheduleAgentStateSync() {
+  if (agentSyncTimer !== null) window.clearTimeout(agentSyncTimer);
+  agentSyncTimer = window.setTimeout(async () => {
+    agentSyncTimer = null;
+    await syncAgentState();
+    scheduleAgentStateSync();
+  }, AGENT_SYNC_INTERVAL_MS);
 }
 
 async function loadAgentInteractions(shouldRender = true) {
@@ -2141,8 +2905,35 @@ async function loadAgentSessions(shouldRender = true) {
   try {
     const result = await rpc("agent.sessions");
     state.agentSessions = Array.isArray(result?.sessions) ? result.sessions : [];
-    const selected = state.agentSessions.find((session) => session.id === state.agentSessionId);
-    if (selected) state.agentPresetId = selected.agent_preset || "";
+    let selected = state.agentSessions.find((session) => session.id === state.agentSessionId);
+    if (!selected && state.agentSessions.length) {
+      const preference = readAgentSessionPreference();
+      const runtimeId = agentRuntimePreferenceId();
+      const preferred = preference?.runtime_id === runtimeId
+        ? state.agentSessions.find((session) => session.id === preference.session_id)
+        : null;
+      selected = preferred || state.agentSessions[0];
+      const previousSessionId = state.agentSessionId;
+      setAgentSessionId(selected.id);
+      if (previousSessionId !== state.agentSessionId) resetAgentHistoryPaging();
+      state.agentNotice = preferred
+        ? `已恢复上次 Agent 会话：${selected.title || selected.id}`
+        : previousSessionId
+          ? `原 Agent 会话已不可用，已切换到最近会话：${selected.title || selected.id}`
+          : `已打开最近 Agent 会话：${selected.title || selected.id}`;
+    }
+    if (selected) {
+      state.agentPresetId = selected.agent_preset || "";
+      if (!state.agentSessionRenameDraft) state.agentSessionRenameDraft = selected.title || "";
+      rememberAgentSession(selected.id);
+    } else if (!state.agentSessionId) {
+      setAgentSessionId(null);
+      state.agentSnapshot = null;
+      state.agentGoal = null;
+      resetAgentHistoryPaging();
+      state.agentSessionRenameDraft = "";
+      clearAgentSessionPreference();
+    }
   } catch {
     state.agentSessions = [];
   }
@@ -2286,6 +3077,12 @@ async function loadAgentPresets(shouldRender = true) {
     state.agentPresets = [];
     state.agentPresetAuthorable = false;
     state.agentPresetHasDocument = false;
+    state.agentPresetValidation = {};
+    state.agentMcpPresetId = "";
+    state.agentMcpConfigurations = [];
+    state.agentMcpClientInstalled = false;
+    state.agentMcpClientVersion = "";
+    state.agentMcpPreview = null;
     if (shouldRender) render();
     return;
   }
@@ -2295,15 +3092,64 @@ async function loadAgentPresets(shouldRender = true) {
     state.agentPresetAuthorable = result?.authorable === true;
     state.agentPresetHasDocument = result?.has_document === true || result?.hasDocument === true;
     const usable = state.agentPresets.filter((item) => item && item.id && !item.broken);
+    const knownIds = new Set(state.agentPresets.map((item) => item?.id).filter(Boolean));
+    state.agentPresetValidation = Object.fromEntries(
+      Object.entries(state.agentPresetValidation).filter(([id]) => knownIds.has(id))
+    );
     const selected = usable.find((item) => item.is_default);
     if (!state.agentPresetId && selected) state.agentPresetId = selected.id;
     if (!state.agentPresetCopySource || !usable.some((item) => item.id === state.agentPresetCopySource)) {
       state.agentPresetCopySource = usable[0]?.id || "";
     }
+    const userPresets = usable.filter((item) => item.trust === "user");
+    if (!userPresets.some((item) => item.id === state.agentMcpPresetId)) {
+      state.agentMcpPresetId = userPresets[0]?.id || "";
+      state.agentMcpConfigurations = [];
+      state.agentMcpPreview = null;
+    }
   } catch {
     state.agentPresets = [];
     state.agentPresetAuthorable = false;
     state.agentPresetHasDocument = false;
+    state.agentPresetValidation = {};
+    state.agentMcpPresetId = "";
+    state.agentMcpConfigurations = [];
+    state.agentMcpClientInstalled = false;
+    state.agentMcpClientVersion = "";
+    state.agentMcpPreview = null;
+  }
+  if (shouldRender) render();
+}
+
+async function loadAgentMcpConfigurations(shouldRender = true) {
+  const preset = validAgentPresetSlug(state.agentMcpPresetId);
+  const entry = state.agentPresets.find((item) => item.id === preset && item.trust === "user" && !item.broken);
+  if (!state.agentStatus?.ready || !agentSupports("mcp-configuration") || !entry) {
+    state.agentMcpConfigurations = [];
+    state.agentMcpClientInstalled = false;
+    state.agentMcpClientVersion = "";
+    state.agentMcpCredentialFieldsSupported = false;
+    state.agentMcpCredentialStorage = "unavailable";
+    state.agentMcpPendingSecret = "";
+    state.agentMcpPreview = null;
+    if (shouldRender) render();
+    return;
+  }
+  try {
+    const result = await rpc("agent.mcp.configurations", { agentPreset: preset });
+    state.agentMcpConfigurations = Array.isArray(result?.configurations) ? result.configurations : [];
+    state.agentMcpClientInstalled = result?.client_installed === true;
+    state.agentMcpClientVersion = result?.client_version || "";
+    state.agentMcpCredentialFieldsSupported = result?.credential_fields_supported === true;
+    state.agentMcpCredentialStorage = result?.credential_storage || "unavailable";
+  } catch (error) {
+    state.agentMcpConfigurations = [];
+    state.agentMcpClientInstalled = false;
+    state.agentMcpClientVersion = "";
+    state.agentMcpCredentialFieldsSupported = false;
+    state.agentMcpCredentialStorage = "unavailable";
+    state.agentMcpPendingSecret = "";
+    state.agentNotice = `MCP 配置读取失败：${error.message}`;
   }
   if (shouldRender) render();
 }
@@ -2327,21 +3173,32 @@ async function loadAgentSubagents(shouldRender = true) {
 }
 
 async function loadAgentWorkspaces(shouldRender = true) {
+  const requestGeneration = ++agentWorkspaceRequestGeneration;
+  const sessionGeneration = agentSessionGeneration;
+  const sessionId = state.agentSessionId;
   if (!state.agentStatus?.ready || !agentSupports("workspaces")) {
+    if (requestGeneration !== agentWorkspaceRequestGeneration) return;
     state.agentWorkspaces = [];
     if (shouldRender) render();
     return;
   }
   try {
     const result = await rpc("agent.workspaces");
+    if (requestGeneration !== agentWorkspaceRequestGeneration || sessionGeneration !== agentSessionGeneration || sessionId !== state.agentSessionId) return;
     state.agentWorkspaces = Array.isArray(result?.workspaces) ? result.workspaces : [];
-    const owner = state.agentWorkspaces.find((workspace) => (workspace.session_ids || []).includes(state.agentSessionId));
-    if (owner && !state.agentWorkspaceId) state.agentWorkspaceId = owner.id;
+    const owner = state.agentWorkspaces.find((workspace) => (workspace.session_ids || []).includes(sessionId));
+    if (owner) {
+      state.agentWorkspaceId = owner.id;
+      state.workspaceRuntimePath = owner.path || state.workspaceRuntimePath;
+    }
     else if (state.agentWorkspaceId && !state.agentWorkspaces.some((workspace) => workspace.id === state.agentWorkspaceId)) state.agentWorkspaceId = "";
+    const selected = state.agentWorkspaces.find((workspace) => workspace.id === state.agentWorkspaceId);
+    if (!state.workspaceRuntimePath && selected?.path) state.workspaceRuntimePath = selected.path;
   } catch {
+    if (requestGeneration !== agentWorkspaceRequestGeneration || sessionGeneration !== agentSessionGeneration || sessionId !== state.agentSessionId) return;
     state.agentWorkspaces = [];
   }
-  if (shouldRender) render();
+  if (requestGeneration === agentWorkspaceRequestGeneration && sessionGeneration === agentSessionGeneration && sessionId === state.agentSessionId && shouldRender) render();
 }
 
 async function loadAgentModels(shouldRender = true) {
@@ -2361,14 +3218,16 @@ async function loadAgentModels(shouldRender = true) {
 async function selectAgentSession(sessionId) {
   const value = String(sessionId || "").trim();
   if (!value || state.agentBusy) return;
-  state.agentSessionId = value;
+  setAgentSessionId(value);
+  rememberAgentSession(value);
+  resetAgentHistoryPaging();
   state.agentGoal = null;
   state.agentSubagentHistories = {};
   state.agentNotice = `已选择 Agent 会话：${value}`;
   const selected = state.agentSessions.find((session) => session.id === value);
   state.agentPresetId = selected?.agent_preset || "";
   state.agentSessionRenameDraft = selected?.title || "";
-  await Promise.all([loadAgentSnapshot(false), loadAgentCapabilities(false), loadAgentModels(false), loadAgentInteractions(false), loadAgentQueue(false), loadAgentSubagents(false)]);
+  await Promise.all([loadAgentSnapshot(false), loadAgentCapabilities(false), loadAgentModels(false), loadAgentInteractions(false), loadAgentQueue(false), loadAgentSubagents(false), loadAgentMcpCatalog(false)]);
   await loadAgentWorkspaces(false);
   render();
 }
@@ -2379,32 +3238,209 @@ async function loadEvolutionRegistry(shouldRender = true) {
 }
 
 async function loadAgentCapabilities(shouldRender = true) {
+  const requestGeneration = ++agentCapabilitiesRequestGeneration;
+  const sessionGeneration = agentSessionGeneration;
+  const sessionId = state.agentSessionId;
   if (!state.agentStatus?.ready) return;
   const values = {};
   const capabilityMethods = [["skills", "skills", "agent.skills"], ["mcp", "mcp", "agent.mcp.inventory"], ["subagents", "subagents", "agent.subagents"], ["commands", "commands", "agent.commands"]];
   for (const [key, capability, method] of capabilityMethods.filter(([, capability]) => agentSupports(capability))) {
     const params = key === "subagents"
-      ? (state.agentSessionId ? { parentSessionId: state.agentSessionId } : {})
-      : (state.agentSessionId ? { sessionId: state.agentSessionId } : {});
+      ? (sessionId ? { parentSessionId: sessionId } : {})
+      : (sessionId ? { sessionId } : {});
     try { values[key] = await rpc(method, params); } catch { values[key] = { available: false }; }
   }
+  if (requestGeneration !== agentCapabilitiesRequestGeneration || sessionGeneration !== agentSessionGeneration || sessionId !== state.agentSessionId) return;
   state.agentCapabilities = { ...state.agentCapabilities, ...values };
   if (shouldRender) render();
 }
 
-async function loadAgentSnapshot(shouldRender = true, includeHistory = true) {
+async function loadAgentMcpCatalog(shouldRender = true) {
+  if (state.agentMcpCatalogBusy) return;
+  state.agentMcpCatalogBusy = true;
+  if (shouldRender) render();
+  const params = state.agentSessionId ? { sessionId: state.agentSessionId } : {};
+  try {
+    state.agentMcpCatalog = await rpc("agent.mcp.catalog", params);
+  } catch (error) {
+    state.agentMcpCatalog = {
+      available: false,
+      status: state.agentStatus?.ready ? "unavailable" : "unavailable",
+      catalog_available: false,
+      entries: [],
+      server_count: 0,
+      tool_count: 0,
+      reason: String(error.message || "MCP 目录不可用").slice(0, 240),
+    };
+  } finally {
+    state.agentMcpCatalogBusy = false;
+  }
+  if (shouldRender) render();
+}
+
+async function loadAgentSkills(shouldRender = true, refresh = false) {
+  if (state.agentSkillsBusy) return;
+  state.agentSkillsBusy = refresh ? "refresh" : "load";
+  if (shouldRender) render();
+  try {
+    const result = await rpc("agent.skills.catalog", { refresh });
+    state.agentSkillsCatalog = Array.isArray(result?.skills) ? result.skills : [];
+  } catch (error) {
+    state.agentSkillsNotice = `Skill 目录读取失败：${String(error.message || "未知错误").slice(0, 240)}`;
+  } finally {
+    state.agentSkillsBusy = null;
+  }
+  if (shouldRender) render();
+}
+
+async function discoverAgentSkills() {
+  if (state.agentSkillsBusy) return;
+  const input = document.querySelector("#agent-skills-path");
+  const rawPath = String(input?.value || state.agentSkillsPath || "").trim();
+  state.agentSkillsPath = rawPath;
+  state.agentSkillsBusy = "discover";
+  state.agentSkillsNotice = "正在读取 Skill 元数据和哈希；不会执行正文。";
+  render();
+  try {
+    const params = rawPath ? { paths: [rawPath] } : {};
+    const result = await rpc("agent.skills.discover", params);
+    state.agentSkillsCatalog = Array.isArray(result?.skills) ? result.skills : [];
+    state.agentSkillsNotice = `扫描完成：发现 ${Number(result?.count || state.agentSkillsCatalog.length)} 个 Skill 候选。`;
+  } catch (error) {
+    state.agentSkillsNotice = `Skill 扫描失败：${error.message}`;
+  } finally {
+    state.agentSkillsBusy = null;
+    render();
+  }
+}
+
+async function approveAgentSkill(candidateId) {
+  const skill = state.agentSkillsCatalog.find((item) => item.candidate_id === candidateId);
+  if (!skill || state.agentSkillsBusy) return;
+  if (!window.confirm(`批准登记 Skill“${skill.name || skill.skill_id || candidateId}”？只保存元数据，不会执行或安装它。`)) return;
+  state.agentSkillsBusy = `approve:${candidateId}`;
+  state.agentSkillsNotice = "正在重新读取 SKILL.md，确认哈希未变化…";
+  render();
+  try {
+    const result = await rpc("agent.skills.approve", { candidate_id: candidateId, approved: true, confirm_skill_id: candidateId });
+    state.agentSkillsCatalog = state.agentSkillsCatalog.map((item) => item.candidate_id === candidateId ? result : item);
+    state.agentSkillsNotice = "Skill 已批准登记；活动会话仍由 DSH skill.list 决定。";
+  } catch (error) {
+    state.agentSkillsNotice = `批准 Skill 失败：${error.message}`;
+  } finally {
+    state.agentSkillsBusy = null;
+    render();
+  }
+}
+
+async function revokeAgentSkill(candidateId) {
+  const skill = state.agentSkillsCatalog.find((item) => item.candidate_id === candidateId);
+  if (!skill || state.agentSkillsBusy || !window.confirm(`撤销 Skill“${skill.name || skill.skill_id || candidateId}”的登记？原始文件不会被删除。`)) return;
+  state.agentSkillsBusy = `revoke:${candidateId}`;
+  render();
+  try {
+    const result = await rpc("agent.skills.revoke", { candidate_id: candidateId, approved: true, confirm_skill_id: candidateId });
+    state.agentSkillsCatalog = state.agentSkillsCatalog.map((item) => item.candidate_id === candidateId ? result : item);
+    state.agentSkillsNotice = "Skill 登记已撤销；运行中的 DSH 会话不会被静默改写。";
+  } catch (error) {
+    state.agentSkillsNotice = `撤销 Skill 失败：${error.message}`;
+  } finally {
+    state.agentSkillsBusy = null;
+    render();
+  }
+}
+
+function agentSnapshotItemKey(item, index) {
+  if (!item || typeof item !== "object") return `index:${index}:${String(item)}`;
+  if (item.call_id) return `call:${item.call_id}`;
+  if (item.id) return `id:${item.id}`;
+  const sequence = item.seq ?? item.completed_seq;
+  if (sequence !== undefined && sequence !== null) {
+    return `seq:${sequence}:${item.type || item.name || item.role || "item"}`;
+  }
+  return `value:${JSON.stringify(item)}`;
+}
+
+function resetAgentHistoryPaging() {
+  state.agentHistoryBeforeSeq = null;
+  state.agentHistoryHasMore = false;
+  state.agentHistoryPagingStarted = false;
+  state.agentHistoryLoading = false;
+}
+
+function mergeAgentSnapshotItems(older, current) {
+  const merged = new Map();
+  for (const [index, item] of [...(Array.isArray(older) ? older : []), ...(Array.isArray(current) ? current : [])].entries()) {
+    if (!item || typeof item !== "object") continue;
+    merged.set(agentSnapshotItemKey(item, index), item);
+  }
+  return [...merged.values()].sort((left, right) => {
+    const leftSeq = Number(left.seq ?? left.start_seq ?? left.end_seq ?? left.completed_seq);
+    const rightSeq = Number(right.seq ?? right.start_seq ?? right.end_seq ?? right.completed_seq);
+    if (Number.isFinite(leftSeq) && Number.isFinite(rightSeq) && leftSeq !== rightSeq) return leftSeq - rightSeq;
+    return 0;
+  });
+}
+
+function mergeAgentSnapshot(current, incoming, { prepend = false, preserveCollections = false, mergeCollections = false } = {}) {
+  if (!current || current.session_id !== incoming.session_id) return incoming;
+  const merged = { ...current, ...incoming };
+  const collections = ["messages", "timeline", "tools", "approvals", "artifacts", "turns"];
+  for (const key of collections) {
+    if (prepend) {
+      merged[key] = mergeAgentSnapshotItems(incoming[key], current[key]);
+    } else if (mergeCollections) {
+      merged[key] = mergeAgentSnapshotItems(current[key], incoming[key]);
+    } else if (preserveCollections && Array.isArray(current[key]) && (!Array.isArray(incoming[key]) || incoming[key].length === 0)) {
+      merged[key] = current[key];
+    }
+  }
+  return merged;
+}
+
+async function loadAgentSnapshot(shouldRender = true, includeHistory = true, options = {}) {
+  const append = options?.append === true;
+  const beforeSeq = options?.beforeSeq;
+  // History paging must be atomic from the UI's point of view. Event-driven
+  // background refreshes that begin while the older page is in flight can
+  // otherwise win the generation race and hide the page we just loaded.
+  if (!append && state.agentHistoryLoading) return;
+  const requestGeneration = ++agentSnapshotRequestGeneration;
   if (!state.agentSessionId || !state.agentStatus?.ready) {
     state.agentSnapshot = null;
     state.agentGoal = null;
+    resetAgentHistoryPaging();
     if (shouldRender) render();
     return;
   }
   try {
-    state.agentSnapshot = await rpc("agent.session.snapshot", {
+    const pagingWasStarted = state.agentHistoryPagingStarted;
+    const incoming = await rpc("agent.session.snapshot", {
       sessionId: state.agentSessionId,
-      maxMessages: includeHistory ? 2 : 1,
+      maxMessages: includeHistory ? 8 : 1,
       include_history: includeHistory,
+      ...(Number.isInteger(beforeSeq) && beforeSeq >= 0 ? { beforeSeq } : {}),
     });
+    // Snapshot requests can overlap during initial navigation, event sync and
+    // history paging. Only the newest response may update the visible state;
+    // an older response must not resurrect a stale history cursor.
+    if (requestGeneration !== agentSnapshotRequestGeneration) return;
+    if (append) {
+      state.agentSnapshot = mergeAgentSnapshot(state.agentSnapshot, incoming, { prepend: true });
+    } else if (!includeHistory) {
+      state.agentSnapshot = mergeAgentSnapshot(state.agentSnapshot, incoming, { preserveCollections: true });
+    } else if (pagingWasStarted) {
+      state.agentSnapshot = mergeAgentSnapshot(state.agentSnapshot, incoming, { mergeCollections: true });
+    } else {
+      state.agentSnapshot = incoming;
+    }
+    if (includeHistory && (append || !pagingWasStarted)) {
+      state.agentHistoryHasMore = Boolean(incoming?.has_more);
+      state.agentHistoryBeforeSeq = state.agentHistoryHasMore && Number.isInteger(incoming?.history_cursor)
+        ? incoming.history_cursor
+        : null;
+    }
+    if (append) state.agentHistoryPagingStarted = true;
     // Older Runtime projections may omit goal entirely. Only an explicit null
     // clears the local receipt; a missing field must not make a just-created
     // goal disappear while its projection is catching up.
@@ -2434,6 +3470,37 @@ async function loadAgentSnapshot(shouldRender = true, includeHistory = true) {
   if (shouldRender) render();
 }
 
+async function loadOlderAgentHistory() {
+  if (
+    state.agentHistoryLoading
+    || state.agentBusy
+    || !state.agentSessionId
+    || !state.agentStatus?.ready
+    || !state.agentHistoryHasMore
+    || !Number.isInteger(state.agentHistoryBeforeSeq)
+  ) return;
+  const list = document.querySelector(".agent-message-list");
+  const previousHeight = list?.scrollHeight || 0;
+  const previousTop = list?.scrollTop || 0;
+  state.agentHistoryLoading = true;
+  state.agentNotice = "正在读取更早的 Agent 会话记录…";
+  render();
+  try {
+    await loadAgentSnapshot(false, true, { append: true, beforeSeq: state.agentHistoryBeforeSeq });
+    state.agentNotice = state.agentHistoryHasMore ? "已加载更早的会话记录。" : "已加载全部会话记录。";
+  } catch (error) {
+    state.agentNotice = `读取更早记录失败：${error.message}`;
+  } finally {
+    state.agentHistoryLoading = false;
+    render();
+    requestAnimationFrame(() => {
+      const next = document.querySelector(".agent-message-list");
+      if (!next || !previousHeight) return;
+      next.scrollTop = Math.max(0, next.scrollHeight - previousHeight + previousTop);
+    });
+  }
+}
+
 async function checkAgentHealth() {
   if (state.agentBusy) return;
   state.agentBusy = "health";
@@ -2445,6 +3512,7 @@ async function checkAgentHealth() {
     try { state.agentProvider = await api("/api/agent/provider"); } catch { /* status remains visible */ }
     if (result.ok) {
       await Promise.all([loadAgentCapabilities(false), loadAgentWorkspaces(false), loadAgentSessions(false), loadAgentPresets(false), loadAgentSubagents(false)]);
+      await loadAgentMcpConfigurations(false);
       if (state.agentSessionId) await loadAgentModels(false);
     }
     const runtimeLabel = agentRuntimeLabel({ ...state.agentStatus, ...result });
@@ -2489,6 +3557,7 @@ async function registerAgentWorkspace() {
   try {
     const result = await rpc("agent.workspace.create", { path });
     state.agentWorkspaceId = result.workspace?.id || "";
+    state.workspaceRuntimePath = result.workspace?.path || path;
     state.agentWorkspacePath = "";
     await loadAgentWorkspaces(false);
     state.agentNotice = result.created ? `已登记 Workspace：${result.workspace?.title || path}` : `该目录已登记：${result.workspace?.title || path}`;
@@ -2496,6 +3565,273 @@ async function registerAgentWorkspace() {
     state.agentNotice = `Workspace 登记失败：${error.message}`;
   } finally {
     state.agentBusy = null;
+    render();
+  }
+}
+
+async function loadWorkspaceRuntime(pathValue = workspaceRuntimePath(), shouldRender = true) {
+  const path = String(pathValue || "").trim();
+  state.workspaceRuntimePath = path;
+  state.workspaceRuntimePreview = null;
+  state.workspaceRuntimeWorktreePreview = null;
+  state.workspaceRuntimeCommitPreview = null;
+  if (!path) {
+    state.workspaceRuntimeInspect = null;
+    state.workspaceRuntimeCheckpoints = [];
+    state.workspaceRuntimeSelectedId = null;
+    state.workspaceRuntimeDiff = null;
+    state.workspaceRuntimePreview = null;
+    if (shouldRender) render();
+    return;
+  }
+  try {
+    const [inspect, checkpoints] = await Promise.all([
+      rpc("workspace.inspect", { path }),
+      rpc("workspace.checkpoints", { path }),
+    ]);
+    state.workspaceRuntimeInspect = inspect;
+    state.workspaceRuntimeCheckpoints = Array.isArray(checkpoints?.checkpoints) ? checkpoints.checkpoints : [];
+    if (!state.workspaceRuntimeSelectedId || !state.workspaceRuntimeCheckpoints.some((item) => item.id === state.workspaceRuntimeSelectedId)) {
+      state.workspaceRuntimeSelectedId = state.workspaceRuntimeCheckpoints[0]?.id || null;
+    }
+    state.workspaceRuntimeNotice = "工作区状态已更新。";
+    if (state.workspaceRuntimeSelectedId) await loadWorkspaceRuntimeDiff(state.workspaceRuntimeSelectedId, false);
+  } catch (error) {
+    state.workspaceRuntimeInspect = null;
+    state.workspaceRuntimeCheckpoints = [];
+    state.workspaceRuntimeSelectedId = null;
+    state.workspaceRuntimeDiff = null;
+    state.workspaceRuntimePreview = null;
+    state.workspaceRuntimeNotice = `Workspace 检查失败：${error.message}`;
+  }
+  if (shouldRender) render();
+}
+
+async function loadWorkspaceRuntimeDiff(checkpointId, shouldRender = true) {
+  const id = String(checkpointId || "").trim();
+  const path = workspaceRuntimePath();
+  if (!id || !path) return;
+  state.workspaceRuntimeSelectedId = id;
+  state.workspaceRuntimePreview = null;
+  state.workspaceRuntimeCommitPreview = null;
+  try {
+    state.workspaceRuntimeDiff = await rpc("workspace.checkpoint.diff", { path, checkpoint_id: id });
+  } catch (error) {
+    state.workspaceRuntimeDiff = null;
+    state.workspaceRuntimeNotice = `读取 diff 失败：${error.message}`;
+  }
+  if (shouldRender) render();
+}
+
+async function inspectWorkspaceRuntime() {
+  if (state.workspaceRuntimeBusy) return;
+  const path = workspaceRuntimePath();
+  if (!path) return;
+  state.workspaceRuntimeBusy = "inspect";
+  state.workspaceRuntimeNotice = "正在检查 Git 工作区…";
+  render();
+  await loadWorkspaceRuntime(path, false);
+  state.workspaceRuntimeBusy = null;
+  render();
+}
+
+async function createWorkspaceRuntimeCheckpoint() {
+  if (state.workspaceRuntimeBusy) return;
+  const path = workspaceRuntimePath();
+  if (!path) return;
+  state.workspaceRuntimeBusy = "create";
+  state.workspaceRuntimeNotice = "正在创建 checkpoint；只保存文件摘要和受控副本…";
+  render();
+  try {
+    const result = await rpc("workspace.checkpoint.create", {
+      path,
+      name: state.workspaceRuntimeCheckpointName.trim() || "Agent checkpoint",
+    });
+    state.workspaceRuntimeCheckpointName = "";
+    state.workspaceRuntimeSelectedId = result.checkpoint?.id || null;
+    await loadWorkspaceRuntime(path, false);
+    state.workspaceRuntimeNotice = `checkpoint 已创建：${result.checkpoint?.name || result.checkpoint?.id}`;
+  } catch (error) {
+    state.workspaceRuntimeNotice = `创建 checkpoint 失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
+    render();
+  }
+}
+
+async function previewWorkspaceRuntimeWorktree() {
+  if (state.workspaceRuntimeBusy) return;
+  const sourcePath = workspaceRuntimePath();
+  const destinationPath = state.workspaceRuntimeWorktreeDestination.trim();
+  const branch = state.workspaceRuntimeWorktreeBranch.trim();
+  if (!sourcePath || !destinationPath || !branch) return;
+  state.workspaceRuntimeBusy = "worktree-preview";
+  state.workspaceRuntimeNotice = "正在验证新分支和 worktree 目标；不会修改 Git 状态…";
+  render();
+  try {
+    state.workspaceRuntimeWorktreePreview = await rpc("workspace.worktree.preview", {
+      source_path: sourcePath,
+      destination_path: destinationPath,
+      branch,
+    });
+    state.workspaceRuntimeNotice = "worktree 创建预览已生成；尚未创建目录或分支。";
+  } catch (error) {
+    state.workspaceRuntimeWorktreePreview = null;
+    state.workspaceRuntimeNotice = `worktree 预览失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
+    render();
+  }
+}
+
+async function createWorkspaceRuntimeWorktree() {
+  if (state.workspaceRuntimeBusy) return;
+  const preview = state.workspaceRuntimeWorktreePreview;
+  const sourcePath = workspaceRuntimePath();
+  const branch = String(preview?.worktree?.branch || "");
+  const destinationPath = String(preview?.worktree?.path || "");
+  const previewToken = preview?.preview_token;
+  if (!sourcePath || !branch || !destinationPath || !previewToken) return;
+  if (!window.confirm("确认创建该 Git 分支与独立 worktree？源目录未提交变更不会被复制；失败时 Sumika 不会自动删除 Git 留下的分支或目录。")) return;
+  const confirmBranch = window.prompt("输入新分支名以确认", branch);
+  if (confirmBranch !== branch) return;
+  const confirmDestination = window.prompt("输入完整目标目录以确认", destinationPath);
+  if (confirmDestination !== destinationPath) return;
+  state.workspaceRuntimeBusy = "worktree-create";
+  state.workspaceRuntimeNotice = "正在创建独立 worktree…";
+  render();
+  try {
+    const result = await rpc("workspace.worktree.create", {
+      source_path: sourcePath,
+      destination_path: destinationPath,
+      branch,
+      approved: true,
+      confirm_branch: confirmBranch,
+      confirm_destination: confirmDestination,
+      preview_token: previewToken,
+    });
+    state.workspaceRuntimeWorktreePreview = null;
+    state.workspaceRuntimePath = result.worktree?.path || destinationPath;
+    state.agentWorkspacePath = state.workspaceRuntimePath;
+    await loadWorkspaceRuntime(state.workspaceRuntimePath, false);
+    state.workspaceRuntimeNotice = `独立 worktree 已创建：${result.worktree?.branch || branch}；可在上方 Agent 工作区登记该目录。`;
+  } catch (error) {
+    state.workspaceRuntimeNotice = `worktree 创建失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
+    render();
+  }
+}
+
+async function previewWorkspaceRuntimeCommit() {
+  if (state.workspaceRuntimeBusy) return;
+  const path = workspaceRuntimePath();
+  const checkpointId = String(state.workspaceRuntimeSelectedId || "");
+  const message = state.workspaceRuntimeCommitMessage.trim();
+  if (!path || !checkpointId || !message) return;
+  state.workspaceRuntimeBusy = "commit-preview";
+  state.workspaceRuntimeNotice = "正在生成受控本地提交预览…";
+  render();
+  try {
+    state.workspaceRuntimeCommitPreview = await rpc("workspace.commit.preview", {
+      path,
+      checkpoint_id: checkpointId,
+      message,
+    });
+    state.workspaceRuntimeNotice = "提交预览已生成；请审阅 patch。当前尚未暂存或提交文件。";
+  } catch (error) {
+    state.workspaceRuntimeCommitPreview = null;
+    state.workspaceRuntimeNotice = `提交预览失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
+    render();
+  }
+}
+
+async function commitWorkspaceRuntimeChanges() {
+  if (state.workspaceRuntimeBusy) return;
+  const path = workspaceRuntimePath();
+  const checkpointId = String(state.workspaceRuntimeSelectedId || "");
+  const preview = state.workspaceRuntimeCommitPreview;
+  const branch = String(preview?.workspace?.branch || "");
+  const previewToken = preview?.preview_token;
+  const message = state.workspaceRuntimeCommitMessage.trim();
+  if (!path || !checkpointId || !branch || !previewToken || !message) return;
+  if (!window.confirm("确认按当前 patch 创建本地 Git commit？此操作不运行 hooks、不签名，也不会 push。")) return;
+  const confirmBranch = window.prompt("输入当前分支名以确认本地提交", branch);
+  if (confirmBranch !== branch) return;
+  state.workspaceRuntimeBusy = "commit";
+  state.workspaceRuntimeNotice = "正在暂存已批准路径并创建本地 commit…";
+  render();
+  try {
+    const result = await rpc("workspace.commit", {
+      path,
+      checkpoint_id: checkpointId,
+      message,
+      approved: true,
+      confirm_branch: confirmBranch,
+      preview_token: previewToken,
+    });
+    state.workspaceRuntimeCommitPreview = null;
+    state.workspaceRuntimeCommitMessage = "";
+    await loadWorkspaceRuntime(path, false);
+    state.workspaceRuntimeNotice = `本地 commit 已创建：${String(result.commit || "").slice(0, 12)}；未 push。`;
+  } catch (error) {
+    state.workspaceRuntimeNotice = `本地提交失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
+    render();
+  }
+}
+
+async function previewWorkspaceRuntimeRestore(checkpointId) {
+  if (state.workspaceRuntimeBusy) return;
+  const path = workspaceRuntimePath();
+  const id = String(checkpointId || "").trim();
+  if (!path || !id) return;
+  state.workspaceRuntimeBusy = "preview";
+  state.workspaceRuntimeNotice = "正在计算恢复影响…";
+  render();
+  try {
+    state.workspaceRuntimeSelectedId = id;
+    state.workspaceRuntimePreview = await rpc("workspace.restore.preview", { path, checkpoint_id: id });
+    state.workspaceRuntimeNotice = "恢复预览已生成；当前文件不会被修改。";
+  } catch (error) {
+    state.workspaceRuntimePreview = null;
+    state.workspaceRuntimeNotice = `恢复预览失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
+    render();
+  }
+}
+
+async function restoreWorkspaceRuntime(checkpointId) {
+  if (state.workspaceRuntimeBusy) return;
+  const path = workspaceRuntimePath();
+  const id = String(checkpointId || "").trim();
+  const token = state.workspaceRuntimePreview?.restore?.preview_token;
+  if (!path || !id || !token) return;
+  if (!window.confirm("确认恢复这个 Workspace checkpoint？当前变更会先被归档，恢复可通过自动 checkpoint 撤销。")) return;
+  const confirmation = window.prompt("输入 checkpoint ID 以确认恢复", id);
+  if (confirmation !== id) return;
+  state.workspaceRuntimeBusy = "restore";
+  state.workspaceRuntimeNotice = "正在归档当前变更并恢复 checkpoint…";
+  render();
+  try {
+    const result = await rpc("workspace.restore", {
+      path,
+      checkpoint_id: id,
+      preview_token: token,
+      approved: true,
+      confirm_checkpoint: id,
+    });
+    state.workspaceRuntimePreview = null;
+    await loadWorkspaceRuntime(path, false);
+    state.workspaceRuntimeNotice = `已恢复 checkpoint；恢复前状态保存为 ${result.pre_restore_checkpoint?.id || "新 checkpoint"}。`;
+  } catch (error) {
+    state.workspaceRuntimeNotice = `Workspace 恢复失败：${error.message}`;
+  } finally {
+    state.workspaceRuntimeBusy = null;
     render();
   }
 }
@@ -2596,6 +3932,209 @@ function validAgentPresetDisplayName(value) {
   return name;
 }
 
+function emptyAgentMcpDraft(configuration = {}) {
+  const credential = configuration.credential && typeof configuration.credential === "object"
+    ? configuration.credential
+    : null;
+  return {
+    server_name: configuration.server_name || "",
+    transport: configuration.transport === "streamable-http" ? "streamable-http" : "stdio",
+    enabled: configuration.enabled === true,
+    command: configuration.command || "",
+    args_text: JSON.stringify(Array.isArray(configuration.args) ? configuration.args : []),
+    cwd: configuration.cwd || "",
+    url: configuration.url || "",
+    tool_call_timeout_ms: Number(configuration.tool_call_timeout_ms || 60000),
+    credential_enabled: Boolean(credential),
+    credential_present: Boolean(credential),
+    credential_target: credential?.target || "",
+    credential_prefix: credential?.prefix || "",
+    credential_rotate: false,
+    credential_configured: credential?.configured === true,
+    credential_loaded_at_launch: credential?.loaded_at_launch === true,
+    credential_restart_required: credential?.restart_required === true,
+  };
+}
+
+function editAgentMcpConfiguration(serverName) {
+  const configuration = state.agentMcpConfigurations.find((item) => item.server_name === serverName);
+  if (!configuration || state.agentBusy) return;
+  state.agentMcpPendingSecret = "";
+  state.agentMcpDraft = emptyAgentMcpDraft(configuration);
+  state.agentMcpPreview = null;
+  state.agentNotice = `正在编辑 MCP 连接：${configuration.server_name}`;
+  render();
+}
+
+function agentMcpConfigurationFromForm(form) {
+  const data = new FormData(form);
+  const serverName = String(data.get("server_name") || "").trim();
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(serverName)) throw new Error("服务名称只能使用字母、数字、下划线和连字符，最长 32 字符");
+  const transport = String(data.get("transport") || "stdio");
+  const timeout = Number.parseInt(String(data.get("tool_call_timeout_ms") || "60000"), 10);
+  if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 600000) throw new Error("工具超时必须是 1000 到 600000 毫秒");
+  const configuration = {
+    server_name: serverName,
+    transport,
+    enabled: data.get("enabled") === "on",
+    tool_call_timeout_ms: timeout,
+  };
+  if (transport === "stdio") {
+    const command = String(data.get("command") || "").trim();
+    if (!command) throw new Error("stdio 连接需要启动命令");
+    let args;
+    try {
+      args = JSON.parse(String(data.get("args") || "[]"));
+    } catch {
+      throw new Error("参数必须是有效的 JSON 数组");
+    }
+    if (!Array.isArray(args) || args.length > 64 || !args.every((item) => typeof item === "string")) throw new Error("参数必须是最多 64 项的字符串数组");
+    configuration.command = command;
+    configuration.args = args;
+    const cwd = String(data.get("cwd") || "").trim();
+    if (cwd) configuration.cwd = cwd;
+  } else if (transport === "streamable-http") {
+    const url = String(data.get("url") || "").trim();
+    let parsed;
+    try { parsed = new URL(url); } catch { throw new Error("请输入有效的 MCP URL"); }
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash) throw new Error("MCP URL 只能使用 HTTP(S)，且不能包含凭据或片段");
+    configuration.url = url;
+  } else {
+    throw new Error("不支持的 MCP 传输方式");
+  }
+  if (state.agentMcpCredentialFieldsSupported) {
+    if (data.get("credential_enabled") === "on") {
+      const target = String(data.get("credential_target") || "").trim();
+      const prefix = transport === "streamable-http" ? String(data.get("credential_prefix") || "") : "";
+      if (!target) throw new Error("使用受保护凭据时必须填写目标环境变量或请求头");
+      const secretProvided = Boolean(String(data.get("credential_value") || ""));
+      const sameTarget = target === state.agentMcpDraft.credential_target;
+      if (state.agentMcpDraft.credential_configured && sameTarget && secretProvided && data.get("credential_rotate") !== "on") {
+        throw new Error("替换已保存密钥时请勾选“轮换已保存密钥”");
+      }
+      configuration.credential = {
+        target,
+        prefix,
+        rotate: data.get("credential_rotate") === "on",
+      };
+    } else if (state.agentMcpDraft.credential_present) {
+      configuration.credential = null;
+    }
+  }
+  return configuration;
+}
+
+async function previewAgentMcpConfiguration(event) {
+  event.preventDefault();
+  const preset = validAgentPresetSlug(state.agentMcpPresetId);
+  if (!preset || state.agentBusy || !state.agentStatus?.ready || !state.agentMcpClientInstalled) return;
+  let configuration;
+  try {
+    state.agentMcpPendingSecret = String(new FormData(event.currentTarget).get("credential_value") || "");
+    configuration = agentMcpConfigurationFromForm(event.currentTarget);
+  } catch (error) {
+    state.agentMcpPendingSecret = "";
+    state.agentNotice = `MCP 配置无效：${error.message}`;
+    render();
+    return;
+  }
+  const credentialState = {
+    credential_configured: state.agentMcpDraft.credential_configured,
+    credential_loaded_at_launch: state.agentMcpDraft.credential_loaded_at_launch,
+    credential_restart_required: state.agentMcpDraft.credential_restart_required,
+  };
+  state.agentMcpDraft = { ...emptyAgentMcpDraft(configuration), ...credentialState };
+  state.agentBusy = "mcp-preview";
+  state.agentNotice = `正在生成 ${configuration.server_name} 的受管配置预览…`;
+  render();
+  try {
+    state.agentMcpPreview = await rpc("agent.mcp.configuration.preview", {
+      agentPreset: preset,
+      action: "upsert",
+      configuration,
+    });
+    state.agentNotice = state.agentMcpPreview?.requires_approval
+      ? "MCP 变更预览已生成；确认目标后再批准应用。"
+      : "MCP 配置与当前文件一致。";
+  } catch (error) {
+    state.agentMcpPreview = null;
+    state.agentMcpPendingSecret = "";
+    state.agentNotice = `MCP 预览失败：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function previewAgentMcpRemoval(serverName) {
+  const preset = validAgentPresetSlug(state.agentMcpPresetId);
+  const configuration = state.agentMcpConfigurations.find((item) => item.server_name === serverName);
+  if (!preset || !configuration || state.agentBusy || !state.agentStatus?.ready) return;
+  state.agentMcpPendingSecret = "";
+  state.agentBusy = "mcp-preview-remove";
+  state.agentNotice = `正在生成 ${serverName} 的移除预览…`;
+  render();
+  try {
+    state.agentMcpPreview = await rpc("agent.mcp.configuration.preview", {
+      agentPreset: preset,
+      action: "remove",
+      configuration: { server_name: serverName },
+    });
+    state.agentNotice = "MCP 移除预览已生成；批准后才会改写 Preset。";
+  } catch (error) {
+    state.agentMcpPreview = null;
+    state.agentNotice = `MCP 移除预览失败：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function applyAgentMcpPreview() {
+  const preview = state.agentMcpPreview;
+  const preset = validAgentPresetSlug(state.agentMcpPresetId);
+  if (!preview?.preview_token || !preview.requires_approval || !preset || state.agentBusy) return;
+  if (preview.credential_requires_value && !state.agentMcpPendingSecret) {
+    state.agentNotice = "此次 MCP 变更需要新密钥；请返回表单填写后重新生成预览。";
+    render();
+    return;
+  }
+  if (!window.confirm(`批准对用户 Preset “${preset}”执行 MCP ${preview.change === "remove" ? "移除" : "写入"}并进行真实挂载验证？`)) return;
+  state.agentBusy = "mcp-apply";
+  state.agentNotice = "正在备份 Preset、应用 MCP 配置并验证挂载…";
+  render();
+  try {
+    const result = await rpc("agent.mcp.configuration.apply", {
+      agentPreset: preset,
+      previewToken: preview.preview_token,
+      approved: true,
+      confirm_agent_preset: preset,
+      ...(preview.credential_requires_value ? { credentialValue: state.agentMcpPendingSecret } : {}),
+    });
+    state.agentMcpPreview = null;
+    state.agentPresetValidation = {
+      ...state.agentPresetValidation,
+      [preset]: {
+        mountable: result?.mountable === true,
+        validation_session_archived: result?.validation_session_archived === true,
+      },
+    };
+    await loadAgentPresets(false);
+    await loadAgentMcpConfigurations(false);
+    state.agentNotice = result?.applied
+      ? result.restart_required
+        ? `MCP 配置已${result.change === "remove" ? "移除" : "应用"}；请重启 Sumika 载入新的凭据边界，再编辑连接并启用。`
+        : `MCP 配置已${result.change === "remove" ? "移除" : "应用"}；原文备份已保留，验证会话已归档。新会话将使用更新后的 Preset。`
+      : "MCP 配置没有变化。";
+  } catch (error) {
+    state.agentNotice = `MCP 配置应用失败：${error.message}`;
+  } finally {
+    state.agentMcpPendingSecret = "";
+    state.agentBusy = null;
+    render();
+  }
+}
+
 async function copyAgentPreset(event) {
   event.preventDefault();
   if (state.agentBusy || !state.agentStatus?.ready || !state.agentPresetAuthorable) return;
@@ -2641,6 +4180,10 @@ async function copyAgentPreset(event) {
     state.agentPresetCopyName = "";
     state.agentPresetCopySource = destination;
     await loadAgentPresets(false);
+    state.agentMcpPresetId = destination;
+    state.agentMcpDraft = emptyAgentMcpDraft();
+    state.agentMcpPreview = null;
+    await loadAgentMcpConfigurations(false);
     state.agentNotice = `用户 Preset 已创建：${result?.agent_preset || destination}；当前会话 Preset 未改变。`;
   } catch (error) {
     state.agentNotice = `创建用户 Preset 失败：${error.message}`;
@@ -2664,6 +4207,37 @@ async function openAgentPresetDocument(presetId) {
       : `${agentRuntimeLabel()} 没有可用的系统目录打开器；为保护隐私，Sumika 不显示本地路径。`;
   } catch (error) {
     state.agentNotice = `打开 Preset 目录失败：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function validateAgentPresetMount(presetId) {
+  const id = validAgentPresetSlug(presetId);
+  const preset = state.agentPresets.find((item) => item.id === id);
+  if (!id || !preset || preset.broken || state.agentBusy || !state.agentStatus?.ready) return;
+  const workspace = state.agentWorkspaces.find((item) => item.id === state.agentWorkspaceId);
+  state.agentBusy = "preset-validate";
+  state.agentNotice = `正在验证 Preset 挂载：${id}…`;
+  render();
+  try {
+    const result = await rpc("agent.preset.validate", {
+      agentPreset: id,
+      ...(workspace?.id ? { workspaceId: workspace.id } : {}),
+    });
+    state.agentPresetValidation = {
+      ...state.agentPresetValidation,
+      [id]: {
+        mountable: result?.mountable === true,
+        validation_session_archived: result?.validation_session_archived === true,
+      },
+    };
+    state.agentNotice = result?.mountable && result?.validation_session_archived
+      ? `Preset 挂载已验证：${id}；空白验证会话已归档。`
+      : `Preset 挂载验证未得到完整确认：${id}`;
+  } catch (error) {
+    state.agentNotice = `Preset 挂载验证失败：${error.message}`;
   } finally {
     state.agentBusy = null;
     render();
@@ -2698,6 +4272,14 @@ async function removeAgentPreset(presetId) {
     if (result?.removed !== true) throw new Error(`${agentRuntimeLabel()} 未确认删除结果`);
     if (resetDefault) state.agentPresetId = "";
     if (state.agentPresetCopySource === id) state.agentPresetCopySource = "";
+    if (state.agentMcpPresetId === id) {
+      state.agentMcpPresetId = "";
+      state.agentMcpConfigurations = [];
+      state.agentMcpPreview = null;
+    }
+    const nextValidation = { ...state.agentPresetValidation };
+    delete nextValidation[id];
+    state.agentPresetValidation = nextValidation;
     await loadAgentPresets(false);
     state.agentNotice = `用户 Preset 已删除：${id}${resetDefault ? `；新会话已恢复使用 ${agentRuntimeLabel()} 默认 Preset` : ""}。`;
   } catch (error) {
@@ -2869,7 +4451,9 @@ async function forkAgentSession() {
   render();
   try {
     const result = await rpc("agent.session.fork", { sessionId: sourceSessionId });
-    state.agentSessionId = result.sessionId;
+    setAgentSessionId(result.sessionId);
+    rememberAgentSession(state.agentSessionId);
+    resetAgentHistoryPaging();
     state.agentGoal = null;
     state.agentSubagentHistories = {};
     state.agentSessionRenameDraft = "";
@@ -2888,19 +4472,29 @@ async function forkAgentSession() {
 
 async function createAgentSession() {
   if (state.agentBusy || !state.agentStatus?.ready) return;
+  const workspace = selectedAgentWorkspace();
+  if (agentSupports("workspaces") && !workspace) {
+    state.agentNotice = "请先登记并选择 Git Workspace，再新建 Agent 会话。";
+    render();
+    return;
+  }
   state.agentBusy = "create-session";
+  state.agentNotice = `正在创建 ${agentRuntimeLabel()} 会话…`;
+  render();
   try {
     const profile = activeProviderProfile();
-    const location = state.agentWorkspaceId ? { workspaceId: state.agentWorkspaceId } : { cwd: "." };
+    const location = workspace ? { workspaceId: workspace.id } : { cwd: "." };
     const selectedPreset = usableAgentPresetId(state.agentPresetId);
     const result = await rpc("agent.session.create", { ...location, characterId: state.selectedCharacter, provider_profile_id: profile?.id, ...(selectedPreset ? { agentPreset: selectedPreset } : {}) });
-    state.agentSessionId = result.id || result.sessionId || null;
+    setAgentSessionId(result.id || result.sessionId || null);
+    rememberAgentSession(state.agentSessionId);
+    resetAgentHistoryPaging();
     state.agentGoal = null;
     state.agentSubagentHistories = {};
     state.agentSessionRenameDraft = "";
     if (result.agentPreset) state.agentPresetId = result.agentPreset;
     if (result.provider) state.agentProvider = { ...state.agentProvider, ...result.provider, state: "ready", ready: true };
-    await Promise.all([loadAgentSessions(false), loadAgentSnapshot(false), loadAgentModels(false), loadAgentQueue(false), loadAgentSubagents(false)]);
+    await Promise.all([loadAgentSessions(false), loadAgentSnapshot(false), loadAgentCapabilities(false), loadAgentModels(false), loadAgentQueue(false), loadAgentSubagents(false)]);
     await loadAgentWorkspaces(false);
     state.agentNotice = `Agent 会话已创建：${result.id || result.sessionId || "已连接"}`;
   } catch (error) {
@@ -2916,17 +4510,32 @@ async function sendAgentPrompt() {
   const text = (input?.value ?? state.agentPromptDraft ?? "").trim();
   const attachments = supportedAgentPromptAttachments();
   if ((!text && !attachments.length) || state.agentBusy || !state.agentStatus?.ready) return;
+  const requestedMode = effectiveAgentMode();
+  const initialWorkspace = agentWorkspaceForPrompt();
+  if (agentSupports("workspaces") && !state.agentSessionId && !initialWorkspace) {
+    state.agentNotice = "请先登记并选择 Git Workspace，再发送 Agent 目标。";
+    render();
+    return;
+  }
+  if (agentSupports("workspaces") && state.agentSessionId && !initialWorkspace) {
+    state.agentNotice = "当前会话没有可验证的 Workspace 绑定；请新建一个绑定 Workspace 的会话后再发送。";
+    render();
+    return;
+  }
   state.agentBusy = "prompt";
   state.agentNotice = `目标已提交，等待 ${agentRuntimeLabel()} 事件…`;
   render();
   try {
     if (!state.agentSessionId) {
       const profile = activeProviderProfile();
-      const location = state.agentWorkspaceId ? { workspaceId: state.agentWorkspaceId } : { cwd: "." };
+      const workspace = selectedAgentWorkspace();
+      const location = workspace ? { workspaceId: workspace.id } : { cwd: "." };
       const selectedPreset = usableAgentPresetId(state.agentPresetId);
       const session = await rpc("agent.session.create", { ...location, characterId: state.selectedCharacter, provider_profile_id: profile?.id, ...(selectedPreset ? { agentPreset: selectedPreset } : {}) });
-      state.agentSessionId = session.sessionId || session.id || null;
+      setAgentSessionId(session.sessionId || session.id || null);
       if (!state.agentSessionId) throw new Error(`${agentRuntimeLabel()} 未返回 sessionId`);
+      rememberAgentSession(state.agentSessionId);
+      resetAgentHistoryPaging();
       state.agentGoal = null;
       state.agentSubagentHistories = {};
       state.agentSessionRenameDraft = "";
@@ -2939,7 +4548,21 @@ async function sendAgentPrompt() {
       ...(text ? [{ type: "text", text }] : []),
       ...attachments.map((item) => ({ type: "image", mediaType: item.mediaType, data: item.data, name: item.name })),
     ];
-    const result = await rpc("agent.session.prompt", { text, content, mode: effectiveAgentMode(), sessionId: state.agentSessionId || undefined });
+    const mode = requestedMode;
+    const promptParams = { text, content, mode, sessionId: state.agentSessionId || undefined };
+    const workspace = currentAgentSessionWorkspace();
+    // Every prompt for a workspace-capable runtime must carry the session's
+    // verified workspace.  Execute is the only mode that creates a
+    // checkpoint; Plan still needs the binding so the runtime cannot silently
+    // plan against a different directory.
+    if (agentSupports("workspaces")) {
+      if (!workspace) throw new Error("Runtime 尚未确认当前会话的 Workspace 绑定，请刷新后重试");
+      promptParams.workspaceId = workspace.id;
+    }
+    if (mode === "execute" && agentPlanModeAvailable() && state.agentSnapshot?.plan?.active === true) {
+      promptParams.leave_plan = true;
+    }
+    const result = await rpc("agent.session.prompt", promptParams);
     state.agentEvents.unshift({ event_type: "agent.turn.accepted", status: "running", content: result.id || "已接受", timestamp: new Date().toISOString() });
     state.agentPromptDraft = "";
     state.agentPromptAttachments = [];
@@ -2949,12 +4572,53 @@ async function sendAgentPrompt() {
     // leave newly attached media invisible until the user manually refreshes.
     void loadAgentSnapshot(true);
     void loadAgentQueue(true);
-    state.agentNotice = "目标已提交；工具调用和审批会显示在本页。";
+    if (result.workspace_checkpoint?.id) {
+      state.workspaceRuntimePath = workspace?.path || state.workspaceRuntimePath;
+      state.agentNotice = `目标已提交；执行前 checkpoint ${result.workspace_checkpoint.id} 已创建。`;
+      if (workspace?.path) void loadWorkspaceRuntime(workspace.path, true);
+    } else {
+      state.agentNotice = "目标已提交；工具调用和审批会显示在本页。";
+    }
   } catch (error) {
     state.agentNotice = `Agent 目标未发送：${error.message}`;
   } finally {
     state.agentBusy = null;
     render();
+  }
+}
+
+async function retryAgentTurn() {
+  const sessionId = String(state.agentSessionId || "").trim();
+  const snapshot = state.agentSnapshot;
+  const retry = agentRetryState(snapshot);
+  if (!sessionId || !retry.retryable || retry.imageTarget || retry.missingTarget || state.agentBusy || !state.agentStatus?.ready) return;
+  if (!window.confirm("将重新提交当前会话最近一次失败或停止的文本目标。不会重复提交图片或工具结果，是否继续？")) return;
+  state.agentBusy = "retry";
+  state.agentNotice = `正在让 ${agentRuntimeLabel()} 重试最近目标…`;
+  render();
+  try {
+    const workspace = currentAgentSessionWorkspace();
+    const result = await rpc("agent.session.retry", {
+      sessionId,
+      approved: true,
+      confirmSessionId: sessionId,
+      ...(workspace ? { workspaceId: workspace.id } : {}),
+    });
+    if (result?.accepted === false) throw new Error("Runtime 未接受重试请求");
+    state.agentNotice = result?.workspace_checkpoint?.id
+      ? `重试已提交；执行前 checkpoint ${result.workspace_checkpoint.id} 已创建。`
+      : `重试已提交；${agentRuntimeLabel()} 会通过事件确认最终状态。`;
+    await Promise.all([
+      loadAgentSnapshot(false, false),
+      loadAgentQueue(false),
+      loadAgentInteractions(false),
+    ]);
+  } catch (error) {
+    state.agentNotice = `重试失败：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+    void syncAgentState();
   }
 }
 
@@ -3069,6 +4733,84 @@ async function respondAgentQuestion(form) {
     void loadAgentSnapshot(false, false);
   } catch (error) {
     state.agentNotice = `回答未提交：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function respondAgentPlanReview(form, action) {
+  const rpcId = form?.dataset.agentInteractionId;
+  const sessionId = form?.dataset.agentInteractionSession;
+  const interaction = state.agentInteractions.find((item) => item.id === rpcId && item.kind === "question" && item.plan_review);
+  if (!rpcId || !sessionId || !interaction || !["approve", "keep-planning"].includes(action) || state.agentBusy) return;
+  const question = (interaction.questions || []).find((item) => item?.intent?.kind === "plan-review") || interaction.questions?.[0];
+  const planReview = interaction.plan_review || {};
+  const label = action === "approve" ? String(planReview.approve || question?.intent?.approve || "Approve") : String(planReview.keep_planning || "Keep planning");
+  if (!question?.id || !label) return;
+  const workspace = currentAgentSessionWorkspace();
+  if (action === "approve" && agentSupports("workspaces") && !workspace) {
+    state.agentNotice = "当前计划会话没有可验证的 Workspace 绑定；请刷新后重试。";
+    render();
+    return;
+  }
+  const answer = { id: question.id, selected: [label] };
+  if (action === "keep-planning") {
+    const feedback = (form.querySelector("[data-agent-plan-review-feedback]")?.value || "").trim();
+    // DSH treats a non-empty custom response as the single-select "other"
+    // choice.  Sending it alongside a selected label is rejected by the
+    // runtime, while an empty selection still means "keep planning" to the
+    // plan-mode controller.
+    if (feedback) {
+      answer.selected = [];
+      answer.custom = feedback;
+    }
+  }
+  state.agentBusy = "plan-review";
+  state.agentNotice = action === "approve" ? "正在批准计划，等待 Agent 进入执行…" : "正在请求 Agent 继续规划…";
+  render();
+  try {
+    const result = await rpc("agent.question.respond", {
+      rpcId,
+      sessionId,
+      answer: { answers: [answer] },
+      ...(action === "approve" && workspace ? { workspaceId: workspace.id } : {}),
+    });
+    state.agentInteractions = state.agentInteractions.filter((item) => item.id !== rpcId);
+    const drafts = { ...state.agentInteractionDrafts };
+    delete drafts[rpcId];
+    state.agentInteractionDrafts = drafts;
+    state.agentNotice = action === "approve"
+      ? result?.workspace_checkpoint?.id
+        ? `计划已批准；执行前 checkpoint ${result.workspace_checkpoint.id} 已创建。`
+        : "计划已批准；Agent 会从下一步开始执行。"
+      : "已选择继续规划；等待 Agent 更新计划。";
+    void loadAgentSnapshot(false, false);
+  } catch (error) {
+    state.agentNotice = `计划审查响应失败：${error.message}`;
+  } finally {
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function cancelAgentInteraction(form) {
+  const rpcId = form?.dataset.agentInteractionId;
+  const sessionId = form?.dataset.agentInteractionSession;
+  const interaction = state.agentInteractions.find((item) => item.id === rpcId && item.kind === "question" && item.plan_review);
+  if (!rpcId || !sessionId || !interaction || state.agentBusy) return;
+  state.agentBusy = "plan-review-cancel";
+  state.agentNotice = "正在关闭计划审查，保留当前 Plan 模式…";
+  render();
+  try {
+    await rpc("agent.question.cancel", { rpcId, sessionId });
+    state.agentInteractions = state.agentInteractions.filter((item) => item.id !== rpcId);
+    const drafts = { ...state.agentInteractionDrafts };
+    delete drafts[rpcId];
+    state.agentInteractionDrafts = drafts;
+    state.agentNotice = "已关闭计划审查；Agent 保持 Plan 模式并等待你的新消息。";
+  } catch (error) {
+    state.agentNotice = `关闭计划审查失败：${error.message}`;
   } finally {
     state.agentBusy = null;
     render();
@@ -3467,6 +5209,12 @@ function applyProviderTemplate(event) {
   form.elements.active_base_url.value = template.base_url || "";
   if (!form.elements.model.value.trim()) form.elements.model.value = template.model || "";
   form.elements.processing_location.value = template.processing_location || "auto";
+  const datalist = document.querySelector("#provider-model-options");
+  if (datalist) {
+    datalist.innerHTML = (Array.isArray(template.model_options) ? template.model_options : [])
+      .map((model) => `<option value="${escapeHtml(model)}"></option>`)
+      .join("");
+  }
 }
 
 function readProviderProfileForm(form) {
@@ -3941,6 +5689,40 @@ async function loadSnapshots(shouldRender = true) {
   if (shouldRender) render();
 }
 
+async function loadAgentTaskProjections(shouldRender = true) {
+  if (!state.agentStatus?.ready) {
+    // The Core can still serve a redacted last-known projection while DSH is
+    // offline.  Ask for it explicitly instead of clearing the task center.
+    try {
+      const result = await rpc("agent.task.projections", { limit: 24 });
+      state.agentTasks = Array.isArray(result?.tasks) ? result.tasks : [];
+    } catch {
+      // Keep an already-rendered cache during a transient Core reconnect.
+      if (!Array.isArray(state.agentTasks)) state.agentTasks = [];
+    }
+    if (shouldRender) render();
+    return;
+  }
+  try {
+    const result = await rpc("agent.task.projections", { limit: 24 });
+    state.agentTasks = Array.isArray(result?.tasks) ? result.tasks : [];
+  } catch {
+    // Keep the last stable projection on a transient request failure. It is
+    // rendered as stale only when the Core explicitly marks it so.
+  }
+  if (shouldRender) render();
+}
+
+async function loadTasks(shouldRender = true) {
+  try {
+    state.tasks = await api("/api/tasks");
+  } catch {
+    state.tasks = [];
+  }
+  await loadAgentTaskProjections(false);
+  if (shouldRender) render();
+}
+
 async function inspectSnapshot(snapshotId) {
   if (!snapshotId || state.snapshotBusy) return;
   state.snapshotBusy = `inspect:${snapshotId}`;
@@ -3995,7 +5777,7 @@ async function restoreSnapshot(snapshotId) {
     state.characters = await api("/api/characters");
     state.sessions = await api("/api/sessions");
     syncActiveSession();
-    state.tasks = await api("/api/tasks");
+    await loadTasks(false);
     await loadAvatarState();
   } catch (error) {
     state.snapshotNotice = `恢复快照失败：${error.message}`;
@@ -4083,6 +5865,7 @@ async function loadInitialData() {
     state.characters = characters;
     state.events = events;
     await loadAgentRuntime(false);
+    await loadAgentTaskProjections(false);
     state.agentEvents = events.filter((event) => String(event.event_type || "").startsWith("agent.") || String(event.event_type || "").startsWith("browser."));
     await loadMemories(false);
     state.avatarState = await rpc("avatar.state", { character_id: state.selectedCharacter });
@@ -4099,6 +5882,10 @@ async function loadInitialData() {
     state.audioStatus = fallbackAudioStatus;
     state.visionStatus = fallbackVisionStatus;
     state.tasks = [];
+    // Keep the last known Agent projection across a transient Core failure;
+    // the next successful RPC will replace it with an explicitly stale/live
+    // response.  This prevents the task center from flashing empty during a
+    // DSH restart.
     state.avatarModels = [];
     state.avatarIgnored = [];
     state.snapshots = [];
@@ -4114,7 +5901,7 @@ async function loadInitialData() {
     state.agentDiagnosticsBusy = false;
     state.browserStatus = { state: "unavailable", ready: false };
     state.browserProfiles = [];
-    state.agentSessionId = null;
+    setAgentSessionId(null);
     state.agentSnapshot = null;
     state.agentModels = { current: {}, routable: false, groups: [], failures: [] };
     state.agentWorkspaces = [];
@@ -4138,6 +5925,14 @@ async function createTask() {
     state.taskNotice = `创建任务失败：${error.message}`;
     render();
   }
+}
+
+async function openAgentTask(sessionId) {
+  const value = String(sessionId || "").trim();
+  if (!value) return;
+  state.activePage = "Agent";
+  render();
+  await selectAgentSession(value);
 }
 
 async function updateTask(taskId, params) {
@@ -4945,7 +6740,11 @@ function connectEvents() {
   const endpoint = coreBaseUrl ? new URL(coreBaseUrl) : window.location;
   const protocol = endpoint.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${protocol}//${endpoint.host}/ws/events`);
-  socket.addEventListener("open", () => { state.connected = true; render(); });
+  socket.addEventListener("open", () => {
+    state.connected = true;
+    render();
+    void syncAgentState({ immediate: true });
+  });
   socket.addEventListener("message", (event) => {
     try {
       const value = JSON.parse(event.data);
@@ -4955,6 +6754,12 @@ function connectEvents() {
           state.agentEvents.unshift(value);
           if (value.event_type === "agent.runtime.health" || value.event_type === "agent.provider.synced" || value.event_type === "browser.session.created" || value.event_type === "browser.session.closed") {
             void loadAgentRuntime(false);
+          }
+          if (["agent.skill.discovered", "agent.skill.approved", "agent.skill.revoked", "agent.skill.discovery.failed"].includes(value.event_type)) {
+            void loadAgentSkills(false);
+          }
+          if (["agent.mcp.configuration.previewed", "agent.mcp.configuration.applied", "agent.mcp.configuration.failed", "agent.session.preset.selected"].includes(value.event_type)) {
+            void loadAgentMcpCatalog(false);
           }
           if (value.event_type === "agent.session.queue" && state.agentSessionId && value.payload?.session_id === state.agentSessionId) {
             void loadAgentQueue(false);
@@ -4973,11 +6778,17 @@ function connectEvents() {
           }
           const runtimeStatus = value.payload?.status;
           if (value.event_type === "agent.session.event" && state.agentSessionId && !["assistant/chunk", "session/projection"].includes(runtimeStatus)) {
-            void loadAgentSnapshot(false, false).then(() => { if (state.activePage === "Agent") render(); });
+            void loadAgentSnapshot(false, false).then(() => { if (state.activePage === "Agent" && !state.agentBusy) render(); });
+          }
+          if (state.activePage === "Tasks" && (
+            ["turn/start", "turn/end", "approval/requested", "approval/resolved", "question/requested", "question/resolved", "tool/result", "session/title"].includes(runtimeStatus)
+            || ["agent.session.created", "agent.approval.decided", "agent.question.answered"].includes(value.event_type)
+          )) {
+            void loadAgentTaskProjections(true);
           }
           const runtimeEvent = /^agent\.[a-z0-9-]+\.event$/i.test(String(value.event_type || ""));
-          if (runtimeEvent || ["agent.approval.requested", "agent.approval.resolved", "agent.question.requested", "agent.question.resolved"].includes(value.event_type)) {
-            void loadAgentInteractions(false).then(() => { if (state.activePage === "Agent") render(); });
+          if (runtimeEvent || ["agent.approval.requested", "agent.approval.resolved", "agent.question.requested", "agent.question.resolved", "agent.question.cancelled"].includes(value.event_type)) {
+            void loadAgentInteractions(false).then(() => { if (state.activePage === "Agent" && !state.agentBusy) render(); });
           }
         }
         if (value.event_type === "module.changed" && value.payload?.module) {
@@ -5059,7 +6870,7 @@ function connectEvents() {
           return;
         }
         if (value.event_type === "chat.completed") state.sending = false;
-        render();
+        if (!state.agentBusy) render();
       }
     } catch { /* ignore malformed event frames at the UI boundary */ }
   });
@@ -5071,6 +6882,13 @@ function rememberChatScrollPreference() {
   if (!list) return;
   const distance = list.scrollHeight - list.scrollTop - list.clientHeight;
   state.chatAutoScroll = distance <= 48;
+}
+
+function rememberFocusedAgentQueueDraft() {
+  const input = document.activeElement;
+  if (!(input instanceof HTMLInputElement) || !input.matches("[data-agent-queue-input]")) return;
+  const itemId = input.closest("[data-agent-queue-row]")?.dataset.agentQueueRow;
+  if (itemId) state.agentQueueDrafts = { ...state.agentQueueDrafts, [itemId]: input.value };
 }
 
 function scheduleScrollMessages(force = false) {
@@ -5092,6 +6910,14 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.providerDrawerOpen) closeProviderDrawer();
 });
 
+window.addEventListener("focus", () => {
+  void syncAgentState({ immediate: true });
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void syncAgentState({ immediate: true });
+});
+
 render();
-loadInitialData();
+void loadInitialData().finally(scheduleAgentStateSync);
 connectEvents();

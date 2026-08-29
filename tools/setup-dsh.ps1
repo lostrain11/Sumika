@@ -58,5 +58,5 @@ if ($reportedVersion -ne $targetVersion) {
     version = $targetVersion
     install_dir = (Resolve-Path -LiteralPath $InstallDir).Path
     global_path_changed = $false
-    next = "Set `$env:SUMIKA_DSH_EXECUTABLE to the executable above and `$env:SUMIKA_DSH_AUTOSTART = '1' before starting the Sumika desktop shell."
+    next = "Run tools\run-desktop.ps1. The Windows launcher will discover this pinned executable and start it only when no healthy DSH endpoint already exists."
 } | ConvertTo-Json -Compress

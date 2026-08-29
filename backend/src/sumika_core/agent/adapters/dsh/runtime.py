@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -26,17 +27,16 @@ from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
 from ....protocol.models import utc_now
+from ...credential_binding import (
+    LOCAL_DSH_CREDENTIAL_REF,
+    LOCAL_DSH_CREDENTIAL_VALUE,
+    dsh_remote_credential_ref,
+    dsh_route_id,
+)
 from ...contracts import AgentCapability, AgentRuntime, AgentRuntimeError, UnavailableAgentRuntime
 from ...models import AgentApproval, AgentEvent
 from .config import DSHRuntimeConfig, default_profile_dir
-
-
-# ``llm-pi-ai`` requires a credential reference for OpenAI-compatible routes,
-# even when the target is an unauthenticated local server such as Ollama.  The
-# value is stored only in the managed DSH credential store and is never sent to
-# a remote service as a user secret; the adapter uses it to satisfy its auth
-# seam while the local endpoint ignores the bearer token.
-_LOCAL_CREDENTIAL_SENTINEL = "sumika-local"
+from .mcp_config import ManagedMcpPresetStore
 
 
 class _WebSocketEventBridge:
@@ -174,7 +174,11 @@ class DSHAgentRuntime(AgentRuntime):
     """HTTP/WebSocket-compatible client for the pinned DSH Web API."""
 
     runtime_id = "dsh"
-    capability_ids = frozenset(AgentCapability)
+    capability_ids = frozenset(
+        capability
+        for capability in AgentCapability
+        if capability is not AgentCapability.READONLY
+    )
 
     def __init__(self, data_dir: str | Path | None = None, *, env: dict[str, str] | None = None, logger: Any = None) -> None:
         env = env if env is not None else os.environ
@@ -187,6 +191,8 @@ class DSHAgentRuntime(AgentRuntime):
             endpoint=endpoint,
             profile_dir=profile_dir,
             executable=executable,
+            managed=str(env.get("SUMIKA_AGENT_AUTOSTART") or env.get("SUMIKA_DSH_AUTOSTART") or "0").lower()
+            in {"1", "true", "yes"},
             enabled=enabled.lower() not in {"0", "false", "no"},
         )
         self.logger = logger
@@ -199,6 +205,17 @@ class DSHAgentRuntime(AgentRuntime):
         self._pending_interactions: dict[str, dict[str, Any]] = {}
         self._queue_lock = threading.RLock()
         self._session_queues: dict[str, dict[str, Any]] = {}
+        launch_credential_refs = _mcp_launch_credential_refs(
+            env.get("SUMIKA_DSH_MCP_CREDENTIAL_REFS")
+        )
+        self._mcp_configurations = ManagedMcpPresetStore(
+            self.config.profile_dir,
+            logger=logger,
+            launch_credential_refs=launch_credential_refs,
+        )
+
+    def bind_credential_store(self, credential_store: Any) -> None:
+        self._mcp_configurations.bind_credential_store(credential_store)
 
     def status(self) -> dict[str, Any]:
         if self.config.enabled and (self._last_health is None or time.monotonic() - self._last_health_at > 1.0):
@@ -241,7 +258,8 @@ class DSHAgentRuntime(AgentRuntime):
         credentials never cross this boundary.
         """
 
-        del params
+        params = params if isinstance(params, dict) else {}
+        requested_session_id = _diagnostic_session_id(params)
         checked_at = utc_now()
         profile_info = self._mcp_profile_info()
         report: dict[str, Any] = {
@@ -299,8 +317,11 @@ class DSHAgentRuntime(AgentRuntime):
         report["capabilities"].append(
             self._diagnostic_capability("sessions", "Sessions", "session.list", session_probe)
         )
-        session_ids = _diagnostic_session_ids(session_value)
-        session_id = session_ids[0] if session_ids else None
+        # Session-scoped probes must never silently adopt an arbitrary historical
+        # session.  A caller may opt in to one explicit session; otherwise the
+        # report stays honest about the missing scope and avoids touching user
+        # history just to populate a capability card.
+        session_id = requested_session_id
 
         for capability_id, label, method in (
             ("presets", "Agent presets", "agentPreset.list"),
@@ -491,7 +512,9 @@ class DSHAgentRuntime(AgentRuntime):
                 continue
             projections = item.get("projections") if isinstance(item.get("projections"), dict) else {}
             values = projections.get("values") if isinstance(projections.get("values"), dict) else {}
-            stats = _safe_numeric_map(values.get("sessionStats"))
+            stats = _compact_session_stats(values.get("sessionStats"))
+            token_usage = _compact_token_usage(values.get("tokenUsage"))
+            context_breakdown = _compact_context_breakdown(values.get("contextBreakdown"))
             sessions.append(
                 {
                     "id": _safe_agent_text(item.get("sessionId"), 120),
@@ -501,6 +524,8 @@ class DSHAgentRuntime(AgentRuntime):
                     "updated_at": item.get("updatedAt"),
                     "agent_preset": _safe_agent_text(item.get("agentPreset"), 80),
                     "stats": stats,
+                    "token_usage": token_usage,
+                    "context_breakdown": context_breakdown,
                 }
             )
         sessions.sort(key=lambda session: (session.get("updated_at") or 0), reverse=True)
@@ -586,6 +611,137 @@ class DSHAgentRuntime(AgentRuntime):
         )
         self._call("agentPreset.remove", {"agentPreset": preset})
         return {"agent_preset": preset, "removed": True}
+
+    def validate_preset_mount(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Mount one preset in a blank session, then archive that session."""
+
+        preset = _agent_preset_id(
+            params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+            "agentPreset",
+        )
+        roster = self.list_presets({})
+        entry = next(
+            (
+                item
+                for item in roster.get("presets") or []
+                if isinstance(item, dict) and item.get("id") == preset
+            ),
+            None,
+        )
+        if entry is None:
+            raise AgentRuntimeError("DSH preset is not in the current runtime roster")
+        if entry.get("broken"):
+            raise AgentRuntimeError("DSH preset composition is marked as broken")
+
+        payload: dict[str, Any] = {"agentPreset": preset}
+        workspace_id = params.get("workspaceId") or params.get("workspace_id")
+        cwd = params.get("cwd")
+        if workspace_id is not None and cwd is not None:
+            raise AgentRuntimeError("preset mount validation accepts workspaceId or cwd, not both")
+        if workspace_id is not None:
+            payload["workspaceId"] = _opaque_id(workspace_id, "workspaceId", 160)
+        elif cwd is not None:
+            if not isinstance(cwd, str) or not cwd.strip() or len(cwd.strip()) > 4096:
+                raise AgentRuntimeError("DSH preset validation cwd must be a non-empty absolute path")
+            candidate = Path(cwd.strip()).expanduser()
+            if not candidate.is_absolute() or any(ord(char) < 32 or ord(char) == 127 for char in str(candidate)):
+                raise AgentRuntimeError("DSH preset validation cwd must be a non-empty absolute path")
+            payload["cwd"] = str(candidate)
+
+        created = self._call("session.create", payload)
+        session_id = _opaque_id(
+            created.get("sessionId") if isinstance(created, dict) else None,
+            "sessionId",
+            _MAX_SESSION_ID_LENGTH,
+        )
+        try:
+            archived = self._call("workspace.archiveSession", {"sessionId": session_id})
+        except AgentRuntimeError as error:
+            raise AgentRuntimeError(
+                "DSH mounted the preset but could not archive the blank validation session"
+            ) from error
+        archived_ids = archived.get("archivedSessionIds") if isinstance(archived, dict) else None
+        if not isinstance(archived_ids, list) or session_id not in archived_ids:
+            raise AgentRuntimeError("DSH did not confirm validation session archival")
+        return {
+            "agent_preset": preset,
+            "mountable": True,
+            "validation_session_archived": True,
+        }
+
+    def list_mcp_configurations(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List only Sumika-managed rows in one user-owned preset."""
+
+        preset = _agent_preset_id(
+            params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+            "agentPreset",
+        )
+        self._require_user_preset(preset)
+        profile = self._mcp_profile_info()
+        result = self._mcp_configurations.list_configurations(preset)
+        result.update(
+            {
+                "client_installed": profile["installed"],
+                "client_version": profile["version"],
+            }
+        )
+        return result
+
+    def preview_mcp_configuration(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Create an expiring, path-free preview for one managed MCP row."""
+
+        preset = _agent_preset_id(
+            params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+            "agentPreset",
+        )
+        self._require_user_preset(preset)
+        profile = self._mcp_profile_info()
+        if not profile["installed"]:
+            raise AgentRuntimeError("managed DSH profile does not contain dsh-mcp-client")
+        result = self._mcp_configurations.preview(preset, params)
+        result.update(
+            {
+                "client_installed": True,
+                "client_version": profile["version"],
+            }
+        )
+        return result
+
+    def apply_mcp_configuration(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Apply a preview, mount it in DSH, and roll back on failure."""
+
+        preset = _agent_preset_id(
+            params.get("agentPreset") or params.get("agent_preset") or params.get("id"),
+            "agentPreset",
+        )
+        token = params.get("previewToken") or params.get("preview_token")
+        if not isinstance(token, str) or not token.strip() or len(token.strip()) > 256:
+            raise AgentRuntimeError("MCP configuration previewToken is required")
+        self._require_user_preset(preset)
+        return self._mcp_configurations.apply(
+            preset,
+            token.strip(),
+            lambda selected: self.validate_preset_mount({"agentPreset": selected}),
+            credential_value=params.get("credentialValue") or params.get("credential_value"),
+        )
+
+    def _require_user_preset(self, preset: str) -> dict[str, Any]:
+        roster = self.list_presets({})
+        entry = next(
+            (
+                item
+                for item in roster.get("presets") or []
+                if isinstance(item, dict) and item.get("id") == preset
+            ),
+            None,
+        )
+        if entry is None:
+            raise AgentRuntimeError("DSH preset is not in the current runtime roster")
+        if entry.get("trust") != "user":
+            raise AgentRuntimeError("managed MCP configuration requires a user-owned Agent preset")
+        if entry.get("broken"):
+            raise AgentRuntimeError("DSH preset composition is marked as broken")
+        return entry
 
     def select_preset(self, params: dict[str, Any]) -> dict[str, Any]:
         """Select a preset for a still-blank session; DSH enforces that lock."""
@@ -742,8 +898,8 @@ class DSHAgentRuntime(AgentRuntime):
         """Expose one Sumika profile as an isolated DSH ``llm-pi-ai`` route.
 
         The managed DSH profile is the only state changed here. Existing DSH
-        routes remain untouched, and secret values travel only through the
-        credentials RPC; this method never returns or logs them.
+        routes remain untouched. Remote secrets must already be present in the
+        Runtime launch environment and never cross the DSH write API.
         """
 
         if not self.config.enabled:
@@ -760,13 +916,9 @@ class DSHAgentRuntime(AgentRuntime):
         route_id = desired["route_id"]
         previous = current_providers.get(route_id)
         changed = not isinstance(previous, dict) or not _dsh_route_matches(previous, desired["route"])
-        credential_ref = desired.get("credential_ref")
-        secret_value = desired.get("secret_value")
-
-        # Store the credential before activating a route that references it.
-        # The value is deliberately kept out of every response and log.
-        if credential_ref and secret_value:
-            self._call("credentials.set", {"ref": credential_ref, "value": secret_value})
+        credential = self._provider_credential_status(desired, provision_local=True)
+        if not credential["ready"]:
+            raise AgentRuntimeError(str(credential["reason"]))
 
         if changed:
             payload: dict[str, Any] = {
@@ -789,38 +941,39 @@ class DSHAgentRuntime(AgentRuntime):
                     retry_payload["expectedRevision"] = fresh_revision
                 self._call("settings.mutate", retry_payload)
 
-        # If an earlier version of this route had an API key and the current
-        # profile no longer does, remove only Sumika's own credential ref.
-        if not credential_ref:
-            old_route = previous if isinstance(previous, dict) else {}
-            old_ref = old_route.get("apiKeyEnv")
-            if isinstance(old_ref, str) and old_ref:
-                try:
-                    self._call("credentials.unset", {"ref": old_ref})
-                except AgentRuntimeError as error:
-                    if self.logger:
-                        self.logger.info("dsh provider credential cleanup skipped error_type=%s", type(error).__name__)
-
         try:
-            providers = self._call("llm.providers", {}).get("providers", [])
-        except AgentRuntimeError as error:
-            raise AgentRuntimeError(f"DSH provider catalog unavailable after sync: {error}") from error
-        catalog_entry = next(
-            (item for item in providers if isinstance(item, dict) and item.get("provider") == route_id),
-            None,
-        )
-        if not isinstance(catalog_entry, dict) or not bool(catalog_entry.get("active")):
-            raise AgentRuntimeError(
-                f'DSH did not activate provider route "{route_id}"; the llm-pi-ai adapter may be unavailable'
+            try:
+                providers = self._call("llm.providers", {}).get("providers", [])
+            except AgentRuntimeError as error:
+                raise AgentRuntimeError(f"DSH provider catalog unavailable after sync: {error}") from error
+            catalog_entry = next(
+                (item for item in providers if isinstance(item, dict) and item.get("provider") == route_id),
+                None,
             )
+            if not isinstance(catalog_entry, dict) or not bool(catalog_entry.get("active")):
+                raise AgentRuntimeError(
+                    f'DSH did not activate provider route "{route_id}"; the llm-pi-ai adapter may be unavailable'
+                )
+
+        except AgentRuntimeError as error:
+            if changed:
+                try:
+                    self._restore_provider_route(route_id, previous, desired["route"])
+                except AgentRuntimeError as rollback_error:
+                    raise AgentRuntimeError(
+                        f"{error}; DSH provider route rollback failed: {rollback_error}"
+                    ) from error
+            raise
         result = {
             "profile_id": desired["profile_id"],
             "route_id": route_id,
             "model": desired["model"],
             "changed": changed,
             "active": True,
-            "credential_configured": bool(credential_ref and secret_value),
-            "credential_mode": desired.get("credential_mode"),
+            "credential_configured": bool(credential["configured"]),
+            "credential_mode": credential["mode"],
+            "credential_source": credential["source"],
+            "credential_reload_required": False,
         }
         if self.logger:
             self.logger.info(
@@ -832,11 +985,116 @@ class DSHAgentRuntime(AgentRuntime):
             )
         return result
 
+    def _provider_credential_status(
+        self,
+        desired: dict[str, Any],
+        *,
+        provision_local: bool,
+    ) -> dict[str, Any]:
+        credential_ref = desired.get("credential_ref")
+        mode = desired.get("credential_mode")
+        if not isinstance(credential_ref, str) or not credential_ref:
+            return {
+                "required": False,
+                "ready": True,
+                "configured": False,
+                "mode": None,
+                "source": "not-required",
+                "reload_required": False,
+                "reason": None,
+            }
+
+        def describe() -> dict[str, Any]:
+            value = self._call("credentials.describe", {"refs": [credential_ref]})
+            credentials = value.get("credentials") if isinstance(value, dict) else None
+            info = credentials.get(credential_ref) if isinstance(credentials, dict) else None
+            if not isinstance(info, dict):
+                raise AgentRuntimeError("DSH credentials.describe omitted the requested reference")
+            return info
+
+        info = describe()
+        configured = bool(info.get("configured"))
+        if mode == "local-placeholder" and not configured and provision_local:
+            self._call(
+                "credentials.set",
+                {"ref": credential_ref, "value": LOCAL_DSH_CREDENTIAL_VALUE},
+            )
+            info = describe()
+            configured = bool(info.get("configured"))
+        source = str(info.get("source") or "unconfigured")
+
+        if mode == "launch-environment":
+            ready = configured and source == "env" and info.get("writable") is False
+            return {
+                "required": True,
+                "ready": ready,
+                "configured": configured,
+                "mode": mode,
+                "source": source,
+                "reload_required": not ready,
+                "reason": None
+                if ready
+                else "远程 Provider 凭据尚未由 Windows 安全存储加载到 DSH；关闭外部 DSH 后重启 Sumika",
+            }
+
+        ready = configured and source in {"env", "file"}
+        return {
+            "required": True,
+            "ready": ready,
+            "configured": configured,
+            "mode": mode,
+            "source": source,
+            "reload_required": False,
+            "reason": None if ready else "本地 Provider 的非敏感运行时占位凭据尚未就绪，请重新同步",
+        }
+
+    def _restore_provider_route(
+        self,
+        route_id: str,
+        previous: dict[str, Any] | None,
+        expected_current: dict[str, Any],
+    ) -> None:
+        """Restore one route only if it still equals this sync attempt."""
+
+        refreshed = self._call("settings.describe", {})
+        descriptor = _find_settings_namespace(refreshed, "llm-pi-ai")
+        value = descriptor.get("value") if isinstance(descriptor, dict) else {}
+        providers = value.get("providers") if isinstance(value, dict) else {}
+        current = providers.get(route_id) if isinstance(providers, dict) else None
+        if not isinstance(current, dict) or not _dsh_route_matches(current, expected_current):
+            raise AgentRuntimeError("provider route changed concurrently; refusing rollback overwrite")
+        operation: dict[str, Any]
+        if isinstance(previous, dict):
+            operation = {"op": "set", "path": ["providers", route_id], "value": previous}
+        else:
+            operation = {"op": "unset", "path": ["providers", route_id]}
+        payload: dict[str, Any] = {"ns": "llm-pi-ai", "ops": [operation]}
+        revision = descriptor.get("revision")
+        if isinstance(revision, int):
+            payload["expectedRevision"] = revision
+        self._call("settings.mutate", payload)
+
     def provider_status(self, profile: dict[str, Any] | None = None) -> dict[str, Any]:
         if profile is None:
             return {"state": "unconfigured", "ready": False, "reason": "没有选择 Sumika Provider 档案"}
         try:
             desired = _dsh_route_from_sumika_profile(profile)
+            credential = self._provider_credential_status(desired, provision_local=False)
+            if not credential["ready"]:
+                return {
+                    "state": "restart-required" if credential["reload_required"] else "not-synced",
+                    "ready": False,
+                    "profile_id": desired["profile_id"],
+                    "route_id": desired["route_id"],
+                    "model": desired["model"],
+                    "synced": False,
+                    "active": False,
+                    "credential_configured": bool(credential["configured"]),
+                    "credential_mode": credential["mode"],
+                    "credential_source": credential["source"],
+                    "credential_reload_required": bool(credential["reload_required"]),
+                    "reason": credential["reason"],
+                }
             namespace = self._call("settings.describe", {})
             descriptor = _find_settings_namespace(namespace, "llm-pi-ai")
             value = descriptor.get("value") if isinstance(descriptor, dict) else {}
@@ -859,6 +1117,10 @@ class DSHAgentRuntime(AgentRuntime):
                 "model": desired["model"],
                 "synced": synced,
                 "active": active,
+                "credential_configured": bool(credential["configured"]),
+                "credential_mode": credential["mode"],
+                "credential_source": credential["source"],
+                "credential_reload_required": False,
                 "reason": None if ready else "Provider 档案尚未同步到 DSH",
             }
         except AgentRuntimeError as error:
@@ -874,6 +1136,55 @@ class DSHAgentRuntime(AgentRuntime):
             if params.get(key) is not None:
                 payload[key] = params[key]
         return self._call("session.history", payload)
+
+    def retry_prompt(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Replay the latest failed or cancelled text-only user target.
+
+        DSH does not expose a stable ``session.retry`` RPC in the pinned Web
+        API.  The adapter therefore reads a bounded history page, identifies
+        the latest closed turn, and sends only its original text through the
+        normal prompt path.  The target itself never crosses this method's
+        return or logging boundary.
+        """
+
+        session_id = _session_id(params)
+        history = self.history({"session_id": session_id, "maxMessages": 64})
+        target = _retry_target_from_history(history)
+        mode = target["mode"]
+        requested_mode = str(params.get("mode") or "").strip().lower()
+        if requested_mode in {"plan", "execute", "readonly"}:
+            mode = requested_mode
+        prompt_params: dict[str, Any] = {
+            "session_id": session_id,
+            "text": target["text"],
+            "mode": mode,
+        }
+        transport_mode = str(params.get("transport_mode") or params.get("queue_mode") or "").strip().lower()
+        if transport_mode in {"queue", "steer"}:
+            prompt_params["transport_mode"] = transport_mode
+        result = self.prompt(prompt_params)
+        receipt: dict[str, Any] = {
+            "accepted": result.get("accepted") is not False if isinstance(result, dict) else True,
+            "session_id": session_id,
+            "source_turn": target["turn"],
+            "mode": mode,
+            "text_length": target["text_length"],
+        }
+        if isinstance(result, dict):
+            for key in ("id", "messageId", "message_id", "turnId", "turn_id"):
+                value = result.get(key)
+                if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip():
+                    receipt["id"] = _safe_agent_text(value, 160)
+                    break
+        if self.logger:
+            self.logger.info(
+                "dsh retry accepted session=%s source_turn=%s mode=%s text_length=%s",
+                session_id,
+                target["turn"],
+                mode,
+                target["text_length"],
+            )
+        return receipt
 
     def attachment(self, params: dict[str, Any]) -> dict[str, Any]:
         """Read one image only after DSH verifies session ownership."""
@@ -923,18 +1234,36 @@ class DSHAgentRuntime(AgentRuntime):
         compact["event_count"] = int(projections.get("asOfSeq", -1)) + 1 if isinstance(projections.get("asOfSeq"), int) else 0
         if params.get("include_history", True) is False:
             return compact
-        history = self.history(
-            {
-                "session_id": session_id,
-                # DSH's maxMessages bounds message groups, not raw chunks.
-                # Two groups contain the latest user/assistant exchange while
-                # avoiding an unnecessary full replay for routine refreshes.
-                "maxMessages": min(8, max(1, int(params.get("maxMessages", 2)))),
-            }
-        )
+        raw_limit = params.get("maxMessages") if params.get("maxMessages") is not None else params.get("max_messages", 2)
+        if isinstance(raw_limit, bool) or not isinstance(raw_limit, int) or not 1 <= raw_limit <= 64:
+            raise AgentRuntimeError("snapshot maxMessages must be an integer from 1 to 64")
+        history_params: dict[str, Any] = {
+            "session_id": session_id,
+            # DSH's maxMessages bounds message groups, not raw chunks.
+            # Eight groups is enough for a routine page without replaying an
+            # unbounded session history.
+            "maxMessages": min(8, raw_limit),
+        }
+        before_seq = _history_before_seq(params)
+        if before_seq is not None:
+            history_params["beforeSeq"] = before_seq
+        history = self.history(history_params)
         detailed = _compact_session_history(session_id, history)
-        for key in ("messages", "timeline", "tools", "approvals", "artifacts", "has_more"):
+        for key in (
+            "messages",
+            "timeline",
+            "tools",
+            "approvals",
+            "artifacts",
+            "turns",
+            "has_more",
+            "stats",
+            "context",
+            "token_usage",
+            "context_breakdown",
+        ):
             compact[key] = detailed.get(key, compact.get(key))
+        compact["history_cursor"] = detailed.get("oldest_seq") if detailed.get("has_more") else None
         if detailed.get("state") not in {"idle", "unknown"} and compact["state"] != "running":
             compact["state"] = detailed["state"]
         return compact
@@ -1010,10 +1339,10 @@ class DSHAgentRuntime(AgentRuntime):
             command_line = _plan_command_line(content)
             result = self._execute_command(session_id, command_line)
             return {"id": result["commandId"], "command": result}
-        if requested_mode == "execute" and bool(params.get("leave_plan", True)):
+        if requested_mode == "execute" and params.get("leave_plan") is True:
             # Wait for the command handler to settle before queueing the real
-            # prompt.  This prevents a plan-exit command from racing the user's
-            # execution request or entering model history as plain text.
+            # prompt. Only an explicit caller request exits Plan: ordinary
+            # Execute must work for presets that do not mount the plan command.
             self._execute_command(session_id, "/plan off")
         return self._call("session.prompt", {"sessionId": session_id, "mode": mode, "content": content})
 
@@ -1024,15 +1353,19 @@ class DSHAgentRuntime(AgentRuntime):
             "commands/execute",
             {"args": {"agentId": session_id, "line": line, "images": []}},
         )
+        command_result = result.get("result")
+        if isinstance(command_result, dict) and command_result.get("kind") == "error":
+            message = str(
+                command_result.get("text")
+                or command_result.get("message")
+                or "DSH command was rejected"
+            )
+            raise AgentRuntimeError(message)
         command_id = result.get("commandId") if isinstance(result, dict) else None
         if not isinstance(command_id, str) or not command_id:
             raise AgentRuntimeError(
                 "DSH command bridge did not return a command id; the pinned runtime may not mount commands/execute"
             )
-        command_result = result.get("result")
-        if isinstance(command_result, dict) and command_result.get("kind") == "error":
-            message = str(command_result.get("text") or "DSH command was rejected")
-            raise AgentRuntimeError(message)
         return result
 
     def cancel(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -1221,6 +1554,125 @@ class DSHAgentRuntime(AgentRuntime):
             result["reason"] = "该会话近期 DSH 历史中尚未观察到 MCP 工具调用"
         return result
 
+    def mcp_catalog(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Merge live, managed-configuration, and observed MCP evidence.
+
+        The pinned DSH release normally does not expose ``mcp.list``.  A
+        missing RPC is therefore represented as ``not-exposed`` rather than
+        guessed as healthy.  Managed Preset rows and session-history tools are
+        useful evidence, but each entry retains its source and freshness.
+        """
+
+        params = params or {}
+        profile_info = self._mcp_profile_info()
+        direct_probe, direct_value = self._probe_rpc("mcp.list", {})
+        merged: dict[str, dict[str, Any]] = {}
+        direct_entries = _mcp_catalog_entries_from_runtime(direct_value) if direct_probe["status"] == "available" else []
+        for entry in direct_entries:
+            _merge_mcp_catalog_entry(merged, entry)
+
+        managed_count = 0
+        managed_error = False
+        try:
+            roster = self.list_presets({})
+            presets = [
+                item
+                for item in roster.get("presets") or []
+                if isinstance(item, dict) and item.get("trust") == "user" and not item.get("broken")
+            ]
+            for preset_entry in presets[:32]:
+                preset = preset_entry.get("id")
+                if not isinstance(preset, str):
+                    continue
+                try:
+                    configurations = self._mcp_configurations.list_configurations(preset).get("configurations") or []
+                except AgentRuntimeError:
+                    managed_error = True
+                    continue
+                for configuration in configurations[:64]:
+                    if not isinstance(configuration, dict):
+                        continue
+                    server_name = configuration.get("server_name")
+                    if not isinstance(server_name, str) or not _MCP_SERVER_NAME_RE.fullmatch(server_name):
+                        continue
+                    managed_count += 1
+                    _merge_mcp_catalog_entry(
+                        merged,
+                        {
+                            "id": server_name,
+                            "name": server_name,
+                            "source": "managed-config",
+                            "freshness": "configuration",
+                            "status": "configured",
+                            "enabled": configuration.get("enabled") is True,
+                            "transport": _safe_agent_text(configuration.get("transport"), 32),
+                            "preset_ids": [preset],
+                            "tools": [],
+                        },
+                    )
+        except AgentRuntimeError:
+            managed_error = True
+
+        session_id = None
+        if any(params.get(key) for key in ("sessionId", "session_id", "parentSessionId", "parent_session_id")):
+            session_id = _session_id(params)
+            try:
+                history = self.history({"session_id": session_id, "maxMessages": 32})
+                observed = _mcp_inventory_from_tools(_compact_session_history(session_id, history).get("tools"))
+                for entry in _mcp_catalog_entries_from_inventory(observed):
+                    _merge_mcp_catalog_entry(merged, entry)
+            except AgentRuntimeError:
+                managed_error = True
+
+        entries = sorted(merged.values(), key=lambda item: str(item.get("name") or item.get("id") or "").casefold())
+        for entry in entries:
+            sources = entry.get("sources") if isinstance(entry.get("sources"), list) else []
+            if "runtime" in sources:
+                entry["status"] = "available"
+                entry["freshness"] = "live" if len(sources) == 1 else "mixed"
+            elif "managed-config" in sources:
+                entry["status"] = "configured"
+                entry["freshness"] = "configuration" if len(sources) == 1 else "mixed"
+            else:
+                entry["status"] = "observed"
+                entry["freshness"] = "session-history"
+            entry["source"] = "+".join(sources) if sources else "unknown"
+            entry["tool_count"] = len(entry.get("tools") or [])
+            entry["preset_ids"] = sorted(set(entry.get("preset_ids") or []), key=str.casefold)[:32]
+
+        runtime_status = direct_probe["status"]
+        if entries:
+            status = "available" if runtime_status == "available" else (
+                "configured" if managed_count else "observed"
+            )
+            reason = "目录由 Runtime、受管 Preset 和会话观察证据合并；各项状态不代表静默故障转移"
+        else:
+            status = runtime_status if runtime_status != "available" else "not-observed"
+            reason = {
+                "not-exposed": "固定版 DSH 未暴露独立 mcp.list，且当前没有已配置或已观察的 MCP 项",
+                "unavailable": "DSH MCP 目录不可达，无法确认当前服务器状态",
+                "rejected": "DSH 拒绝了 MCP 目录探测",
+                "disabled": "DSH Runtime 已关闭",
+            }.get(runtime_status, "当前会话尚未观察到 MCP 工具")
+        if managed_error and entries:
+            reason += "；部分受管 Preset 或历史未能读取"
+        result = {
+            "available": bool(entries) or runtime_status == "available",
+            "status": status,
+            "catalog_available": runtime_status == "available",
+            "runtime_status": runtime_status,
+            "observation_source": "merged",
+            "client_installed": profile_info["installed"],
+            "client_version": profile_info["version"],
+            "entries": entries[:256],
+            "server_count": len(entries),
+            "tool_count": sum(len(item.get("tools") or []) for item in entries),
+            "configured_count": managed_count,
+            "session_id": session_id,
+            "reason": reason,
+        }
+        return result
+
     def respond(self, params: dict[str, Any]) -> dict[str, Any]:
         # DSH server-initiated approval/question requests are answered as a
         # client-response envelope with the original server-request rpcId.
@@ -1286,12 +1738,52 @@ class DSHAgentRuntime(AgentRuntime):
         else:
             raise AgentRuntimeError("unsupported interaction type")
         response = self.respond({"rpc_id": rpc_id, "result": result})
-        response_value = response.get("value") if isinstance(response.get("value"), dict) else response
-        if response_value.get("accepted") is not True:
-            raise AgentRuntimeError(f"DSH rejected the interaction response: {response.get('reason') or 'unknown reason'}")
+        if not _interaction_response_accepted(response):
+            reason = response.get("reason") if isinstance(response, dict) else None
+            raise AgentRuntimeError(f"DSH rejected the interaction response: {reason or 'unknown reason'}")
         with self._interaction_lock:
             self._pending_interactions.pop(rpc_id, None)
         return {"accepted": True, "kind": kind, "response": response}
+
+    def cancel_interaction(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Cancel a pending DSH question using its standard error result.
+
+        DSH treats a cancelled user-question as a settled wait, rather than as
+        an empty answer.  Keeping this as a separate operation prevents a UI
+        dismissal from accidentally selecting one of the model's options.
+        """
+
+        rpc_id = str(params.get("rpcId") or params.get("rpc_id") or "").strip()
+        if not rpc_id:
+            raise AgentRuntimeError("interaction cancellation requires rpcId")
+        with self._interaction_lock:
+            pending = dict(self._pending_interactions.get(rpc_id) or {})
+        if not pending:
+            raise AgentRuntimeError("interaction is no longer pending")
+        if pending.get("kind") != "question":
+            raise AgentRuntimeError("only question interactions can be cancelled")
+        session_id = str(params.get("sessionId") or params.get("session_id") or "").strip()
+        if session_id != pending.get("session_id"):
+            raise AgentRuntimeError("interaction session does not match")
+        response = self.respond(
+            {
+                "rpc_id": rpc_id,
+                "result": {
+                    "ok": False,
+                    "error": {
+                        "code": "cancelled",
+                        "message": "the user closed this question request",
+                        "details": {},
+                    },
+                },
+            }
+        )
+        if not _interaction_response_accepted(response):
+            reason = response.get("reason") if isinstance(response, dict) else None
+            raise AgentRuntimeError(f"DSH rejected the interaction cancellation: {reason or 'unknown reason'}")
+        with self._interaction_lock:
+            self._pending_interactions.pop(rpc_id, None)
+        return {"accepted": True, "kind": "question", "cancelled": True, "response": response}
 
     def set_event_sink(self, sink: Any) -> None:
         self._event_sink = sink
@@ -1319,6 +1811,7 @@ class DSHAgentRuntime(AgentRuntime):
     def normalize_event(self, payload: dict[str, Any]) -> dict[str, Any]:
         nested_event = payload.get("event") if isinstance(payload.get("event"), dict) else None
         source = nested_event or payload
+        source_data = source.get("data") if isinstance(source.get("data"), dict) else {}
         event_type = str(payload.get("event_type") or payload.get("type") or payload.get("method") or "agent.event")
         status = str(payload.get("status") or source.get("type") or "unknown")
         content = None
@@ -1326,9 +1819,9 @@ class DSHAgentRuntime(AgentRuntime):
             content = source.get("content") or source.get("text")
         event = AgentEvent(
             event_type=event_type,
-            session_id=_text(payload.get("session_id") or payload.get("sessionId") or source.get("sessionId")),
-            turn_id=_text(payload.get("turn_id") or payload.get("turnId")),
-            item_id=_text(payload.get("item_id") or payload.get("itemId")),
+            session_id=_text(payload.get("session_id") or payload.get("sessionId") or source.get("sessionId") or source_data.get("sessionId")),
+            turn_id=_text(payload.get("turn_id") or payload.get("turnId") or source.get("turnId") or source_data.get("turnId")),
+            item_id=_text(payload.get("item_id") or payload.get("itemId") or source.get("itemId") or source_data.get("itemId")),
             status=status,
             content=_safe_agent_text(content, 1200) if content is not None else None,
             extensions=_safe_event_extensions(payload, source, event_type),
@@ -1374,13 +1867,17 @@ class DSHAgentRuntime(AgentRuntime):
             elif event_type == "question/requested" and rpc_id:
                 questions = _safe_questions(source.get("questions"))
                 if questions:
-                    self._pending_interactions[rpc_id] = {
+                    interaction = {
                         "id": rpc_id,
                         "kind": "question",
                         "session_id": session_id,
                         "questions": questions,
                         "created_at": str(source.get("timestamp") or utc_now()),
                     }
+                    plan_review = _plan_review_metadata(questions)
+                    if plan_review:
+                        interaction["plan_review"] = plan_review
+                    self._pending_interactions[rpc_id] = interaction
             elif event_type == "approval/resolved":
                 approval_id = _text(source.get("approvalId"))
                 for key, item in list(self._pending_interactions.items()):
@@ -1428,11 +1925,15 @@ class DSHAgentRuntime(AgentRuntime):
             method="POST",
             headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
-        return self._request(request)
+        # MCP discovery inherits a 60-second upstream timeout and runs while a
+        # preset-backed session is created.  Other control-plane calls keep the
+        # short default so an unavailable runtime still fails promptly.
+        timeout = 65.0 if path == "/api/session.create" else 3.0
+        return self._request(request, timeout=timeout)
 
-    def _request(self, request: urllib.request.Request) -> dict[str, Any]:
+    def _request(self, request: urllib.request.Request, *, timeout: float = 3.0) -> dict[str, Any]:
         try:
-            with urllib.request.urlopen(request, timeout=3.0) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 value = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             if self.logger:
@@ -1479,7 +1980,7 @@ def _dsh_route_from_sumika_profile(profile: dict[str, Any]) -> dict[str, Any]:
     model = str(config.get("model") or "").strip()
     if not profile_id or not base_url or not model:
         raise AgentRuntimeError("Provider profile is incomplete; test a Base URL and model first")
-    route_id = _dsh_route_id(profile_id)
+    route_id = dsh_route_id(profile_id)
     raw_headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
     headers = {str(key): str(value) for key, value in raw_headers.items() if str(key).strip() and value is not None}
     secrets_value = profile.get("secrets") if isinstance(profile.get("secrets"), dict) else {}
@@ -1494,28 +1995,41 @@ def _dsh_route_from_sumika_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if api_key is not None and not isinstance(api_key, str):
         raise AgentRuntimeError("Provider API Key must be a string")
     local_endpoint = _is_local_provider(profile, base_url)
-    credential_ref = _dsh_credential_ref(route_id) if api_key or local_endpoint else None
-    credential_mode = "profile" if api_key else ("local-placeholder" if local_endpoint else None)
-    credential_value = api_key if api_key else (_LOCAL_CREDENTIAL_SENTINEL if local_endpoint else None)
+    credential_ref = (
+        dsh_remote_credential_ref(profile)
+        if api_key
+        else (LOCAL_DSH_CREDENTIAL_REF if local_endpoint else None)
+    )
+    credential_mode = "launch-environment" if api_key else ("local-placeholder" if local_endpoint else None)
+    model_profile: dict[str, Any] = {
+        "id": model,
+        "name": model,
+        "contextWindow": 262144,
+        "maxTokens": 32768,
+        "input": ["text"],
+        "reasoningEfforts": False,
+    }
+    if _uses_ollama_qwen3_chat_template(profile, model):
+        # Ollama enables Qwen 3 thinking by default. DSH's pi-ai adapter can
+        # explicitly disable it only through Qwen's chat-template shape.
+        model_profile.update(
+            {
+                "reasoningEfforts": {"off": None, "low": "low"},
+                "compat": {"thinkingFormat": "qwen-chat-template"},
+            }
+        )
     route: dict[str, Any] = {
         "displayName": name,
         "api": "openai-completions",
         "baseURL": base_url,
-        "models": [
-            {
-                "id": model,
-                "name": model,
-                "contextWindow": 262144,
-                "maxTokens": 32768,
-                "input": ["text"],
-                "reasoningEfforts": False,
-            }
-        ],
+        "models": [model_profile],
         "defaultContextWindow": 262144,
         "defaultMaxTokens": 32768,
         "defaultInput": ["text"],
         "headers": headers,
     }
+    if _uses_ollama_qwen3_chat_template(profile, model):
+        route["reasoning"] = "off"
     if credential_ref:
         route["apiKeyEnv"] = credential_ref
     return {
@@ -1524,9 +2038,14 @@ def _dsh_route_from_sumika_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "model": model,
         "route": route,
         "credential_ref": credential_ref,
-        "secret_value": credential_value,
         "credential_mode": credential_mode,
     }
+
+
+def _uses_ollama_qwen3_chat_template(profile: dict[str, Any], model: str) -> bool:
+    template_id = str(profile.get("template_id") or "").strip().lower()
+    normalized_model = model.strip().lower()
+    return template_id == "ollama" and bool(re.match(r"^qwen3(?:[:._-]|$)", normalized_model))
 
 
 def _is_local_provider(profile: dict[str, Any], base_url: str) -> bool:
@@ -1547,18 +2066,7 @@ def _is_local_provider(profile: dict[str, Any], base_url: str) -> bool:
 
 
 def _dsh_route_id(profile_id: str) -> str:
-    slug = re.sub(r"[^a-z0-9-]+", "-", profile_id.lower()).strip("-")
-    if not slug:
-        slug = hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:12]
-    # Keep the route readable while making collisions from punctuation or
-    # truncation impossible for two profile ids.
-    digest = hashlib.sha256(profile_id.encode("utf-8")).hexdigest()[:10]
-    return f"sumika-{slug[:48]}-{digest}"
-
-
-def _dsh_credential_ref(route_id: str) -> str:
-    digest = hashlib.sha256(route_id.encode("utf-8")).hexdigest()[:16].upper()
-    return f"SUMIKA_{digest}_API_KEY"
+    return dsh_route_id(profile_id)
 
 
 def _dsh_route_matches(current: dict[str, Any], desired: dict[str, Any]) -> bool:
@@ -1570,6 +2078,8 @@ def _dsh_route_matches(current: dict[str, Any], desired: dict[str, Any]) -> bool
         return False
     if current.get("headers") != desired.get("headers"):
         return False
+    if current.get("reasoning") != desired.get("reasoning"):
+        return False
     current_models = current.get("models")
     desired_models = desired.get("models")
     if not isinstance(current_models, list) or not isinstance(desired_models, list) or len(current_models) != len(desired_models):
@@ -1580,7 +2090,28 @@ def _dsh_route_matches(current: dict[str, Any], desired: dict[str, Any]) -> bool
         for key in ("id", "name", "contextWindow", "maxTokens", "input", "reasoningEfforts"):
             if current_model.get(key) != desired_model.get(key):
                 return False
+        if _normalize_dsh_compat(current_model.get("compat")) != _normalize_dsh_compat(desired_model.get("compat")):
+            return False
     return True
+
+
+def _normalize_dsh_compat(value: Any) -> dict[str, Any] | None:
+    """Ignore empty compatibility scaffolding written by DSH.
+
+    The pinned runtime may materialize ``chatTemplateKwargs: {}`` (or an
+    otherwise empty ``compat`` object) while persisting a route.  These values
+    carry no behavior and should not make every provider sync look like a
+    configuration change.  Non-empty compatibility options remain exact.
+    """
+
+    if not isinstance(value, dict):
+        return None
+    normalized = {
+        str(key): item
+        for key, item in value.items()
+        if not (str(key) == "chatTemplateKwargs" and isinstance(item, dict) and not item)
+    }
+    return normalized or None
 
 
 def _compact_agent_presets(value: Any) -> dict[str, Any]:
@@ -1764,6 +2295,18 @@ _MAX_PROMPT_TEXT_LENGTH = 12000
 _MAX_PROMPT_TOTAL_TEXT_LENGTH = 48000
 _BASE64_RE = re.compile(r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
 _AGENT_PRESET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_MCP_LAUNCH_ENV_RE = re.compile(r"^SUMIKA_MCP_[A-F0-9]{24}_SECRET$")
+
+
+def _mcp_launch_credential_refs(value: Any) -> set[str]:
+    if value is None or value == "":
+        return set()
+    if not isinstance(value, str) or len(value) > 4096:
+        return set()
+    refs = {item.strip() for item in value.split(",") if item.strip()}
+    if len(refs) > 32 or any(_MCP_LAUNCH_ENV_RE.fullmatch(item) is None for item in refs):
+        return set()
+    return refs
 
 
 def _opaque_id(value: Any, field: str, limit: int) -> str:
@@ -1788,6 +2331,17 @@ def _session_id(params: dict[str, Any]) -> str:
         or params.get("id")
     )
     return _opaque_id(value, "sessionId", _MAX_SESSION_ID_LENGTH)
+
+
+def _history_before_seq(params: dict[str, Any]) -> int | None:
+    """Validate the DSH history page cursor without accepting coercions."""
+
+    value = params.get("beforeSeq") if params.get("beforeSeq") is not None else params.get("before_seq")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise AgentRuntimeError("history beforeSeq must be a non-negative integer")
+    return value
 
 
 def _agent_preset_id(value: Any, field: str = "agentPreset") -> str:
@@ -1996,20 +2550,13 @@ def _safe_agent_text(value: Any, limit: int = 800) -> str:
     return text
 
 
-def _diagnostic_session_ids(value: Any) -> list[str]:
-    """Extract bounded session ids for session-scoped read-only probes."""
+def _diagnostic_session_id(params: dict[str, Any]) -> str | None:
+    """Return a caller-selected session scope, without guessing from history."""
 
-    items = value.get("items") if isinstance(value, dict) else None
-    if not isinstance(items, list):
-        return []
-    result: list[str] = []
-    for item in items[:32]:
-        if not isinstance(item, dict):
-            continue
-        session_id = _safe_agent_text(item.get("sessionId") or item.get("id"), 160)
-        if session_id:
-            result.append(session_id)
-    return result
+    value = params.get("sessionId") or params.get("session_id")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return _opaque_id(value, "sessionId", _MAX_SESSION_ID_LENGTH)
 
 
 def _diagnostic_entry_count(value: Any) -> int:
@@ -2027,6 +2574,7 @@ def _diagnostic_entry_count(value: Any) -> int:
 
 
 _MCP_PUBLIC_TOOL_RE = re.compile(r"^mcp__([A-Za-z0-9_-]{1,32})__([A-Za-z0-9_-]{1,64})$")
+_MCP_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 def _mcp_inventory_from_tools(value: Any) -> dict[str, Any]:
@@ -2073,6 +2621,134 @@ def _mcp_inventory_from_tools(value: Any) -> dict[str, Any]:
     }
 
 
+def _mcp_catalog_entries_from_inventory(value: dict[str, Any]) -> list[dict[str, Any]]:
+    entries = value.get("entries") if isinstance(value, dict) else []
+    result: list[dict[str, Any]] = []
+    for item in entries[:256] if isinstance(entries, list) else []:
+        if not isinstance(item, dict):
+            continue
+        server_name = _safe_agent_text(item.get("name") or item.get("id"), 32)
+        if _MCP_SERVER_NAME_RE.fullmatch(server_name) is None:
+            continue
+        tools: list[dict[str, Any]] = []
+        for tool in item.get("tools", [])[:128] if isinstance(item.get("tools"), list) else []:
+            if not isinstance(tool, dict):
+                continue
+            name = _safe_agent_text(tool.get("name") or tool.get("tool_name"), 128)
+            if not name:
+                continue
+            tools.append(
+                {
+                    "name": name,
+                    "tool_name": _safe_agent_text(tool.get("tool_name"), 96),
+                    "status": _safe_agent_text(tool.get("status") or "observed", 32),
+                    "last_seq": tool.get("last_seq") if isinstance(tool.get("last_seq"), int) else 0,
+                }
+            )
+        result.append(
+            {
+                "id": server_name,
+                "name": server_name,
+                "source": "session-history",
+                "freshness": "session-history",
+                "status": "observed",
+                "enabled": True,
+                "preset_ids": [],
+                "tools": tools,
+            }
+        )
+    return result
+
+
+def _mcp_catalog_entries_from_runtime(value: Any) -> list[dict[str, Any]]:
+    """Normalize common mcp.list response shapes to safe server summaries."""
+
+    if isinstance(value, list):
+        raw_entries = value
+    elif isinstance(value, dict):
+        raw_entries = next(
+            (value.get(key) for key in ("servers", "entries", "items", "value") if isinstance(value.get(key), list)),
+        ) if any(isinstance(value.get(key), list) for key in ("servers", "entries", "items", "value")) else []
+    else:
+        raw_entries = []
+    result: list[dict[str, Any]] = []
+    for item in raw_entries[:256]:
+        if not isinstance(item, dict):
+            continue
+        server_name = _safe_agent_text(item.get("name") or item.get("id") or item.get("serverName"), 32)
+        if _MCP_SERVER_NAME_RE.fullmatch(server_name) is None:
+            continue
+        tools: list[dict[str, Any]] = []
+        raw_tools = item.get("tools") if isinstance(item.get("tools"), list) else item.get("toolCatalog")
+        for tool in raw_tools[:128] if isinstance(raw_tools, list) else []:
+            if isinstance(tool, str):
+                tool_name = _safe_agent_text(tool, 128)
+                tool_status = "available"
+            elif isinstance(tool, dict):
+                tool_name = _safe_agent_text(tool.get("name") or tool.get("id"), 128)
+                tool_status = _safe_agent_text(tool.get("status") or "available", 32)
+            else:
+                continue
+            if not tool_name:
+                continue
+            tools.append({"name": tool_name, "tool_name": tool_name, "status": tool_status})
+        result.append(
+            {
+                "id": server_name,
+                "name": server_name,
+                "source": "runtime",
+                "freshness": "live",
+                "status": "available",
+                "enabled": item.get("enabled") is not False,
+                "preset_ids": [],
+                "tools": tools,
+            }
+        )
+    return result
+
+
+def _merge_mcp_catalog_entry(target: dict[str, dict[str, Any]], incoming: dict[str, Any]) -> None:
+    server_id = str(incoming.get("id") or incoming.get("name") or "").strip()
+    if _MCP_SERVER_NAME_RE.fullmatch(server_id) is None:
+        return
+    current = target.setdefault(
+        server_id,
+        {
+            "id": server_id,
+            "name": _safe_agent_text(incoming.get("name") or server_id, 64),
+            "sources": [],
+            "freshness": "unknown",
+            "status": "unknown",
+            "enabled": False,
+            "preset_ids": [],
+            "tools": [],
+        },
+    )
+    source = str(incoming.get("source") or "unknown")
+    if source not in current["sources"]:
+        current["sources"].append(source)
+    if incoming.get("enabled") is True:
+        current["enabled"] = True
+    for preset in incoming.get("preset_ids") or []:
+        if isinstance(preset, str) and preset not in current["preset_ids"]:
+            current["preset_ids"].append(preset)
+    existing_tools = {str(item.get("name")): item for item in current["tools"] if isinstance(item, dict)}
+    for tool in incoming.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        name = _safe_agent_text(tool.get("name") or tool.get("tool_name"), 128)
+        if name and name not in existing_tools:
+            existing_tools[name] = {
+                "name": name,
+                "tool_name": _safe_agent_text(tool.get("tool_name"), 96),
+                "status": _safe_agent_text(tool.get("status") or "observed", 32),
+            }
+    current["tools"] = list(existing_tools.values())[:128]
+    transport = _safe_agent_text(incoming.get("transport"), 32)
+    if transport and "transport" not in current:
+        current["transport"] = transport
+
+
 def _safe_event_extensions(payload: dict[str, Any], source: dict[str, Any], event_type: str) -> dict[str, Any]:
     """Keep only bounded presentation metadata on the persistent Sumika event bus."""
 
@@ -2088,10 +2764,16 @@ def _safe_event_extensions(payload: dict[str, Any], source: dict[str, Any], even
         result["event"] = {"type": nested_type}
         data = source.get("data") if isinstance(source.get("data"), dict) else {}
         if nested_type in {"tool/call", "tool/result"}:
+            call_id = _safe_agent_text(data.get("callId"), 160)
+            is_error = False
+            if nested_type == "tool/result":
+                call_id, is_error = _tool_result_metadata(data)
             tool = {
                 "name": _safe_agent_text(data.get("name") or "tool", 120),
-                "call_id": _safe_agent_text(data.get("callId"), 160),
+                "call_id": call_id,
             }
+            if nested_type == "tool/result":
+                tool["status"] = "failed" if is_error else "completed"
             view = _compact_tool_event_view(payload.get("view"), expected="call" if nested_type == "tool/call" else "result")
             if view:
                 tool["presentation"] = view
@@ -2101,6 +2783,9 @@ def _safe_event_extensions(payload: dict[str, Any], source: dict[str, Any], even
             result["turn"] = {
                 "state": "running" if nested_type == "turn/start" else _safe_agent_text(reason.get("kind") or "completed", 60),
             }
+            metrics = _safe_event_metrics(data)
+            if metrics:
+                result["metrics"] = metrics
         for key, item in payload.items():
             if key in {"type", "event", "view", "data", "content", "text", "sessionId", "rpcId"} or key in result:
                 continue
@@ -2144,6 +2829,32 @@ def _safe_event_extensions(payload: dict[str, Any], source: dict[str, Any], even
         question_rpc_id = _safe_agent_text(source.get("questionRpcId"), 160)
         if question_rpc_id:
             result["questionRpcId"] = question_rpc_id
+    return result
+
+
+def _safe_event_metrics(data: dict[str, Any]) -> dict[str, int | float]:
+    """Extract numeric runtime counters only; never copy metric-bearing text."""
+
+    aliases: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("duration_ms", ("durationMs", "duration_ms", "elapsedMs", "elapsed_ms")),
+        ("queue_ms", ("queueMs", "queue_ms")),
+        ("retry_count", ("retryCount", "retry_count", "retries")),
+        ("input_units", ("inputTokens", "input_tokens", "uncachedInputTokens", "uncached_input_tokens")),
+        ("output_units", ("outputTokens", "output_tokens", "decodeTokens", "decode_tokens")),
+        ("cache_units", ("cacheReadTokens", "cache_read_tokens", "cachedInputTokens", "cached_input_tokens")),
+        ("estimated_cost", ("estimatedCost", "estimated_cost", "cost")),
+        ("approval_count", ("approvalCount", "approval_count")),
+    )
+    result: dict[str, int | float] = {}
+    for output_key, candidates in aliases:
+        for key in candidates:
+            value = data.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            if not math.isfinite(value) or value < 0 or value > 10**15:
+                continue
+            result[output_key] = int(value) if isinstance(value, int) or value.is_integer() else round(float(value), 6)
+            break
     return result
 
 
@@ -2212,6 +2923,26 @@ def _compact_queue_items(items: list[Any]) -> dict[str, Any]:
             }
         )
     return {"items": visible, "hidden_context_count": hidden_context_count}
+
+
+def _tool_result_metadata(data: dict[str, Any]) -> tuple[str, bool]:
+    """Read DSH's nested tool-result envelope without exposing its content."""
+
+    call_id = _safe_agent_text(data.get("callId"), 160)
+    is_error = bool(data.get("isError")) or isinstance(data.get("error"), dict)
+    message = data.get("message") if isinstance(data.get("message"), dict) else {}
+    source = message.get("source") if isinstance(message.get("source"), dict) else {}
+    if not call_id:
+        call_id = _safe_agent_text(source.get("callId"), 160)
+    content = message.get("content") if isinstance(message.get("content"), list) else []
+    for block in content[:16]:
+        if not isinstance(block, dict) or block.get("type") != "tool-result":
+            continue
+        if not call_id:
+            call_id = _safe_agent_text(block.get("toolCallId"), 160)
+        if block.get("isError") is True:
+            is_error = True
+    return call_id, is_error
 
 
 def _safe_locations(value: Any, limit: int = 12) -> list[dict[str, Any]]:
@@ -2372,10 +3103,83 @@ def _safe_numeric_map(value: Any) -> dict[str, int | float]:
     for key, item in value.items():
         if any(token in str(key).lower() for token in ("secret", "password", "apikey", "api_key", "authorization")):
             continue
-        if isinstance(item, bool) or not isinstance(item, (int, float)):
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or item < 0:
             continue
         result[str(key)] = item
     return result
+
+
+def _non_negative_number(value: Any) -> int | float | None:
+    """Return a finite, non-negative JSON number suitable for telemetry."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return int(value) if isinstance(value, int) or value.is_integer() else float(value)
+
+
+def _compact_known_numbers(value: Any, fields: tuple[tuple[str, tuple[str, ...]], ...]) -> dict[str, int | float]:
+    """Copy only documented projection fields, accepting known wire aliases."""
+
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, int | float] = {}
+    for output_key, aliases in fields:
+        for alias in aliases:
+            number = _non_negative_number(value.get(alias))
+            if number is not None:
+                result[output_key] = number
+                break
+    return result
+
+
+_TOKEN_USAGE_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("uncachedInputTokens", ("uncachedInputTokens", "uncached_input_tokens", "inputTokens", "input_tokens")),
+    ("outputTokens", ("outputTokens", "output_tokens")),
+    ("cacheReadTokens", ("cacheReadTokens", "cache_read_tokens", "cachedInputTokens", "cached_input_tokens")),
+    ("cacheWriteTokens", ("cacheWriteTokens", "cache_write_tokens")),
+)
+_CONTEXT_PRESSURE_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("projectedTokens", ("projectedTokens", "projected_tokens", "usedTokens", "used_tokens")),
+    ("pressureTokens", ("pressureTokens", "pressure_tokens")),
+    ("contextWindow", ("contextWindow", "context_window", "maxContextTokens", "max_context_tokens")),
+)
+_CONTEXT_BREAKDOWN_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("systemTokens", ("systemTokens", "system_tokens")),
+    ("toolsTokens", ("toolsTokens", "tools_tokens")),
+    ("messageTokens", ("messageTokens", "message_tokens")),
+)
+_SESSION_STATS_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("turns", ("turns",)),
+    ("steps", ("steps",)),
+    ("llmMs", ("llmMs", "llm_ms")),
+    ("toolMs", ("toolMs", "tool_ms")),
+    ("ttftMs", ("ttftMs", "ttft_ms")),
+    ("ttftSteps", ("ttftSteps", "ttft_steps")),
+    ("decodeMs", ("decodeMs", "decode_ms")),
+    ("decodeTokens", ("decodeTokens", "decode_tokens")),
+    # Older DSH projections exposed completion usage on sessionStats rather
+    # than the newer tokenUsage projection. Keep this documented field in the
+    # stats view for compatibility while also exposing tokenUsage separately.
+    ("outputTokens", ("outputTokens", "output_tokens")),
+)
+
+
+def _compact_token_usage(value: Any) -> dict[str, int | float]:
+    return _compact_known_numbers(value, _TOKEN_USAGE_FIELDS)
+
+
+def _compact_context_pressure(value: Any) -> dict[str, int | float]:
+    return _compact_known_numbers(value, _CONTEXT_PRESSURE_FIELDS)
+
+
+def _compact_context_breakdown(value: Any) -> dict[str, int | float]:
+    return _compact_known_numbers(value, _CONTEXT_BREAKDOWN_FIELDS)
+
+
+def _compact_session_stats(value: Any) -> dict[str, int | float]:
+    return _compact_known_numbers(value, _SESSION_STATS_FIELDS)
 
 
 def _compact_model_catalog(value: Any) -> dict[str, Any]:
@@ -2505,7 +3309,9 @@ def _safe_questions(value: Any) -> list[dict[str, Any]]:
         if not question_id or not question:
             continue
         projected: dict[str, Any] = {"id": question_id, "question": question}
-        for key, limit in (("header", 120), ("detail", 1200)):
+        plan_intent = item.get("intent") if isinstance(item.get("intent"), dict) else {}
+        is_plan_review = plan_intent.get("kind") == "plan-review"
+        for key, limit in (("header", 120), ("detail", 24000 if is_plan_review else 1200)):
             text = _safe_agent_text(item.get(key), limit)
             if text:
                 projected[key] = text
@@ -2534,6 +3340,41 @@ def _safe_questions(value: Any) -> list[dict[str, Any]]:
                 projected["intent"] = {"kind": "plan-review", "approve": approve}
         result.append(projected)
     return result
+
+
+def _plan_review_metadata(questions: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Recognize only DSH's fixed plan-review question shape."""
+
+    for question in questions:
+        intent = question.get("intent")
+        if not isinstance(intent, dict) or intent.get("kind") != "plan-review":
+            continue
+        approve = _safe_agent_text(intent.get("approve"), 240)
+        options = question.get("options") if isinstance(question.get("options"), list) else []
+        labels = {
+            str(option.get("label"))
+            for option in options
+            if isinstance(option, dict) and isinstance(option.get("label"), str)
+        }
+        # DSH 0.1.1-rc.2 uses these exact labels.  Do not classify a future
+        # or arbitrary question as a plan review based on intent alone.
+        if approve and approve in labels and "Keep planning" in labels:
+            return {"approve": approve, "keep_planning": "Keep planning"}
+    return None
+
+
+def _interaction_response_accepted(response: Any) -> bool:
+    """Accept the bounded receipt shape across DSH HTTP wrappers."""
+
+    if not isinstance(response, dict):
+        return False
+    if response.get("accepted") is True:
+        return True
+    for key in ("value", "result"):
+        nested = response.get(key)
+        if isinstance(nested, dict) and _interaction_response_accepted(nested):
+            return True
+    return False
 
 
 def _valid_question_answer(answer: dict[str, Any], questions: Any) -> bool:
@@ -2610,6 +3451,137 @@ def _compact_message(event: dict[str, Any], *, sequence: int) -> dict[str, Any] 
     }
 
 
+_RETRYABLE_TURN_KINDS = frozenset(
+    {"error", "failed", "failure", "cancelled", "canceled", "aborted", "interrupted", "stopped"}
+)
+_NON_RETRYABLE_TURN_KINDS = frozenset({"completed", "success", "succeeded", "max-tokens", "max_tokens"})
+
+
+def _retry_target_from_history(history: Any) -> dict[str, Any]:
+    """Find a replayable text target in the latest closed DSH turn.
+
+    The helper deliberately works on the raw history page only inside the
+    adapter.  It returns the text to the caller so it can be sent immediately,
+    but callers must use the bounded receipt returned by ``retry_prompt`` and
+    never persist this object in an audit event.
+    """
+
+    events = history.get("events") if isinstance(history, dict) else None
+    if not isinstance(events, list) or not events:
+        raise AgentRuntimeError("the latest Agent turn is not retryable: no history was returned")
+
+    ordered: list[tuple[int, dict[str, Any]]] = []
+    for index, wrapper in enumerate(events):
+        if not isinstance(wrapper, dict):
+            continue
+        event = wrapper.get("event") if isinstance(wrapper.get("event"), dict) else wrapper
+        if not isinstance(event, dict):
+            continue
+        sequence = event.get("seq")
+        order = sequence if isinstance(sequence, int) and not isinstance(sequence, bool) else index
+        ordered.append((order, event))
+    ordered.sort(key=lambda item: item[0])
+    if not ordered:
+        raise AgentRuntimeError("the latest Agent turn is not retryable: no valid history events")
+
+    end_index = max(
+        (index for index, (_, event) in enumerate(ordered) if event.get("type") == "turn/end"),
+        default=-1,
+    )
+    if end_index < 0:
+        if any(event.get("type") == "turn/start" for _, event in ordered):
+            raise AgentRuntimeError("the latest Agent turn is still running")
+        raise AgentRuntimeError("the latest Agent turn is not retryable: no terminal event")
+
+    # A start after the selected terminal event means a newer open turn exists;
+    # do not replay an older failure while that turn is still running.
+    if any(event.get("type") == "turn/start" for _, event in ordered[end_index + 1 :]):
+        raise AgentRuntimeError("the latest Agent turn is still running")
+
+    end_event = ordered[end_index][1]
+    end_data = end_event.get("data") if isinstance(end_event.get("data"), dict) else {}
+    reason = end_data.get("reason") if isinstance(end_data.get("reason"), dict) else {}
+    kind = str(reason.get("kind") or end_data.get("status") or "").strip().lower()
+    if kind not in _RETRYABLE_TURN_KINDS:
+        if kind in _NON_RETRYABLE_TURN_KINDS or not kind:
+            raise AgentRuntimeError("the latest Agent turn is not retryable")
+        raise AgentRuntimeError("the latest Agent turn has an unsupported terminal state")
+
+    raw_turn = end_data.get("turn")
+    turn: int | str | None
+    if isinstance(raw_turn, bool) or not isinstance(raw_turn, (int, str)):
+        turn = None
+    else:
+        turn = raw_turn
+
+    start_index = 0
+    start_data: dict[str, Any] = {}
+    for index in range(end_index - 1, -1, -1):
+        event = ordered[index][1]
+        if event.get("type") != "turn/start":
+            continue
+        candidate_data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        candidate_turn = candidate_data.get("turn")
+        if turn is None or candidate_turn == turn or str(candidate_turn) == str(turn):
+            start_index = index
+            start_data = candidate_data
+            break
+
+    user_event: dict[str, Any] | None = None
+    for index in range(end_index - 1, start_index - 1, -1):
+        event = ordered[index][1]
+        if event.get("type") != "user/message":
+            continue
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        message = data.get("message") if isinstance(data.get("message"), dict) else data
+        if not isinstance(message, dict) or str(message.get("role") or "user").strip().lower() != "user":
+            continue
+        source = message.get("source") if isinstance(message.get("source"), dict) else data.get("source")
+        if isinstance(source, dict) and source.get("kind") not in {None, "user"}:
+            continue
+        candidate_turn = data.get("turn")
+        if turn is not None and candidate_turn is not None and str(candidate_turn) != str(turn):
+            continue
+        user_event = message
+        break
+
+    if user_event is None:
+        raise AgentRuntimeError("the latest failed Agent turn has no replayable user target")
+
+    content = user_event.get("content")
+    if not isinstance(content, list) or not content:
+        raise AgentRuntimeError("the retry target contains image or non-text content")
+    if user_event.get("attachments") or any(
+        not isinstance(block, dict) or block.get("type") != "text" for block in content
+    ):
+        raise AgentRuntimeError("the retry target contains image or non-text content")
+    try:
+        normalized = _prompt_content(content)
+    except AgentRuntimeError as error:
+        raise AgentRuntimeError("the retry target contains invalid text content") from error
+    text = "\n".join(block["text"] for block in normalized)
+    if not text.strip():
+        raise AgentRuntimeError("the latest failed Agent turn has no replayable user target")
+
+    mode = "execute"
+    for candidate in (
+        start_data.get("mode"),
+        start_data.get("requestedMode"),
+        start_data.get("requested_mode"),
+        (start_data.get("trigger") or {}).get("mode") if isinstance(start_data.get("trigger"), dict) else None,
+    ):
+        candidate_mode = str(candidate or "").strip().lower()
+        if candidate_mode in {"plan", "execute", "readonly"}:
+            mode = candidate_mode
+            break
+    return {
+        "turn": turn,
+        "mode": mode,
+        "text": text,
+        "text_length": len(text),
+    }
+
+
 def _compact_plan(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {"active": False, "pending": False, "steps": []}
@@ -2634,6 +3606,125 @@ def _compact_plan(value: Any) -> dict[str, Any]:
     return result
 
 
+_TURN_STATUS_ALIASES = {
+    "complete": "completed",
+    "completed": "completed",
+    "success": "completed",
+    "succeeded": "completed",
+    "ok": "completed",
+    "cancel": "cancelled",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+    "abort": "aborted",
+    "aborted": "aborted",
+    "fail": "failed",
+    "failed": "failed",
+    "failure": "failed",
+    "error": "error",
+    "interrupted": "interrupted",
+    "stopped": "stopped",
+}
+def _turn_status(value: Any, *, default: str = "running") -> str:
+    candidate = str(value or "").strip().lower()
+    return _TURN_STATUS_ALIASES.get(candidate, default)
+
+
+def _turn_reference(data: dict[str, Any], sequence: int, active: str | None) -> tuple[str | None, int | str | None]:
+    raw_turn = data.get("turn")
+    if isinstance(raw_turn, bool) or not isinstance(raw_turn, (int, str)):
+        return active, None
+    if isinstance(raw_turn, str):
+        turn_value = _safe_agent_text(raw_turn, 80)
+        if not turn_value:
+            return active, None
+    else:
+        turn_value = raw_turn
+    return f"turn:{turn_value}", turn_value
+
+
+def _compact_turns(events: list[Any]) -> list[dict[str, Any]]:
+    """Project bounded turn lifecycle counters without conversation content."""
+
+    records: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    active: str | None = None
+    for wrapper in events:
+        if not isinstance(wrapper, dict):
+            continue
+        event = wrapper.get("event") if isinstance(wrapper.get("event"), dict) else wrapper
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "")
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        raw_sequence = event.get("seq")
+        sequence = raw_sequence if isinstance(raw_sequence, int) and not isinstance(raw_sequence, bool) and raw_sequence >= 0 else 0
+        reference, turn_value = _turn_reference(data, sequence, active)
+        if event_type == "turn/start" and reference is None:
+            reference = f"seq:{sequence}"
+        if reference is None:
+            continue
+        record = records.get(reference)
+        if record is None:
+            record = {
+                "id": reference[:96],
+                "status": "running",
+                "steps": 0,
+                "tools": 0,
+                "approvals": 0,
+                "artifacts": 0,
+            }
+            if turn_value is not None:
+                record["turn"] = turn_value
+            records[reference] = record
+            order.append(reference)
+        if event_type == "turn/start":
+            active = reference
+            record["status"] = "running"
+            record["start_seq"] = sequence
+            mode = str(data.get("mode") or data.get("requestedMode") or data.get("requested_mode") or "").strip().lower()
+            if mode in {"plan", "execute", "readonly"}:
+                record["mode"] = mode
+        elif event_type == "turn/end":
+            reason = data.get("reason") if isinstance(data.get("reason"), dict) else {}
+            record["status"] = _turn_status(reason.get("kind") or reason.get("status") or data.get("status"), default="completed")
+            record["end_seq"] = sequence
+            if active == reference:
+                active = None
+        elif event_type == "step/start":
+            record["steps"] = min(10000, int(record.get("steps") or 0) + 1)
+        elif event_type == "tool/call":
+            record["tools"] = min(10000, int(record.get("tools") or 0) + 1)
+        elif event_type.startswith("approval/") or event_type.startswith("approval."):
+            if event_type.endswith("requested") or event_type.endswith("request"):
+                record["approvals"] = min(10000, int(record.get("approvals") or 0) + 1)
+        elif "artifact" in event_type or "diff" in event_type:
+            record["artifacts"] = min(10000, int(record.get("artifacts") or 0) + 1)
+
+    result: list[dict[str, Any]] = []
+    for reference in order[-16:]:
+        record = records[reference]
+        clean: dict[str, Any] = {
+            "id": _safe_agent_text(record.get("id"), 96),
+            "status": _turn_status(record.get("status")),
+            "steps": max(0, int(record.get("steps") or 0)),
+            "tools": max(0, int(record.get("tools") or 0)),
+            "approvals": max(0, int(record.get("approvals") or 0)),
+            "artifacts": max(0, int(record.get("artifacts") or 0)),
+        }
+        for key in ("turn", "mode", "start_seq", "end_seq"):
+            value = record.get(key)
+            if key == "mode":
+                if value in {"plan", "execute", "readonly"}:
+                    clean[key] = value
+            elif key in {"start_seq", "end_seq"}:
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    clean[key] = value
+            elif value is not None:
+                clean[key] = value
+        result.append(clean)
+    return result
+
+
 def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[str, Any]:
     """Project DSH history into a bounded, stable Sumika session snapshot."""
 
@@ -2649,7 +3740,9 @@ def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[s
     approvals: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
     artifacts_by_call_id: dict[str, dict[str, Any]] = {}
+    sequence_values: list[int] = []
     last_turn_state = "idle"
+    turns = _compact_turns(events)
 
     for wrapper in events:
         if not isinstance(wrapper, dict):
@@ -2658,8 +3751,10 @@ def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[s
         if not isinstance(event, dict):
             continue
         event_type = str(event.get("type") or "agent/event")
-        sequence = event.get("seq")
-        sequence = sequence if isinstance(sequence, int) else 0
+        raw_sequence = event.get("seq")
+        sequence = raw_sequence if isinstance(raw_sequence, int) else 0
+        if isinstance(raw_sequence, int) and not isinstance(raw_sequence, bool) and raw_sequence >= 0:
+            sequence_values.append(raw_sequence)
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
         tool_view = wrapper.get("view") if isinstance(wrapper.get("view"), dict) else None
         if event_type in {"user/message", "assistant/message"}:
@@ -2693,7 +3788,7 @@ def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[s
             if call_id:
                 tools_by_call_id[call_id] = entry
         elif event_type == "tool/result":
-            call_id = _safe_agent_text(data.get("callId"), 120)
+            call_id, is_error = _tool_result_metadata(data)
             entry = tools_by_call_id.get(call_id) if call_id else None
             if entry is None:
                 entry = {
@@ -2705,13 +3800,16 @@ def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[s
                 tools.append(entry)
                 if call_id:
                     tools_by_call_id[call_id] = entry
-            entry["status"] = "failed" if bool(data.get("isError")) else "completed"
+            entry["status"] = "failed" if is_error else "completed"
             entry["completed_seq"] = sequence
+            artifact = artifacts_by_call_id.get(call_id) if call_id else None
+            if artifact is not None:
+                artifact["status"] = entry["status"]
+                artifact["seq"] = sequence
             presentation = _compact_tool_event_view(tool_view, expected="result")
             if presentation:
                 entry["result"] = presentation
                 if presentation.get("card") == "diff":
-                    artifact = artifacts_by_call_id.get(call_id) if call_id else None
                     if artifact is None:
                         artifact = _diff_artifact_from_view(
                             presentation,
@@ -2771,8 +3869,10 @@ def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[s
     tools = tools[-24:]
     approvals = approvals[-16:]
     artifacts = artifacts[-16:]
-    stats = _safe_numeric_map(values.get("sessionStats"))
-    context = _safe_numeric_map(values.get("contextPressure"))
+    stats = _compact_session_stats(values.get("sessionStats"))
+    context = _compact_context_pressure(values.get("contextPressure"))
+    token_usage = _compact_token_usage(values.get("tokenUsage"))
+    context_breakdown = _compact_context_breakdown(values.get("contextBreakdown"))
     return {
         "session_id": session_id,
         "state": last_turn_state,
@@ -2784,9 +3884,17 @@ def _compact_session_history(session_id: str, history: dict[str, Any]) -> dict[s
         "tools": tools,
         "approvals": approvals,
         "artifacts": artifacts,
+        "turns": turns,
         "stats": stats,
         "context": context,
+        "token_usage": token_usage,
+        "context_breakdown": context_breakdown,
         "has_more": bool(history.get("hasMore")),
+        # DSH's beforeSeq cursor is the sequence of the first event in the
+        # current page.  Keeping it separate from the compact message list
+        # lets the UI page across tool-only turns without exposing raw events.
+        "oldest_seq": min(sequence_values) if sequence_values else None,
+        "newest_seq": max(sequence_values) if sequence_values else None,
         "event_count": len(events),
     }
 

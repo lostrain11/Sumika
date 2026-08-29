@@ -12,11 +12,14 @@ Sumika 当前采用 DSH-first，但 DSH 只是 [Agent Runtime](../architecture/a
 `http://127.0.0.1:3080`。`SUMIKA_AGENT_RUNTIME=dsh` 是默认选择。可以用
 `SUMIKA_AGENT_ENDPOINT`（兼容 `SUMIKA_DSH_ENDPOINT`）指向受管实例，用
 `SUMIKA_AGENT_PROFILE_DIR`（兼容 `SUMIKA_DSH_PROFILE_DIR`）指定隔离 profile；
-桌面端只有在同时设置
-`SUMIKA_AGENT_AUTOSTART=1` 和 `SUMIKA_AGENT_EXECUTABLE` 时才会启动子进程；
-现有 `SUMIKA_DSH_AUTOSTART` / `SUMIKA_DSH_EXECUTABLE` 继续兼容。launcher 会把
+Tauri 仍只在 `SUMIKA_AGENT_AUTOSTART=1` 且存在
+`SUMIKA_AGENT_EXECUTABLE` 时启动子进程；Windows 的 `run-desktop.ps1` 会先复用
+已通过健康检查的外部端点，否则自动发现固定安装目录中已经存在且版本匹配的
+DSH，再为本次启动设置这两个变量。现有 `SUMIKA_DSH_AUTOSTART` /
+`SUMIKA_DSH_EXECUTABLE` 继续兼容。launcher 会把
 `.sumika-desktop/dsh-profile` 作为子进程 `DSH_HOME`。Sumika 不会写入用户全局
-`DSH_HOME`。`SUMIKA_DSH_ENABLED=0` 可关闭适配器。
+`DSH_HOME`，启动流程也不会安装、升级或下载 DSH。`SUMIKA_DSH_ENABLED=0` 可关闭
+适配器。
 
 当前 npm CLI tarball 的 SHA-256 为
 `47ec05f45ada5ab87779ae18a90456b5ebff5421dc0ff5c179677d65e1c16057`；该值也
@@ -51,16 +54,55 @@ DSH 历史里筛选公开名称符合 `mcp__<server>__<tool>` 的工具事件。
 不会跨越 Core 边界。卡片显示“已观察”只证明该工具曾出现在这段会话历史中，不表示
 MCP server 当前在线；尚未调用过时显示“尚未观察”，也不等同于插件未安装。
 
-MCP 配置写入仍保持关闭。固定版 `dsh-mcp-client` 由 Agent preset 的 Cordis plugin row
-挂载，而且包本身明确没有异步重同步后的独立 server-to-tool snapshot。后续配置管理
-必须先创建 Sumika 自有的 user preset、隔离凭据注入并通过 mount validation，再允许用户
-显式启用；当前实现不会静默修改 `cordis.patch.yml`、系统 preset 或全局 DSH。
+MCP 配置通过独立的 `mcp-configuration` capability 接入。固定版没有 composition
+写入 RPC，因此 Sumika 只在受管 profile 的 `trust=user` Preset 中维护带版本标记的
+`dsh-mcp-client` 行；系统 Preset、`cordis.patch.yml` 和用户全局 DSH 保持只读。UI 先调用
+`agent.mcp.configuration.preview`，用户明确批准后才原子写入，并立即创建空白 Session
+执行 mount validation。原文会先复制到受管 profile 的私有备份目录；写入、挂载或验证
+会话归档失败时逐字恢复，检测到并发修改时拒绝覆盖。
+
+受管配置支持 `stdio` 和 `streamable-http`，并可为每条连接登记一个受保护凭据目标。
+`stdio` 将密钥映射到经过校验的目标环境变量；HTTP 将密钥映射到安全的鉴权请求头，
+可带非敏感前缀，例如 `Bearer `。密钥值只写入 Windows Credential Manager。Preset
+只保存版本化元数据和固定 DSH loader 表达式 `!!js process.env...`，不保存值、凭据引用
+或可执行的任意 JavaScript。Sumika 重新生成并逐字验证受管行，手工篡改表达式、目标或
+元数据会使读取和启动绑定 fail-closed。
+
+新增、替换、轮换或移除密钥会要求重启。首次保存或轮换时，连接自动保持关闭；Tauri
+通过版本化 NUL 私有协议一次读取当前 Provider 与 MCP 密钥，只把值注入受管 DSH 子进程
+环境，并把已加载的非敏感环境名集合传给 Core。重启后用户再次编辑连接即可启用。
+禁用连接缺少密钥不会阻止桌面启动；启用连接缺少密钥会明确失败。`env`、任意 headers、
+URL 内嵌凭据和参数中的密钥仍被拒绝。启用行固定使用 `failOnStartupError: true`，因此
+连接或工具发现失败不会被误报成可用。配置只影响之后创建的 Session；MCP 工具是否
+实际出现仍以 DSH tool catalog 和会话事件为准。
+
+### Phase 3 交付边界
+
+Phase 0–3 已完成并通过隔离组合验收，当前暂停在 Phase 3，不自动进入 Phase 4。已交付
+的边界包括：Provider 与 MCP 凭据的受保护注入、User Preset 的复制/打开/删除/恢复、
+MCP 配置的 preview/apply、mount validation、stdio/streamable HTTP 连接，以及 Skill
+元数据的 discover/approve/revoke。Plugin manifest 已完成安全发现、审批和 provider
+边界；安装、升级、签名验证和隔离 Runner 仍属于后续能力。
+
+2026-08-29 在全新隔离 profile 上通过了
+`agent_daily_acceptance.py --runtime-smoke --mcp --skills-subagents`：Plan Review、
+批准前 checkpoint、Execute、MCP `initialize/tools/list/tools/call`、Skill discover/load、
+Subagent 创建/历史读取、Workspace diff 与精确恢复均为通过。该报告只保留布尔值、计数和
+状态，不包含提示词、模型输出、路径、凭据或 Cookie。
+
+固定 DSH Web API 没有独立的 live `mcp.list`、Readonly policy、composition 写入、artifact
+或 rollback RPC。Sumika 对这些能力明确返回 `not-exposed`，或由自身 WorkspaceRuntime
+补足可验证的 diff/恢复边界；不会把观察到的工具或包存在误报成在线能力。后续只有在用户
+明确恢复目标后，才开始 Phase 4 的更广泛日用任务和真实第三方账号/MCP 验证。
 
 ### User Preset 管理
 
 Agent 页读取 DSH 的真实 `agentPreset.list`，并通过固定协议提供
-`agentPreset.copy`、`agentPreset.openDocument` 和 `agentPreset.remove`。Sumika 不读取、
-展示或直接改写 Preset composition，也不会直接删除 DSH profile 中的目录。
+`agentPreset.copy`、`agentPreset.openDocument` 和 `agentPreset.remove`。用户 Preset 还可
+显式执行 mount validation：DSH 创建一个指定 Preset 的空白 Session 来触发真实组装，
+成功后必须通过 `workspace.archiveSession` 归档该验证 Session；创建或归档任一步失败都
+明确报错。除上述带 Sumika 标记的 MCP 行外，Sumika 不解析、展示或重排 Preset 的其他
+composition 内容，也不会直接删除 DSH profile 中的目录。
 
 删除不是只由 Skill 约束的工具能力。Core 在每次删除前重新读取 DSH roster，只允许
 `trust=user` 的精确 Preset ID，并同时要求 `approved: true` 与完整 ID 二次确认；系统、
@@ -82,9 +124,29 @@ Developer 页的“DSH 能力探针”（`agent.diagnostics` 或
 DSH Session。
 
 Agent 页还接入了 `workspace.list` 和 `workspace.create`。后者只让 DSH 登记一个已经
-存在的目录；它不会创建、移动或删除目录。新建会话可显式携带 `workspaceId`，否则
-继续使用当前进程目录。删除 Workspace 登记、重排、归档会话等真实 DSH 协议本轮不在
-Sumika UI 暴露。
+存在且通过 `WorkspaceRuntime` 检查的 Git 目录；它不会创建、移动或删除目录。新建
+DSH 会话必须显式携带已登记的 `workspaceId`，不再使用当前进程目录。删除 Workspace
+登记、重排、归档会话等真实 DSH 协议本轮不在 Sumika UI 暴露。
+
+这层登记与 Sumika 的 Git 安全层分开。Agent 页的“Workspace 安全与回滚”使用
+`WorkspaceRuntime` 的 `workspace.inspect`、`workspace.checkpoint.create`、
+`workspace.checkpoint.diff`、`workspace.restore.preview` 和 `workspace.restore` RPC，
+对同一目录保存文件摘要和受控 blob。恢复前会自动保存恢复前 checkpoint，并在明确
+批准后把当前变更移入仓库内的可恢复归档；公共响应不包含文件内容、绝对归档路径或
+内部 blob。文件列表超过展示上限时只截断 UI 摘要，不截断恢复范围。
+
+Execute 请求必须携带当前 Session 实际归属的 `workspaceId`。Core 重新读取 DSH
+Workspace roster，确认 Session 归属后先创建 checkpoint，再把目标交给 DSH；检查或
+checkpoint 失败时不会发送目标。用户仍可在 UI 中额外创建命名 checkpoint。
+Plan 请求本身不创建 checkpoint；由于批准 `exit_plan_mode` 的 Plan Review 会在同一回合
+直接继续执行，Core 会先识别精确的待处理审查、验证 Session/Workspace 归属并创建
+checkpoint，然后才向 DSH 回复 `Approve`。任一步失败都不会批准计划。
+WorkspaceRuntime 不提交 Git、不删除已有 `deprecated/` 内容，并不声称 DSH 已提供
+artifact 或 rollback RPC。
+
+固定版 DSH 没有可由 Sumika 验证的独立 Readonly policy/Preset，因此 adapter 不声明
+`readonly` capability，UI 也不显示该模式。Plan 继续通过 DSH command plane 提供真实的
+非修改规划流程；Readonly 只有在未来 Runtime 提供可验证策略后才会进入可选项。
 
 `session.fork` 用于从源会话的最近完成回合创建子 Session；固定协议也允许以后传入
 消息对应的 `atSeq`。Sumika 当前只提供“从最近完成回合创建分支”，创建后原会话和日志
@@ -120,6 +182,37 @@ Agent 页会把 DSH host 提供的 `ToolEventView(card=diff)` 投影为文件级
   PNG/JPEG/WebP/GIF、限制 base64 大小，并向 UI 返回脱敏引用；图片数据不写入 Sumika
   事件或日志。会话消息仅携带附件元数据，用户点击“查看图片”时才读取正文。
 
+Agent 页会记住最后选择的 DSH Session，但只在 `localStorage` 保存 `runtime_id` 和
+`session_id`。重启或刷新后先以 `agent.sessions` roster 校验，再重新加载该 Session 的
+命令、Skills、待处理交互、模型、队列、Subagents、Workspace 归属和最近八组消息。
+DSH roster 是权威源；消息正文、路径、工具结果和凭据不会写入该偏好记录。创建会话后
+若 roster 短暂为空，前端保留 DSH 刚返回的 ID，避免把最终一致性窗口误判为会话失效。
+
+最近消息区域的“加载更早消息”使用 DSH `session.history.beforeSeq` 游标继续向上翻页。
+适配器把当前页最早事件的 sequence 作为下一页游标，前端只合并脱敏后的消息、工具、审批、
+产物和时间线，不覆盖已经显示的当前页；低频同步或只读投影短暂为空时也保留已有内容。
+游标分页不会暴露原始事件、工具参数或完整结果，历史用尽后按钮消失。
+
+### 刷新、断线与失败回合恢复
+
+Agent 页面每 15 秒执行一次低频同步；WebSocket 重连、窗口重新聚焦和页面重新可见时
+立即同步。同步先以 DSH `agent.sessions` roster 校验当前 Session，再并行读取 snapshot、
+queue、interactions、models、Subagents、Workspace 和任务投影。同步请求不会在发送、审批、
+队列编辑或其他 Agent mutation 期间重绘页面；完成后最多补发一次排队同步，避免覆盖输入中
+草稿或确认状态。
+
+若最近回合明确以 `error`、`failed`、`cancelled`、`aborted` 等终态结束，且最近用户目标
+只有文字，Agent 卡片显示“重试最近目标”。重试必须由用户确认，并再次提交精确 Session ID；
+Core 在 adapter 调用前创建 Workspace checkpoint，只向 Runtime 传递模式和 Session ID，
+不转发审批字段。图片目标、缺失历史、运行中或已完成回合不会自动重放；含图片的目标只提示
+用户重新附加。返回值和审计事件仅含回合标识、模式、长度和 checkpoint ID，不含目标正文、
+工具结果或审批文本。
+
+当前重试实现复用正常 `session.prompt`，因为固定 DSH Web API 没有稳定的 `session.retry`
+RPC。适配器从受限 `session.history` 提取最后一个失败/取消文本目标，拒绝非文本或新近成功
+回合；未来 Harness 若提供原生重试协议，可在 `AgentRuntime` capability 中替换而不改变 UI
+和 Core 的审批边界。
+
 Agent composer 也支持同一组图片格式的临时附件。文件只在内存中转为 DSH `session.prompt`
 的 image content block，发送成功后立即从 Sumika 前端状态清除；Plan 命令仍只接受文字，
 不会把图片静默丢弃或当作普通文本。
@@ -144,6 +237,18 @@ DSH 的服务器请求不会被当作普通事件丢给聊天页。适配器在�
 
 - `approval/requested`：`id`、`session_id`、`approval_id`、工具名称、原因和创建时间；
 - `question/requested`：问题 `id`、标题、说明、选项以及是否允许多选。
+
+当问题同时带有 DSH 固定的 `intent.kind = "plan-review"`、`Approve` 和
+`Keep planning` 选项时，Core 会额外标记 `plan_review` 投影。Agent 页会把它显示为
+独立的计划审查卡片：计划详情使用有界的可滚动文本展示，“批准并执行”发送
+`Approve`，“继续规划”发送 `Keep planning`（可附带受限的意见文本）。两者都使用
+原问题 ID 和完整 answer batch，不把审查内容写入 Sumika 聊天消息。
+“批准并执行”还必须携带当前 Session 的 `workspaceId`；Core 返回的有界回执包含新建
+checkpoint 摘要，前端据此刷新 Workspace 安全区。
+
+“直接讨论”使用单独的 `agent.question.cancel` RPC，发送 DSH 要求的
+`ok: false` / `error.code: "cancelled"` 响应。它表示用户关闭审查并准备发送新消息，
+不会伪造一个选项答案；运行时保持 Plan 模式，直到用户或 Agent 明确切换。
 
 Agent 页的“待处理交互”区域通过 `agent.interactions` 读取队列。审批只能选择
 `allowed-once` 或 `rejected`；问题回答必须与 DSH 请求中的问题数量、顺序、问题 ID、
@@ -192,13 +297,101 @@ Agent 页的“工具”区域默认折叠每次调用。它只消费 DSH host �
 按钮可单独执行这一步，便于在发送目标前检查状态。
 
 Base URL、模型和非敏感请求头进入 DSH settings；API Key 只通过
-`credentials.set` 写入受管 DSH 凭据层，Sumika 日志、事件和 API 返回均不包含密钥。
-当前桥接适配已实现的 OpenAI-compatible Chat Completions route。自定义敏感请求头、
-尚未测试的协议和不完整档案会明确拒绝，不会回退到 Fake 或静默使用另一个模型。
+Windows Credential Manager 持久化。Tauri 启动受管 DSH 前调用只读 Python helper，
+只读取当前已启用且健康档案的密钥，再通过 NUL 分隔私有管道把值放入 DSH 子进程的启动
+环境；密钥不进入命令行、DSH `credentials.set`、settings、SQLite、事件或日志。DSH 的
+`credentials.describe` 必须把该引用报告为 `source=env`、`writable=false`，否则同步
+保持 fail-closed。没有鉴权的本地 Ollama 等 route 只使用固定的非敏感占位值。
+
+Provider 档案每次实际变更密钥都会生成新的非敏感 `credential_revision`，route 中的
+环境引用也随之变化。若 DSH 已经运行，Agent Provider 面板显示“需要重启”及具体原因，
+重启前不允许同步，避免旧进程继续静默使用旧密钥。当前桥接适配已实现的
+OpenAI-compatible Chat Completions route；自定义敏感请求头、尚未测试的协议和不完整
+档案会明确拒绝，不会回退到 Fake 或静默使用另一个模型。
+
+同步顺序固定为“验证凭据来源 → 写入精确 route → 通过 `llm.providers` 验证 adapter
+已激活”。route 验证失败时，只在该 route 仍与本次写入完全相同时按最新 revision 恢复
+旧值；检测到并发修改会拒绝覆盖。远程密钥从不参与这条 Runtime 写入与回滚链。
+
+`python tools/smoke_dsh_round.py --endpoint <isolated-endpoint> --profile-dir
+<isolated-profile>` 可显式运行测试专用协议 smoke。它启动仅测试可见的标准库
+OpenAI-compatible SSE stub，完成 route、Session、模型选择、prompt、WebSocket 事件和
+最终 snapshot 验证，再移除唯一测试 route 与凭据引用。它不测试模型质量、不注册生产
+Provider，也不读取用户凭据；每次运行会在隔离 DSH Profile 中保留一个 Session 作为
+协议证据。
+
+显式增加 `--mcp` 时，profile 根目录还必须包含内容完全匹配的
+`.sumika-mcp-smoke-profile.json` 安全标记。smoke 会复制一个临时用户 Preset，挂载仓库内
+测试专用的标准 MCP stdio server，完成 `initialize`、`tools/list`、
+`mcp__sumika_smoke__echo` 工具调用和结果回传，并确认挂载验证 Session 已归档。该流程已在
+固定 DSH `0.1.1-rc.2` 上验证 26 个可见工具及一次真实 MCP `tools/call`。Preset 和会话留在
+专用隔离 profile 中作为证据，不会写入生产 profile；该 smoke 当前证明无鉴权 stdio
+协议闭环。受保护 MCP 凭据的存储、表达式防篡改、多绑定启动协议、重启门控和密钥隔离
+由 Python、Rust 与 Playwright 专项测试覆盖；带真实第三方密钥的端到端 smoke 仍需用户
+明确配置目标服务后执行。
+
+`python tools/agent_daily_acceptance.py --runtime-smoke --profile-dir <isolated-profile>`
+是日用验收入口。它会创建临时 Git 仓库和临时 checkpoint store，调用上述 smoke 的
+`--plan-execute` 流程，依次验证 DSH Plan command、`exit_plan_mode` 审查、明确批准、
+Execute 工具链、Workspace diff、恢复预览和精确恢复；临时仓库在进程结束时清理。该脚本
+只输出有界状态和计数，不输出 DSH 原始 stdout、Prompt、模型内容、路径或凭据。当前已在固定
+DSH profile 中通过 `--plan-execute --mcp --workspace-recovery` 组合回合。`--mcp`
+可在同一隔离 profile 中追加无鉴权 MCP fixture，`--full-tests` 才会运行 Python、Node、
+前端构建和 Rust 回归检查。没有显式 `--runtime-smoke` 时只运行 Core preflight，便于
+启动前快速判断 Provider、Workspace 和能力状态。
+
+对已经完成的真实 Provider Session，可改用只读 `--real-session <session-id>`。该模式不会
+重新发送 Prompt 或调用模型，而是通过 Core `agent.acceptance.evidence` 从最多 1000 条事件
+中验证 Plan Review 请求与批准、批准前 checkpoint、回合完成、写工具、diff、恢复预览和
+精确恢复。checkpoint 晚于批准、任一终态缺失或恢复未完成都会令阶段失败。Session、
+checkpoint、request ID、路径、时间戳、Prompt 和模型输出都不会进入报告：
+
+```powershell
+python tools/agent_daily_acceptance.py `
+  --core-url http://127.0.0.1:8771 `
+  --real-session <session-id> `
+  --report-dir .sumika-desktop\logs\acceptance --json
+```
+
+为验证 Skills 与 Subagents，可追加 `--skills-subagents`：脚本会在隔离工作区创建一次性
+`.agents/skills` fixture，通过真实 `skill.list` 发现并调用 Skill，确认 Skill 正文只到达
+测试 Provider；随后调用 DSH `subagent` 工具，并用 `subagent.list` / `subagent.history`
+核对直接子 Agent 与摘要。该选项会暂时把隔离 profile 的默认模型切到测试 route，结束时
+逐字恢复原设置；报告只投影 `discovered/loaded/created/history` 布尔值和子 Agent 数量，
+不输出 prompt、回复正文、文件路径、工具参数、凭据或 Cookie。建议日用命令为：
+
+```powershell
+$env:PYTHONPATH = 'backend/src'
+python tools/agent_daily_acceptance.py --runtime-smoke --skills-subagents `
+  --profile-dir <isolated-profile> --endpoint http://127.0.0.1:3080 --skip-preflight
+```
+
+该回合只用于隔离验收，不会安装 Skill、修改生产 Session 或改变用户的 DSH Profile。
+
+显式增加 `--workspace-recovery` 时，脚本只接受带固定 marker 和基线文件的专用 Git
+测试仓库，并拒绝 Sumika 源码 checkout。DSH 必须先 `read` 目标再 `edit`；脚本随后要求
+所有工具结果均为 completed，再验证唯一文件 diff、恢复预览令牌、恢复前 checkpoint、
+可恢复归档和基线内容。DSH 的嵌套 `tool-result` 只投影 `callId` 与 completed/failed，
+错误正文、工具参数和结果内容不会进入公开 Session snapshot。
 
 桥接只影响新建或明确选择模型的 DSH Session；已经运行的旧 Session 保持其原有
 模型选择。若 DSH 未安装、`llm-pi-ai` 未挂载或 route 注册失败，Agent 请求保持
 fail-closed，先修复同步状态再继续。
+
+## BrowserSkill policy companion
+
+官方 `@wxg-prc-cpg/browser-skill-dsh-plugin` 保持 BrowserSkill 工具和会话实现的事实源；
+Sumika 不 fork 该插件。受管 profile 额外安装 `@sumika/dsh-browser-policy`，通过 DSH
+公开的 `tools/pre-execute` waterfall 将脱敏工具元数据交给 Core
+`browser.policy.evaluate`。`allow` 才继续执行，`ask` 进入 DSH 原生审批，`deny` 和 Core
+不可达都不会调用 `bsk`。策略插件还补充结构化 `browser_request_help`，将登录、OTP、
+CAPTCHA 和凭据输入交给隔离浏览器窗口中的用户。
+
+这层是 Harness adapter，不是浏览器实现：BrowserSkill 继续负责实际 DOM/CDP，Core
+继续负责策略、审计和 quarantine，DSH 只负责 Agent 工具生命周期。因此未来新增其他
+Harness 时可复用 Core `BrowserPolicyEvaluator` 和 BrowserSkill runtime，只重写对应的
+pre-execute/approval 适配器。当前 DSH 进程必须在 policy plugin 安装后重启才能加载它；
+外部已运行的 DSH 不会被 Sumika 强制停止或重启。
 
 ## 迁移边界
 

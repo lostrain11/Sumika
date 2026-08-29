@@ -99,6 +99,8 @@ API Key 的 Provider 会以安全失败方式拒绝保存；无需鉴权的本�
 
 `qwen3:4b` 只是 Ollama 模板里可编辑的示例，不会默认安装。辅助脚本可通过
 `-ModelsDir` 或 `SUMIKA_OLLAMA_MODELS` 使用用户指定的模型缓存目录。
+模型目录在 Ollama 服务启动时读取；如果已有服务使用了另一目录，辅助脚本不会
+重复下载，而会提示重启服务或改用其他端口。具体命令见本地模型文档。
 
 主窗口可以打开可选的置顶“桌宠模式”。模型区域是 Tauri 拖动区域，浮窗可以
 在桌面上拖动；模型下方有紧凑聊天输入框，并复用主窗口当前的角色、会话和
@@ -112,11 +114,12 @@ provider。Provider、模块、权限和任务配置仍在主窗口中完成。
 
 桌面端核心默认监听 `127.0.0.1:8771`，浏览器预览默认使用 `127.0.0.1:8770`。
 
-如果要让 Tauri 壳监督已经安装好的 DSH 可执行文件，必须显式选择加入：
+Windows 一键启动会先检查 `SUMIKA_AGENT_ENDPOINT` / `SUMIKA_DSH_ENDPOINT`
+（默认 `http://127.0.0.1:3080`）。已有 DSH 通过健康检查时直接复用且不接管其
+生命周期；端点不可用时，脚本会自动发现下面固定目录中已经安装的版本并交给
+Tauri 监督：
 
 ```powershell
-$env:SUMIKA_DSH_EXECUTABLE = 'D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd'
-$env:SUMIKA_DSH_AUTOSTART = '1'
 .\tools\run-desktop.ps1
 ```
 
@@ -126,14 +129,15 @@ $env:SUMIKA_DSH_AUTOSTART = '1'
 .\tools\setup-dsh.ps1 -Proxy 'http://127.0.0.1:6064'
 ```
 
-脚本只写入 `D:\Tools\DeepSeekHarness\0.1.1-rc.2`，不修改 PATH 或全局
-DSH。安装完成后把输出的 executable 路径设置给
-`SUMIKA_DSH_EXECUTABLE`；桌面端会使用 `.sumika-desktop\dsh-profile` 作为
-隔离 `DSH_HOME`。
+安装辅助脚本只写入 `D:\Tools\DeepSeekHarness\0.1.1-rc.2`，不修改 PATH 或
+全局 DSH。`run-desktop.ps1` 只发现这个已经存在且版本匹配的可执行文件，不会
+安装、升级或下载 DSH；桌面端会使用 `.sumika-desktop\dsh-profile` 作为隔离
+`DSH_HOME`。自定义安装位置仍可显式设置 `SUMIKA_AGENT_EXECUTABLE` 和
+`SUMIKA_AGENT_AUTOSTART=1`。
 
 桌面壳会把 DSH 生命周期写入 `.sumika-desktop/logs/dsh.log`，并把
-`.sumika-desktop/dsh-profile` 作为 `DSH_HOME`。没有同时设置这两个变量时不会
-启动 DSH；Agent 页面仍可以通过 `SUMIKA_DSH_ENDPOINT` 连接用户手动启动的实例。
+`.sumika-desktop/dsh-profile` 作为 `DSH_HOME`。固定版本未安装且没有可用外部
+端点时，桌面仍会启动，但 Agent 页面明确显示不可用。
 
 ## 核心能力
 
@@ -154,7 +158,9 @@ JSON-RPC 命令和 WebSocket 事件流，也提供经过批准门控的外部工
 未运行时安全失败，不会安装或修改用户全局 DSH。Plan、Skills、MCP、Subagents、
 审批和流式事件会通过适配器逐步暴露。当前会话可以导出 DSH 原始会话日志 ZIP，
 diff 卡片只显示受限的文件摘要，不透传完整 patch；固定版 Web API 尚无独立 rollback
-RPC。同一页面还显示 BrowserSkill 策略层；
+RPC。新建 DSH 会话必须选择已登记 Git Workspace，每个 Execute 回合会在目标进入
+Runtime 前自动创建可恢复 checkpoint；只有 Runtime 提供可验证只读策略时才显示
+Readonly。同一页面还显示 BrowserSkill 策略层；
 首版浏览器只登记隔离 Profile、审批、人工接管和下载 quarantine，不控制 Windows
 全局鼠标键盘。
 
