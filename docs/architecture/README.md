@@ -24,6 +24,7 @@ OpenAI-compatible / external-process providers
 - [Local model](local-model.md)：用户选择模型、可选 Ollama 辅助脚本和推理边界。
 - [Avatar](avatar.md) / [Characters](characters.md)：模型资产、角色和展示配置。
 - [Desktop shell](desktop-shell.md)：Tauri 主窗口、桌宠浮窗和 Python 子进程。
+- [Desktop automation](desktop-automation.md)：应用协议、Electron CDP、Windows UIA 和受控前台接管的通用适配器边界。
 - [Tasks](tasks.md)：预算、批准、生命周期和任务 HUD。
 - [Agent Runtime](agent-runtime.md)：稳定会话内核、可选能力、adapter registry 和进程边界。
 - [Audio](audio.md) / [Memory](memory.md) / [Vision](vision.md)：可选能力边界。
@@ -57,6 +58,9 @@ profile 和插件约束记录在[外部集成专题](../integrations/dsh-agent.m
 - `plugins`: manifest validation; third-party code is not loaded into the core.
 - `tools`: approval-gated one-shot external processes using the JSONL tool
   contract; no shell or persistent process.
+- `desktop_automation`: explicitly registered desktop applications behind a
+  transport-neutral adapter; profile leases, approvals, idempotency and audit
+  stay in Core, while CDP/UIA clients remain optional transports.
 - `avatar`: renderer-neutral AvatarDriver plus safe local model metadata; the
   browser VRM adapter is a separate bundle behind the same boundary, while
   Live2D remains a future renderer.

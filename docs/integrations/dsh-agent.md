@@ -21,6 +21,42 @@ DSH，再为本次启动设置这两个变量。现有 `SUMIKA_DSH_AUTOSTART` /
 `DSH_HOME`，启动流程也不会安装、升级或下载 DSH。`SUMIKA_DSH_ENABLED=0` 可关闭
 适配器。
 
+## 可选 ZCode runtime
+
+选择 `SUMIKA_AGENT_RUNTIME=zcode` 可使用 ZCode 自带的 `app-server --stdio`。当前
+ZCode 入口通常是 Node 与打包脚本的组合，例如：
+
+```powershell
+$env:SUMIKA_AGENT_RUNTIME = 'zcode'
+$env:SUMIKA_ZCODE_NODE = 'D:\Tools\nodejs\node.exe'
+$env:SUMIKA_ZCODE_SCRIPT = 'D:\ZCode\resources\glm\zcode.cjs'
+$env:SUMIKA_ZCODE_WORKING_DIR = 'D:\Code\Sumika'
+$env:SUMIKA_ZCODE_PROTOCOL = 'auto'
+```
+
+Windows 安装也可以在确认路径后使用一次性自动发现：
+
+```powershell
+$env:SUMIKA_AGENT_RUNTIME = 'zcode'
+$env:SUMIKA_ZCODE_AUTODISCOVER = '1'
+$env:SUMIKA_ZCODE_INSTALL_DIR = 'D:\ZCode'
+```
+
+自动发现只检查显式给出的安装目录或 `PATH` 中的 `zcode` 命令；如果发现
+`ZCode.exe` 旁边的公开 `resources\glm\zcode.cjs`，会用 `node.exe` 启动该脚本，
+避免调用 Electron 单实例壳。`SUMIKA_ZCODE_NODE` 可用于指定 Node 路径。它不会读取
+ZCode 设置、Cookie 或凭据，也不会自动选择 ZCode runtime；仍需显式设置
+`SUMIKA_AGENT_RUNTIME=zcode`。如果找不到公开脚本，会保留原始命令并报告未就绪。
+
+`auto` 先发送无副作用的 `session/list` 探针：当前 ZCode 返回不带
+`jsonrpc` 字段的行分隔对象，adapter 随后使用 workspace-scoped Session、模型目录、
+MCP 和事件方法；旧标准 JSON-RPC peer 会在探测后切换兼容 wire。ZCode 自己的登录态、
+模型配置和额度仍由 ZCode 管理，Sumika 不读取其文件或提取 Token。缺少模型配置时只
+报告未就绪，不创建生产会话或静默切换 Provider。现代协议未验证的 `readonly`、附件和
+队列能力不会显示为可用。`session/send` 的短模型选择会先调用公开
+`session/setModel`；只有包含 `revision`、数值 `generatedAt`、匹配的 Provider/model
+定义和非内联凭据引用的完整 `runtimeModel` 才会被转发，避免把不完整配置误报成可用。
+
 当前 npm CLI tarball 的 SHA-256 为
 `47ec05f45ada5ab87779ae18a90456b5ebff5421dc0ff5c179677d65e1c16057`；该值也
 记录在 Evolution Knowledge Registry，用于后续固定版本复核。
@@ -392,6 +428,20 @@ CAPTCHA 和凭据输入交给隔离浏览器窗口中的用户。
 Harness 时可复用 Core `BrowserPolicyEvaluator` 和 BrowserSkill runtime，只重写对应的
 pre-execute/approval 适配器。当前 DSH 进程必须在 policy plugin 安装后重启才能加载它；
 外部已运行的 DSH 不会被 Sumika 强制停止或重启。
+
+## Desktop automation bridge
+
+`plugins/dsh-desktop-automation` 是可选的 DSH tool bridge，把 Core 的
+`desktop.automation.*` RPC 投影为 `desktop_app_*` 工具。应用必须先在 Sumika
+Core 登记并由用户批准；bridge 不发现任意窗口、不读取 ZCode 或其他应用凭据，也不
+启用全局鼠标键盘。控制、发送、删除、上传、下载和前台接管仍经过 Core 的审批、租约、
+幂等和审计边界。
+
+ZCode 的首选路径仍是公开 `app-server --stdio`。若应用协议不可用，用户可以为同一
+`DesktopAdapter` 显式配置 Electron CDP 或 Windows UIA transport；这些 transport
+client 只提供连接方法，通用 `TransportDesktopAdapter` 负责把它们接入统一契约。真实
+transport runner 和应用启动器必须在隔离 profile 中验证后再登记，bridge 不会自动安装、
+重启或升级外部软件。
 
 ## 迁移边界
 

@@ -170,7 +170,7 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".empty-chat")).toContainText("先配置 Provider");
     await expect(page.locator("#chat-form .send-button")).toBeDisabled();
     await page.locator('.empty-chat [data-page="Modules"]').click();
-    await expect(page.locator("body")).toContainText("自定义连接");
+    await expect(page.locator("body")).toContainText("自定义 API 连接");
   });
 
   test("Developer manages metadata-only Skills and shows the MCP catalog", async ({ page }) => {
@@ -505,7 +505,7 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("h1")).toHaveText("入门指南");
     await expect(page.locator("body")).toContainText("界面地图");
     await expect(page.locator("body")).toContainText("完整基本使用流程");
-    await expect(page.locator(".guide-map-item")).toHaveCount(9);
+    await expect(page.locator(".guide-map-item")).toHaveCount(10);
     await expect(page.locator(".guide-flow-item")).toHaveCount(7);
     await page.locator('.guide-jump[data-page="Modules"]').first().click();
     await expect(page.locator("body")).toContainText("语音识别");
@@ -2447,6 +2447,117 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("#provider-profile-form")).toContainText("保存并启用");
   });
 
+  test("网页聊天模板切换填充真实字段并保留 BrowserSkill 边界", async ({ page }) => {
+    const namedBrowserProfile = {
+      id: "browser-profile-web-smoke",
+      name: "网页测试登录态",
+      character_id: "sumika",
+      status: "active",
+      archived_at: null,
+      leased: false,
+    };
+    const webProfile = {
+      id: "web-chat-deepseek-smoke",
+      name: "DeepSeek 网页账号",
+      adapter_id: "deepseek-web",
+      adapter_name: "DeepSeek 网页聊天",
+      browser_profile_id: namedBrowserProfile.id,
+      chat_url: "https://chat.deepseek.com/",
+      status: "needs-auth",
+      auth_state: "needs-auth",
+      auto_chat_enabled: false,
+      archived_at: null,
+      budget_policy: "free-only",
+      config: {
+        domains: ["chat.deepseek.com"],
+        chat_url: "https://chat.deepseek.com/",
+        model_id: "web-session",
+        selectors: {
+          input: ["textarea", "[contenteditable='true']"],
+          send: ["button[type='submit']"],
+          response: ["[data-message-author-role='assistant']"],
+        },
+        login_markers: ["登录"],
+        authorized_markers: ["退出登录"],
+        ready_markers: ["发送"],
+        response_timeout_seconds: 4,
+      },
+    };
+    await page.route("**/api/browser/web-chat/adapters", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          schema: "web-chat/v1",
+          adapters: [
+            { id: "deepseek-web", name: "DeepSeek 网页聊天", domains: ["chat.deepseek.com"], chat_url: "https://chat.deepseek.com/", model_id: "web-session", selectors: { input: ["textarea"], send: ["button[type='submit']"], response: ["[data-message-author-role='assistant']"] }, login_markers: ["登录"], authorized_markers: ["退出登录"], ready_markers: ["发送"] },
+            { id: "chatgpt-web", name: "ChatGPT 网页聊天", domains: ["chatgpt.com"], chat_url: "https://chatgpt.com/", model_id: "web-session", selectors: { input: ["textarea"], send: ["button[type='submit']"], response: ["[data-message-author-role='assistant']"] }, login_markers: ["Log in"], authorized_markers: ["Log out"], ready_markers: ["Send"] },
+            { id: "custom", name: "通用网页聊天", domains: [], chat_url: "", model_id: "web-session", selectors: { input: ["textarea"], send: [], response: [] }, login_markers: [], authorized_markers: [], ready_markers: [], custom: true },
+          ],
+        }),
+      });
+    });
+    await page.route("**/api/browser/web-chat/profiles*", async (route) => {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ schema: "web-chat/v1", profiles: [webProfile] }) });
+    });
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body?.method !== "browser.profiles") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { profiles: [namedBrowserProfile] } }) });
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Modules"]').click();
+    await expect(page.locator(".provider-picker")).toBeVisible();
+    await page.locator(".provider-picker summary").click();
+    await page.locator('[data-web-chat-new-adapter="deepseek-web"]').click();
+    const drawer = page.locator(".web-chat-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator('input[name="chat_url"]')).toHaveValue("https://chat.deepseek.com/");
+    await expect(drawer.locator('select[name="browser_profile_id"]')).toHaveCount(1);
+    await drawer.locator('select[name="adapter_id"]').selectOption("chatgpt-web");
+    await expect(drawer.locator('input[name="chat_url"]')).toHaveValue("https://chatgpt.com/");
+    await expect(drawer.locator(".provider-security-note")).toContainText("不读取 Cookie");
+  });
+
+  test("Developer 提供网页连接的可恢复归档入口", async ({ page }) => {
+    const archived = {
+      id: "web-chat-archived-smoke",
+      name: "已归档网页账号",
+      adapter_id: "deepseek-web",
+      adapter_name: "DeepSeek 网页聊天",
+      browser_profile_id: "browser-profile-web-smoke",
+      chat_url: "https://chat.deepseek.com/",
+      status: "archived",
+      auth_state: "authorized",
+      auto_chat_enabled: false,
+      archived_at: "2026-08-30T00:00:00Z",
+      budget_policy: "free-only",
+      config: { domains: ["chat.deepseek.com"], chat_url: "https://chat.deepseek.com/", model_id: "web-session", selectors: { input: ["textarea"], send: [], response: [] }, login_markers: ["登录"], authorized_markers: ["退出登录"], ready_markers: ["发送"], response_timeout_seconds: 4 },
+    };
+    let restored = false;
+    await page.route("**/api/browser/web-chat/adapters", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ adapters: [] }) }));
+    await page.route("**/api/browser/web-chat/profiles*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ profiles: restored ? [{ ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null }] : [archived] }) }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body?.method === "browser.web_chat.profile.restore") {
+        restored = true;
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null } }) });
+        return;
+      }
+      await route.continue();
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Developer"]').click();
+    const panel = page.locator("[data-web-chat-archive-panel]");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("已归档网页账号");
+    await panel.locator('[data-web-chat-restore="web-chat-archived-smoke"]').click();
+    await expect(page.locator("body")).toContainText("已恢复；需要重新检查登录状态");
+    expect(restored).toBe(true);
+  });
+
   test("CC Switch import preview masks secrets and keeps the draft boundary", async ({ page }) => {
     const preview = {
       format: "sumika-provider-profile/v1",
@@ -2570,5 +2681,150 @@ test.describe("Sumika UI shell", () => {
     await page.locator('[data-provider-restore="archived-profile"]').click();
     await expect(page.locator(".provider-row").first()).toContainText("已归档连接");
     await expect(page.locator("body")).toContainText("已恢复为草稿");
+  });
+
+  test("模型策略在推荐确认前不创建 Agent 会话", async ({ page }) => {
+    const calls = [];
+    const policyEntry = {
+      route_id: "profile:local-test:playwright-model",
+      provider_id: "openai-compatible",
+      provider_profile_id: "local-test",
+      model_id: "playwright-model",
+      display_name: "本地测试连接 · playwright-model",
+      capabilities: ["chat"],
+      quality_tier: "standard",
+      cost_class: "local",
+      processing_location: "local",
+      auth_state: "not-required",
+      quota_state: "not-applicable",
+      health_state: "healthy",
+      routable: true,
+    };
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "ready",
+        ready: true,
+        runtime_id: "dsh",
+        version: "0.1.1-rc.2",
+        commit: "b150a551b8d4",
+        runtime_capabilities: ["models", "commands", "plan", "interactions"],
+      }),
+    }));
+    await page.route("**/api/model-policy/catalog*", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        policy_version: "model-policy/v1",
+        checked_at: "2026-08-30T00:00:00Z",
+        entries: [policyEntry],
+        quotas: [],
+      }),
+    }));
+    await page.route("**/api/model-policy/quota*", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ policy_version: "model-policy/v1", checked_at: "2026-08-30T00:00:00Z", snapshots: [], runtime: { state: "unknown" } }),
+    }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, profile_id: "local-test", model: "playwright-model" }),
+    }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      calls.push(body);
+      if (body?.method === "model.policy.preflight") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {
+            request: body.params,
+            decision: {
+              status: "needs-confirmation",
+              selected_route: policyEntry.route_id,
+              selected_entry: policyEntry,
+              alternatives: [],
+              quality_gate: { required: "standard", selected: "standard", passed: true },
+              reason_codes: ["privacy_and_permissions_passed", "quality_gate_passed"],
+              estimated_cost: "local",
+              quota_impact: { state: "not-applicable" },
+              confidence: 0.9,
+              requires_confirmation: true,
+            },
+          } }),
+        });
+        return;
+      }
+      if (body?.method === "agent.session.create") {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "routing-session" } }) });
+        return;
+      }
+      if (body?.method === "agent.session.prompt") {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "routing-turn", accepted: true } }) });
+        return;
+      }
+      await route.continue();
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await expect(page.locator("[data-agent-routing-panel]")).toBeVisible();
+    await page.locator("#agent-routing-mode").selectOption("recommendation-then-confirmation");
+    await page.locator("#agent-prompt").fill("检查当前仓库并给出计划");
+    await page.locator("#agent-send").click();
+    await expect(page.locator("[data-agent-routing-decision='needs-confirmation']")).toBeVisible();
+    expect(calls.filter((item) => item?.method === "model.policy.preflight")).toHaveLength(1);
+    expect(calls.filter((item) => item?.method === "agent.session.create")).toHaveLength(0);
+    await page.locator("#agent-routing-confirm").click();
+    await expect.poll(() => calls.filter((item) => item?.method === "agent.session.create").length).toBe(1);
+    await expect.poll(() => calls.filter((item) => item?.method === "agent.session.prompt").length).toBe(1);
+    expect(calls.find((item) => item?.method === "agent.session.create")?.params?.routingApproved).toBe(true);
+  });
+
+  test("自动策略可在免费/本地候选通过时发送，并保存偏好", async ({ page }) => {
+    const calls = [];
+    const policyEntry = {
+      route_id: "profile:local-auto:auto-model",
+      provider_id: "openai-compatible",
+      provider_profile_id: "local-auto",
+      model_id: "auto-model",
+      display_name: "本地自动连接 · auto-model",
+      capabilities: ["chat"],
+      quality_tier: "basic",
+      cost_class: "local",
+      processing_location: "local",
+      auth_state: "not-required",
+      quota_state: "not-applicable",
+      health_state: "healthy",
+      routable: true,
+    };
+    await page.route("**/api/agent/status", async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ state: "ready", ready: true, runtime_id: "dsh", version: "0.1.1-rc.2", commit: "b150a551b8d4", runtime_capabilities: ["commands", "plan"] }),
+    }));
+    await page.route("**/api/model-policy/catalog*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy_version: "model-policy/v1", checked_at: "2026-08-30T00:00:00Z", entries: [policyEntry], quotas: [] }) }));
+    await page.route("**/api/model-policy/quota*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy_version: "model-policy/v1", snapshots: [], runtime: { state: "unknown" } }) }));
+    await page.route("**/api/agent/provider", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ state: "ready", ready: true, profile_id: "local-auto", model: "auto-model" }) }));
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      calls.push(body);
+      if (body?.method === "model.policy.preflight") {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { decision: { status: "selected", selected_route: policyEntry.route_id, selected_entry: policyEntry, alternatives: [], quality_gate: { required: "basic", passed: true }, reason_codes: ["free_or_local_preferred"], estimated_cost: "local", quota_impact: { state: "not-applicable" }, confidence: 0.9, requires_confirmation: false } } }) });
+        return;
+      }
+      if (body?.method === "agent.session.create") {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "auto-session" } }) });
+        return;
+      }
+      if (body?.method === "agent.session.prompt") {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "auto-turn", accepted: true } }) });
+        return;
+      }
+      await route.continue();
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Agent"]').click();
+    await page.locator("#agent-routing-mode").selectOption("automatic");
+    await page.locator("#agent-prompt").fill("列出当前目录");
+    await page.locator("#agent-send").click();
+    await expect.poll(() => calls.filter((item) => item?.method === "agent.session.prompt").length).toBe(1);
+    await expect(page.locator("[data-agent-routing-decision='selected']")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("sumika.agent.routing-policy.v1")))).toEqual({ mode: "automatic", budget_policy: "prefer-free" });
   });
 });

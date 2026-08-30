@@ -1,4 +1,5 @@
 const AGENT_SESSION_PREFERENCE_KEY = "sumika.agent.active-session.v1";
+const AGENT_ROUTING_PREFERENCE_KEY = "sumika.agent.routing-policy.v1";
 
 const state = {
   activePage: "Chat",
@@ -12,6 +13,35 @@ const state = {
   providerDrawerProfileId: null,
   providerBusy: null,
   providerNotice: "",
+  // Browser DOM chat accounts are a separate connection kind. Their
+  // authentication state is owned by BrowserSkill named Profiles; Sumika
+  // keeps only these safe projections and editable selector metadata.
+  webChatAdapters: [],
+  webChatProfiles: [],
+  webChatDrawerOpen: false,
+  webChatDrawerMode: "manual",
+  webChatDrawerProfileId: null,
+  webChatDrawerAdapterId: "custom",
+  webChatBusy: null,
+  webChatNotice: "",
+  // Web Workbench is a UI projection over the runtime-neutral route bridge.
+  // It never stores browser cookies, snapshots, or full route context.
+  webWorkbenchCatalog: { schema: "agent-route/v1", routes: [], count: 0, routable_count: 0, quota_state: "unknown" },
+  webWorkbenchCatalogBusy: false,
+  webWorkbenchConsultations: [],
+  webWorkbenchConsultationRequests: {},
+  webWorkbenchConsultationDraft: { question: "", context: "", decision_kind: "brainstorm", max_members: 3 },
+  webWorkbenchWorkerDraft: { route_id: "", question: "" },
+  webWorkbenchWorkerResult: null,
+  webWorkbenchWorkerDispatchId: "",
+  webWorkbenchManualDrafts: {},
+  webWorkbenchManualResults: {},
+  webWorkbenchSelectedProfileId: "",
+  webWorkbenchNotice: "",
+  webWorkbenchBusy: null,
+  webWorkbenchAutoRefresh: false,
+  webWorkbenchPollTimer: null,
+  webWorkbenchPollInFlight: false,
   providerImportRaw: "",
   providerImportFilename: "",
   providerImportPreview: null,
@@ -171,6 +201,18 @@ const state = {
   agentQueue: { known: false, items: [], hidden_context_count: 0, updated_at: null },
   agentQueueDrafts: {},
   agentModels: { current: {}, routable: false, groups: [], failures: [] },
+  agentRoutingMode: "manual",
+  agentRoutingBudgetPolicy: "prefer-free",
+  agentRoutingDecision: null,
+  agentRoutingDecisionKey: "",
+  agentRoutingApprovedKey: "",
+  agentRoutingPendingKey: "",
+  agentRoutingBusy: false,
+  agentRoutingNotice: "",
+  agentModelPolicyCatalog: null,
+  agentModelPolicyQuota: null,
+  agentModelPolicyBusy: false,
+  agentModelPolicyLoadedAt: 0,
   agentInteractions: [],
   agentInteractionDrafts: {},
   agentSubagents: [],
@@ -203,6 +245,7 @@ const navItems = [
   ["Settings", "设置"],
   ["Developer", "开发者"],
   ["Agent", "Agent"],
+  ["WebWorkbench", "网页工作台"],
   ["Guide", "入门指南"],
 ];
 
@@ -299,9 +342,9 @@ function syncActiveSession() {
 
 function providerName() {
   const llm = state.modules.find((item) => item.id === "llm");
-  const profile = activeProviderProfile() || llm?.profile;
+  const profile = webChatProfileForModule() || activeProviderProfile() || llm?.profile;
   if (profile?.name) return profile.name;
-  if (!state.providerProfiles.length) return "未配置 Provider";
+  if (!state.providerProfiles.length && !state.webChatProfiles.length) return "未配置 Provider";
   if (llm?.implementation_id && llm.implementation_id !== "none" && llm?.implementation?.name) return llm.implementation.name;
   const real = (llm?.implementations || []).find((item) => item.id !== "none");
   if (real?.name) return real.name;
@@ -322,12 +365,76 @@ function currentLlmModule() {
 
 function activeProviderProfile() {
   const llm = currentLlmModule();
+  if (String(llm?.implementation_id || "").startsWith("web-chat:")) return null;
   const profileId = llm?.profile_id || llm?.config?.profile_id;
   return state.providerProfiles.find((profile) => profile.id === profileId) || state.providerProfiles.find((profile) => profile.active) || null;
 }
 
+function isWebChatProfile(profile) {
+  return Boolean(profile?.adapter_id && String(profile.id || "").startsWith("web-chat-"));
+}
+
+function webChatProfileForModule(module = currentLlmModule()) {
+  const implementation = String(module?.implementation_id || "");
+  if (!implementation.startsWith("web-chat:")) return null;
+  const suffix = implementation.slice("web-chat:".length);
+  const profileId = module?.profile_id || module?.config?.profile_id || suffix;
+  if (profileId !== suffix) return null;
+  return state.webChatProfiles.find((profile) => profile.id === profileId)
+    || (module?.profile?.id === profileId ? module.profile : null);
+}
+
+function webChatReady(profile) {
+  return Boolean(
+    profile
+    && profile.status === "ready"
+    && profile.auth_state === "authorized"
+    && profile.auto_chat_enabled === true,
+  );
+}
+
+function activeLlmConnection() {
+  const web = webChatProfileForModule();
+  if (web) return { kind: "web-chat", profile: web };
+  const apiProfile = activeProviderProfile();
+  return apiProfile ? { kind: "api", profile: apiProfile } : null;
+}
+
+function hasLlmConnections() {
+  return state.providerProfiles.some((profile) => !profile.archived_at)
+    || state.webChatProfiles.some((profile) => !profile.archived_at);
+}
+
+function webChatStatusLabel(profile) {
+  if (profile?.archived_at || profile?.status === "archived") return "已归档";
+  if (profile?.status === "ready" && profile?.auth_state === "authorized" && profile?.auto_chat_enabled) return "可用";
+  if (profile?.status === "draft") return "草稿";
+  if (profile?.auth_state === "needs-auth") return "需要登录";
+  if (profile?.status === "unavailable") return "未就绪";
+  return "待检查";
+}
+
+function webChatAdapter(adapterId) {
+  return state.webChatAdapters.find((item) => item.id === adapterId) || null;
+}
+
+function webChatConfig(profile) {
+  const value = profile?.config;
+  return value && typeof value === "object" ? value : {};
+}
+
+function webChatArrayText(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()).join("\n") : "";
+}
+
+function webChatProfileModel(profile) {
+  return webChatConfig(profile).model_id || "网页会话";
+}
+
 function llmReady() {
   const module = currentLlmModule();
+  const webProfile = webChatProfileForModule(module);
+  if (webProfile) return Boolean(state.connected && module?.enabled && webChatReady(webProfile));
   const profile = activeProviderProfile() || module?.profile;
   return Boolean(state.connected && module?.enabled && module.implementation_id !== "none" && profile?.status === "available");
 }
@@ -553,6 +660,7 @@ function renderPage() {
     case "Settings": return renderSettings();
     case "Developer": return renderDeveloper();
     case "Agent": return renderAgent();
+    case "WebWorkbench": return renderWebWorkbench();
     default: return renderChat();
   }
 }
@@ -568,6 +676,7 @@ function renderGuide() {
     Settings: ["管理数据快照、导入导出、差异检查和恢复。", "快照范围、创建、选择、导出/恢复/导入"],
     Developer: ["检查 provider、扫描插件 manifest、配置外部启动器和查看事件。", "刷新、扫描、批准、配置、测试调用、撤销"],
     Agent: ["连接 Agent Runtime（当前默认 DSH），查看 Plan、工具调用、审批、MCP、Skills、Subagents 和浏览器策略。", "检查连接、切换模式、提交目标、创建隔离浏览器 Profile"],
+    WebWorkbench: ["管理隔离网页 Profile，执行单次 Web Worker 或让多个网页模型独立提供意见。", "打开/聚焦网页、发送问题、启动咨询、接管或停止"],
   };
   const navigation = navItems
     .filter(([id]) => id !== "Guide")
@@ -638,11 +747,19 @@ function renderEmptyChat() {
   if (!state.connected) {
     return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>核心未连接</strong><p>启动 Sumika 核心后才能发送消息。</p></div>';
   }
-  if (!state.providerProfiles.length) {
+  if (!hasLlmConnections()) {
     return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>先配置 Provider</strong><p>Sumika 不会自动安装模型或选择连接。</p><button class="outline-button" type="button" data-page="Modules">前往模块页</button></div>';
   }
   if (!currentLlmModule()?.enabled) {
     return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>LLM 已关闭</strong><p>在模块页选择已测试的连接并主动启用。</p><button class="outline-button" type="button" data-page="Modules">前往模块页</button></div>';
+  }
+  const webProfile = webChatProfileForModule();
+  if (webProfile && !webChatReady(webProfile)) {
+    return `<div class="empty-chat"><span class="empty-icon">✦</span><strong>网页聊天尚未就绪</strong><p>${escapeHtml(webChatStatusLabel(webProfile))}；请在模块页打开隔离浏览器、检查登录和授权。</p><button class="outline-button" type="button" data-page="Modules">配置网页聊天</button></div>`;
+  }
+  const apiProfile = activeProviderProfile() || currentLlmModule()?.profile;
+  if (!webProfile && (!apiProfile || apiProfile.status !== "available")) {
+    return '<div class="empty-chat"><span class="empty-icon">✦</span><strong>当前连接未就绪</strong><p>请在模块页测试真实连接；未就绪时不会生成替代回复。</p><button class="outline-button" type="button" data-page="Modules">检查连接</button></div>';
   }
   const greeting = currentPersonaConfig().greeting.trim();
   if (greeting) {
@@ -851,11 +968,11 @@ function formatBytes(value) {
 
 function renderModules() {
   const modules = state.modules;
-  const notices = [state.moduleNotice, state.providerNotice].filter(Boolean).map((notice) => `<div class="module-notice" role="status">${escapeHtml(notice)}</div>`).join("");
+  const notices = [state.moduleNotice, state.providerNotice, state.webChatNotice].filter(Boolean).map((notice) => `<div class="module-notice" role="status">${escapeHtml(notice)}</div>`).join("");
   const body = modules.length
     ? `${renderCapabilityCatalogPanel()}${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${modules.map(renderModuleCard).join("")}</div>`
     : `<div class="empty-panel">核心未连接，模块目录暂不可用。启动核心后刷新此页。</div>`;
-  return renderPageFrame("模块", "每个模块都有可替换实现。连接档案可保存、测试并随时切换。", `${notices}${body}${renderProviderDrawer()}`);
+  return renderPageFrame("模块", "每个模块都有可替换实现。连接档案可保存、测试并随时切换。", `${notices}${body}${renderProviderDrawer()}${renderWebChatDrawer()}`);
 }
 
 function capabilityStatusLabel(status) {
@@ -1033,22 +1150,35 @@ function renderModuleCard(module) {
 
 function renderLlmModuleCard(module) {
   const busy = state.moduleBusy === module.id || Boolean(state.providerBusy);
-  const profiles = state.providerProfiles.filter((profile) => !profile.archived_at);
-  const current = activeProviderProfile() || module.profile || profiles[0] || null;
-  const available = profiles.filter((profile) => profile.status === "available");
-  const pending = profiles.filter((profile) => profile.status !== "available");
+  const apiProfiles = state.providerProfiles.filter((profile) => !profile.archived_at);
+  const webProfiles = state.webChatProfiles.filter((profile) => !profile.archived_at);
+  const currentWeb = webChatProfileForModule(module);
+  const currentApi = activeProviderProfile() || (!currentWeb ? module.profile : null);
+  const current = currentWeb || currentApi || apiProfiles[0] || webProfiles[0] || null;
+  const available = apiProfiles.filter((profile) => profile.status === "available");
+  const pending = apiProfiles.filter((profile) => profile.status !== "available");
+  const webAvailable = webProfiles.filter((profile) => webChatReady(profile));
+  const webPending = webProfiles.filter((profile) => !webChatReady(profile));
+  const webTemplates = state.webChatAdapters
+    .filter((adapter) => adapter.id !== "custom")
+    .map((adapter) => `<button class="web-chat-template-row" type="button" data-web-chat-new-adapter="${escapeHtml(adapter.id)}"><span><strong>${escapeHtml(adapter.name || adapter.id)}</strong><small>${escapeHtml((adapter.domains || []).join(" · "))} · 模板</small></span><span>添加</span></button>`)
+    .join("");
   const rows = [
     available.length ? `<div class="provider-picker-group"><span>可用连接</span>${available.map(renderProviderProfileRow).join("")}</div>` : "",
     pending.length ? `<div class="provider-picker-group"><span>草稿与未就绪</span>${pending.map(renderProviderProfileRow).join("")}</div>` : "",
+    webAvailable.length ? `<div class="provider-picker-group"><span>可用网页聊天</span>${webAvailable.map(renderWebChatProfileRow).join("")}</div>` : "",
+    webPending.length ? `<div class="provider-picker-group"><span>网页登录与草稿</span>${webPending.map(renderWebChatProfileRow).join("")}</div>` : "",
+    webTemplates ? `<div class="provider-picker-group"><span>网页聊天模板</span>${webTemplates}</div>` : "",
   ].join("");
+  const currentReady = currentWeb ? webChatReady(currentWeb) : currentApi?.status === "available";
   const summary = current
-    ? `<span><strong>${escapeHtml(current.name)}</strong><small>${escapeHtml(current.config?.model || "未填写模型")} · ${providerProfileStatusLabel(current.status)}</small></span>`
+    ? `<span><strong>${escapeHtml(current.name)}</strong><small>${escapeHtml(currentWeb ? webChatProfileModel(currentWeb) : current.config?.model || "未填写模型")} · ${escapeHtml(currentWeb ? webChatStatusLabel(currentWeb) : providerProfileStatusLabel(current.status))}</small></span>`
     : `<span><strong>尚未配置</strong><small>创建一个真实连接后启用</small></span>`;
   return `<article class="module-card llm-module-card ${module.enabled ? "" : "module-disabled"}">
-    <div class="module-card-top"><span class="module-icon">LLM</span><span class="module-status ${escapeHtml(module.status)}">${moduleStatusLabel(module)}</span><button class="module-toggle" type="button" role="switch" aria-checked="${module.enabled}" aria-label="切换 ${escapeHtml(module.name)}" data-module-toggle="${escapeHtml(module.id)}" ${busy || (!module.enabled && current?.status !== "available") ? "disabled" : ""}><span class="switch ${module.enabled ? "on" : "off"}"></span></button></div>
+    <div class="module-card-top"><span class="module-icon">LLM</span><span class="module-status ${escapeHtml(module.status)}">${moduleStatusLabel(module)}</span><button class="module-toggle" type="button" role="switch" aria-checked="${module.enabled}" aria-label="切换 ${escapeHtml(module.name)}" data-module-toggle="${escapeHtml(module.id)}" ${busy || (!module.enabled && !currentReady) ? "disabled" : ""}><span class="switch ${module.enabled ? "on" : "off"}"></span></button></div>
     <strong>${escapeHtml(module.name)}</strong><p>${escapeHtml(module.description)}</p>
-    <details class="provider-picker"><summary><span class="provider-picker-label">实现方式</span>${summary}<span class="provider-picker-chevron" aria-hidden="true">⌄</span></summary><div class="provider-picker-menu">${rows || `<div class="provider-picker-empty">还没有保存的连接</div>`}<button class="provider-add-row" type="button" data-provider-new><span aria-hidden="true">＋</span>自定义连接</button></div></details>
-    <div class="llm-profile-meta"><span>${escapeHtml(current?.resolved_processing_location === "cloud" ? "云端" : "本地")}</span><code>${escapeHtml(current?.config?.active_base_url || "未配置端点")}</code>${current ? `<button class="ghost-button" type="button" data-provider-edit="${escapeHtml(current.id)}">编辑</button>` : ""}</div>
+    <details class="provider-picker"><summary><span class="provider-picker-label">实现方式</span>${summary}<span class="provider-picker-chevron" aria-hidden="true">⌄</span></summary><div class="provider-picker-menu">${rows || `<div class="provider-picker-empty">还没有保存的连接</div>`}<button class="provider-add-row" type="button" data-provider-new><span aria-hidden="true">＋</span>自定义 API 连接</button><button class="provider-add-row web-chat-add-row" type="button" data-web-chat-new-adapter="custom"><span aria-hidden="true">＋</span>自定义网页聊天</button></div></details>
+    <div class="llm-profile-meta"><span>${escapeHtml(currentWeb ? "云端 · 浏览器" : current?.resolved_processing_location === "cloud" ? "云端" : "本地")}</span><code>${escapeHtml(currentWeb ? currentWeb.chat_url || "网页聊天" : current?.config?.active_base_url || "未配置端点")}</code>${currentWeb ? `<button class="ghost-button" type="button" data-web-chat-edit="${escapeHtml(currentWeb.id)}">编辑</button>` : current ? `<button class="ghost-button" type="button" data-provider-edit="${escapeHtml(current.id)}">编辑</button>` : ""}</div>
     <div class="module-card-meta"><span>权限</span><small>密钥使用系统安全凭据存储；当前 Windows 已实现</small></div>
   </article>`;
 }
@@ -1057,6 +1187,17 @@ function renderProviderProfileRow(profile) {
   const active = activeProviderProfile()?.id === profile.id;
   const status = providerProfileStatusLabel(profile.status);
   return `<div class="provider-profile-row ${active ? "active" : ""}"><button type="button" data-provider-select="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.config?.model || "未填写模型")} · ${escapeHtml(status)}</small></span>${active ? `<span class="provider-active-mark">当前</span>` : ""}</button><button class="icon-button provider-row-edit" type="button" data-provider-edit="${escapeHtml(profile.id)}" title="编辑连接" aria-label="编辑 ${escapeHtml(profile.name)}">⋯</button></div>`;
+}
+
+function renderWebChatProfileRow(profile) {
+  const active = webChatProfileForModule()?.id === profile.id;
+  const ready = webChatReady(profile);
+  const busy = state.webChatBusy;
+  const status = webChatStatusLabel(profile);
+  const action = profile.archived_at
+    ? `<button class="ghost-button" type="button" data-web-chat-restore="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>恢复</button>`
+    : `<button class="ghost-button" type="button" data-web-chat-edit="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>编辑</button><button class="ghost-button" type="button" data-web-chat-authorize="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>人工登录</button><button class="ghost-button" type="button" data-web-chat-check="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>检查</button>${ready && !profile.auto_chat_enabled ? `<button class="small-button" type="button" data-web-chat-consent="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>授权聊天</button>` : ""}${ready && profile.auto_chat_enabled && !active ? `<button class="small-button" type="button" data-web-chat-select="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>启用</button>` : ""}${active && profile.auto_chat_enabled ? `<button class="ghost-button" type="button" data-web-chat-consent-off="${escapeHtml(profile.id)}" ${busy ? "disabled" : ""}>停用授权</button>` : ""}<button class="icon-button provider-row-edit" type="button" data-web-chat-archive="${escapeHtml(profile.id)}" title="归档" aria-label="归档 ${escapeHtml(profile.name)}" ${busy || active ? "disabled" : ""}>×</button>`;
+  return `<div class="provider-profile-row web-chat-profile-row ${active ? "active" : ""}"><div class="web-chat-profile-main"><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(webChatProfileModel(profile))} · ${escapeHtml(status)} · ${escapeHtml(profile.chat_url || "")}</small></div><div class="web-chat-profile-actions">${active ? `<span class="provider-active-mark">当前</span>` : ""}${action}</div></div>`;
 }
 
 function providerProfileStatusLabel(status) {
@@ -1083,6 +1224,51 @@ function renderProviderDrawer() {
   </form>`;
   const importer = `<section class="provider-import-pane"><label><span>粘贴配置</span><textarea id="provider-import-raw" rows="9" placeholder="ccswitch://v1/import?... 或 Sumika JSON / OpenAI JSON / Codex TOML">${escapeHtml(state.providerImportRaw)}</textarea></label><div class="provider-import-tools"><input id="provider-import-file" type="file" accept=".json,.toml,.txt" /><button class="outline-button" type="button" id="provider-import-preview" ${state.providerBusy ? "disabled" : ""}>预览导入</button></div><p>导入只生成 Sumika 草稿档案，不注册系统协议，也不会执行 JavaScript。</p>${renderProviderImportPreview()}</section>`;
   return `<div class="provider-drawer-backdrop" data-provider-drawer-close></div><aside class="provider-drawer" role="dialog" aria-modal="true" aria-labelledby="provider-drawer-title"><header><div><span class="eyebrow">PROVIDER PROFILE</span><h2 id="provider-drawer-title">${profile ? "编辑连接" : "自定义连接"}</h2></div><button class="icon-button" type="button" data-provider-drawer-close aria-label="关闭配置抽屉" title="关闭">×</button></header><div class="provider-drawer-tabs" role="tablist"><button type="button" role="tab" aria-selected="${state.providerDrawerMode === "manual"}" data-provider-drawer-mode="manual">手动配置</button><button type="button" role="tab" aria-selected="${state.providerDrawerMode === "import"}" data-provider-drawer-mode="import">导入配置</button></div><div class="provider-drawer-body">${state.providerDrawerMode === "import" ? importer : manual}</div></aside>`;
+}
+
+function renderWebChatDrawer() {
+  if (!state.webChatDrawerOpen) return "";
+  const profile = state.webChatProfiles.find((item) => item.id === state.webChatDrawerProfileId) || null;
+  const adapterId = profile?.adapter_id || state.webChatDrawerAdapterId || "custom";
+  const adapter = webChatAdapter(adapterId);
+  const config = webChatConfig(profile);
+  const isCustom = adapterId === "custom";
+  const defaults = profile ? config : (adapter || {});
+  const adapterOptions = state.webChatAdapters.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === adapterId ? "selected" : ""}>${escapeHtml(item.name || item.id)}</option>`).join("");
+  const boundId = profile?.browser_profile_id || "";
+  const browserOptions = state.browserProfiles
+    .filter((item) => !item.archived_at || item.id === boundId)
+    .map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === boundId ? "selected" : ""}>${escapeHtml(item.name || item.id)}${item.archived_at ? " · 已归档" : ""}</option>`)
+    .join("");
+  const domains = Array.isArray(defaults.domains) ? defaults.domains.join("\n") : isCustom ? "" : (adapter?.domains || []).join("\n");
+  const chatUrl = defaults.chat_url || (isCustom ? "" : adapter?.chat_url || "");
+  const selectors = defaults.selectors && typeof defaults.selectors === "object" ? defaults.selectors : adapter?.selectors || {};
+  const loginMarkers = defaults.login_markers || adapter?.login_markers || [];
+  const authorizedMarkers = defaults.authorized_markers || adapter?.authorized_markers || [];
+  const readyMarkers = defaults.ready_markers || adapter?.ready_markers || [];
+  const modelId = defaults.model_id || adapter?.model_id || "web-session";
+  const timeout = Number(defaults.response_timeout_seconds || 4);
+  const actionBusy = Boolean(state.webChatBusy);
+  const noBrowserProfile = !browserOptions;
+  const statusNote = profile
+    ? `当前状态：${webChatStatusLabel(profile)}；网页聊天额度固定显示为未知，不会作为 API 额度使用。`
+    : "登录态只保存在 BrowserSkill 命名 Profile；Sumika 不读取 Cookie、Token、密码或 localStorage。";
+  return `<div class="provider-drawer-backdrop" data-web-chat-drawer-close></div><aside class="provider-drawer web-chat-drawer" role="dialog" aria-modal="true" aria-labelledby="web-chat-drawer-title"><header><div><span class="eyebrow">WEB CHAT PROFILE</span><h2 id="web-chat-drawer-title">${profile ? "编辑网页聊天" : "添加网页聊天"}</h2></div><button class="icon-button" type="button" data-web-chat-drawer-close aria-label="关闭网页聊天配置抽屉" title="关闭">×</button></header><div class="provider-drawer-body"><form id="web-chat-profile-form" class="provider-drawer-form" data-profile-id="${escapeHtml(profile?.id || "")}">
+    <div class="provider-security-note" role="note"><strong>安全边界</strong><span>${escapeHtml(statusNote)}</span></div>
+    <div class="provider-form-grid"><label><span>连接名称</span><input name="name" value="${escapeHtml(profile?.name || (adapter?.name && !isCustom ? adapter.name : ""))}" maxlength="100" required autofocus /></label><label><span>网页适配器</span><select name="adapter_id" id="web-chat-adapter-select">${adapterOptions}</select></label></div>
+    <label><span>BrowserSkill 命名 Profile</span><select name="browser_profile_id" required ${noBrowserProfile ? "disabled" : ""}><option value="">${noBrowserProfile ? "先创建命名 Profile" : "选择登录态 Profile"}</option>${browserOptions}</select></label>
+    ${noBrowserProfile ? `<div class="web-chat-inline-action"><span>网页登录必须使用独立的命名 Profile。</span><button class="ghost-button" type="button" data-web-chat-create-browser-profile>新建命名 Profile</button></div>` : ""}
+    <div class="provider-form-grid"><label><span>聊天页面 URL</span><input name="chat_url" type="url" value="${escapeHtml(chatUrl)}" placeholder="https://chat.example.com/" required /></label><label><span>网页模型标识（可选）</span><input name="model_id" value="${escapeHtml(modelId)}" maxlength="160" placeholder="web-session" /></label></div>
+    <details class="provider-advanced web-chat-advanced" ${isCustom ? "open" : ""}><summary>高级：域名、选择器和就绪标记</summary><div>
+      <label><span>允许域名（每行一个）</span><textarea name="domains" rows="2" placeholder="chat.example.com">${escapeHtml(domains)}</textarea></label>
+      <div class="provider-form-grid"><label><span>输入框 CSS 选择器（每行一个）</span><textarea name="input_selectors" rows="3" required>${escapeHtml(webChatArrayText(selectors.input))}</textarea></label><label><span>发送按钮 CSS 选择器（每行一个）</span><textarea name="send_selectors" rows="3">${escapeHtml(webChatArrayText(selectors.send))}</textarea></label></div>
+      <label><span>Assistant 回复 CSS 选择器（每行一个）</span><textarea name="response_selectors" rows="3">${escapeHtml(webChatArrayText(selectors.response))}</textarea></label>
+      <div class="provider-form-grid"><label><span>登录提示标记（每行一个）</span><textarea name="login_markers" rows="3">${escapeHtml(webChatArrayText(loginMarkers))}</textarea></label><label><span>已登录标记（每行一个）</span><textarea name="authorized_markers" rows="3">${escapeHtml(webChatArrayText(authorizedMarkers))}</textarea></label></div>
+      <label><span>聊天页就绪标记（每行一个）</span><textarea name="ready_markers" rows="2">${escapeHtml(webChatArrayText(readyMarkers))}</textarea></label>
+     <div class="provider-form-grid"><label><span>等待回复超时（秒）</span><input name="response_timeout_seconds" type="number" min="0.5" max="15" step="0.5" value="${escapeHtml(timeout)}" /></label><label><span>预算策略</span><select name="budget_policy"><option value="free-only" ${(profile?.budget_policy || "free-only") === "free-only" ? "selected" : ""}>仅允许已确认免费/本地</option><option value="no-paid" ${(profile?.budget_policy || "") === "no-paid" ? "selected" : ""}>禁止付费动作</option></select></label></div>
+    </div></details>
+    <div class="web-chat-actions"><button class="ghost-button" type="button" data-web-chat-drawer-close>取消</button><span></span>${profile ? `<button class="ghost-button" type="button" data-web-chat-authorize-drawer="${escapeHtml(profile.id)}" ${actionBusy ? "disabled" : ""}>打开人工登录</button><button class="ghost-button" type="button" data-web-chat-check-drawer="${escapeHtml(profile.id)}" ${actionBusy ? "disabled" : ""}>检查页面</button>` : ""}<button class="ghost-button" type="submit" data-web-chat-action="save" ${actionBusy || noBrowserProfile ? "disabled" : ""}>保存草稿</button><button class="outline-button" type="submit" data-web-chat-action="test" ${actionBusy || noBrowserProfile ? "disabled" : ""}>测试连接</button><button class="primary-button" type="submit" data-web-chat-action="activate" ${actionBusy || noBrowserProfile ? "disabled" : ""}>保存并启用</button></div>
+  </form></div></aside>`;
 }
 
 function renderProviderImportPreview() {
@@ -1426,6 +1612,84 @@ function clearAgentSessionPreference() {
   } catch {
     // An unavailable preference store must not block the Agent runtime.
   }
+}
+
+const AGENT_ROUTING_MODES = new Set(["manual", "recommendation-then-confirmation", "automatic"]);
+const AGENT_ROUTING_BUDGETS = new Set(["prefer-free", "free-only", "allow-paid", "no-paid"]);
+
+function readAgentRoutingPreference() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(AGENT_ROUTING_PREFERENCE_KEY) || "null");
+    const mode = String(value?.mode || "manual").trim().toLowerCase();
+    const budget = String(value?.budget_policy || "prefer-free").trim().toLowerCase();
+    return {
+      mode: AGENT_ROUTING_MODES.has(mode) ? mode : "manual",
+      budget_policy: AGENT_ROUTING_BUDGETS.has(budget) ? budget : "prefer-free",
+    };
+  } catch {
+    return { mode: "manual", budget_policy: "prefer-free" };
+  }
+}
+
+function rememberAgentRoutingPreference() {
+  try {
+    window.localStorage.setItem(AGENT_ROUTING_PREFERENCE_KEY, JSON.stringify({
+      mode: AGENT_ROUTING_MODES.has(state.agentRoutingMode) ? state.agentRoutingMode : "manual",
+      budget_policy: AGENT_ROUTING_BUDGETS.has(state.agentRoutingBudgetPolicy) ? state.agentRoutingBudgetPolicy : "prefer-free",
+    }));
+  } catch {
+    // Routing preferences are best effort and must not block a turn.
+  }
+}
+
+function resetAgentRoutingDecision() {
+  state.agentRoutingDecision = null;
+  state.agentRoutingDecisionKey = "";
+  state.agentRoutingApprovedKey = "";
+  state.agentRoutingPendingKey = "";
+  state.agentRoutingNotice = "";
+}
+
+function routingModeLabel(mode) {
+  return ({
+    manual: "手动",
+    "recommendation-then-confirmation": "推荐后确认",
+    automatic: "自动",
+  })[mode] || "手动";
+}
+
+function routingBudgetLabel(policy) {
+  return ({
+    "prefer-free": "优先免费 / 本地",
+    "free-only": "仅免费 / 本地",
+    "allow-paid": "允许付费（仍需确认）",
+    "no-paid": "禁止付费",
+  })[policy] || "优先免费 / 本地";
+}
+
+function routingTaskKey(text, mode) {
+  const attachments = supportedAgentPromptAttachments().map((item) => `${item.name || "image"}:${item.bytes || 0}`).join("|");
+  return JSON.stringify({
+    session: state.agentSessionId || "new",
+    text: String(text || "").slice(0, 4000),
+    mode: effectiveAgentMode(),
+    routing: mode,
+    budget: state.agentRoutingBudgetPolicy,
+    attachments,
+  });
+}
+
+function agentRoutingRequest(text, requestedMode, approved = false) {
+  const policyMode = state.agentRoutingMode;
+  if (!AGENT_ROUTING_MODES.has(policyMode) || policyMode === "manual") return null;
+  const config = {
+    task_kind: requestedMode === "plan" ? "plan" : "code",
+    task_text: String(text || "").slice(0, 4000),
+    budget_policy: AGENT_ROUTING_BUDGETS.has(state.agentRoutingBudgetPolicy) ? state.agentRoutingBudgetPolicy : "prefer-free",
+    confirmation_mode: policyMode,
+  };
+  if (approved) config.approved = true;
+  return config;
 }
 
 function agentSupports(capability) {
@@ -1817,6 +2081,106 @@ function renderAgentModelPanel(status) {
   return `<section class="agent-panel agent-model-panel"><div class="panel-heading"><div><strong>会话模型</strong><small>目录来自 ${escapeHtml(runtimeLabel)} <code>session.models</code>；切换只影响当前 Agent 会话。</small></div><span class="agent-chip ${catalog.routable ? "" : "pending"}">${escapeHtml(stateLabel)}</span></div><label class="agent-model-select"><span>Provider / Model</span><select id="agent-model-select" ${status.ready && state.agentSessionId && rows.length && !state.agentBusy ? "" : "disabled"}>${rows.join("") || `<option>暂无可用模型</option>`}</select></label>${catalog.failures?.length ? `<small class="agent-mode-warning">${escapeHtml(catalog.failures.length)} 个 Provider 目录加载失败；其余可用项不受影响。</small>` : ""}</section>`;
 }
 
+function modelPolicyCostLabel(value) {
+  return ({
+    local: "本地",
+    "free-limited": "免费额度",
+    "paid-low": "低价付费",
+    "paid-high": "高价付费",
+    unknown: "成本未知",
+  })[String(value || "").toLowerCase()] || "成本未知";
+}
+
+function modelPolicyLocationLabel(value) {
+  return ({ local: "本地处理", cloud: "云端处理", mixed: "混合处理" })[String(value || "").toLowerCase()] || "位置未知";
+}
+
+function modelPolicyHealthLabel(entry) {
+  if (entry?.routable === true) return "可用";
+  const auth = String(entry?.auth_state || "").toLowerCase();
+  const quota = String(entry?.quota_state || "").toLowerCase();
+  const health = String(entry?.health_state || "").toLowerCase();
+  if (auth === "needs-auth") return "需要认证";
+  if (["exhausted", "expired", "blocked"].includes(quota)) return "额度不可用";
+  if (health === "unavailable" || health === "error") return "连接不可用";
+  if (entry?.requires_browser) return "需浏览器授权";
+  return "未就绪";
+}
+
+function modelPolicyQuotaFor(routeId) {
+  const snapshots = Array.isArray(state.agentModelPolicyCatalog?.quotas)
+    ? state.agentModelPolicyCatalog.quotas
+    : [];
+  return snapshots.find((item) => item?.route_id === routeId)
+    || (Array.isArray(state.agentModelPolicyQuota?.snapshots)
+      ? state.agentModelPolicyQuota.snapshots.find((item) => item?.route_id === routeId)
+      : null);
+}
+
+function modelPolicyQuotaLabel(snapshot) {
+  if (!snapshot) return "额度未观测";
+  const stateLabel = ({
+    available: "额度可用",
+    low: "额度较低",
+    exhausted: "额度已用尽",
+    expired: "额度已过期",
+    "needs-auth": "额度需认证",
+    blocked: "额度被阻断",
+    unknown: "额度未知",
+  })[snapshot.state] || "额度未知";
+  const remaining = snapshot.remaining_min != null
+    ? `${Number(snapshot.remaining_min).toFixed(2)}${snapshot.unit ? ` ${snapshot.unit}` : ""}`
+    : "";
+  return `${stateLabel}${remaining ? ` · 剩余约 ${remaining}` : ""}${snapshot.stale ? " · 需刷新" : ""}`;
+}
+
+function modelPolicyDecisionLabel(decision) {
+  return ({
+    selected: "已选择",
+    "needs-confirmation": "等待确认",
+    "no-compatible-route": "没有合规候选",
+  })[decision?.status] || "未决定";
+}
+
+function modelPolicyDecisionSummary(decision) {
+  if (!decision) return "尚未对当前目标进行 preflight。";
+  const selected = decision.selected_entry;
+  if (!selected) return `策略无法继续：${(decision.reason_codes || []).slice(0, 3).join("、") || "没有满足门槛的模型"}。`;
+  const route = selected.display_name || `${selected.provider_id || "Provider"} · ${selected.model_id || "模型"}`;
+  const reasons = Array.isArray(decision.reason_codes) ? decision.reason_codes.slice(0, 3).join("、") : "";
+  return `${route} · ${modelPolicyLocationLabel(selected.processing_location)} · ${modelPolicyCostLabel(decision.estimated_cost)}${reasons ? ` · ${reasons}` : ""}`;
+}
+
+function renderAgentRoutingPanel(status) {
+  if (!status || (!status.ready && !state.agentModelPolicyCatalog)) return "";
+  const catalog = state.agentModelPolicyCatalog || {};
+  const entries = Array.isArray(catalog.entries) ? catalog.entries : [];
+  const routable = entries.filter((item) => item?.routable === true).length;
+  const decision = state.agentRoutingDecision?.decision || null;
+  const decisionKey = state.agentRoutingDecisionKey;
+  const pending = Boolean(decision && state.agentRoutingPendingKey && state.agentRoutingPendingKey === decisionKey);
+  const mode = AGENT_ROUTING_MODES.has(state.agentRoutingMode) ? state.agentRoutingMode : "manual";
+  const budget = AGENT_ROUTING_BUDGETS.has(state.agentRoutingBudgetPolicy) ? state.agentRoutingBudgetPolicy : "prefer-free";
+  const entryRows = entries.slice(0, 12).map((entry) => {
+    const quota = modelPolicyQuotaFor(entry.route_id);
+    const stateClass = entry.routable === true ? "ready" : "pending";
+    return `<li class="agent-routing-entry ${stateClass}"><div><strong>${escapeHtml(entry.display_name || `${entry.provider_id} · ${entry.model_id}`)}</strong><small>${escapeHtml(modelPolicyLocationLabel(entry.processing_location))} · ${escapeHtml(modelPolicyCostLabel(entry.cost_class))} · ${escapeHtml(entry.quality_tier || "质量未知")}</small></div><span>${escapeHtml(modelPolicyHealthLabel(entry))}${quota ? `<small>${escapeHtml(modelPolicyQuotaLabel(quota))}</small>` : ""}</span></li>`;
+  }).join("");
+  const catalogStatus = state.agentModelPolicyBusy
+    ? "读取中"
+    : state.agentModelPolicyCatalog
+      ? `${routable} / ${entries.length} 个候选可路由`
+      : "尚未读取";
+  const decisionActions = pending
+    ? `<div class="agent-routing-confirm" role="group" aria-label="模型策略确认"><button class="small-button" id="agent-routing-confirm" type="button" ${state.agentBusy ? "disabled" : ""}>确认并继续</button><button class="ghost-button" id="agent-routing-cancel" type="button" ${state.agentBusy ? "disabled" : ""}>取消</button></div>`
+    : "";
+  const decisionBlock = decision
+    ? `<div class="agent-routing-decision ${pending ? "pending" : ""}" data-agent-routing-decision="${escapeHtml(decision.status || "unknown")}"><div class="agent-routing-decision-heading"><strong>${escapeHtml(modelPolicyDecisionLabel(decision))}</strong><span>${escapeHtml(decision.requires_confirmation ? "需要确认" : "可自动继续")}</span></div><p>${escapeHtml(modelPolicyDecisionSummary(decision))}</p><small>质量门槛：${escapeHtml(decision.quality_gate?.required || "未知")} · 置信度 ${(Number(decision.confidence || 0) * 100).toFixed(0)}% · ${escapeHtml(decision.quota_impact?.state || "额度未知")}</small>${decision.alternatives?.length ? `<details><summary>其他候选（${decision.alternatives.length}）</summary><ul>${decision.alternatives.slice(0, 4).map((item) => `<li>${escapeHtml(item.display_name || `${item.provider_id} · ${item.model_id}`)} · ${escapeHtml(modelPolicyCostLabel(item.cost_class))}</li>`).join("")}</ul></details>` : ""}${decisionActions}</div>`
+    : "";
+  const notice = state.agentRoutingNotice ? `<div class="agent-routing-notice" role="status">${escapeHtml(state.agentRoutingNotice)}</div>` : "";
+  return `<section class="agent-panel agent-routing-panel" data-agent-routing-panel><div class="panel-heading"><div><strong>模型策略</strong><small>发送前按安全、隐私、能力、质量、额度和成本排序；手动模式沿用模块页当前连接。</small></div><span class="agent-chip ${routable ? "" : "pending"}" data-agent-routing-catalog-status>${escapeHtml(catalogStatus)}</span></div><div class="agent-routing-controls"><label><span>选择策略</span><select id="agent-routing-mode"><option value="manual" ${mode === "manual" ? "selected" : ""}>手动</option><option value="recommendation-then-confirmation" ${mode === "recommendation-then-confirmation" ? "selected" : ""}>推荐后确认</option><option value="automatic" ${mode === "automatic" ? "selected" : ""}>自动（遵守硬门槛）</option></select></label><label><span>预算偏好</span><select id="agent-routing-budget"><option value="prefer-free" ${budget === "prefer-free" ? "selected" : ""}>优先免费 / 本地</option><option value="free-only" ${budget === "free-only" ? "selected" : ""}>仅免费 / 本地</option><option value="allow-paid" ${budget === "allow-paid" ? "selected" : ""}>允许付费（仍需确认）</option><option value="no-paid" ${budget === "no-paid" ? "selected" : ""}>禁止付费</option></select></label><div class="agent-routing-actions"><button class="ghost-button" id="agent-routing-refresh" type="button" ${state.agentModelPolicyBusy ? "disabled" : ""}>刷新目录</button><button class="ghost-button" id="agent-routing-quota" type="button" ${state.agentModelPolicyBusy ? "disabled" : ""}>刷新额度</button></div></div><div class="agent-routing-meta"><span>当前：${escapeHtml(routingModeLabel(mode))}</span><span>${escapeHtml(routingBudgetLabel(budget))}</span><span>最近检查：${escapeHtml(formatTime(catalog.checked_at || state.agentModelPolicyQuota?.checked_at))}</span></div>${notice}${decisionBlock}${entries.length ? `<details class="agent-routing-catalog"><summary>候选目录（${entries.length}）</summary><ul>${entryRows}</ul></details>` : `<div class="empty-column">暂无候选。请先在模块页配置并启用真实 Provider，或连接受管 Agent Runtime。</div>`}</section>`;
+}
+
 function renderAgentPlanReviewInteraction(item) {
   const questions = Array.isArray(item.questions) ? item.questions : [];
   const question = questions.find((entry) => entry?.intent?.kind === "plan-review") || questions[0] || {};
@@ -2028,6 +2392,549 @@ function renderBrowserPanel(browser, browserLabel, browserDetail) {
   return `<section class="agent-panel browser-runtime-panel"><div class="panel-heading"><div><strong>隔离浏览器</strong><small>${escapeHtml(browserDetail)}</small></div><div class="browser-panel-actions"><button class="small-button" id="browser-new-session" type="button" ${browser.state === "disabled" ? "disabled" : ""}>创建临时 Profile</button><button class="ghost-button" id="browser-new-named-profile" type="button" ${browser.state === "disabled" ? "disabled" : ""}>新建命名 Profile</button></div></div><div class="diagnostic-grid"><div><span>状态</span><strong>${escapeHtml(browserLabel)}</strong></div><div><span>后端</span><strong>${escapeHtml(browser.backend || "BrowserSkill")}</strong></div><div><span>活动会话</span><strong>${escapeHtml(browser.active_sessions ?? 0)}</strong></div><div><span>命名 Profile</span><strong>${escapeHtml(browser.named_profiles ?? state.browserProfiles.filter((item) => !item.archived_at).length)}</strong></div><div><span>下载隔离</span><strong>${escapeHtml(browser.quarantined_downloads ?? 0)} 项</strong></div></div><label class="browser-developer-toggle"><input id="browser-developer-mode" type="checkbox" ${state.browserDeveloperMode ? "checked" : ""} /> Developer 诊断（控制台/网络每次读取都需批准）</label><details class="browser-profiles-wrap"><summary>命名 Profile（凭据由 BrowserSkill 管理；Sumika 只保存授权和租约元数据）</summary><div class="browser-profile-list">${renderBrowserProfiles()}</div></details><div class="browser-session-list">${renderBrowserSessions()}</div>${renderBrowserDownloads()}</section>`;
 }
 
+function webRouteStatusLabel(route) {
+  const status = String(route?.status || "unknown");
+  if (route?.routable) return "可咨询";
+  return ({
+    ready: "可用但被占用",
+    "needs-auth": "需要登录",
+    unavailable: "未就绪",
+    archived: "已归档",
+    waiting: "等待人工接管",
+  })[status] || (route?.reason === "profile-not-configured" ? "尚未配置" : status);
+}
+
+function webConsultationStatusLabel(status) {
+  return ({
+    queued: "排队中",
+    running: "进行中",
+    completed: "已完成",
+    partial: "部分完成",
+    failed: "全部失败",
+    cancelled: "已停止",
+    "waiting-human": "等待人工操作",
+    unknown: "状态未知",
+    interrupted: "已中断",
+  })[String(status || "unknown")] || String(status || "未知");
+}
+
+function safeWebWorkbenchText(value, limit = 6000) {
+  let text = String(value || "");
+  text = text.replace(/(?:sk|pk)-[A-Za-z0-9_-]{8,}/gi, "<REDACTED_KEY>");
+  text = text.replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer <REDACTED>");
+  text = text.replace(/((?:api[_ -]?key|token|secret|password|cookie|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1<REDACTED>");
+  text = text.replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\n\r ]+/g, "<LOCAL_PATH>");
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+function webWorkbenchProfiles() {
+  const routes = Array.isArray(state.webWorkbenchCatalog?.routes) ? state.webWorkbenchCatalog.routes : [];
+  return routes.filter((route) => route?.provider_profile_id).map((route) => ({
+    route,
+    profile: state.webChatProfiles.find((item) => item.id === route.provider_profile_id) || null,
+  }));
+}
+
+function renderWebWorkbenchProfile(route, profile) {
+  const profileId = route.provider_profile_id || "";
+  const occupied = route.occupancy && route.occupancy !== "idle";
+  const active = Boolean(profile?.active_session);
+  const lease = profile?.browser_profile_lease_owner === "other-core";
+  const stateText = lease ? "其他 Sumika 实例占用" : webRouteStatusLabel(route);
+  const canOpen = Boolean(profileId && !lease && !state.webWorkbenchBusy);
+  const controls = profileId
+    ? `<button class="small-button" type="button" data-web-workbench-open="${escapeHtml(profileId)}" ${canOpen ? "" : "disabled"}>${active ? "保持打开" : "打开隔离窗口"}</button><button class="ghost-button" type="button" data-web-workbench-focus="${escapeHtml(profileId)}" ${canOpen ? "" : "disabled"}>聚焦</button>${active ? `<button class="ghost-button" type="button" data-web-workbench-close="${escapeHtml(profileId)}" ${state.webWorkbenchBusy ? "disabled" : ""}>关闭</button>` : ""}${occupied && route.occupancy === "agent" ? `<button class="outline-button" type="button" data-web-workbench-takeover="${escapeHtml(profileId)}" ${state.webWorkbenchBusy ? "disabled" : ""}>接管并暂停 Agent</button>` : `<button class="ghost-button" type="button" data-web-workbench-release="${escapeHtml(profileId)}" ${state.webWorkbenchBusy || !occupied ? "disabled" : ""}>交给 Agent</button>`}`
+    : `<button class="ghost-button" type="button" data-page="Modules">去模块页配置</button>`;
+  return `<article class="web-workbench-profile" data-web-workbench-profile="${escapeHtml(profileId || route.route_id)}"><div class="web-workbench-profile-main"><div class="web-workbench-profile-heading"><span class="status-dot ${route.routable ? "online" : lease ? "warning" : "offline"}"></span><strong>${escapeHtml(route.label || profile?.name || route.adapter_id || "网页 Profile")}</strong><span class="web-workbench-badge">${escapeHtml(stateText)}</span></div><small>${escapeHtml(route.adapter_id || route.provider_key || "web-chat")} · ${escapeHtml((route.domains || []).join(" / ") || profile?.chat_url || "域名未登记")}</small><small>额度：<span class="web-workbench-quota">unknown（不会承诺免费）</span> · 占用：${escapeHtml(route.occupancy || "idle")}</small></div><div class="web-workbench-profile-actions">${controls}</div></article>`;
+}
+
+function renderWebWorkbenchConsultation(item) {
+  const members = Array.isArray(item?.members) ? item.members : [];
+  const memberRows = members.length ? members.map((member) => {
+    const status = String(member.status || "unknown");
+    const answer = member.answer ? safeWebWorkbenchText(member.answer) : "";
+    const retry = status === "failed" && member.dispatch_id ? `<button class="ghost-button" type="button" data-web-workbench-retry="${escapeHtml(member.dispatch_id)}">重试</button>` : "";
+    return `<article class="web-workbench-member" data-web-workbench-member="${escapeHtml(member.dispatch_id || member.route_id || "member")}"><div><strong>${escapeHtml(member.provider_profile_id || member.route_id || "网页成员")}</strong><span class="web-workbench-member-status ${escapeHtml(status)}">${escapeHtml(webConsultationStatusLabel(status))}</span><small>${member.latency_ms != null ? `${escapeHtml(String(Math.round(Number(member.latency_ms) || 0)))} ms` : "等待响应"}${member.error_code ? ` · ${escapeHtml(member.error_code)}` : ""}</small></div>${answer ? `<details><summary>UNTRUSTED_WEB_RESULT · 查看回答</summary><p>${escapeHtml(answer).replaceAll("\n", "<br>")}</p></details>` : ""}<div>${retry}</div></article>`;
+  }).join("") : `<div class="empty-column">尚未分配网页成员</div>`;
+  const running = ["queued", "running"].includes(String(item?.status || ""));
+  const opinion = item?.opinion_mode === "single-opinion" || item?.single_opinion ? "single-opinion · 单模型意见" : "panel · 独立成员";
+  return `<article class="web-workbench-consultation" data-web-workbench-consultation="${escapeHtml(item?.consultation_id || "")}"><div class="web-workbench-consultation-heading"><div><strong>${escapeHtml(webConsultationStatusLabel(item?.status))}</strong><small>${escapeHtml(item?.decision_kind || "small-answer")} · ${escapeHtml(opinion)} · ${Number(item?.successful_count || 0)}/${members.length || "?"} 成功</small></div><div>${running ? `<button class="ghost-button" type="button" data-web-workbench-consultation-cancel="${escapeHtml(item.consultation_id)}">停止当前咨询</button>` : item?.status === "partial" || item?.status === "failed" ? `<button class="ghost-button" type="button" data-web-workbench-consultation-continue="${escapeHtml(item.consultation_id)}">继续复核</button>` : ""}</div></div>${item?.disagreement_detected ? `<div class="web-workbench-disagreement">检测到意见分歧；结果仅供主 Agent/用户审阅。</div>` : ""}<div class="web-workbench-member-list">${memberRows}</div><small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT · 网页内容不会自动执行</small></article>`;
+}
+
+function renderWebWorkbench() {
+  const catalog = state.webWorkbenchCatalog || {};
+  const routes = Array.isArray(catalog.routes) ? catalog.routes : [];
+  const profiles = webWorkbenchProfiles();
+  const templates = routes.filter((route) => !route.provider_profile_id);
+  const readyRoutes = routes.filter((route) => route.routable);
+  const workerDraft = state.webWorkbenchWorkerDraft || {};
+  const consultationDraft = state.webWorkbenchConsultationDraft || {};
+  const manualOptions = profiles.filter(({ route }) => route.routable).map(({ route, profile }) => `<option value="${escapeHtml(profile?.id || route.provider_profile_id)}" ${state.webWorkbenchSelectedProfileId === (profile?.id || route.provider_profile_id) ? "selected" : ""}>${escapeHtml(route.label || profile?.name || route.adapter_id)}</option>`).join("");
+  const workerOptions = readyRoutes.map((route) => `<option value="${escapeHtml(route.route_id)}" ${workerDraft.route_id === route.route_id ? "selected" : ""}>${escapeHtml(route.label)} · ${escapeHtml(route.adapter_id || route.provider_key)}</option>`).join("");
+  const consultationRows = (state.webWorkbenchConsultations || []).map(renderWebWorkbenchConsultation).join("") || `<div class="empty-column">还没有咨询记录；主 Agent 或你可以在需要时动态发起。</div>`;
+  const notice = state.webWorkbenchNotice ? `<div class="agent-notice" role="status">${escapeHtml(state.webWorkbenchNotice)}</div>` : "";
+  return renderPageFrame("网页工作台", "管理隔离 BrowserSkill 网页 Profile，执行单次网页子任务或并行咨询；网页回答始终是不可信外部结果。", `${notice}<section class="web-workbench-safety"><strong>隔离与额度边界</strong><p>网页运行在 Sumika 管理的 Agent Window，不复用你的 Edge 标签页。额度固定显示 <code>unknown</code>；不会因为“通常免费”而保证免费，也不会静默切换到付费 API。</p></section><section class="web-workbench-panel" data-web-workbench-catalog><div class="panel-heading"><div><strong>网页 Profiles</strong><small>${escapeHtml(String(catalog.routable_count ?? 0))} 个可咨询 · ${escapeHtml(String(routes.length))} 个目录项 · 最近刷新只读取元数据</small></div><button class="small-button" id="web-workbench-refresh" type="button" ${state.webWorkbenchCatalogBusy ? "disabled" : ""}>${state.webWorkbenchCatalogBusy ? "刷新中" : "刷新目录"}</button></div><div class="web-workbench-profile-list">${profiles.map(({ route, profile }) => renderWebWorkbenchProfile(route, profile)).join("") || `<div class="empty-column">尚未配置网页 Profile。可在模块页创建并完成隔离登录。</div>`}</div>${templates.length ? `<details class="web-workbench-templates"><summary>可配置网页模板（不会直接路由）</summary><div>${templates.map((route) => renderWebWorkbenchProfile(route, null)).join("")}</div></details>` : ""}</section><section class="web-workbench-two-column"><section class="web-workbench-panel"><div class="panel-heading"><div><strong>手动网页查询</strong><small>不经过主 Agent；仍使用同一命名 Profile 的独占写租约。</small></div></div><form id="web-workbench-manual-form" class="web-workbench-form"><label><span>网页 Profile</span><select name="profile_id" ${manualOptions ? "" : "disabled"} required><option value="">选择已授权 Profile</option>${manualOptions}</select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="输入一个独立的小问题" required>${escapeHtml(state.webWorkbenchManualDrafts[state.webWorkbenchSelectedProfileId] || "")}</textarea></label><button class="outline-button" type="submit" ${manualOptions && !state.webWorkbenchBusy ? "" : "disabled"}>发送网页问题</button></form><div class="web-workbench-manual-results">${Object.entries(state.webWorkbenchManualResults || {}).map(([profileId, result]) => `<article class="web-workbench-manual-result" data-web-workbench-manual-result="${escapeHtml(profileId)}"><strong>${escapeHtml(state.webChatProfiles.find((item) => item.id === profileId)?.name || profileId)}</strong>${result?.ok ? `<small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(result.text)).replaceAll("\n", "<br>")}</p>` : `<p class="plugin-error">${escapeHtml(result?.reason || result?.error_code || "网页查询未完成")}</p>`}</article>`).join("") || `<div class="empty-column">尚无手动回答</div>`}</div></section><section class="web-workbench-panel"><div class="panel-heading"><div><strong>Web Worker</strong><small>一次明确网页子任务；由你选择路由，结果不会直接修改文件。</small></div></div><form id="web-workbench-worker-form" class="web-workbench-form"><label><span>路由</span><select name="route_id" ${workerOptions ? "" : "disabled"} required><option value="">选择可咨询 Profile</option>${workerOptions}</select></label><label class="web-workbench-wide"><span>子任务</span><textarea name="question" rows="3" maxlength="16000" placeholder="例如：只检查这个 API 设计的一个风险点" required>${escapeHtml(workerDraft.question || "")}</textarea></label><button class="outline-button" type="submit" ${workerOptions && !state.webWorkbenchBusy ? "" : "disabled"}>交给 Web Worker</button></form><div class="web-workbench-worker-result">${state.webWorkbenchWorkerResult ? `<article class="web-workbench-manual-result"><strong>${escapeHtml(state.webWorkbenchWorkerResult.status || "结果")}</strong><small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(state.webWorkbenchWorkerResult.result?.answer || state.webWorkbenchWorkerResult.reason || "暂无回答")).replaceAll("\n", "<br>")}</p></article>` : `<div class="empty-column">尚无 Web Worker 回合</div>`}</div></section></section><section class="web-workbench-panel web-workbench-consultation-panel"><div class="panel-heading"><div><strong>多模型咨询面板</strong><small>每次在当前 turn 动态创建 1–3 个不同网页 Provider；成员互相看不到答案。</small></div><div class="web-workbench-panel-actions"><button class="ghost-button" type="button" data-web-workbench-pause-all ${state.webWorkbenchBusy ? "disabled" : ""}>暂停 Agent 咨询</button><button class="ghost-button" type="button" data-web-workbench-continue-latest ${state.webWorkbenchBusy ? "disabled" : ""}>继续最近咨询</button></div></div><form id="web-workbench-consultation-form" class="web-workbench-form"><label><span>决策类型</span><select name="decision_kind"><option value="brainstorm" ${consultationDraft.decision_kind === "brainstorm" ? "selected" : ""}>brainstorm · 头脑风暴</option><option value="plan-review" ${consultationDraft.decision_kind === "plan-review" ? "selected" : ""}>plan-review · 计划复核</option><option value="fact-check" ${consultationDraft.decision_kind === "fact-check" ? "selected" : ""}>fact-check · 事实核查</option><option value="counterexample" ${consultationDraft.decision_kind === "counterexample" ? "selected" : ""}>counterexample · 反例</option><option value="small-answer" ${consultationDraft.decision_kind === "small-answer" ? "selected" : ""}>small-answer · 小问题</option></select></label><label><span>成员数</span><select name="max_members"><option value="1" ${Number(consultationDraft.max_members) === 1 ? "selected" : ""}>1 · single-opinion</option><option value="2" ${Number(consultationDraft.max_members) === 2 ? "selected" : ""}>2</option><option value="3" ${Number(consultationDraft.max_members) !== 1 && Number(consultationDraft.max_members) !== 2 ? "selected" : ""}>3</option></select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="让多个网页模型独立评审同一个问题" required>${escapeHtml(consultationDraft.question || "")}</textarea></label><label class="web-workbench-wide"><span>必要上下文（可选，禁止粘贴凭据文件）</span><textarea name="context" rows="2" maxlength="24000" placeholder="目标、短 diff 或脱敏工具结果">${escapeHtml(consultationDraft.context || "")}</textarea></label><button class="outline-button" type="submit" ${readyRoutes.length && !state.webWorkbenchBusy ? "" : "disabled"}>启动咨询面板</button></form><div class="web-workbench-consultations">${consultationRows}</div></section>`);
+}
+
+function webWorkbenchParentSessionId() {
+  // The bridge requires a parent id for audit correlation.  Prefer the active
+  // DSH session, then the normal chat session; neither value is sent as page
+  // content or persisted by the browser workbench.
+  return String(state.agentSessionId || currentSessionId() || "workbench").trim() || "workbench";
+}
+
+function webWorkbenchContextFromText(value) {
+  const text = String(value || "").trim();
+  return text ? { user_context: text } : {};
+}
+
+function webWorkbenchActiveConsultation(item) {
+  return ["queued", "running"].includes(String(item?.status || ""));
+}
+
+function webWorkbenchRememberRequest(request) {
+  if (!request?.consultation_id) return;
+  state.webWorkbenchConsultationRequests = {
+    ...state.webWorkbenchConsultationRequests,
+    [request.consultation_id]: {
+      question: request.question,
+      context: request.context || "",
+      decision_kind: request.decision_kind,
+      max_members: Number(request.max_members) || 3,
+      parent_session_id: request.parent_session_id,
+      parent_turn_id: request.parent_turn_id || null,
+    },
+  };
+}
+
+function webWorkbenchShouldPoll() {
+  return Boolean(
+    ["queued", "running"].includes(String(state.webWorkbenchWorkerResult?.status || ""))
+    || (state.webWorkbenchConsultations || []).some(webWorkbenchActiveConsultation),
+  );
+}
+
+function scheduleWebWorkbenchPoll() {
+  if (state.webWorkbenchPollTimer !== null) return;
+  if (!webWorkbenchShouldPoll()) return;
+  state.webWorkbenchPollTimer = window.setTimeout(() => {
+    state.webWorkbenchPollTimer = null;
+    void pollWebWorkbenchRuns();
+  }, 900);
+}
+
+function stopWebWorkbenchPoll() {
+  if (state.webWorkbenchPollTimer !== null) {
+    window.clearTimeout(state.webWorkbenchPollTimer);
+    state.webWorkbenchPollTimer = null;
+  }
+}
+
+async function loadWebWorkbenchConsultations(shouldRender = true) {
+  try {
+    const result = await rpc("sumika.consultation.status", { limit: 50 });
+    state.webWorkbenchConsultations = Array.isArray(result?.consultations) ? result.consultations : [];
+  } catch (error) {
+    if (shouldRender) state.webWorkbenchNotice = `咨询记录读取失败：${String(error.message || "未知错误").slice(0, 240)}`;
+  }
+  if (shouldRender) render();
+  if (webWorkbenchShouldPoll()) scheduleWebWorkbenchPoll();
+}
+
+async function loadWebWorkbenchData(shouldRender = true, refresh = false) {
+  if (state.webWorkbenchCatalogBusy) return;
+  state.webWorkbenchCatalogBusy = true;
+  if (shouldRender) render();
+  try {
+    // Keep the profile projection and route catalog from the same refresh so
+    // a just-finished login/consent cannot leave stale controls visible.
+    await loadWebChatData(false, false);
+    state.webWorkbenchCatalog = await rpc("sumika.route.catalog", {
+      include_templates: true,
+      refresh: Boolean(refresh),
+    });
+    await loadWebWorkbenchConsultations(false);
+    const profiles = webWorkbenchProfiles();
+    if (!profiles.some(({ profile }) => profile?.id === state.webWorkbenchSelectedProfileId)) {
+      state.webWorkbenchSelectedProfileId = profiles.find(({ route }) => route.routable)?.profile?.id || "";
+    }
+    state.webWorkbenchNotice = "";
+  } catch (error) {
+    state.webWorkbenchNotice = `网页工作台读取失败：${String(error.message || "未知错误").slice(0, 240)}`;
+    if (!state.webWorkbenchCatalog) state.webWorkbenchCatalog = { schema: "agent-route/v1", routes: [], count: 0, routable_count: 0, quota_state: "unknown" };
+  } finally {
+    state.webWorkbenchCatalogBusy = false;
+    if (shouldRender) render();
+  }
+  if (webWorkbenchShouldPoll()) scheduleWebWorkbenchPoll();
+}
+
+async function pollWebWorkbenchRuns() {
+  if (state.webWorkbenchPollInFlight) return;
+  if (!webWorkbenchShouldPoll()) return;
+  state.webWorkbenchPollInFlight = true;
+  try {
+    if (state.webWorkbenchWorkerDispatchId) {
+      const result = await rpc("sumika.route.status", { dispatch_id: state.webWorkbenchWorkerDispatchId });
+      const dispatch = result?.dispatch || result;
+      if (dispatch && typeof dispatch === "object") {
+        state.webWorkbenchWorkerResult = dispatch;
+      }
+    }
+    await loadWebWorkbenchConsultations(false);
+    // Occupancy is derived from the coordinator and can change while a worker
+    // finishes; refresh the catalog before repainting the controls.
+    state.webWorkbenchCatalog = await rpc("sumika.route.catalog", { include_templates: true });
+    if (state.activePage === "WebWorkbench") render();
+  } catch (error) {
+    state.webWorkbenchNotice = `网页运行状态读取失败：${String(error.message || "未知错误").slice(0, 240)}`;
+    if (state.activePage === "WebWorkbench") render();
+  } finally {
+    state.webWorkbenchPollInFlight = false;
+    if (webWorkbenchShouldPoll()) scheduleWebWorkbenchPoll();
+  }
+}
+
+function updateWebWorkbenchDraftFromForm(form) {
+  if (!form) return;
+  const question = String(form.elements.question?.value || "");
+  if (form.id === "web-workbench-worker-form") {
+    state.webWorkbenchWorkerDraft = {
+      route_id: String(form.elements.route_id?.value || ""),
+      question,
+    };
+  } else if (form.id === "web-workbench-consultation-form") {
+    state.webWorkbenchConsultationDraft = {
+      question,
+      context: String(form.elements.context?.value || ""),
+      decision_kind: String(form.elements.decision_kind?.value || "brainstorm"),
+      max_members: Number(form.elements.max_members?.value || 3),
+    };
+  }
+}
+
+async function openWebWorkbenchProfile(profileId) {
+  if (!profileId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `open:${profileId}`;
+  state.webWorkbenchNotice = "正在打开隔离网页窗口…";
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.open", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webWorkbenchSelectedProfileId = profileId;
+    state.webWorkbenchNotice = "隔离网页窗口已打开；不会复用你的个人 Edge 标签页。";
+  } catch (error) {
+    state.webWorkbenchNotice = `打开网页窗口失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function focusWebWorkbenchProfile(profileId) {
+  if (!profileId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `focus:${profileId}`;
+  state.webWorkbenchNotice = "正在聚焦隔离网页窗口…";
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.focus", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webWorkbenchSelectedProfileId = profileId;
+    state.webWorkbenchNotice = result.focused === false ? "网页窗口未返回可聚焦状态；请检查 BrowserSkill。" : "已聚焦隔离网页窗口。";
+  } catch (error) {
+    state.webWorkbenchNotice = `聚焦网页窗口失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function closeWebWorkbenchProfile(profileId) {
+  if (!profileId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `close:${profileId}`;
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.close", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webWorkbenchNotice = "隔离网页窗口已关闭；命名 Profile 登录态仍保留。";
+  } catch (error) {
+    state.webWorkbenchNotice = `关闭网页窗口失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function setWebWorkbenchOccupancy(profileId, owner = "idle") {
+  if (!profileId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `occupancy:${profileId}`;
+  render();
+  try {
+    await rpc("sumika.route.occupancy", { profile_id: profileId, owner });
+    state.webWorkbenchNotice = owner === "idle" ? "已释放网页 Profile；Agent 可在下一次 dispatch 中使用。" : `网页 Profile 已标记为 ${owner}。`;
+  } catch (error) {
+    state.webWorkbenchNotice = `更新网页占用状态失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function takeoverWebWorkbenchProfile(profileId) {
+  if (!profileId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `takeover:${profileId}`;
+  state.webWorkbenchNotice = "正在暂停该 Profile 上的 Agent 回合并交给你接管…";
+  render();
+  try {
+    const result = await rpc("sumika.route.takeover", { profile_id: profileId });
+    state.webWorkbenchNotice = result.cancelled_dispatches?.length
+      ? `已请求接管，并停止 ${result.cancelled_dispatches.length} 个 Agent 回合。`
+      : "已请求接管；若网页正在发送，状态会在下一次刷新中更新。";
+  } catch (error) {
+    state.webWorkbenchNotice = `接管网页 Profile 失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function sendWebWorkbenchManual(event) {
+  event.preventDefault();
+  if (state.webWorkbenchBusy) return;
+  const form = event.currentTarget;
+  const profileId = String(form.elements.profile_id?.value || "").trim();
+  const question = String(form.elements.question?.value || "").trim();
+  if (!profileId || !question) {
+    state.webWorkbenchNotice = "请选择已授权网页 Profile 并填写问题。";
+    render();
+    return;
+  }
+  state.webWorkbenchSelectedProfileId = profileId;
+  state.webWorkbenchManualDrafts = { ...state.webWorkbenchManualDrafts, [profileId]: question };
+  state.webWorkbenchBusy = "manual-send";
+  state.webWorkbenchNotice = "正在通过隔离网页发送；不会把回答自动交给主 Agent。";
+  render();
+  try {
+    const result = await rpc("browser.web_chat.send", { profile_id: profileId, text: question });
+    state.webWorkbenchManualResults = { ...state.webWorkbenchManualResults, [profileId]: result };
+    state.webWorkbenchManualDrafts = { ...state.webWorkbenchManualDrafts, [profileId]: "" };
+    state.webWorkbenchNotice = result?.ok
+      ? "网页回答已返回，并标记为 UNTRUSTED_WEB_RESULT。"
+      : String(result?.reason || result?.error_code || "网页查询未完成");
+  } catch (error) {
+    state.webWorkbenchManualResults = { ...state.webWorkbenchManualResults, [profileId]: { ok: false, reason: error.message } };
+    state.webWorkbenchNotice = `网页查询失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function startWebWorkbenchWorker(event) {
+  event.preventDefault();
+  if (state.webWorkbenchBusy) return;
+  const form = event.currentTarget;
+  const routeId = String(form.elements.route_id?.value || state.webWorkbenchWorkerDraft.route_id || "").trim();
+  const question = String(form.elements.question?.value || state.webWorkbenchWorkerDraft.question || "").trim();
+  if (!routeId || !question) {
+    state.webWorkbenchNotice = "请选择可用路由并填写子任务。";
+    render();
+    return;
+  }
+  state.webWorkbenchWorkerDraft = { route_id: routeId, question };
+  state.webWorkbenchBusy = "worker-start";
+  state.webWorkbenchNotice = "Web Worker 已提交，等待隔离网页事件…";
+  render();
+  try {
+    const result = await rpc("sumika.route.dispatch", {
+      parent_session_id: webWorkbenchParentSessionId(),
+      parent_turn_id: state.agentSnapshot?.turn_id || undefined,
+      route_id: routeId,
+      mode: "web-worker",
+      question,
+      context_refs: { source: "web-workbench" },
+    });
+    const dispatch = result?.dispatch || {};
+    state.webWorkbenchWorkerDispatchId = dispatch.dispatch_id || "";
+    state.webWorkbenchWorkerResult = dispatch;
+    state.webWorkbenchWorkerDraft = { route_id: routeId, question: "" };
+    if (result?.accepted === false) {
+      state.webWorkbenchNotice = `Web Worker 未接受：${result.reason || dispatch.error_code || "route-unavailable"}`;
+    } else {
+      state.webWorkbenchNotice = "Web Worker 已排队；结果会保持 UNTRUSTED_WEB_RESULT。";
+    }
+  } catch (error) {
+    state.webWorkbenchWorkerResult = { status: "failed", reason: error.message };
+    state.webWorkbenchNotice = `Web Worker 提交失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+    scheduleWebWorkbenchPoll();
+  }
+}
+
+async function startWebWorkbenchConsultation(event) {
+  event.preventDefault();
+  if (state.webWorkbenchBusy) return;
+  const form = event.currentTarget;
+  updateWebWorkbenchDraftFromForm(form);
+  const draft = state.webWorkbenchConsultationDraft;
+  const question = String(draft.question || "").trim();
+  const maxMembers = Math.max(1, Math.min(3, Number(draft.max_members) || 3));
+  if (!question) {
+    state.webWorkbenchNotice = "请填写咨询问题。";
+    render();
+    return;
+  }
+  state.webWorkbenchBusy = "consultation-start";
+  state.webWorkbenchNotice = "正在动态分配独立网页成员；成员不会互相看到回答。";
+  render();
+  const request = {
+    parent_session_id: webWorkbenchParentSessionId(),
+    parent_turn_id: state.agentSnapshot?.turn_id || undefined,
+    question,
+    decision_kind: draft.decision_kind || "brainstorm",
+    required_capabilities: ["text"],
+    context_refs: webWorkbenchContextFromText(draft.context),
+    max_members: maxMembers,
+  };
+  try {
+    const result = await rpc("sumika.consultation.start", request);
+    if (!result?.consultation_id) throw new Error("核心未返回 consultation_id");
+    webWorkbenchRememberRequest({ ...request, consultation_id: result.consultation_id, context: draft.context });
+    state.webWorkbenchConsultations = [result, ...state.webWorkbenchConsultations.filter((item) => item.consultation_id !== result.consultation_id)];
+    state.webWorkbenchConsultationDraft = { ...draft, question: "", context: "", max_members: maxMembers };
+    state.webWorkbenchNotice = result.status === "failed"
+      ? "没有可用网页 Profile；未生成替代意见。"
+      : "咨询面板已启动；结果只作为外部建议，不会自动执行。";
+  } catch (error) {
+    state.webWorkbenchNotice = `启动咨询面板失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+    scheduleWebWorkbenchPoll();
+  }
+}
+
+async function cancelWebWorkbenchConsultation(consultationId) {
+  if (!consultationId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `consultation-cancel:${consultationId}`;
+  state.webWorkbenchNotice = "正在停止咨询成员…";
+  render();
+  try {
+    await rpc("sumika.route.cancel", { consultation_id: consultationId });
+    state.webWorkbenchNotice = "已发送停止请求；最终状态以咨询事件为准。";
+  } catch (error) {
+    state.webWorkbenchNotice = `停止咨询失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function continueWebWorkbenchConsultation(consultationId) {
+  if (!consultationId || state.webWorkbenchBusy) return;
+  const previous = state.webWorkbenchConsultationRequests[consultationId];
+  if (!previous?.question) {
+    state.webWorkbenchNotice = "该咨询来自较早的核心记录，问题正文未保存在 UI；请重新填写问题后发起复核。";
+    render();
+    return;
+  }
+  state.webWorkbenchBusy = `consultation-continue:${consultationId}`;
+  state.webWorkbenchNotice = "正在发起一次新的复核回合…";
+  render();
+  try {
+    const request = {
+      parent_session_id: previous.parent_session_id || webWorkbenchParentSessionId(),
+      parent_turn_id: previous.parent_turn_id || undefined,
+      question: previous.question,
+      decision_kind: previous.decision_kind || "fact-check",
+      required_capabilities: ["text"],
+      context_refs: webWorkbenchContextFromText(previous.context),
+      max_members: Math.max(1, Math.min(3, Number(previous.max_members) || 3)),
+      continuation_of: consultationId,
+    };
+    const result = await rpc("sumika.consultation.start", request);
+    webWorkbenchRememberRequest({ ...request, consultation_id: result.consultation_id, context: previous.context });
+    state.webWorkbenchNotice = "复核回合已启动；它使用新的成员分配，不会把旧回答发送给成员。";
+  } catch (error) {
+    state.webWorkbenchNotice = `继续复核失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+    scheduleWebWorkbenchPoll();
+  }
+}
+
+async function retryWebWorkbenchDispatch(dispatchId) {
+  if (!dispatchId || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `retry:${dispatchId}`;
+  state.webWorkbenchNotice = "正在重试已确认的发送前失败回合…";
+  render();
+  try {
+    const result = await rpc("sumika.route.retry", { dispatch_id: dispatchId });
+    const dispatch = result?.dispatch || result;
+    if (dispatch?.dispatch_id) {
+      state.webWorkbenchWorkerDispatchId = dispatch.dispatch_id;
+      state.webWorkbenchWorkerResult = dispatch;
+    }
+    state.webWorkbenchNotice = "重试已排队；不会重复发送已确认成功的消息。";
+  } catch (error) {
+    state.webWorkbenchNotice = `网页回合重试失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+    scheduleWebWorkbenchPoll();
+  }
+}
+
+async function pauseAllWebWorkbenchConsultations() {
+  if (state.webWorkbenchBusy) return;
+  const active = state.webWorkbenchConsultations.filter(webWorkbenchActiveConsultation);
+  if (!active.length && !webWorkbenchShouldPoll()) {
+    state.webWorkbenchNotice = "当前没有运行中的网页咨询。";
+    render();
+    return;
+  }
+  state.webWorkbenchBusy = "pause-all";
+  state.webWorkbenchNotice = "正在停止运行中的网页咨询…";
+  render();
+  try {
+    await Promise.all(active.map((item) => rpc("sumika.route.cancel", { consultation_id: item.consultation_id })));
+    if (["queued", "running"].includes(String(state.webWorkbenchWorkerResult?.status || "")) && state.webWorkbenchWorkerDispatchId) {
+      await rpc("sumika.route.cancel", { dispatch_id: state.webWorkbenchWorkerDispatchId });
+    }
+    state.webWorkbenchNotice = "已停止当前网页咨询；可以从失败/部分结果处继续复核。";
+  } catch (error) {
+    state.webWorkbenchNotice = `暂停网页咨询失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
+    await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function continueLatestWebWorkbenchConsultation() {
+  const candidate = state.webWorkbenchConsultations.find((item) => ["partial", "failed", "waiting-human"].includes(String(item?.status || "")));
+  if (!candidate) {
+    state.webWorkbenchNotice = "没有可继续复核的部分或失败咨询。";
+    render();
+    return;
+  }
+  await continueWebWorkbenchConsultation(candidate.consultation_id);
+}
+
 function renderAgentSessionRow(session, snippet = "") {
   const id = session?.id || session?.session_id || "";
   if (!id) return "";
@@ -2117,7 +3024,7 @@ function renderAgent() {
           : "")
     : "";
   const attachmentTools = agentSupports("attachments") ? `<div class="agent-attachment-tools"><input id="agent-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden /><button class="ghost-button" id="agent-attach-image" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>添加图片</button><div class="agent-attachment-list">${renderAgentPromptAttachments()}</div>${state.agentAttachmentNotice ? `<small class="agent-attachment-notice" role="status">${escapeHtml(state.agentAttachmentNotice)}</small>` : ""}</div>` : "";
-  return renderPageFrame("Agent 工作区", `以 ${runtimeLabel} 为运行时，统一展示会话、计划、工具、审批和可选能力。`, `${notice}<div class="agent-toolbar"><div class="agent-status-line"><span class="status-dot ${status.state === "ready" ? "online" : status.state === "disabled" ? "offline" : "warning"}"></span><strong>${escapeHtml(runtimeLabel)} ${escapeHtml(statusLabel)}</strong><code>${escapeHtml(status.version || status.runtime_id || "未配置")}${status.commit ? ` · ${String(status.commit).slice(0, 12)}` : ""}</code></div><div class="agent-actions"><button class="small-button" id="agent-health" type="button" ${state.agentBusy ? "disabled" : ""}>检查连接</button><button class="outline-button" id="agent-create-session" type="button" ${canCreateSession ? "" : "disabled"}>新建 Agent 会话</button></div></div>${renderAgentPresetPanel(status)}${catalogManagement}${providerPanel}${renderAgentWorkspacePanel(status)}${renderWorkspaceRuntimePanel()}${renderAgentModelPanel(status)}<section class="agent-panel agent-sessions-panel"><div class="panel-heading"><div><strong>受管 Agent 会话</strong><small>只显示当前 Sumika 受管 ${escapeHtml(runtimeLabel)} 实例的会话元数据；旧聊天会话不会混入。</small></div><button class="small-button" id="agent-refresh-sessions" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div>${renderAgentSessionSearch()}</section>${renderAgentSessionPanel(state.agentSnapshot)}${renderAgentGoalPanel(status)}${renderAgentSubagentPanel(status)}${agentSupports("interactions") ? renderAgentInteractions(state.agentInteractions) : ""}<section class="agent-panel"><div class="panel-heading"><div><strong>运行模式</strong><small>执行能力由 ${escapeHtml(runtimeLabel)} 与 Sumika policy companion 共同决定。</small>${commandNotice}${workspaceModeNotice}</div><select id="agent-mode" aria-label="Agent 模式">${modeOptions}</select></div><div class="agent-composer"><textarea id="agent-prompt" rows="3" maxlength="48000" placeholder="输入 Agent 目标；Runtime 未连接时不会发送或生成回复">${escapeHtml(state.agentPromptDraft)}</textarea><div class="agent-composer-footer">${attachmentTools}<button class="outline-button" id="agent-send" type="button" ${canSendPrompt ? "" : "disabled"}>发送目标</button></div></div></section>${capabilities ? `<section class="agent-capability-grid">${capabilities}</section>` : ""}<div class="agent-two-column"><section class="agent-panel"><div class="panel-heading"><div><strong>事件审计</strong><small>敏感动作默认拒绝，登录凭据和 OTP 不进入模型上下文。</small></div></div><div class="agent-event-list">${events}</div></section>${browserPanel}</div>`);
+  return renderPageFrame("Agent 工作区", `以 ${runtimeLabel} 为运行时，统一展示会话、计划、工具、审批和可选能力。`, `${notice}<div class="agent-toolbar"><div class="agent-status-line"><span class="status-dot ${status.state === "ready" ? "online" : status.state === "disabled" ? "offline" : "warning"}"></span><strong>${escapeHtml(runtimeLabel)} ${escapeHtml(statusLabel)}</strong><code>${escapeHtml(status.version || status.runtime_id || "未配置")}${status.commit ? ` · ${String(status.commit).slice(0, 12)}` : ""}</code></div><div class="agent-actions"><button class="small-button" id="agent-health" type="button" ${state.agentBusy ? "disabled" : ""}>检查连接</button><button class="outline-button" id="agent-create-session" type="button" ${canCreateSession ? "" : "disabled"}>新建 Agent 会话</button></div></div>${renderAgentPresetPanel(status)}${catalogManagement}${providerPanel}${renderAgentRoutingPanel(status)}${renderAgentWorkspacePanel(status)}${renderWorkspaceRuntimePanel()}${renderAgentModelPanel(status)}<section class="agent-panel agent-sessions-panel"><div class="panel-heading"><div><strong>受管 Agent 会话</strong><small>只显示当前 Sumika 受管 ${escapeHtml(runtimeLabel)} 实例的会话元数据；旧聊天会话不会混入。</small></div><button class="small-button" id="agent-refresh-sessions" type="button" ${status.ready && !state.agentBusy ? "" : "disabled"}>刷新</button></div>${renderAgentSessionSearch()}</section>${renderAgentSessionPanel(state.agentSnapshot)}${renderAgentGoalPanel(status)}${renderAgentSubagentPanel(status)}${agentSupports("interactions") ? renderAgentInteractions(state.agentInteractions) : ""}<section class="agent-panel"><div class="panel-heading"><div><strong>运行模式</strong><small>执行能力由 ${escapeHtml(runtimeLabel)} 与 Sumika policy companion 共同决定。</small>${commandNotice}${workspaceModeNotice}</div><select id="agent-mode" aria-label="Agent 模式">${modeOptions}</select></div><div class="agent-composer"><textarea id="agent-prompt" rows="3" maxlength="48000" placeholder="输入 Agent 目标；Runtime 未连接时不会发送或生成回复">${escapeHtml(state.agentPromptDraft)}</textarea><div class="agent-composer-footer">${attachmentTools}<button class="outline-button" id="agent-send" type="button" ${canSendPrompt ? "" : "disabled"}>发送目标</button></div></div></section>${capabilities ? `<section class="agent-capability-grid">${capabilities}</section>` : ""}<div class="agent-two-column"><section class="agent-panel"><div class="panel-heading"><div><strong>事件审计</strong><small>敏感动作默认拒绝，登录凭据和 OTP 不进入模型上下文。</small></div></div><div class="agent-event-list">${events}</div></section>${browserPanel}</div>`);
 }
 
 function renderAgentEventRow(event) {
@@ -2138,6 +3045,7 @@ function renderAgentEventRow(event) {
 function renderDeveloper() {
   const notice = state.pluginNotice ? `<div class="plugin-notice" role="status">${escapeHtml(state.pluginNotice)}</div>` : "";
   const providerNotice = state.providerNotice ? `<div class="plugin-notice" role="status">${escapeHtml(state.providerNotice)}</div>` : "";
+  const webChatNotice = state.webChatNotice ? `<div class="plugin-notice" role="status">${escapeHtml(state.webChatNotice)}</div>` : "";
   const pluginRows = state.plugins.length ? state.plugins.map(renderPluginRow).join("") : `<div class="empty-column">还没有扫描到本地 manifest</div>`;
   const pluginPanel = `<section class="dev-panel plugin-panel"><div class="panel-heading"><div><strong>本地插件 manifest</strong><small>只读取清单并等待批准；不会导入、启动代码或安装依赖。</small></div><button class="small-button" id="refresh-plugins" ${state.pluginBusy ? "disabled" : ""}>刷新</button></div><div class="plugin-scan-form"><input id="plugin-path" type="text" value="${escapeHtml(state.pluginPath)}" placeholder="插件目录或 manifest.json 的绝对路径" aria-label="插件目录或 manifest 路径" /><button class="outline-button" id="discover-plugins" ${state.pluginBusy ? "disabled" : ""}>扫描</button></div>${notice}<div class="plugin-list">${pluginRows}</div></section>`;
   const diagnostics = state.diagnostics;
@@ -2148,7 +3056,15 @@ function renderDeveloper() {
   const avatarAuditPanel = renderAvatarAssetAudit();
   const evolutionPanel = `<section class="dev-panel evolution-panel"><div class="panel-heading"><div><strong>Evolution Knowledge Registry</strong><small>只读参考索引；安装、升级和正式启用仍需用户批准。</small></div><button class="small-button" id="refresh-evolution-registry" type="button">刷新</button></div><div class="evolution-list">${state.evolutionRegistry.length ? state.evolutionRegistry.map((entry) => `<div class="evolution-row"><div><strong>${escapeHtml(entry.id)}</strong><small>${escapeHtml(entry.kind || "reference")} · ${escapeHtml(entry.license || "未登记许可证")}</small></div><code>${escapeHtml(entry.commit || entry.version || "未固定")}</code></div>`).join("") : `<div class="empty-column">尚未加载参考登记</div>`}</div></section>`;
   const profileRows = state.providerProfiles.map((profile) => `<div class="provider-row"><span class="status-dot ${profile.status === "available" ? "online" : "offline"}"></span><div><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.adapter_id)} · ${escapeHtml(providerProfileStatusLabel(profile.status))}</small></div>${profile.status === "archived" ? `<button class="ghost-button" type="button" data-provider-restore="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>恢复</button>` : `<button class="ghost-button" type="button" data-provider-health="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>测试</button>`}</div>`).join("") || `<div class="empty-column">暂无 Provider 档案</div>`;
-  return renderPageFrame("开发者", "查看 manifest、事件、健康检查和 provider 运行边界。", `<div class="developer-grid">${providerNotice}${renderCapabilityCatalogPanel()}<section class="dev-panel"><div class="panel-heading"><strong>Provider 健康</strong><button class="small-button" id="refresh-health">刷新</button></div>${profileRows}</section>${renderCcsCompatibilityPanel()}${evolutionPanel}${pluginPanel}${renderAgentMcpCatalogPanel()}${renderAgentSkillCatalogPanel()}${diagnosticPanel}${agentDiagnosticPanel}${desktopPanel}${avatarAuditPanel}<section class="dev-panel"><div class="panel-heading"><strong>事件流</strong><span class="muted-text">${state.events.length} 条</span></div><div class="event-log">${state.events.slice(0, 12).map((event) => `<div class="log-row"><code>${escapeHtml(event.event_type)}</code><span>${escapeHtml(JSON.stringify(event.payload).slice(0, 100))}</span></div>`).join("") || `<div class="empty-column">暂无事件</div>`}</div></section></div>`);
+  return renderPageFrame("开发者", "查看 manifest、事件、健康检查和 provider 运行边界。", `<div class="developer-grid">${providerNotice}${webChatNotice}${renderCapabilityCatalogPanel()}<section class="dev-panel"><div class="panel-heading"><strong>Provider 健康</strong><button class="small-button" id="refresh-health">刷新</button></div>${profileRows}</section>${renderWebChatArchivePanel()}${renderCcsCompatibilityPanel()}${evolutionPanel}${pluginPanel}${renderAgentMcpCatalogPanel()}${renderAgentSkillCatalogPanel()}${diagnosticPanel}${agentDiagnosticPanel}${desktopPanel}${avatarAuditPanel}<section class="dev-panel"><div class="panel-heading"><strong>事件流</strong><span class="muted-text">${state.events.length} 条</span></div><div class="event-log">${state.events.slice(0, 12).map((event) => `<div class="log-row"><code>${escapeHtml(event.event_type)}</code><span>${escapeHtml(JSON.stringify(event.payload).slice(0, 100))}</span></div>`).join("") || `<div class="empty-column">暂无事件</div>`}</div></section></div>`);
+}
+
+function renderWebChatArchivePanel() {
+  const archived = state.webChatProfiles.filter((profile) => profile.archived_at || profile.status === "archived");
+  const rows = archived.length
+    ? archived.map(renderWebChatProfileRow).join("")
+    : `<div class="empty-column">暂无已归档网页连接</div>`;
+  return `<section class="dev-panel web-chat-archive-panel" data-web-chat-archive-panel><div class="panel-heading"><div><strong>已归档网页连接</strong><small>归档只隐藏连接档案，不删除 BrowserSkill 登录态；恢复后仍需重新检查和授权。</small></div></div><div class="provider-profile-list">${rows}</div></section>`;
 }
 
 function renderAgentDiagnosticsPanel() {
@@ -2244,10 +3160,13 @@ function bindEvents() {
   document.querySelectorAll("[data-page]").forEach((element) => element.addEventListener("click", () => {
     state.activePage = element.dataset.page;
     if (state.activePage === "Modules" || state.activePage === "Developer") void loadCapabilityCatalog(true, false);
+    if (state.activePage === "Modules" || state.activePage === "Developer") void loadWebChatData(true, state.activePage === "Developer");
     if (state.activePage === "Developer") void loadProviderProfiles(true, true);
     if (state.activePage === "Developer") void loadEvolutionRegistry(true);
     if (state.activePage === "Developer") void loadAgentDiagnostics(true);
     if (state.activePage === "Developer" || state.activePage === "Agent") void loadAgentRuntime(true);
+    if (state.activePage === "Agent") void loadAgentModelPolicy(true, false);
+    if (state.activePage === "WebWorkbench") void loadWebWorkbenchData(true, false);
     if (state.activePage === "Tasks") void loadTasks(true);
     render();
   }));
@@ -2344,6 +3263,35 @@ function bindEvents() {
   document.querySelector("#refresh-evolution-registry")?.addEventListener("click", loadEvolutionRegistry);
   document.querySelector("#agent-mode")?.addEventListener("change", (event) => {
     state.agentMode = event.target.value;
+  });
+  document.querySelector("#agent-routing-mode")?.addEventListener("change", (event) => {
+    const value = String(event.target.value || "manual").toLowerCase();
+    state.agentRoutingMode = AGENT_ROUTING_MODES.has(value) ? value : "manual";
+    resetAgentRoutingDecision();
+    rememberAgentRoutingPreference();
+    render();
+  });
+  document.querySelector("#agent-routing-budget")?.addEventListener("change", (event) => {
+    const value = String(event.target.value || "prefer-free").toLowerCase();
+    state.agentRoutingBudgetPolicy = AGENT_ROUTING_BUDGETS.has(value) ? value : "prefer-free";
+    resetAgentRoutingDecision();
+    rememberAgentRoutingPreference();
+    render();
+  });
+  document.querySelector("#agent-routing-refresh")?.addEventListener("click", () => {
+    void loadAgentModelPolicy(true, true);
+  });
+  document.querySelector("#agent-routing-quota")?.addEventListener("click", () => {
+    void loadAgentModelPolicy(true, true);
+  });
+  document.querySelector("#agent-routing-confirm")?.addEventListener("click", () => {
+    void sendAgentPrompt({ approvedRouting: true });
+  });
+  document.querySelector("#agent-routing-cancel")?.addEventListener("click", () => {
+    state.agentRoutingPendingKey = "";
+    state.agentRoutingApprovedKey = "";
+    state.agentRoutingNotice = "已取消本次模型选择；目标仍保留在输入框中。";
+    render();
   });
   document.querySelector("#agent-create-session")?.addEventListener("click", createAgentSession);
   document.querySelector("#agent-refresh-workspaces")?.addEventListener("click", () => loadAgentWorkspaces());
@@ -2506,6 +3454,13 @@ function bindEvents() {
   document.querySelector("#agent-send")?.addEventListener("click", sendAgentPrompt);
   document.querySelector("#agent-prompt")?.addEventListener("input", (event) => {
     state.agentPromptDraft = event.target.value;
+    if (state.agentRoutingDecisionKey && state.agentRoutingDecisionKey !== routingTaskKey(state.agentPromptDraft, state.agentRoutingMode)) {
+      state.agentRoutingDecision = null;
+      state.agentRoutingDecisionKey = "";
+      state.agentRoutingPendingKey = "";
+      state.agentRoutingApprovedKey = "";
+      state.agentRoutingNotice = "";
+    }
     const button = document.querySelector("#agent-send");
     if (button) {
       button.disabled = !agentPromptCanSend(
@@ -2629,6 +3584,99 @@ function bindEvents() {
   document.querySelector("#provider-import-file")?.addEventListener("change", loadProviderImportFile);
   document.querySelector("#provider-import-preview")?.addEventListener("click", previewProviderImport);
   document.querySelector("#provider-import-save")?.addEventListener("click", saveProviderImport);
+  document.querySelectorAll("[data-web-chat-new-adapter]").forEach((element) => element.addEventListener("click", () => {
+    openWebChatDrawer(null, element.dataset.webChatNewAdapter || "custom");
+  }));
+  document.querySelectorAll("[data-web-chat-edit]").forEach((element) => element.addEventListener("click", () => {
+    openWebChatDrawer(element.dataset.webChatEdit);
+  }));
+  document.querySelectorAll("[data-web-chat-select]").forEach((element) => element.addEventListener("click", () => {
+    void activateWebChatProfile(element.dataset.webChatSelect);
+  }));
+  document.querySelectorAll("[data-web-chat-authorize]").forEach((element) => element.addEventListener("click", () => {
+    void authorizeWebChatProfile(element.dataset.webChatAuthorize);
+  }));
+  document.querySelectorAll("[data-web-chat-check]").forEach((element) => element.addEventListener("click", () => {
+    void checkWebChatProfile(element.dataset.webChatCheck);
+  }));
+  document.querySelectorAll("[data-web-chat-consent]").forEach((element) => element.addEventListener("click", () => {
+    void setWebChatConsent(element.dataset.webChatConsent, true);
+  }));
+  document.querySelectorAll("[data-web-chat-consent-off]").forEach((element) => element.addEventListener("click", () => {
+    void setWebChatConsent(element.dataset.webChatConsentOff, false);
+  }));
+  document.querySelectorAll("[data-web-chat-archive]").forEach((element) => element.addEventListener("click", () => {
+    void archiveWebChatProfile(element.dataset.webChatArchive);
+  }));
+  document.querySelectorAll("[data-web-chat-restore]").forEach((element) => element.addEventListener("click", () => {
+    void restoreWebChatProfile(element.dataset.webChatRestore);
+  }));
+  document.querySelectorAll("[data-web-chat-drawer-close]").forEach((element) => element.addEventListener("click", closeWebChatDrawer));
+  document.querySelector("#web-chat-profile-form")?.addEventListener("submit", saveWebChatProfileFromForm);
+  document.querySelector("#web-chat-adapter-select")?.addEventListener("change", (event) => {
+    const nextAdapterId = String(event.target.value || "custom");
+    const form = event.target.closest("form");
+    const previousAdapterId = state.webChatDrawerAdapterId || "custom";
+    state.webChatDrawerAdapterId = nextAdapterId;
+    applyWebChatAdapterTemplate(form, nextAdapterId, previousAdapterId);
+    const advanced = form?.querySelector(".web-chat-advanced");
+    if (advanced) advanced.open = nextAdapterId === "custom";
+  });
+  document.querySelector("[data-web-chat-create-browser-profile]")?.addEventListener("click", () => {
+    void createNamedBrowserProfileForWebChat();
+  });
+  document.querySelectorAll("[data-web-chat-authorize-drawer]").forEach((element) => element.addEventListener("click", () => {
+    void authorizeWebChatProfile(element.dataset.webChatAuthorizeDrawer);
+  }));
+  document.querySelectorAll("[data-web-chat-check-drawer]").forEach((element) => element.addEventListener("click", () => {
+    void checkWebChatProfile(element.dataset.webChatCheckDrawer);
+  }));
+  document.querySelector("#web-workbench-refresh")?.addEventListener("click", () => {
+    void loadWebWorkbenchData(true, true);
+  });
+  document.querySelector("#web-workbench-manual-form")?.addEventListener("submit", sendWebWorkbenchManual);
+  document.querySelector("#web-workbench-worker-form")?.addEventListener("submit", startWebWorkbenchWorker);
+  document.querySelector("#web-workbench-consultation-form")?.addEventListener("submit", startWebWorkbenchConsultation);
+  document.querySelector("#web-workbench-manual-form select[name=profile_id]")?.addEventListener("change", (event) => {
+    state.webWorkbenchSelectedProfileId = event.target.value;
+    render();
+  });
+  document.querySelector("#web-workbench-worker-form")?.addEventListener("input", (event) => {
+    updateWebWorkbenchDraftFromForm(event.currentTarget);
+  });
+  document.querySelector("#web-workbench-consultation-form")?.addEventListener("input", (event) => {
+    updateWebWorkbenchDraftFromForm(event.currentTarget);
+  });
+  document.querySelectorAll("[data-web-workbench-open]").forEach((element) => element.addEventListener("click", () => {
+    void openWebWorkbenchProfile(element.dataset.webWorkbenchOpen);
+  }));
+  document.querySelectorAll("[data-web-workbench-focus]").forEach((element) => element.addEventListener("click", () => {
+    void focusWebWorkbenchProfile(element.dataset.webWorkbenchFocus);
+  }));
+  document.querySelectorAll("[data-web-workbench-close]").forEach((element) => element.addEventListener("click", () => {
+    void closeWebWorkbenchProfile(element.dataset.webWorkbenchClose);
+  }));
+  document.querySelectorAll("[data-web-workbench-takeover]").forEach((element) => element.addEventListener("click", () => {
+    void takeoverWebWorkbenchProfile(element.dataset.webWorkbenchTakeover);
+  }));
+  document.querySelectorAll("[data-web-workbench-release]").forEach((element) => element.addEventListener("click", () => {
+    void setWebWorkbenchOccupancy(element.dataset.webWorkbenchRelease, "idle");
+  }));
+  document.querySelectorAll("[data-web-workbench-consultation-cancel]").forEach((element) => element.addEventListener("click", () => {
+    void cancelWebWorkbenchConsultation(element.dataset.webWorkbenchConsultationCancel);
+  }));
+  document.querySelectorAll("[data-web-workbench-consultation-continue]").forEach((element) => element.addEventListener("click", () => {
+    void continueWebWorkbenchConsultation(element.dataset.webWorkbenchConsultationContinue);
+  }));
+  document.querySelectorAll("[data-web-workbench-retry]").forEach((element) => element.addEventListener("click", () => {
+    void retryWebWorkbenchDispatch(element.dataset.webWorkbenchRetry);
+  }));
+  document.querySelector("[data-web-workbench-pause-all]")?.addEventListener("click", () => {
+    void pauseAllWebWorkbenchConsultations();
+  });
+  document.querySelector("[data-web-workbench-continue-latest]")?.addEventListener("click", () => {
+    void continueLatestWebWorkbenchConsultation();
+  });
   document.querySelector("#check-ccs-compatibility")?.addEventListener("click", checkCcsCompatibility);
   document.querySelector("#refresh-diagnostics")?.addEventListener("click", loadDiagnostics);
   document.querySelector("#refresh-agent-diagnostics")?.addEventListener("click", () => loadAgentDiagnostics());
@@ -2905,7 +3953,33 @@ async function loadAgentRuntime(shouldRender = true) {
   if (state.agentStatus?.ready && state.agentSessionId) {
     await Promise.all([loadAgentSnapshot(false), loadAgentModels(false), loadAgentQueue(false), loadAgentSubagents(false)]);
   }
+  if (state.activePage === "Agent") await loadAgentModelPolicy(false, false);
   if (shouldRender) render();
+}
+
+async function loadAgentModelPolicy(shouldRender = true, refresh = false) {
+  if (state.agentModelPolicyBusy) return;
+  if (!refresh && state.agentModelPolicyCatalog && Date.now() - state.agentModelPolicyLoadedAt < 15_000) {
+    return;
+  }
+  state.agentModelPolicyBusy = true;
+  if (shouldRender) render();
+  const sessionQuery = state.agentSessionId ? `&session_id=${encodeURIComponent(state.agentSessionId)}` : "";
+  try {
+    const [catalog, quota] = await Promise.all([
+      api(`/api/model-policy/catalog?refresh=${refresh ? "true" : "false"}${sessionQuery}`),
+      api(`/api/model-policy/quota?refresh=${refresh ? "true" : "false"}`),
+    ]);
+    state.agentModelPolicyCatalog = catalog && typeof catalog === "object" ? catalog : null;
+    state.agentModelPolicyQuota = quota && typeof quota === "object" ? quota : null;
+    state.agentModelPolicyLoadedAt = Date.now();
+    if (state.agentRoutingNotice.startsWith("策略目录")) state.agentRoutingNotice = "";
+  } catch (error) {
+    state.agentRoutingNotice = `策略目录读取失败：${error.message}`;
+  } finally {
+    state.agentModelPolicyBusy = false;
+    if (shouldRender) render();
+  }
 }
 
 async function syncAgentState({ immediate = false } = {}) {
@@ -3341,6 +4415,8 @@ async function selectAgentSession(sessionId) {
   state.agentSessionRenameDraft = selected?.title || "";
   await Promise.all([loadAgentSnapshot(false), loadAgentCapabilities(false), loadAgentModels(false), loadAgentInteractions(false), loadAgentQueue(false), loadAgentSubagents(false), loadAgentMcpCatalog(false)]);
   await loadAgentWorkspaces(false);
+  state.agentModelPolicyLoadedAt = 0;
+  await loadAgentModelPolicy(false, false);
   render();
 }
 
@@ -4608,6 +5684,8 @@ async function createAgentSession() {
     if (result.provider) state.agentProvider = { ...state.agentProvider, ...result.provider, state: "ready", ready: true };
     await Promise.all([loadAgentSessions(false), loadAgentSnapshot(false), loadAgentCapabilities(false), loadAgentModels(false), loadAgentQueue(false), loadAgentSubagents(false)]);
     await loadAgentWorkspaces(false);
+    state.agentModelPolicyLoadedAt = 0;
+    await loadAgentModelPolicy(false, false);
     state.agentNotice = `Agent 会话已创建：${result.id || result.sessionId || "已连接"}`;
   } catch (error) {
     state.agentNotice = `创建 Agent 会话失败：${error.message}`;
@@ -4617,7 +5695,49 @@ async function createAgentSession() {
   }
 }
 
-async function sendAgentPrompt() {
+async function preflightAgentRouting(text, requestedMode, key) {
+  const routing = agentRoutingRequest(text, requestedMode, false);
+  if (!routing) return null;
+  if (state.agentRoutingDecision && state.agentRoutingDecisionKey === key) return state.agentRoutingDecision;
+  state.agentRoutingBusy = true;
+  state.agentBusy = "routing";
+  state.agentRoutingNotice = "正在检查候选模型的连接、额度和质量门槛…";
+  render();
+  try {
+    const result = await rpc("model.policy.preflight", {
+      ...routing,
+      ...(state.agentSessionId ? { sessionId: state.agentSessionId } : {}),
+    });
+    const decision = result?.decision;
+    state.agentRoutingDecision = result && typeof result === "object" ? result : null;
+    state.agentRoutingDecisionKey = key;
+    state.agentRoutingPendingKey = decision?.requires_confirmation ? key : "";
+    if (!decision?.selected_route) {
+      state.agentRoutingApprovedKey = "";
+      state.agentRoutingNotice = "没有满足当前安全、隐私、质量和预算门槛的模型；目标尚未发送。";
+    } else if (decision.requires_confirmation) {
+      state.agentRoutingApprovedKey = "";
+      state.agentRoutingNotice = "策略已给出候选，请确认后才会创建会话或执行回合。";
+    } else {
+      state.agentRoutingApprovedKey = key;
+      state.agentRoutingNotice = "策略通过硬门槛，将使用推荐候选继续。";
+    }
+    return state.agentRoutingDecision;
+  } catch (error) {
+    state.agentRoutingDecision = null;
+    state.agentRoutingDecisionKey = key;
+    state.agentRoutingPendingKey = "";
+    state.agentRoutingApprovedKey = "";
+    state.agentRoutingNotice = `模型策略检查失败：${error.message}`;
+    return null;
+  } finally {
+    state.agentRoutingBusy = false;
+    state.agentBusy = null;
+    render();
+  }
+}
+
+async function sendAgentPrompt({ approvedRouting = false } = {}) {
   const input = document.querySelector("#agent-prompt");
   const text = (input?.value ?? state.agentPromptDraft ?? "").trim();
   const attachments = supportedAgentPromptAttachments();
@@ -4634,16 +5754,51 @@ async function sendAgentPrompt() {
     render();
     return;
   }
+  const routingKey = routingTaskKey(text, state.agentRoutingMode);
+  const routing = agentRoutingRequest(text, requestedMode, approvedRouting || state.agentRoutingApprovedKey === routingKey);
+  if (routing) {
+    const existing = state.agentRoutingDecisionKey === routingKey ? state.agentRoutingDecision : null;
+    if (!existing || (existing.decision?.requires_confirmation && !approvedRouting && state.agentRoutingApprovedKey !== routingKey)) {
+      await preflightAgentRouting(text, requestedMode, routingKey);
+    }
+    const decision = state.agentRoutingDecisionKey === routingKey ? state.agentRoutingDecision?.decision : null;
+    if (!decision?.selected_route) {
+      if (!state.agentRoutingNotice) state.agentRoutingNotice = "没有可用的模型候选；目标尚未发送。";
+      render();
+      return;
+    }
+    if (decision.requires_confirmation && !approvedRouting && state.agentRoutingApprovedKey !== routingKey) {
+      state.agentRoutingPendingKey = routingKey;
+      state.agentRoutingNotice = "请在模型策略面板确认候选后继续；目标和附件仍保留。";
+      render();
+      return;
+    }
+    state.agentRoutingApprovedKey = routingKey;
+    state.agentRoutingPendingKey = "";
+  }
   state.agentBusy = "prompt";
   state.agentNotice = `目标已提交，等待 ${agentRuntimeLabel()} 事件…`;
   render();
   try {
     if (!state.agentSessionId) {
-      const profile = activeProviderProfile();
+      const profile = routing ? null : activeProviderProfile();
       const workspace = selectedAgentWorkspace();
       const location = workspace ? { workspaceId: workspace.id } : { cwd: "." };
       const selectedPreset = usableAgentPresetId(state.agentPresetId);
-      const session = await rpc("agent.session.create", { ...location, characterId: state.selectedCharacter, provider_profile_id: profile?.id, ...(selectedPreset ? { agentPreset: selectedPreset } : {}) });
+      const createParams = { ...location, characterId: state.selectedCharacter, ...(profile?.id ? { provider_profile_id: profile.id } : {}), ...(selectedPreset ? { agentPreset: selectedPreset } : {}) };
+      if (routing) {
+        createParams.routing = { ...routing, approved: true };
+        createParams.routingApproved = true;
+      }
+      const session = await rpc("agent.session.create", createParams);
+      if (session?.accepted === false) {
+        if (session.routing) {
+          state.agentRoutingDecision = session.routing;
+          state.agentRoutingDecisionKey = routingKey;
+          state.agentRoutingPendingKey = session.reason === "confirmation-required" ? routingKey : "";
+        }
+        throw new Error(session.reason === "confirmation-required" ? "模型策略需要确认" : "模型策略没有接受本次会话");
+      }
       setAgentSessionId(session.sessionId || session.id || null);
       if (!state.agentSessionId) throw new Error(`${agentRuntimeLabel()} 未返回 sessionId`);
       rememberAgentSession(state.agentSessionId);
@@ -4655,6 +5810,8 @@ async function sendAgentPrompt() {
       if (session.provider) state.agentProvider = { ...state.agentProvider, ...session.provider, state: "ready", ready: true };
       await Promise.all([loadAgentSessions(false), loadAgentCapabilities(false), loadAgentModels(false), loadAgentQueue(false), loadAgentSubagents(false)]);
       await loadAgentWorkspaces(false);
+      state.agentModelPolicyLoadedAt = 0;
+      await loadAgentModelPolicy(false, false);
     }
     const content = [
       ...(text ? [{ type: "text", text }] : []),
@@ -4674,7 +5831,19 @@ async function sendAgentPrompt() {
     if (mode === "execute" && agentPlanModeAvailable() && state.agentSnapshot?.plan?.active === true) {
       promptParams.leave_plan = true;
     }
+    if (routing) {
+      promptParams.routing = { ...routing, approved: true };
+      promptParams.routingApproved = true;
+    }
     const result = await rpc("agent.session.prompt", promptParams);
+    if (result?.accepted === false) {
+      if (result.routing) {
+        state.agentRoutingDecision = result.routing;
+        state.agentRoutingDecisionKey = routingKey;
+        state.agentRoutingPendingKey = result.reason === "confirmation-required" ? routingKey : "";
+      }
+      throw new Error(result.reason === "confirmation-required" ? "模型策略需要确认" : "Runtime 未接受目标");
+    }
     state.agentEvents.unshift({ event_type: "agent.turn.accepted", status: "running", content: result.id || "已接受", timestamp: new Date().toISOString() });
     state.agentPromptDraft = "";
     state.agentPromptAttachments = [];
@@ -5292,7 +6461,12 @@ async function loadPrivacy(shouldRender = true) {
 }
 
 async function refreshProviderHealth() {
-  await Promise.all([loadProviders(false), loadProviderProfiles(false, state.activePage === "Developer"), loadPrivacy(false)]);
+  await Promise.all([
+    loadProviders(false),
+    loadProviderProfiles(false, state.activePage === "Developer"),
+    loadWebChatData(false, state.activePage === "Developer"),
+    loadPrivacy(false),
+  ]);
   state.providerNotice = "Provider 状态已刷新";
   render();
 }
@@ -5311,6 +6485,316 @@ function closeProviderDrawer() {
   state.providerDrawerProfileId = null;
   state.providerImportPreview = null;
   render();
+}
+
+function openWebChatDrawer(profileId = null, adapterId = "custom") {
+  state.webChatDrawerOpen = true;
+  state.webChatDrawerProfileId = profileId || null;
+  const profile = profileId ? state.webChatProfiles.find((item) => item.id === profileId) : null;
+  state.webChatDrawerAdapterId = profile?.adapter_id || adapterId || "custom";
+  state.webChatNotice = "";
+  render();
+  requestAnimationFrame(() => document.querySelector(".web-chat-drawer input[autofocus]")?.focus());
+}
+
+function applyWebChatAdapterTemplate(form, adapterId, previousAdapterId = "custom") {
+  if (!form) return;
+  const adapter = webChatAdapter(adapterId);
+  const previous = webChatAdapter(previousAdapterId);
+  const fields = {
+    domains: (adapter?.domains || []).join("\n"),
+    chat_url: adapter?.chat_url || "",
+    model_id: adapter?.model_id || "web-session",
+    input_selectors: webChatArrayText(adapter?.selectors?.input),
+    send_selectors: webChatArrayText(adapter?.selectors?.send),
+    response_selectors: webChatArrayText(adapter?.selectors?.response),
+    login_markers: webChatArrayText(adapter?.login_markers),
+    authorized_markers: webChatArrayText(adapter?.authorized_markers),
+    ready_markers: webChatArrayText(adapter?.ready_markers),
+  };
+  const previousFields = {
+    domains: (previous?.domains || []).join("\n"),
+    chat_url: previous?.chat_url || "",
+    model_id: previous?.model_id || "web-session",
+    input_selectors: webChatArrayText(previous?.selectors?.input),
+    send_selectors: webChatArrayText(previous?.selectors?.send),
+    response_selectors: webChatArrayText(previous?.selectors?.response),
+    login_markers: webChatArrayText(previous?.login_markers),
+    authorized_markers: webChatArrayText(previous?.authorized_markers),
+    ready_markers: webChatArrayText(previous?.ready_markers),
+  };
+  Object.entries(fields).forEach(([name, value]) => {
+    const field = form.elements[name];
+    if (!field) return;
+    const current = String(field.value || "").trim();
+    // Replace empty values or values that still equal the old preset.  A
+    // user's custom selector/marker is never silently overwritten.
+    if (!current || current === String(previousFields[name] || "").trim()) field.value = value;
+  });
+  const nameField = form.elements.name;
+  if (nameField && (!String(nameField.value || "").trim() || String(nameField.value).trim() === String(previous?.name || "").trim())) {
+    nameField.value = adapter?.name && adapterId !== "custom" ? adapter.name : "";
+  }
+}
+
+function closeWebChatDrawer() {
+  state.webChatDrawerOpen = false;
+  state.webChatDrawerProfileId = null;
+  state.webChatNotice = "";
+  render();
+}
+
+function replaceWebChatProfile(profile) {
+  if (!profile?.id) return;
+  state.webChatProfiles = [profile, ...state.webChatProfiles.filter((item) => item.id !== profile.id)];
+}
+
+function webChatFormLines(value) {
+  return String(value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function readWebChatProfileForm(form) {
+  const adapterId = String(form.elements.adapter_id.value || "custom").trim().toLowerCase();
+  const name = String(form.elements.name.value || "").trim();
+  const domains = webChatFormLines(form.elements.domains.value);
+  const selectors = {
+    input: webChatFormLines(form.elements.input_selectors.value),
+    send: webChatFormLines(form.elements.send_selectors.value),
+    response: webChatFormLines(form.elements.response_selectors.value),
+  };
+  if (!name) throw new Error("连接名称不能为空");
+  if (!form.elements.browser_profile_id.value) throw new Error("请选择 BrowserSkill 命名 Profile");
+  if (!form.elements.chat_url.value.trim()) throw new Error("聊天页面 URL 不能为空");
+  if (!selectors.input.length) throw new Error("至少填写一个输入框选择器");
+  const timeout = Number(form.elements.response_timeout_seconds.value || 4);
+  if (!Number.isFinite(timeout) || timeout < 0.5 || timeout > 15) throw new Error("等待回复超时必须在 0.5–15 秒之间");
+  return {
+    name,
+    adapter_id: adapterId,
+    browser_profile_id: form.elements.browser_profile_id.value,
+    browser_instance: String(form.elements.browser_instance?.value || "").trim() || undefined,
+    budget_policy: form.elements.budget_policy.value || "free-only",
+    config: {
+      name,
+      domains,
+      chat_url: form.elements.chat_url.value.trim(),
+      model_id: String(form.elements.model_id.value || "web-session").trim() || "web-session",
+      selectors,
+      login_markers: webChatFormLines(form.elements.login_markers.value),
+      authorized_markers: webChatFormLines(form.elements.authorized_markers.value),
+      ready_markers: webChatFormLines(form.elements.ready_markers.value),
+      response_timeout_seconds: timeout,
+    },
+  };
+}
+
+async function loadWebChatData(shouldRender = true, includeArchived = false) {
+  const profileQuery = includeArchived ? "?include_archived=true" : "";
+  try {
+    const result = await api("/api/browser/web-chat/adapters");
+    state.webChatAdapters = Array.isArray(result?.adapters) ? result.adapters : [];
+  } catch {
+    state.webChatAdapters = [];
+  }
+  try {
+    const result = await api(`/api/browser/web-chat/profiles${profileQuery}`);
+    state.webChatProfiles = Array.isArray(result?.profiles) ? result.profiles : [];
+  } catch {
+    state.webChatProfiles = [];
+  }
+  if (shouldRender) render();
+}
+
+async function createNamedBrowserProfileForWebChat() {
+  await createNamedBrowserProfile();
+  try {
+    const result = await rpc("browser.profiles", { include_archived: false });
+    state.browserProfiles = Array.isArray(result?.profiles) ? result.profiles : state.browserProfiles;
+  } catch {
+    // The browser page will show the existing error notice.
+  }
+  render();
+}
+
+async function saveWebChatProfileFromForm(event) {
+  event.preventDefault();
+  if (state.webChatBusy) return;
+  const form = event.currentTarget;
+  const action = event.submitter?.dataset.webChatAction || "save";
+  let payload;
+  try {
+    payload = readWebChatProfileForm(form);
+  } catch (error) {
+    state.webChatNotice = error.message;
+    render();
+    return;
+  }
+  state.webChatBusy = action;
+  state.webChatNotice = "";
+  render();
+  try {
+    const profileId = form.dataset.profileId;
+    const method = profileId ? "browser.web_chat.profile.update" : "browser.web_chat.profile.create";
+    const result = await rpc(method, {
+      ...(profileId ? { profile_id: profileId } : {}),
+      ...payload,
+      draft: action === "save",
+      approved: true,
+    });
+    let profile = result;
+    replaceWebChatProfile(profile);
+    state.webChatDrawerProfileId = profile.id;
+    if (action === "save") {
+      state.webChatNotice = `${profile.name} 已保存为草稿；登录和检查通过后才能启用。`;
+    } else {
+      const checked = await rpc("browser.web_chat.profile.check", { profile_id: profile.id, approved: true });
+      profile = checked;
+      replaceWebChatProfile(profile);
+      if (!checked.ready) throw new Error(checked.reason || "网页聊天页面尚未就绪");
+      if (action === "activate") {
+        if (!profile.auto_chat_enabled) {
+          profile = await rpc("browser.web_chat.profile.consent", {
+            profile_id: profile.id,
+            enabled: true,
+            allowed_actions: ["chat.read", "chat.send"],
+            approved: true,
+          });
+          replaceWebChatProfile(profile);
+        }
+        const activated = await rpc("browser.web_chat.profile.activate", { profile_id: profile.id, approved: true });
+        replaceWebChatProfile(activated.profile || activated);
+        state.modules = state.modules.map((module) => module.id === "llm" ? normalizeModule(activated.module) : module);
+        state.privacy = activated.privacy?.label || state.privacy;
+        state.webChatDrawerOpen = false;
+        state.webChatNotice = `${profile.name} 已检查并启用；聊天会通过隔离浏览器发送。`;
+      } else {
+        state.webChatNotice = `${profile.name} 页面检查通过；仍需点击“授权聊天”后才会自动发送。`;
+      }
+    }
+    await loadWebChatData(false, state.activePage === "Developer");
+    await loadPrivacy(false);
+  } catch (error) {
+    state.webChatNotice = `网页聊天操作失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    render();
+  }
+}
+
+async function authorizeWebChatProfile(profileId) {
+  if (!profileId || state.webChatBusy) return;
+  state.webChatBusy = `authorize:${profileId}`;
+  state.webChatNotice = "正在打开隔离网页登录窗口…";
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.authorize", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webChatNotice = "请在隔离浏览器中完成登录；Sumika 不会读取或保存登录字段。完成后点击“检查”。";
+  } catch (error) {
+    state.webChatNotice = `打开网页登录失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    render();
+  }
+}
+
+async function checkWebChatProfile(profileId) {
+  if (!profileId || state.webChatBusy) return;
+  state.webChatBusy = `check:${profileId}`;
+  state.webChatNotice = "正在读取有限页面状态…";
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.check", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webChatNotice = result.ready ? `${result.name || "网页聊天"} 已登录且页面就绪。` : (result.reason || "网页聊天尚未就绪");
+  } catch (error) {
+    state.webChatNotice = `网页状态检查失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    render();
+  }
+}
+
+async function setWebChatConsent(profileId, enabled) {
+  if (!profileId || state.webChatBusy) return;
+  state.webChatBusy = `consent:${profileId}`;
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.consent", {
+      profile_id: profileId,
+      enabled,
+      allowed_actions: ["chat.read", "chat.send"],
+      approved: true,
+    });
+    replaceWebChatProfile(result);
+    state.webChatNotice = enabled ? "已授权普通网页聊天；敏感网页登录和提交仍会暂停。" : "已关闭网页聊天自动发送授权。";
+  } catch (error) {
+    state.webChatNotice = `网页聊天授权变更失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    render();
+  }
+}
+
+async function activateWebChatProfile(profileId) {
+  if (!profileId || state.webChatBusy) return;
+  const profile = state.webChatProfiles.find((item) => item.id === profileId);
+  if (!profile) return;
+  if (!webChatReady(profile)) {
+    openWebChatDrawer(profileId);
+    state.webChatNotice = "请先人工登录、检查页面并授权普通聊天。";
+    return;
+  }
+  state.webChatBusy = `activate:${profileId}`;
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.activate", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result.profile || result);
+    if (result.module) state.modules = state.modules.map((module) => module.id === "llm" ? normalizeModule(result.module) : module);
+    state.privacy = result.privacy?.label || state.privacy;
+    state.webChatNotice = `${profile.name} 已启用`;
+  } catch (error) {
+    state.webChatNotice = `启用网页聊天失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    await loadWebChatData(false, state.activePage === "Developer");
+    await loadPrivacy(false);
+    render();
+  }
+}
+
+async function archiveWebChatProfile(profileId) {
+  if (!profileId || state.webChatBusy || !window.confirm("归档该网页连接？登录态仍由 BrowserSkill 保留，可恢复；不会删除浏览器数据。")) return;
+  state.webChatBusy = `archive:${profileId}`;
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.archive", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webChatNotice = `${result.name} 已归档。`;
+  } catch (error) {
+    state.webChatNotice = `归档网页连接失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    await loadWebChatData(false, true);
+    render();
+  }
+}
+
+async function restoreWebChatProfile(profileId) {
+  if (!profileId || state.webChatBusy) return;
+  state.webChatBusy = `restore:${profileId}`;
+  render();
+  try {
+    const result = await rpc("browser.web_chat.profile.restore", { profile_id: profileId, approved: true });
+    replaceWebChatProfile(result);
+    state.webChatNotice = `${result.name} 已恢复；需要重新检查登录状态。`;
+  } catch (error) {
+    state.webChatNotice = `恢复网页连接失败：${error.message}`;
+  } finally {
+    state.webChatBusy = null;
+    await loadWebChatData(false, true);
+    render();
+  }
 }
 
 function applyProviderTemplate(event) {
@@ -5742,6 +7226,7 @@ async function loadModules(shouldRender = true) {
   } catch {
     state.modules = fallbackModules;
   }
+  await loadWebChatData(false, state.activePage === "Developer");
   await loadMemories(false);
   if (shouldRender) render();
 }
@@ -5952,6 +7437,7 @@ async function loadInitialData() {
     const [providers, providerProfiles, providerTemplates, privacy, ccsManifest, modules, plugins, audioStatus, visionStatus, tasks, sessions, characters, events, avatarModels, avatarIgnored, snapshots] = await Promise.all([api("/api/providers"), api("/api/provider-profiles"), api("/api/provider-templates"), api("/api/privacy"), api("/api/integrations/ccswitch"), api("/api/modules"), api("/api/plugins"), api("/api/audio/status"), api("/api/vision/status"), api("/api/tasks"), api("/api/sessions"), api("/api/characters"), api("/api/events"), api("/api/avatar/models"), api("/api/avatar/ignored"), rpc("snapshot.list")]);
     state.providers = providers;
     state.providerProfiles = providerProfiles;
+    await loadWebChatData(false, false);
     state.providerTemplates = providerTemplates;
     state.privacy = privacy.label || "本地处理";
     state.ccsManifest = ccsManifest;
@@ -5987,6 +7473,8 @@ async function loadInitialData() {
   } catch {
     state.providers = [];
     state.providerProfiles = [];
+    state.webChatAdapters = [];
+    state.webChatProfiles = [];
     state.providerTemplates = [];
     state.ccsManifest = null;
     state.modules = [];
@@ -6502,7 +7990,7 @@ async function sendMessage(event) {
   const input = document.querySelector("#chat-input");
   const content = String(input?.value ?? state.composerDraft).trim();
   if (!content || state.sending) return;
-  if (!state.connected || !state.providerProfiles.length) {
+  if (!state.connected || !hasLlmConnections()) {
     state.sessionNotice = "核心未连接，当前没有可用的真实 Provider。";
     render();
     return;
@@ -6513,11 +8001,20 @@ async function sendMessage(event) {
     render();
     return;
   }
-  const selectedProvider = activeProviderProfile() || llm.profile;
-  if (!selectedProvider || selectedProvider.status !== "available") {
-    state.sessionNotice = `${selectedProvider?.name || "当前 Provider"} 尚未就绪，请先在模块页测试连接。`;
-    render();
-    return;
+  const selectedWebProfile = webChatProfileForModule(llm);
+  if (selectedWebProfile) {
+    if (!webChatReady(selectedWebProfile)) {
+      state.sessionNotice = `${selectedWebProfile.name || "网页聊天"} 尚未就绪，请先在模块页登录、检查并授权。`;
+      render();
+      return;
+    }
+  } else {
+    const selectedProvider = activeProviderProfile() || llm.profile;
+    if (!selectedProvider || selectedProvider.status !== "available") {
+      state.sessionNotice = `${selectedProvider?.name || "当前 Provider"} 尚未就绪，请先在模块页测试连接。`;
+      render();
+      return;
+    }
   }
   const sessionId = currentSessionId();
   state.sessionNotice = "";
@@ -7021,8 +8518,13 @@ function scrollMessages(force = false) {
   requestAnimationFrame(scrollToEnd);
 }
 
+const initialAgentRoutingPreference = readAgentRoutingPreference();
+state.agentRoutingMode = initialAgentRoutingPreference.mode;
+state.agentRoutingBudgetPolicy = initialAgentRoutingPreference.budget_policy;
+
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.providerDrawerOpen) closeProviderDrawer();
+  if (event.key === "Escape" && state.webChatDrawerOpen) closeWebChatDrawer();
 });
 
 window.addEventListener("focus", () => {

@@ -153,6 +153,18 @@ class AgentRuntime(ABC):
         del params
         self._unsupported(AgentCapability.MODELS, "model listing")
 
+    def runtime_models(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return an optional model directory that does not need a Session.
+
+        Most Harnesses expose models only after a Session is created.  An
+        adapter may override this read-only hook when its public protocol has
+        a global model directory, allowing policy preflight to happen before
+        a confirmation-gated Session creation.
+        """
+
+        del params
+        self._unsupported(AgentCapability.MODELS, "runtime model listing")
+
     def select_model(self, params: dict[str, Any]) -> dict[str, Any]:
         del params
         self._unsupported(AgentCapability.MODELS, "model selection")
@@ -180,6 +192,21 @@ class AgentRuntime(ABC):
     def provider_status(self, profile: dict[str, Any] | None = None) -> dict[str, Any]:
         del profile
         self._unsupported(AgentCapability.PROVIDER_BRIDGE, "provider status")
+
+    def quota_status(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return a conservative runtime quota projection.
+
+        Harnesses are not required to expose billing information.  Adapters
+        must override this only when the public protocol provides a stable,
+        read-only usage method; the default deliberately remains unknown.
+        """
+
+        del params
+        return {
+            "state": "unknown",
+            "source": f"{self.runtime_id}-quota-not-exposed",
+            "detail": "Agent runtime does not expose a verifiable quota endpoint",
+        }
 
     def history(self, params: dict[str, Any]) -> dict[str, Any]:
         del params

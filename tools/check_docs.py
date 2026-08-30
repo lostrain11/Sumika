@@ -52,6 +52,7 @@ REQUIRED_STATUS_IDS = {
     "chat",
     "characters",
     "modules",
+    "desktop-automation",
     "tasks",
     "avatar-vrm-desktop",
     "plugins-manifest",

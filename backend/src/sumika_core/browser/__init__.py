@@ -8,6 +8,16 @@ from .policy import (
     normalize_domain,
 )
 from .runtime import BrowserRuntime, BrowserRuntimeError, BrowserSkillClient
+from .web_chat import (
+    WEB_CHAT_ACTIONS,
+    WEB_CHAT_ADAPTER_VERSION,
+    WEB_CHAT_SCHEMA,
+    WebChatAdapterRegistry,
+    WebChatAdapterSpec,
+    WebChatProvider,
+    WebChatRuntime,
+    WebChatRuntimeError,
+)
 
 __all__ = [
     "BrowserPolicyDecision",
@@ -16,6 +26,14 @@ __all__ = [
     "BrowserRuntime",
     "BrowserRuntimeError",
     "BrowserSkillClient",
+    "WEB_CHAT_ACTIONS",
+    "WEB_CHAT_ADAPTER_VERSION",
+    "WEB_CHAT_SCHEMA",
+    "WebChatAdapterRegistry",
+    "WebChatAdapterSpec",
+    "WebChatProvider",
+    "WebChatRuntime",
+    "WebChatRuntimeError",
     "looks_like_secret_text",
     "normalize_domain",
 ]

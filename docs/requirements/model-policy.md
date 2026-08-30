@@ -63,6 +63,20 @@
 认证/额度/健康状态和是否可选；网页聊天固定为 `needs-auth` 与人工登录边界。目录过滤 Fake、
 Stub、Placeholder 和敏感元数据，来源探测失败只影响对应条目并保留受限错误类型。
 
+### 网页聊天候选
+
+网页聊天档案通过 `BrowserRuntime` 投影为 `source_kind=web-chat`、
+`transport=browser-dom` 的候选。内置站点和自定义站点都先标记为 `needs-auth`、
+`quota=unknown`、`requires_user_login=true`，不能因为浏览器已打开或页面出现发送
+按钮就进入路由。只有档案完成隔离 Profile 人工登录、页面检查、`chat.send` 一次性
+授权和健康确认后，才会出现对应的可路由档案；即便如此，路由仍须遵守推荐后确认和
+预算策略，网页端额度未知时不能被当作免费额度。
+
+网页 Provider 只发送用户明确提交的当前消息，并从页面中提取新的 assistant/model/bot
+回复。页面快照在 Core 边界限深、限长并过滤凭据字段；没有新回复、快照损坏或回复
+疑似包含密钥时，适配器返回受限失败，不伪造回答、不导出原始快照。站点选择器是
+声明式配置，适配器不执行导入的 JavaScript，也不读取 Cookie 或网页端 Token。
+
 ## 决策优先级
 
 路由器必须按以下顺序过滤和排序：
@@ -85,6 +99,19 @@ ZCode 是独立的 `AgentRuntime` 来源，通过受支持的 `app-server --stdi
 Session、Plan/Execute、工具和事件。Sumika 不读取 ZCode 配置提取 Token，不把未验证的内部
 接口当作 OpenAI-compatible endpoint。额度状态若不能由协议可靠提供，必须显示 `unknown`，
 不能标为“免费可用”。
+
+当前已对安装的 ZCode `app-server --stdio` 做过只读协议探测：它使用无 `jsonrpc` 字段的
+行分隔消息，首个健康探针为 `session/list`；工作区级目录使用 `workspace/readState`，会话
+使用 `session/create`、`session/send`、`session/read`、`session/messages`、`session/stop`、
+`session/setModel`、`session/setMode` 和 `session/subagents`。创建会话前的
+`session/requestRuntimePreferences` 由 adapter 以安全默认值应答。旧标准 JSON-RPC peer 仍可
+通过 `SUMIKA_ZCODE_PROTOCOL=jsonrpc` 或 `auto` 的只读探测兼容。该探测只证明协议和进程可达，
+不证明模型配置、账号额度或生产会话可用；缺少模型配置时保持“未就绪”。
+
+Windows Electron 安装可在用户显式设置 `SUMIKA_ZCODE_AUTODISCOVER=1` 和安装目录后，由
+适配器解析旁边的公开 `resources/glm/zcode.cjs` 并交给 Node 启动；这只解决启动入口，
+不读取 ZCode 私有设置或登录凭据。当前本机只读验证得到 2 个模型，额度能力未公开，仍为
+`unknown`。
 
 ### 智谱
 
@@ -136,8 +163,29 @@ Provider、模型目录、额度监控、路由策略和评测记录属于 Sumik
 实现 Session、事件、工具和审批的 adapter。更换 Harness 时不迁移角色、Avatar、浏览器
 策略、Workspace 安全或凭据格式；只替换运行时事件翻译和启动器。
 
-## 当前实现差距
+## 当前实现
 
-当前只有 DSH Session 级手动模型选择和脱敏观测，尚无难度分类器、自动推荐、额度目录、
-ZCode adapter 或自动评测选择器。实现这些能力前，先完成文档基线和固定夹具，避免把一次
-成功请求误判为路由能力。
+当前代码已经提供 `model-policy/v1` 的基础、确定性路由闭环：
+
+- `ModelPolicyService` 从 Provider profiles、Runtime 的公开全局/Session 模型目录和网页聊天
+  候选构建有界 catalog；`model.policy.catalog`、`model.policy.route`、
+  `model.policy.preflight`、`model.policy.apply` 和 `model.policy.quota` 是 Core 入口；
+- `ModelRouter` 按安全/隐私、能力、质量、用户偏好、额度/成本和延迟的固定顺序过滤与排序；
+  `difficulty=auto` 目前使用 `infer_difficulty()` 的保守规则，不是机器学习分类器；
+- Agent 新建 Session 和发送 Execute/Plan 目标都可以显式携带 `routing` 或 `auto_route=true`。
+  无候选、未确认或健康检查失败时，Core 在创建 Session、绑定 Provider 或 Workspace checkpoint
+  之前返回明确结果；默认仍是“推荐后确认”，既有未携带 routing 的 Session 行为保持不变；
+- 声明式 Provider 用量查询只执行白名单 HTTP 请求和字段提取，JavaScript 脚本不会执行；结果
+  按 15 分钟 TTL 缓存并保存脱敏快照。ZCode adapter 只在 app-server 宣布公开 quota/usage
+  capability 时读取额度，否则保持 `unknown`；当前固定测试 fixture 验证了目录、状态推导和
+  缓存，不能代表用户本机 ZCode 已公开额度；
+- ZCode 的全局模型目录只通过公开 app-server 方法读取，不创建试探 Session、不读取配置文件或
+  登录凭据。网页聊天候选默认需要人工登录和一次性授权，且不可静默路由或宣称未知额度为免费。
+- 固定任务集和离线评测器已提供 `sumika.model-evaluation/v1` 记录、可比 cohort、Wilson 95%
+  区间以及成功率/工具/质量/重试/延迟/成本统计；诊断建议不会改变生产路由，默认每个任务
+  至少需要 3 次重复样本。
+
+尚未完成的部分是跨真实账户的额度适配器、长期样本持久化/质量判定器、学习型难度分类器和
+后台自动刷新。它们完成前，不能把一次成功请求或离线诊断建议当作“自动选择已全面可用”，
+也不能自动切换到付费模型；真实 Provider、ZCode 登录态和额度仍需用户主动配置并以最新
+preflight 结果为准。

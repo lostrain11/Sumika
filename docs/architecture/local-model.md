@@ -41,7 +41,7 @@ After closing Ollama from its tray menu, start a fresh service with the existing
 cache:
 
 ```powershell
-$env:OLLAMA_MODELS = 'E:\AI\OllamaModels'
+$env:OLLAMA_MODELS = 'D:\AI\OllamaModels'
 $env:OLLAMA_HOST = '127.0.0.1:11434'
 & "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
 ```
@@ -50,7 +50,7 @@ Then verify `ollama list` or `GET /api/tags`. To leave the current service
 untouched, use a separate port and point the Sumika profile at that port:
 
 ```powershell
-.\tools\setup-ollama.ps1 -Model 'qwen3:4b' -ModelsDir 'E:\AI\OllamaModels' -Port 11435 -SkipPull
+.\tools\setup-ollama.ps1 -Model 'qwen3:4b' -ModelsDir 'D:\AI\OllamaModels' -Port 11435 -SkipPull
 ```
 
 Ollama profile 使用其 OpenAI-compatible endpoint。对于 Qwen3，适配器使用

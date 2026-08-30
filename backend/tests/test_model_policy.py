@@ -145,6 +145,46 @@ class _AgentFixture:
         return {"groups": [{"id": "fixture", "name": "Fixture", "models": [{"id": "qwen3:4b"}]}]}
 
 
+class _GlobalModelQuotaFixture(_AgentFixture):
+    def __init__(self, quota):
+        self.quota = quota
+        self.quota_calls = 0
+
+    def runtime_models(self, params=None):
+        del params
+        return {"groups": [{"id": "zcode", "name": "ZCode", "models": [{"id": "glm-4.5-air"}]}]}
+
+    def quota_status(self, params=None):
+        del params
+        self.quota_calls += 1
+        return dict(self.quota)
+
+
+class _WebChatFixture:
+    def list_adapters(self):
+        return [
+            {"id": "deepseek-web", "name": "DeepSeek 网页聊天", "custom": False},
+            {"id": "custom", "name": "通用网页聊天", "custom": True},
+        ]
+
+    def list_profiles(self, *, include_archived=False):
+        del include_archived
+        return [
+            {
+                "id": "web-chat-authorized",
+                "name": "已授权网页账号",
+                "adapter_id": "deepseek-web",
+                "status": "ready",
+                "auth_state": "authorized",
+                "auto_chat_enabled": True,
+                "allowed_actions": ["chat.read", "chat.send"],
+                "budget_policy": "free-only",
+                "config": {"model_id": "web-session"},
+                "archived_at": None,
+            }
+        ]
+
+
 class ModelPolicyServiceTests(unittest.TestCase):
     def test_service_projects_profiles_web_entries_and_session_models(self):
         profiles = _ProfileFixture(
@@ -238,6 +278,48 @@ class ModelPolicyServiceTests(unittest.TestCase):
             loaded = ModelCatalogStore(data_dir)
             self.assertEqual(loaded.entries()[0].route_id, "local:one")
             self.assertTrue(loaded.entries()[0].routable)
+
+    def test_global_runtime_models_participate_in_preflight_and_runtime_quota_blocks_route(self):
+        agent = _GlobalModelQuotaFixture({"state": "exhausted", "source": "zcode-app-server"})
+        with tempfile.TemporaryDirectory() as data_dir:
+            service = ModelPolicyService(provider_profiles=None, agent=agent, data_dir=data_dir)
+            catalog = service.catalog()
+            runtime_entries = [item for item in catalog["entries"] if item["source_kind"] == "harness"]
+            self.assertEqual(len(runtime_entries), 1)
+            self.assertEqual(runtime_entries[0]["quota_state"], "exhausted")
+            service.catalog()
+            self.assertEqual(agent.quota_calls, 1)
+            decision = service.preflight({"taskKind": "greeting", "confirmationMode": "automatic"})
+            self.assertEqual(decision["decision"]["status"], "no-compatible-route")
+            self.assertIn("quota_exhausted:1", decision["decision"]["reason_codes"])
+            # A preflight is an explicit live check and bypasses the cache.
+            self.assertEqual(agent.quota_calls, 2)
+
+    def test_web_profile_unknown_quota_is_not_projected_as_free(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            service = ModelPolicyService(
+                provider_profiles=None,
+                agent=None,
+                data_dir=data_dir,
+                web_chat=_WebChatFixture(),
+            )
+            catalog = service.catalog()
+            profile_entry = next(
+                item for item in catalog["entries"] if item["route_id"] == "web:web-chat-authorized"
+            )
+            self.assertEqual(profile_entry["cost_class"], "unknown")
+            self.assertEqual(profile_entry["quota_state"], "unknown")
+            self.assertTrue(profile_entry["metadata"]["routable"])
+
+            decision = service.decide(
+                {
+                    "taskKind": "chat",
+                    "budgetPolicy": "free-only",
+                    "confirmationMode": "automatic",
+                }
+            )
+            self.assertEqual(decision["decision"]["status"], "no-compatible-route")
+            self.assertIn("paid_disallowed", decision["decision"]["reason_codes"])
 
 
 class RoutingRequestTests(unittest.TestCase):

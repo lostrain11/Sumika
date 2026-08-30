@@ -37,6 +37,22 @@ Provider bridge 是可选能力。声明该能力的 adapter 由 Core 将当前 
 档案显式同步；没有声明时，新会话由 Harness 自己管理 Provider，Core 不强制要求
 Sumika Provider 档案。
 
+### ZCode adapter
+
+可选 `zcode` adapter 使用 ZCode 官方 `app-server --stdio` 边界，不读取其配置、Cookie
+或凭据文件。当前 ZCode wire 是无 `jsonrpc` 字段的行分隔对象，adapter 先用
+`session/list` 探测，再按 workspace 描述调用 `session/create`、`session/send`、
+`session/read`、`session/messages`、`session/setModel`、`session/subagents` 和 `mcp/list`。
+`session/requestRuntimePreferences` 使用安全默认值自动应答。`SUMIKA_ZCODE_PROTOCOL=auto`
+默认兼容旧标准 JSON-RPC peer；Node 打包入口可用 `SUMIKA_ZCODE_NODE` 与
+`SUMIKA_ZCODE_SCRIPT` 显式配置。Windows 上也可在用户显式设置
+`SUMIKA_ZCODE_AUTODISCOVER=1` 与 `SUMIKA_ZCODE_INSTALL_DIR` 后自动解析
+`ZCode.exe` 旁边的公开 `resources\\glm\\zcode.cjs`，并改用 Node 启动，避免 Electron
+单实例壳提前退出；找不到脚本时不会猜测或回退。模型目录同时读取 Provider 分组和公开的 `available`
+选项；显式的短 `providerId/modelId` 选择通过 `session/setModel` 发送，只有调用方提供
+完整且经过结构校验的 `runtimeModel` 才会进入 `session/create` 或 `session/send`，不会
+凭空生成 Provider 或凭据。现代协议未验证的 `readonly`、附件和队列能力不会显示。
+
 ## 会话连续性
 
 前端只在浏览器本地存储当前 `runtime_id` 与 `session_id`，不保存消息、Workspace 路径、
@@ -109,6 +125,11 @@ namespace 读取已启用 Provider 的 API Key，并用 NUL 分隔的私有管�
 `tools/pre-execute` 调用 `browser.policy.evaluate`，因此替换 Harness 时可复用策略和
 运行时，只重写工具/审批事件映射。策略桥失败时必须拒绝浏览器调用，不能为了兼容性绕过
 Core 或退回直接执行 CLI。
+
+网页聊天档案是 Browser capability 上的独立 `web-chat/v1` 投影：它复用命名 Profile、
+页面快照和受审批的 DOM 动作，但不把网页登录态当作通用 Provider 凭据。其登录、页面
+就绪、一次性聊天授权和回复提取由 `WebChatRuntime` 管理；Harness 只看到受限的 Provider
+结果。详见[网页聊天档案](../integrations/browser-runtime.md#网页聊天档案web-chat)。
 
 ## 验证边界
 

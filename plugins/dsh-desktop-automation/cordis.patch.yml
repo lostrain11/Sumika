@@ -1,0 +1,7 @@
+- insert:
+    - id: sumika-desktop-automation
+      name: "@sumika/dsh-desktop-automation"
+      config:
+        endpoint: "http://127.0.0.1:8771/rpc"
+        policyTimeoutMs: 1500
+        enabled: true

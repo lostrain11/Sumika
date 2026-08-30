@@ -312,6 +312,50 @@
       "status_ref": "status-matrix:capability-catalog"
     },
     {
+      "id": "DESKTOP-001",
+      "category": "desktop-automation",
+      "statement": "Desktop software must be replaceable capability implementations behind a stable DesktopAdapter boundary for app protocols, Electron CDP, Windows UI Automation, and explicitly approved foreground takeover.",
+      "acceptance": [
+        "A transport client can be registered through a generic adapter without changing Core or UI policy",
+        "An unavailable or unimplemented transport returns an explicit unavailable result and never fabricates window actions"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": [],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/desktop_automation/contracts.py",
+        "../../backend/src/sumika_core/desktop_automation/adapters.py",
+        "../../docs/architecture/desktop-automation.md"
+      ],
+      "test_refs": ["../../backend/tests/test_desktop_automation.py"],
+      "status_ref": "status-matrix:desktop-automation"
+    },
+    {
+      "id": "DESKTOP-002",
+      "category": "desktop-automation-security",
+      "statement": "Desktop automation must use explicit registration, single-writer profile leases, approval-bound control, and bounded redacted audit metadata without exposing credentials, window contents, paths, or global input.",
+      "acceptance": [
+        "Lease conflicts, approval-token reuse, nested credential input, and uncertain sends are covered by repeatable tests",
+        "Core shutdown releases only sessions created by that instance and does not terminate unrelated applications"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context", "repository-docs"],
+      "excerpt_refs": [],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/desktop_automation/runtime.py",
+        "../../backend/src/sumika_core/desktop_automation/audit.py",
+        "../../plugins/dsh-desktop-automation/lib/policy.mjs",
+        "../../docs/architecture/security.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_desktop_automation.py",
+        "../../plugins/dsh-desktop-automation/test/policy.test.mjs"
+      ],
+      "status_ref": "status-matrix:desktop-automation"
+    },
+    {
       "id": "BROWSER-001",
       "category": "browser",
       "statement": "BrowserSkill handles browser mechanics while Sumika enforces isolated profiles, sensitive-action approval, human handoff, and download quarantine.",
@@ -359,8 +403,8 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-SEC-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/observability.py", "../../docs/architecture/agent-observability.md"],
-      "test_refs": ["../../backend/tests/test_agent_observability.py", "../../tools/test_agent_daily_acceptance.py"],
+      "implementation_refs": ["../../backend/src/sumika_core/observability.py", "../../backend/src/sumika_core/model_evaluation.py", "../../tools/fixtures/model-evaluation-v1.json", "../../docs/architecture/agent-observability.md"],
+      "test_refs": ["../../backend/tests/test_agent_observability.py", "../../backend/tests/test_model_evaluation.py", "../../tools/test_agent_daily_acceptance.py"],
       "status_ref": "status-matrix:agent-observability"
     },
     {
@@ -398,9 +442,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-001"],
-      "implementation_refs": ["../../docs/requirements/model-policy.md"],
-      "test_refs": [],
-      "status_ref": "status-matrix:agent-observability"
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/requirements/model-policy.md"],
+      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_server.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-002",
@@ -411,9 +455,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-004"],
-      "implementation_refs": ["../../docs/architecture/agent-runtime.md", "../../backend/src/sumika_core/provider_profiles.py"],
-      "test_refs": [],
-      "status_ref": "status-matrix:agent-runtime-portability"
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/architecture/agent-runtime.md", "../../backend/src/sumika_core/provider_profiles.py"],
+      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_portability.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-003",
@@ -424,9 +468,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-001"],
-      "implementation_refs": ["../../docs/requirements/model-policy.md"],
-      "test_refs": [],
-      "status_ref": "status-matrix:agent-runtime-portability"
+      "implementation_refs": ["../../backend/src/sumika_core/agent/contracts.py", "../../backend/src/sumika_core/agent/adapters/zcode/runtime.py", "../../docs/requirements/model-policy.md"],
+      "test_refs": ["../../backend/tests/test_zcode_runtime.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-004",
@@ -437,9 +481,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/provider_profiles.py", "../../backend/src/sumika_core/credentials.py"],
-      "test_refs": ["../../backend/tests/test_provider_profiles.py"],
-      "status_ref": "status-matrix:provider-profiles"
+      "implementation_refs": ["../../backend/src/sumika_core/provider_profiles.py", "../../backend/src/sumika_core/credentials.py", "../../backend/src/sumika_core/model_policy.py"],
+      "test_refs": ["../../backend/tests/test_provider_profiles.py", "../../backend/tests/test_model_policy.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-005",
@@ -450,9 +494,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-002"],
-      "implementation_refs": ["../../docs/requirements/model-policy.md"],
-      "test_refs": [],
-      "status_ref": "status-matrix:agent-observability"
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/requirements/model-policy.md"],
+      "test_refs": ["../../backend/tests/test_model_policy.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-006",
@@ -463,9 +507,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-002"],
-      "implementation_refs": ["../../docs/requirements/model-policy.md"],
-      "test_refs": [],
-      "status_ref": "status-matrix:agent-observability"
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/server.py", "../../docs/requirements/model-policy.md"],
+      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_server.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-007",
@@ -476,9 +520,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-003"],
-      "implementation_refs": ["../../docs/requirements/model-policy.md"],
-      "test_refs": [],
-      "status_ref": "status-matrix:agent-observability"
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/server.py", "../../frontend/main.js", "../../docs/requirements/model-policy.md"],
+      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_server.py", "../../frontend/tests/smoke.spec.js"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-008",
@@ -489,8 +533,8 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-MODEL-004"],
-      "implementation_refs": ["../../docs/architecture/local-model.md", "../../tools/setup-ollama.ps1"],
-      "test_refs": ["../../backend/tests/test_openai_compatible_stub.py"],
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/architecture/local-model.md", "../../tools/setup-ollama.ps1"],
+      "test_refs": ["../../backend/tests/test_openai_compatible_stub.py", "../../backend/tests/test_model_policy.py"],
       "status_ref": "status-matrix:local-llm"
     },
     {
@@ -502,9 +546,9 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": [],
-      "implementation_refs": ["../../docs/requirements/model-policy.md", "../../docs/integrations/browser-runtime.md"],
-      "test_refs": [],
-      "status_ref": "status-matrix:browser-runtime"
+      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/agent/adapters/zcode/runtime.py", "../../docs/requirements/model-policy.md", "../../docs/integrations/browser-runtime.md"],
+      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_zcode_runtime.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-010",

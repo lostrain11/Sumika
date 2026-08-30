@@ -1,0 +1,14 @@
+{
+  "id": "sumika.desktop-automation-bridge",
+  "version": "0.1.0",
+  "capabilities": ["tool"],
+  "entrypoint": "lib/index.mjs",
+  "runtime": "external-process",
+  "sdk_range": ">=0.1,<1.0",
+  "permissions": ["desktop.observe", "desktop.control", "desktop.sensitive"],
+  "dependencies": [],
+  "resource_requirements": {
+    "network": false,
+    "filesystem": "none"
+  }
+}

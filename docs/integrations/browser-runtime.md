@@ -63,6 +63,44 @@ DOM 操作统一走 `browser.action.execute`，当前映射到 BrowserSkill 的
 OTP、验证码和疑似凭据字段即使收到批准，也只返回 `requires_human`，要求用户在
 隔离窗口中输入。动作返回值经过限长投影，输入值从不进入 Sumika 事件日志。
 
+## 网页聊天档案（Web Chat）
+
+网页聊天是建立在 `BrowserRuntime` 上的通用 Provider 投影，不是另一个 API
+客户端，也不会把浏览器 Cookie 转成 API Key。当前协议标识为 `web-chat/v1`，内置
+三个可编辑模板：`deepseek-web`、`chatgpt-web` 和 `zhipu-web`；`custom` 模板允许
+用户为其他网页聊天站点填写域名、聊天 URL、输入/发送/回复 CSS 选择器和有限的文本
+标记。选择器只接受声明式 CSS 子集，拒绝 `javascript:`、`data:`、换行和任意脚本。
+
+档案只保存名称、适配器版本、域名、页面选择器、绑定的命名 BrowserSkill Profile、
+超时和 `free-only`/`no-paid` 策略。登录态仍由 BrowserSkill 的命名 Profile 管理；
+Sumika 不读取或持久化 Cookie、localStorage、密码、OTP、Authorization、网页
+JavaScript 或页面原始快照。公开 RPC/HTTP 只返回脱敏的档案元数据，不提供快照导出。
+
+生命周期必须按以下顺序完成：
+
+1. 在 Modules 或 Developer 创建档案（可先保存为 `draft`）；
+2. 点击“人工登录”，在隔离浏览器窗口完成登录；
+3. 点击“检查页面”，同时确认账号标记和聊天页面就绪标记；
+4. 明确授予一次性普通聊天权限（`chat.read`、`chat.send`），再选择“启用”。
+
+发送前和等待回复期间都会重新检查登录状态、页面就绪状态和当前域名。输入框、发送
+按钮或 Enter 操作任一失败都会停止，不会重试到未声明的选择器，也不会生成替代文本。
+如果页面没有出现新的、明确标记为 assistant/model/bot 的回复，结果为 `pending`；
+敏感样式的回复会被丢弃并返回受限错误。网页端额度固定为 `unknown`，不能仅凭网页
+登录状态宣称免费；模型策略只有在上述人工授权、健康检查和显式同意完成后才会把该
+档案作为可路由候选，而且不会静默切换到付费路线。
+
+对应入口为 `browser.web_chat.adapters`、`browser.web_chat.profiles`、
+`browser.web_chat.profile.{create,update,authorize,check,consent,activate,archive,restore}`
+和 `browser.web_chat.send`。归档只隐藏 Sumika 档案，不删除 BrowserSkill 登录态；
+恢复后强制重新检查登录并重新授权。站点 DOM 变化时应编辑档案或停用适配器，不让
+Sumika 猜测新页面结构。
+
+当前网页聊天仍属于“部分实现”：需要用户先准备 BrowserSkill 扩展和命名 Profile，
+真实账号登录、人工接管和长期网页端额度来源不由自动化测试代替。适配器只复用
+BrowserSkill 的公开 DOM/快照边界；未来替换 BrowserSkill 或 Harness 时，保留档案
+协议和策略层即可重写传输适配器。
+
 ## 命名 Profile 与租约
 
 `browser.profile.create` 创建的命名 Profile 元数据保存在 Sumika SQLite 的

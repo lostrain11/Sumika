@@ -171,6 +171,7 @@ class CapabilityCatalog:
         plugins: Any = None,
         skills: Any = None,
         model_policy: Any = None,
+        desktop_automation: Any = None,
         logger: Any = None,
     ) -> None:
         self.modules = modules
@@ -179,6 +180,7 @@ class CapabilityCatalog:
         self.plugins = plugins
         self.skills = skills
         self.model_policy = model_policy
+        self.desktop_automation = desktop_automation
         self.logger = logger
 
     def catalog(
@@ -222,6 +224,7 @@ class CapabilityCatalog:
         extend_from("module-projection", self._module_entries, module_rows, selected_by_capability)
         extend_from("plugin-projection", self._plugin_entries, selected_by_capability)
         extend_from("skill-projection", self._skill_entries)
+        extend_from("desktop-automation", self._desktop_entries, refresh, errors)
 
         if include_runtime:
             extend_from("agent-runtime", self._runtime_entries)
@@ -563,6 +566,74 @@ class CapabilityCatalog:
                         "version": _safe_text(row.get("version"), 80),
                         "manifest_sha256": _safe_text(row.get("manifest_sha256"), 80),
                         "metadata_only": True,
+                    },
+                )
+            )
+        return result
+
+    def _desktop_entries(
+        self,
+        refresh: bool,
+        errors: list[dict[str, str]],
+    ) -> list[CapabilityImplementationDescriptor]:
+        """Project registered desktop applications as tool implementations."""
+
+        if self.desktop_automation is None:
+            return []
+        try:
+            value = self.desktop_automation.catalog(
+                refresh=bool(refresh),
+                include_unavailable=True,
+            )
+        except Exception as error:
+            errors.append({"source": "desktop-automation", "error": type(error).__name__})
+            return []
+        rows = value.get("apps") if isinstance(value, dict) else []
+        if not isinstance(rows, list):
+            return []
+        result: list[CapabilityImplementationDescriptor] = []
+        for row in rows[:256]:
+            if not isinstance(row, dict):
+                continue
+            app_id = _safe_text(row.get("app_id"), 180)
+            name = _safe_text(row.get("name") or app_id, 240)
+            if not app_id or not name or _contains_blocked_name(app_id, name):
+                continue
+            raw_status = _safe_text(row.get("status"), 48).lower() or "unknown"
+            status = (
+                "available"
+                if raw_status in {"ready", "running"}
+                else raw_status
+                if raw_status in VALID_CAPABILITY_STATUSES
+                else "unknown"
+            )
+            approved = row.get("approved") is True
+            session_count = _bounded_int(row.get("session_count"), 0, 64)
+            result.append(
+                CapabilityImplementationDescriptor(
+                    id=f"desktop:{app_id}",
+                    capability="tools",
+                    name=name,
+                    status=status,
+                    selectable=approved and status in {"available", "configured", "unconfigured"},
+                    selected=False,
+                    enabled=session_count > 0,
+                    source_type="desktop-automation",
+                    transport=_safe_text(row.get("transport"), 80) or "app-protocol",
+                    trust="managed" if row.get("managed") is True else "user-approved" if approved else "unverified",
+                    lifecycle="managed-process" if row.get("managed") is True else "external-process",
+                    processing_location="local",
+                    permissions=_safe_tuple(row.get("permissions")),
+                    description="受控桌面软件实现；观察可自动执行，控制、发送和敏感操作遵循应用授权。",
+                    metadata={
+                        "app_id": app_id,
+                        "adapter_id": _safe_text(row.get("adapter_id"), 160),
+                        "approved": approved,
+                        "managed": row.get("managed") is True,
+                        "profile_configured": row.get("profile_configured") is True,
+                        "session_count": session_count,
+                        "lease_state": _safe_text(row.get("lease_state"), 40) or "idle",
+                        "global_input": False,
                     },
                 )
             )

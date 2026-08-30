@@ -40,6 +40,13 @@ The first slice is intentionally local-only:
   policy failure is a denial. The bridge receives only normalized host/action
   metadata, while credentials and human takeover text stay out of durable
   events. BrowserSkill never receives global desktop mouse/keyboard authority.
+- Desktop automation is a separate, explicitly registered boundary. Its
+  application declarations and profile leases persist only bounded metadata;
+  executable paths, launch arguments, credentials and window contents stay
+  out of SQLite and audit logs. `DesktopAdapter` actions require the Core
+  approval path, bind approvals to the original input hash, and never enable
+  foreground/global input by default. CDP/UIA transports are injectable and
+  loopback or OS-scoped; they do not discover arbitrary windows.
 
 This is not a safe remote deployment profile. Before enabling LAN or Android
 access, add pairing/authentication, origin checks, encrypted transport,

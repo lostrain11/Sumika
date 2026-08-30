@@ -49,6 +49,14 @@ not copy N.E.K.O source code, models or animation assets. Transparent means the
 window has no decorative panel background; it remains hit-testable so the model
 can be dragged and the chat composer can receive input.
 
+Controlled automation of a separate desktop application is deliberately not
+implemented by the overlay. It is exposed through the runtime-neutral
+[desktop automation toolkit](desktop-automation.md): an approved application
+is opened under an exclusive profile lease, then observed or controlled through
+an application protocol, Electron CDP, or Windows UIA adapter. Foreground input
+is a separate disabled-by-default takeover path and never affects the user's
+other windows.
+
 The following desktop capabilities remain deferred:
 
 - tray integration;

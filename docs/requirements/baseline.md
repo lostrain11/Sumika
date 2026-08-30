@@ -135,6 +135,25 @@ Execute 和 Plan Review 批准前创建 checkpoint；修改在独立 Workspace/w
   和 Fake/占位项不会出现在 HTTP、RPC 或 UI 投影中。
 - 当前实现：`capability-catalog` 状态行和 [Module catalog](../architecture/modules.md)。
 
+### `DESKTOP-001` 通用桌面软件适配器
+
+桌面软件是可替换的能力实现，不应被写死为 ZCode。Sumika 通过稳定的
+`DesktopAdapter` 契约统一应用协议、Electron `CDP`、Windows `UI Automation` 和经批准的
+前台接管；transport client 只负责协议调用，Core 负责生命周期和策略。
+
+- 来源：用户要求为 ZCode 增加可复用的通用桌面软件自动化工具包，并保留未来替换实现的能力。
+- 验收：任一实现可在不修改 Core/UI 策略的情况下登记；未实现的 transport 明确返回不可用，不伪造窗口操作。
+- 状态证据：[桌面自动化专题](../architecture/desktop-automation.md)；当前状态参考 `desktop-automation`。
+
+### `DESKTOP-002` 桌面操作安全边界
+
+桌面自动化必须显式登记和批准，profile 只能被一个写入者租用，控制和敏感动作需要批准，发送
+不确定时返回 `unknown`，且凭据、窗口正文、路径和全局输入不得进入持久化审计。
+
+- 来源：用户关于使用桌面自动化操纵 ZCode、同时不影响其他工作窗口的要求，结合现有安全边界归一化。
+- 验收：租约冲突、审批令牌复用、嵌套凭据和未知发送均有可重复测试；Core 关闭只清理本实例会话。
+- 状态证据：[桌面自动化专题](../architecture/desktop-automation.md)；当前状态参考 `desktop-automation`。
+
 ## 浏览器、安全与可进化系统
 
 ### `BROWSER-001` 隔离浏览器能力

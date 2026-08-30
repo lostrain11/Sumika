@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -20,6 +21,7 @@ from urllib.parse import urlparse
 
 
 MODEL_POLICY_VERSION = "model-policy/v1"
+QUOTA_TTL_SECONDS = 15 * 60
 
 QUALITY_RANK = {
     "unknown": 0,
@@ -214,6 +216,7 @@ class QuotaSnapshot:
         object.__setattr__(self, "source", _safe_text(self.source, 160) or "unknown")
         object.__setattr__(self, "confidence", _safe_text(self.confidence, 40) or "unknown")
         object.__setattr__(self, "detail", _safe_text(self.detail, 400))
+        object.__setattr__(self, "expires_at", _safe_text(self.expires_at, 80) if self.expires_at else None)
         for name in ("remaining_min", "remaining_max", "used", "total"):
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0):
@@ -223,7 +226,9 @@ class QuotaSnapshot:
             object.__setattr__(self, name, value)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        value["stale"] = not _quota_is_fresh(self.expires_at)
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +246,7 @@ class RoutingRequest:
     min_quality_tier: str | None = None
     character_id: str | None = None
     agent_preset_id: str | None = None
+    task_text: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task_kind", _safe_text(self.task_kind, 80).lower() or "chat")
@@ -275,6 +281,7 @@ class RoutingRequest:
         object.__setattr__(self, "min_quality_tier", quality)
         object.__setattr__(self, "character_id", _safe_text(self.character_id, 120) if self.character_id else None)
         object.__setattr__(self, "agent_preset_id", _safe_text(self.agent_preset_id, 160) if self.agent_preset_id else None)
+        object.__setattr__(self, "task_text", _safe_text(self.task_text, 4000))
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -344,7 +351,7 @@ def _required_quality(request: RoutingRequest) -> str:
     else:
         difficulty = request.difficulty
         if difficulty == "auto":
-            difficulty = infer_difficulty(request.task_kind)
+            difficulty = infer_difficulty(request.task_kind, request.task_text)
         baseline = {
             "trivial": "basic",
             "basic": "basic",
@@ -556,7 +563,14 @@ class ModelCatalogStore:
                 self._entries[entry.route_id] = entry
             for raw in payload.get("quotas", [])[:256] if isinstance(payload.get("quotas"), list) else []:
                 try:
-                    quota = QuotaSnapshot(**raw)
+                    if not isinstance(raw, dict):
+                        continue
+                    quota_values = {
+                        key: item
+                        for key, item in raw.items()
+                        if key in QuotaSnapshot.__dataclass_fields__
+                    }
+                    quota = QuotaSnapshot(**quota_values)
                 except (TypeError, ModelPolicyError):
                     continue
                 self._quotas[quota.route_id] = quota
@@ -580,6 +594,10 @@ class ModelCatalogStore:
     def quotas(self) -> dict[str, QuotaSnapshot]:
         with self._lock:
             return dict(self._quotas)
+
+    def quota(self, route_id: str) -> QuotaSnapshot | None:
+        with self._lock:
+            return self._quotas.get(route_id)
 
     def save(self) -> None:
         if self.path is None:
@@ -607,19 +625,33 @@ class ModelPolicyService:
         ("chatgpt-web", "ChatGPT 网页聊天"),
         ("zhipu-web", "智谱网页聊天"),
     )
+    quota_ttl_seconds = QUOTA_TTL_SECONDS
 
-    def __init__(self, provider_profiles: Any = None, agent: Any = None, data_dir: str | Path | None = None, logger: Any = None) -> None:
+    def __init__(
+        self,
+        provider_profiles: Any = None,
+        agent: Any = None,
+        data_dir: str | Path | None = None,
+        logger: Any = None,
+        web_chat: Any = None,
+    ) -> None:
         self.provider_profiles = provider_profiles
         self.agent = agent
         self.logger = logger
+        self.web_chat = web_chat
         self.store = ModelCatalogStore(data_dir)
         self.router = ModelRouter()
+        self._quota_lock = threading.RLock()
+        self._runtime_quota_cache: dict[str, Any] | None = None
+        self._runtime_quota_checked_at = 0.0
 
     def catalog(self, *, refresh: bool = False, session_id: str | None = None) -> dict[str, Any]:
         if refresh:
             self._refresh_profile_health()
+        quota_refreshed = self._refresh_quotas_if_due(force=refresh)
+        runtime_quota = self._runtime_quota_status(force=refresh)
         entries = self._profile_entries()
-        entries.extend(self._runtime_entries(session_id))
+        entries.extend(self._runtime_entries(session_id, runtime_quota=runtime_quota))
         entries.extend(self._web_entries())
         self.store.upsert_entries(entries)
         self.store.save()
@@ -630,6 +662,8 @@ class ModelPolicyService:
             "quotas": [quota.to_dict() for quota in quotas.values()],
             "checked_at": _utc_now(),
             "refresh_requested": bool(refresh),
+            "quota_refresh_performed": quota_refreshed,
+            "runtime_quota": runtime_quota,
             "sources": ["provider-profiles", "agent-runtime", "browser-web-chat"],
         }
 
@@ -638,6 +672,7 @@ class ModelPolicyService:
         params: Mapping[str, Any] | RoutingRequest,
         *,
         session_id: str | None = None,
+        refresh: bool = False,
     ) -> dict[str, Any]:
         """Evaluate a request against the current catalog.
 
@@ -651,20 +686,37 @@ class ModelPolicyService:
             session_id = _safe_text(session_id, 240)
             if not session_id:
                 session_id = None
-        catalog = self.catalog(refresh=False, session_id=session_id)
+        catalog = self.catalog(refresh=refresh, session_id=session_id)
         entries = [ModelCatalogEntry(**self._entry_constructor(item)) for item in catalog["entries"]]
         decision = self.router.decide(request, entries, self.store.quotas())
         return {"request": request.to_dict(), "decision": decision.to_dict(), "catalog_checked_at": catalog["checked_at"]}
 
-    def quota_status(self, *, refresh: bool = False) -> dict[str, Any]:
-        if refresh:
-            self._refresh_declarative_quotas()
+    def preflight(
+        self,
+        params: Mapping[str, Any] | RoutingRequest,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run a live, bounded health/quota check before an Agent turn.
+
+        This is deliberately separate from ``decide`` so callers can choose
+        an explicit preflight at a user-visible boundary without changing the
+        inexpensive, read-only catalog RPC semantics.
+        """
+
+        return self.decide(params, session_id=session_id, refresh=True)
+
+    def quota_status(self, *, refresh: bool = False, force: bool = False) -> dict[str, Any]:
+        refreshed = self._refresh_quotas_if_due(force=bool(refresh or force))
         self.store.save()
+        runtime_quota = self._runtime_quota_status(force=bool(refresh or force))
         return {
             "policy_version": MODEL_POLICY_VERSION,
             "checked_at": _utc_now(),
             "snapshots": [item.to_dict() for item in self.store.quotas().values()],
             "refresh_requested": bool(refresh),
+            "refresh_performed": refreshed,
+            "runtime": runtime_quota,
         }
 
     def _entry_constructor(self, value: dict[str, Any]) -> dict[str, Any]:
@@ -734,15 +786,34 @@ class ModelPolicyService:
             )
         return entries
 
-    def _runtime_entries(self, session_id: str | None) -> list[ModelCatalogEntry]:
-        if self.agent is None or not session_id:
+    def _runtime_entries(
+        self,
+        session_id: str | None,
+        *,
+        runtime_quota: Mapping[str, Any] | None = None,
+    ) -> list[ModelCatalogEntry]:
+        if self.agent is None:
             return []
         try:
             if not self.agent.status().get("ready") or not self.agent.supports("models"):
                 return []
-            value = self.agent.session_models({"session_id": session_id})
+            if session_id:
+                value = self.agent.session_models({"session_id": session_id})
+            else:
+                # A recommendation must be possible before creating a
+                # session.  Only adapters that expose a public, unscoped
+                # model directory participate here; older runtimes remain
+                # session-scoped and are intentionally omitted.
+                runtime_models = getattr(self.agent, "runtime_models", None)
+                if not callable(runtime_models):
+                    return []
+                value = runtime_models({})
         except Exception:
             return []
+        quota_state = _safe_text((runtime_quota or {}).get("state"), 40).lower() or "unknown"
+        if quota_state not in VALID_QUOTA_STATES:
+            quota_state = "unknown"
+        quota_source = _safe_text((runtime_quota or {}).get("source"), 160) or "agent-runtime"
         entries: list[ModelCatalogEntry] = []
         for group in value.get("groups", []) if isinstance(value, dict) else []:
             if not isinstance(group, dict):
@@ -765,16 +836,34 @@ class ModelPolicyService:
                         cost_class="unknown",
                         processing_location="cloud",
                         auth_state="authorized",
-                        quota_state="unknown",
+                        quota_state=quota_state,
                         health_state="healthy",
                         source_kind="harness",
                         transport="runtime",
+                        metadata={"quota_source": quota_source},
                     )
                 )
         return entries
 
     def _web_entries(self) -> list[ModelCatalogEntry]:
-        return [
+        # Built-in adapters are discovered from the registry when available,
+        # so adding a safe first-party adapter does not require changing the
+        # policy router.  ``custom`` is a configuration template, not a
+        # routable model candidate and is intentionally excluded.
+        sources = self.WEB_CHAT_SOURCES
+        if self.web_chat is not None:
+            try:
+                discovered = self.web_chat.list_adapters()
+            except Exception:
+                discovered = []
+            dynamic_sources = [
+                (str(item.get("id") or ""), str(item.get("name") or item.get("id") or ""))
+                for item in discovered
+                if isinstance(item, dict) and item.get("custom") is not True and item.get("id")
+            ]
+            if dynamic_sources:
+                sources = tuple(dynamic_sources)
+        entries = [
             ModelCatalogEntry(
                 route_id=f"web:{source_id}",
                 provider_id=source_id,
@@ -782,7 +871,7 @@ class ModelPolicyService:
                 display_name=label,
                 capabilities=("chat", "browser"),
                 quality_tier="unknown",
-                cost_class="free-limited",
+                cost_class="unknown",
                 processing_location="cloud",
                 auth_state="needs-auth",
                 quota_state="unknown",
@@ -796,8 +885,59 @@ class ModelPolicyService:
                     "authorization_boundary": "manual-login",
                 },
             )
-            for source_id, label in self.WEB_CHAT_SOURCES
+            for source_id, label in sources
         ]
+        if self.web_chat is None:
+            return entries
+        try:
+            profiles = self.web_chat.list_profiles(include_archived=False)
+        except Exception:
+            profiles = []
+        for profile in profiles:
+            if not isinstance(profile, dict) or profile.get("archived_at"):
+                continue
+            profile_id = _safe_text(profile.get("id"), 120)
+            if not profile_id:
+                continue
+            adapter_id = _safe_text(profile.get("adapter_id"), 120) or "custom"
+            profile_config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+            model_id = _safe_text(profile_config.get("model_id"), 160) or "web-session"
+            auth_state = _safe_text(profile.get("auth_state"), 40).lower() or "unknown"
+            status = _safe_text(profile.get("status"), 40).lower() or "unknown"
+            consented = profile.get("auto_chat_enabled") is True and "chat.send" in set(profile.get("allowed_actions") or [])
+            ready = status == "ready" and auth_state == "authorized"
+            entries.append(
+                ModelCatalogEntry(
+                    route_id=f"web:{profile_id}",
+                    provider_id=f"web-chat:{profile_id}",
+                    model_id=model_id,
+                    display_name=f"{_safe_text(profile.get('name') or profile_id, 160)} · 网页聊天",
+                    capabilities=("chat", "browser"),
+                    quality_tier=_quality_from_model(model_id),
+                    # Web accounts do not expose a verified quota source.  A
+                    # profile-level ``free-only`` preference is a safety
+                    # constraint, not evidence that the website is free, so
+                    # keep the route's cost unknown until an official source
+                    # is integrated.
+                    cost_class="unknown",
+                    processing_location="cloud",
+                    auth_state=auth_state,
+                    quota_state="unknown",
+                    health_state="healthy" if ready else "unknown",
+                    source_kind="web-chat",
+                    transport="browser-dom",
+                    metadata={
+                        "routable": bool(ready and consented),
+                        "web_profile_id": profile_id,
+                        "adapter_id": adapter_id,
+                        "requires_user_login": auth_state != "authorized",
+                        "authorization_boundary": "one-time-chat-consent",
+                        "quota_source": "provider_web_account",
+                        "budget_policy": _safe_text(profile.get("budget_policy"), 40) or "free-only",
+                    },
+                )
+            )
+        return entries
 
     def _refresh_declarative_quotas(self) -> None:
         if self.provider_profiles is None:
@@ -818,6 +958,70 @@ class ModelPolicyService:
             route_id = f"profile:{profile_id}:{model or 'unconfigured'}"
             snapshot = self._query_usage(profile, query, route_id)
             self.store.upsert_quota(snapshot)
+
+    def _refresh_quotas_if_due(self, *, force: bool = False) -> bool:
+        """Refresh only configured usage queries whose snapshots are stale."""
+
+        with self._quota_lock:
+            if not force and not self._quota_refresh_due():
+                return False
+            self._refresh_declarative_quotas()
+            self.store.save()
+            return True
+
+    def _quota_refresh_due(self) -> bool:
+        if self.provider_profiles is None:
+            return False
+        try:
+            profiles = self.provider_profiles.list(include_archived=False)
+        except Exception:
+            return False
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+            query = config.get("usage_query") if isinstance(config.get("usage_query"), dict) else {}
+            if query.get("enabled") is not True:
+                continue
+            route_id = f"profile:{profile.get('id')}:{config.get('model') or 'unconfigured'}"
+            snapshot = self.store.quota(route_id)
+            if snapshot is None or not _quota_is_fresh(snapshot.expires_at):
+                return True
+        return False
+
+    def _runtime_quota_status(self, *, force: bool = False) -> dict[str, Any]:
+        with self._quota_lock:
+            if (
+                not force
+                and self._runtime_quota_cache is not None
+                and time.monotonic() - self._runtime_quota_checked_at < self.quota_ttl_seconds
+            ):
+                return dict(self._runtime_quota_cache)
+        if self.agent is None or not callable(getattr(self.agent, "quota_status", None)):
+            result = {"state": "unknown", "source": "agent-runtime-not-supported"}
+        else:
+            try:
+                value = self.agent.quota_status({})
+            except Exception as error:
+                result = {"state": "unknown", "source": "agent-runtime-error", "error_type": type(error).__name__}
+            else:
+                if not isinstance(value, dict):
+                    result = {"state": "unknown", "source": "agent-runtime-invalid"}
+                else:
+                    result = {"state": _safe_text(value.get("state"), 40).lower() or "unknown", "source": _safe_text(value.get("source"), 160) or "agent-runtime"}
+                    if result["state"] not in VALID_QUOTA_STATES:
+                        result["state"] = "unknown"
+                    for key in ("checked_at", "expires_at", "unit"):
+                        if value.get(key) is not None:
+                            result[key] = _safe_text(value.get(key), 120)
+                    for key in ("remaining", "remaining_min", "remaining_max", "used", "total"):
+                        number = value.get(key)
+                        if isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number) and number >= 0:
+                            result[key] = float(number)
+        with self._quota_lock:
+            self._runtime_quota_cache = dict(result)
+            self._runtime_quota_checked_at = time.monotonic()
+        return dict(result)
 
     def _query_usage(self, profile: dict[str, Any], query: dict[str, Any], route_id: str) -> QuotaSnapshot:
         profile_id = str(profile.get("id") or "")
@@ -866,14 +1070,15 @@ class ModelPolicyService:
                 total=total,
                 unit=str(fields.get("unit") or ""),
                 source="declarative-usage-query",
+                expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)),
                 confidence="observed" if state != "unknown" else "low",
                 detail="官方声明式额度查询",
             )
         except urllib.error.HTTPError as error:
             state = "needs-auth" if error.code in {401, 403} else "unknown"
-            return QuotaSnapshot(route_id=route_id, state=state, source="declarative-usage-query", confidence="low", requires_auth=state == "needs-auth", detail=f"HTTP {error.code}")
+            return QuotaSnapshot(route_id=route_id, state=state, source="declarative-usage-query", expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)), confidence="low", requires_auth=state == "needs-auth", detail=f"HTTP {error.code}")
         except (OSError, ValueError, ModelPolicyError, json.JSONDecodeError) as error:
-            return QuotaSnapshot(route_id=route_id, state="unknown", source="declarative-usage-query", confidence="low", detail=type(error).__name__)
+            return QuotaSnapshot(route_id=route_id, state="unknown", source="declarative-usage-query", expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)), confidence="low", detail=type(error).__name__)
 
 
 def _number_at(payload: Any, path: Any) -> float | None:
@@ -890,6 +1095,20 @@ def _number_at(payload: Any, path: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         return None
     return float(value)
+
+
+def _quota_is_fresh(expires_at: str | None) -> bool:
+    """Return whether a persisted quota snapshot is still within its TTL."""
+
+    if not expires_at:
+        return False
+    try:
+        value = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value > datetime.now(timezone.utc)
 
 
 def _quality_from_model(model: str) -> str:
@@ -920,6 +1139,7 @@ def routing_request_from_dict(value: Mapping[str, Any]) -> RoutingRequest:
         min_quality_tier=value.get("min_quality_tier", value.get("minQualityTier")),
         character_id=value.get("character_id", value.get("characterId")),
         agent_preset_id=value.get("agent_preset_id", value.get("agentPresetId")),
+        task_text=value.get("task_text", value.get("taskText", value.get("text", ""))),
     )
 
 

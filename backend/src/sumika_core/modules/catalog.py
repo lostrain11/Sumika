@@ -28,6 +28,20 @@ class ModuleError(ValueError):
 _PROFILE_MANAGED_LLM_ADAPTERS = {"openai-compatible"}
 
 
+def _is_profile_managed_llm_adapter(module_id: str, implementation_id: str) -> bool:
+    """Return whether an LLM implementation stores its connection by profile.
+
+    Web-chat accounts are dynamic provider projections.  They use the same
+    ``{profile_id}`` module configuration as OpenAI-compatible connections,
+    while their credentials remain owned by BrowserSkill.
+    """
+
+    return module_id == "llm" and (
+        implementation_id in _PROFILE_MANAGED_LLM_ADAPTERS
+        or implementation_id.startswith("web-chat:")
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ModuleImplementation:
     id: str
@@ -332,18 +346,18 @@ class ModuleCatalog:
                 raise ModuleError("config must be an object")
             # Selecting an unconfigured real adapter is a valid intermediate
             # state; required fields are enforced once values are supplied.
-            if module_id == "llm" and selected_id in _PROFILE_MANAGED_LLM_ADAPTERS:
-                self._validate_profile_config(config)
+            if _is_profile_managed_llm_adapter(module_id, selected_id):
+                self._validate_profile_config(config, selected_id)
             elif config or implementation.status != "unconfigured":
                 self._validate_config(implementation.config_schema, config)
             next_config, secret_fields = (
                 (dict(config), [])
-                if module_id == "llm" and selected_id in _PROFILE_MANAGED_LLM_ADAPTERS
+                if _is_profile_managed_llm_adapter(module_id, selected_id)
                 else _persistable_config(implementation.config_schema, config)
             )
 
         if selected_id != "none":
-            if module_id == "llm" and selected_id in _PROFILE_MANAGED_LLM_ADAPTERS:
+            if _is_profile_managed_llm_adapter(module_id, selected_id):
                 pass
             elif self.providers.has(selected_id):
                 self.providers.configure(selected_id, config or next_config)
@@ -391,8 +405,8 @@ class ModuleCatalog:
                 raise ModuleError(f"Invalid module config in snapshot: {module_id}") from exc
             if not isinstance(config, dict):
                 raise ModuleError(f"Invalid module config in snapshot: {module_id}")
-            if module_id == "llm" and implementation_id in _PROFILE_MANAGED_LLM_ADAPTERS:
-                self._validate_profile_config(config)
+            if _is_profile_managed_llm_adapter(module_id, implementation_id):
+                self._validate_profile_config(config, implementation_id)
             elif config or implementation.status != "unconfigured":
                 self._validate_config(implementation.config_schema, config)
 
@@ -407,7 +421,7 @@ class ModuleCatalog:
             if implementation_id == "none":
                 continue
             config = setting["config"]
-            if spec.id == "llm" and implementation_id in _PROFILE_MANAGED_LLM_ADAPTERS:
+            if _is_profile_managed_llm_adapter(spec.id, implementation_id):
                 continue
             if self.providers.has(implementation_id):
                 self.providers.configure(implementation_id, config)
@@ -450,7 +464,7 @@ class ModuleCatalog:
             # module switch as the only disable control.
             "implementations": [self._runtime_implementation(item).to_dict() for item in spec.implementations],
             "config": setting["config"],
-            "config_schema": {} if spec.id == "llm" and implementation.id in _PROFILE_MANAGED_LLM_ADAPTERS else implementation.config_schema,
+            "config_schema": {} if _is_profile_managed_llm_adapter(spec.id, implementation.id) else implementation.config_schema,
             "permissions": list(spec.permissions),
             "resource_requirements": spec.resource_requirements,
             "updated_at": setting["updated_at"],
@@ -468,11 +482,15 @@ class ModuleCatalog:
         return implementation
 
     @staticmethod
-    def _validate_profile_config(config: dict[str, Any]) -> None:
+    def _validate_profile_config(config: dict[str, Any], implementation_id: str = "openai-compatible") -> None:
         profile_id = config.get("profile_id")
         if isinstance(profile_id, str) and profile_id.strip():
             if set(config) != {"profile_id"}:
                 raise ModuleError("LLM module configuration may only contain profile_id")
+            if implementation_id.startswith("web-chat:"):
+                expected = implementation_id.removeprefix("web-chat:")
+                if profile_id.strip() != expected:
+                    raise ModuleError("web-chat implementation must use its matching profile_id")
             return
         # Version-1 snapshots stored the OpenAI-compatible fields directly.
         # They are accepted only for restore and are migrated immediately by

@@ -1,8 +1,8 @@
 # Agent 日用遥测与评估
 
 本页冻结 Sumika 日用运行诊断、插件对比和 Agent 自进化评估的数据边界。当前已经落地
-内容无关的 JSONL receipt、按日聚合、安全 API，以及真实 Session 的有界验收投影；
-自动评分、候选推荐和自动切换仍未实现。
+内容无关的 JSONL receipt、按日聚合、安全 API、真实 Session 的有界验收投影，以及模型策略
+的确定性候选目录/推荐门控；自动质量评分、长期评测和生产自动切换仍未实现。
 功能状态以 [状态矩阵](../status-matrix.md)为准。
 
 ## 目标与非目标
@@ -67,8 +67,9 @@ ID 只用于同一安装内关联，不编码角色名、仓库路径或用户�
 残留受管进程都属于机器可检测异常。
 
 未来的离线分析器按天生成：新错误指纹、错误率回归、p95 回归、频繁人工接管、重复撤销、
-checkpoint 恢复次数和未闭合操作。它可以提出 issue 草稿或隔离复测建议，但不能自行
-修改代码、安装插件、切换 Provider 或删除数据。
+checkpoint 恢复次数和未闭合操作。当前模型策略已经能根据固定门槛提出一次性候选建议；离线
+分析器仍只能提出 issue 草稿或隔离复测建议，不能自行修改代码、安装插件、切换 Provider 或
+删除数据。
 
 ## 插件可比性
 
@@ -98,14 +99,23 @@ privacy_policy + cache_state` 相同时才进入同一 cohort。优先做同一�
 2. 增加内容无关的 JSONL sink、轮转和退出完整性检查；
 3. 增加日聚合器与固定诊断包格式；
 4. 建立真实编码任务和记忆检索的版本化评测夹具；
-5. 最后增加候选推荐和隔离复测，不增加自动生产切换。
+5. 用固定样本校准候选推荐和隔离复测，不增加自动生产切换。
 
-当前 Codex 平替里程碑已完成第 1、2 项的最小实现：Core RPC 和 DSH runtime event
+当前 Codex 平替里程碑已完成第 1、2 项的最小实现，并接入模型策略的基础门控：Core RPC 和 DSH runtime event
 会生成稳定的 operation/opaque session 关联字段，并写入可轮转 JSONL；按日聚合器
 提供 p50/p95、结果计数、重试/审批/资源总量。只读 `agent.acceptance.evidence` RPC
 还可从最多 1000 条 Core 事件中关联指定真实 Session 的 Plan 审查、批准前 checkpoint、
 工具终态、diff 和恢复结果；公开结果不返回 Session/checkpoint/request ID、时间戳、路径或
-正文。第 3 至第 5 项（固定诊断包、评测夹具、候选推荐）仍需在真实日用闭环稳定后建设。
+正文。模型策略的 catalog、确定性难度推断、额度 TTL 和推荐前确认已由独立模块及测试覆盖。
+
+固定评测任务集现已落地为
+[`tools/fixtures/model-evaluation-v1.json`](../../tools/fixtures/model-evaluation-v1.json)，
+覆盖只读问答、单/多文件修改、工具、Plan Review、MCP、浏览器审批和工作区恢复。
+[`sumika_core.model_evaluation`](../../backend/src/sumika_core/model_evaluation.py) 只接受
+不含内容的结果记录，并按 `task_set + Harness + adapter + provider + hardware + privacy +
+cache_state` 分 cohort，输出成功率、Wilson 95% 区间、工具/质量通过率、重试、p50/p95、成本
+和额度单位。`routing_action` 固定为 `none`：即使报告给出诊断性候选，也不会自动修改生产路由。
+证据不足（默认每个任务至少 3 次）或置信区间重叠时，结果标记为 `insufficient`/`inconclusive`。
 
 ## 运行方式
 
@@ -115,6 +125,13 @@ python tools/aggregate_agent_day.py
 
 # 生成今天的持久摘要
 python tools/aggregate_agent_day.py --write
+
+# 离线汇总固定评测结果（JSONL 或包含 records 数组的 JSON）
+python tools/evaluate_models.py --input <evaluation-results.jsonl>
+
+# 输出完整的有界 JSON；结果文件只会写入项目目录且不会覆盖旧报告
+python tools/evaluate_models.py --input <evaluation-results.jsonl> `
+  --output .sumika-desktop\logs\evaluation\model-evaluation.json --json
 
 # 只读投影一个已经完成的真实 Session；不会再次调用模型
 python tools/agent_daily_acceptance.py `
@@ -139,6 +156,43 @@ python tools/agent_daily_acceptance.py --browser-smoke --browser-write-smoke `
 Core 也提供 `GET /api/agent/observability?day=YYYY-MM-DD&write=true`。这些接口只
 返回聚合计数、耗时和稳定分类；原始 JSONL 是一次性诊断数据，不是 Session、Workspace
 或备份恢复来源。
+
+评测记录的最小形状如下（示例只展示元数据和布尔/数值结果，不放请求或响应正文）：
+
+```json
+{
+  "schema_version": "sumika.model-evaluation/v1",
+  "task_id": "read-only-question",
+  "route_id": "profile:local:qwen3:4b",
+  "manifest": {
+    "task_set_id": "sumika-agent-core",
+    "task_set_version": "1.0.0",
+    "harness_id": "dsh",
+    "harness_version": "0.1.1-rc.2",
+    "adapter_id": "dsh-adapter",
+    "adapter_version": "1",
+    "provider_kind": "ollama",
+    "model_id": "qwen3:4b",
+    "model_version": "local",
+    "hardware_class": "local-rx5700xt",
+    "privacy_policy": "local-only",
+    "cache_state": "cold"
+  },
+  "success": true,
+  "outcome": "completed",
+  "tool_success": null,
+  "retry_count": 0,
+  "latency_ms": 420,
+  "estimated_cost": 0,
+  "quota_units": 0,
+  "quality_passed": true,
+  "user_correction": false,
+  "approval_count": 0
+}
+```
+
+结果由隔离 runner 产生；当前 CLI 只做离线验证和汇总，不负责启动模型、执行任务、安装
+插件或切换 Provider。被拒绝的记录只返回行号和稳定错误码，错误值和疑似敏感字段不会回显。
 
 ## 相关文档
 

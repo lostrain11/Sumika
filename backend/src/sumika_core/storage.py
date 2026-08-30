@@ -14,7 +14,7 @@ from typing import Any
 from .protocol.models import Message, utc_now
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 17
 
 SNAPSHOT_FORMAT_VERSION = 1
 
@@ -51,6 +51,27 @@ _SNAPSHOT_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "status",
         "created_at",
         "updated_at",
+        "last_used_at",
+        "archived_at",
+    ),
+    "web_chat_profiles": (
+        "id",
+        "name",
+        "adapter_id",
+        "site_key",
+        "browser_profile_id",
+        "browser_instance",
+        "chat_url",
+        "status",
+        "auth_state",
+        "auto_chat_enabled",
+        "allowed_actions_json",
+        "budget_policy",
+        "config_json",
+        "adapter_version",
+        "created_at",
+        "updated_at",
+        "last_checked_at",
         "last_used_at",
         "archived_at",
     ),
@@ -99,6 +120,7 @@ _SNAPSHOT_TABLE_KEYS = {
     "module_settings": "module_id",
     "provider_profiles": "id",
     "browser_profiles": "id",
+    "web_chat_profiles": "id",
     "tasks": "id",
     "avatar_models": "id",
     "audio_permissions": "permission_id",
@@ -107,7 +129,7 @@ _SNAPSHOT_TABLE_KEYS = {
 }
 _SNAPSHOT_SCOPE_TABLES = {
     "system": tuple(_SNAPSHOT_TABLE_COLUMNS),
-    "modules": ("module_settings", "provider_profiles", "browser_profiles"),
+    "modules": ("module_settings", "provider_profiles", "browser_profiles", "web_chat_profiles"),
     "characters": ("characters",),
     "memories": ("memories",),
 }
@@ -120,6 +142,122 @@ _SNAPSHOT_SCOPE_ALIASES = {
     "memory": "memories",
     "memories": "memories",
 }
+
+
+def _bounded_identifier(value: Any, field: str) -> str:
+    candidate = str(value or "").strip()
+    if not candidate or len(candidate) > 240 or any(ord(char) < 32 or ord(char) == 127 for char in candidate):
+        raise ValueError(f"{field} must be a non-empty identifier")
+    if re.fullmatch(r"[A-Za-z0-9._:-]{1,240}", candidate) is None:
+        raise ValueError(f"{field} contains unsupported characters")
+    return candidate
+
+
+def _optional_identifier(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return _bounded_identifier(value, "identifier")
+
+
+def _bounded_text(value: Any, limit: int) -> str:
+    candidate = str(value or "").strip()
+    if len(candidate) > limit or any(ord(char) < 32 or ord(char) == 127 for char in candidate):
+        raise ValueError("bounded metadata text is invalid")
+    return candidate
+
+
+def _bounded_enum(value: Any, allowed: set[str], field: str) -> str:
+    candidate = _bounded_text(value, 80).lower()
+    if candidate not in allowed:
+        raise ValueError(f"{field} is invalid")
+    return candidate
+
+
+def _bounded_timestamp(value: Any, field: str) -> str:
+    candidate = _bounded_text(value, 120)
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]{1,100}", candidate):
+        raise ValueError(f"{field} must be an ISO timestamp")
+    return candidate
+
+
+def _optional_timestamp(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return _bounded_timestamp(value, "timestamp")
+
+
+def _bounded_number(value: Any, *, maximum: float) -> int | float | None:
+    if value in (None, "") or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(float(value)) or value < 0 or value > maximum:
+        raise ValueError("bounded metadata number is invalid")
+    return int(value) if float(value).is_integer() else round(float(value), 3)
+
+
+def _bounded_int(value: Any, *, maximum: int, minimum: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise ValueError("bounded metadata integer is invalid")
+    number = int(value)
+    if number < minimum or number > maximum:
+        raise ValueError("bounded metadata integer is out of range")
+    return number
+
+
+def _safe_hash(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    candidate = str(value).strip().lower()
+    if re.fullmatch(r"[0-9a-f]{16,128}", candidate) is None:
+        raise ValueError("summary_hash must be hexadecimal")
+    return candidate[:128]
+
+
+def _bounded_projection(value: Any, *, depth: int = 0) -> Any:
+    """Keep derived desktop metadata bounded and free of secrets/paths."""
+
+    if depth > 3:
+        return {}
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        blocked = {
+            "token",
+            "secret",
+            "password",
+            "cookie",
+            "authorization",
+            "api_key",
+            "apikey",
+            "credential",
+            "path",
+            "file",
+            "directory",
+            "executable",
+            "launcher",
+        }
+        for raw_key, raw_value in list(value.items())[:64]:
+            key = str(raw_key).strip().lower()
+            if not key or len(key) > 80 or any(part in key for part in blocked):
+                continue
+            if isinstance(raw_value, dict):
+                result[key] = _bounded_projection(raw_value, depth=depth + 1)
+            elif isinstance(raw_value, (list, tuple)):
+                result[key] = [
+                    _bounded_projection(item, depth=depth + 1)
+                    for item in list(raw_value)[:32]
+                    if isinstance(item, (dict, list, tuple, str, int, float, bool)) or item is None
+                ]
+            elif isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+                if isinstance(raw_value, str):
+                    text = raw_value.strip()
+                    if len(text) > 300 or "\\" in text or "/" in text:
+                        continue
+                    result[key] = text
+                else:
+                    result[key] = raw_value
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_bounded_projection(item, depth=depth + 1) for item in list(value)[:32]]
+    return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)[:120]
 
 
 class Storage:
@@ -328,6 +466,30 @@ class Storage:
                  );
                  CREATE INDEX IF NOT EXISTS idx_browser_profiles_status
                      ON browser_profiles(status, archived_at, last_used_at);
+                 CREATE TABLE IF NOT EXISTS web_chat_profiles (
+                     id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     adapter_id TEXT NOT NULL,
+                     site_key TEXT NOT NULL,
+                     browser_profile_id TEXT NOT NULL,
+                     browser_instance TEXT,
+                     chat_url TEXT NOT NULL,
+                     status TEXT NOT NULL,
+                     auth_state TEXT NOT NULL,
+                     auto_chat_enabled INTEGER NOT NULL DEFAULT 0,
+                     allowed_actions_json TEXT NOT NULL DEFAULT '["chat.read","chat.send"]',
+                     budget_policy TEXT NOT NULL DEFAULT 'free-only',
+                     config_json TEXT NOT NULL DEFAULT '{}',
+                     adapter_version TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL,
+                     last_checked_at TEXT,
+                     last_used_at TEXT,
+                     archived_at TEXT,
+                     FOREIGN KEY(browser_profile_id) REFERENCES browser_profiles(id)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_web_chat_profiles_status
+                     ON web_chat_profiles(status, archived_at, last_used_at);
                  CREATE TABLE IF NOT EXISTS browser_profile_leases (
                      profile_id TEXT PRIMARY KEY,
                      lease_id TEXT NOT NULL,
@@ -336,6 +498,84 @@ class Storage:
                      expires_at TEXT NOT NULL,
                      FOREIGN KEY(profile_id) REFERENCES browser_profiles(id)
                  );
+                 -- Desktop automation declarations are safe projections of
+                 -- registered applications.  Adapter configuration (paths,
+                 -- launch arguments, and credentials) stays out of SQLite.
+                 CREATE TABLE IF NOT EXISTS desktop_applications (
+                     app_id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     adapter_id TEXT NOT NULL,
+                     transport TEXT NOT NULL,
+                     status TEXT NOT NULL,
+                     approved INTEGER NOT NULL DEFAULT 0,
+                     managed INTEGER NOT NULL DEFAULT 0,
+                     capabilities_json TEXT NOT NULL DEFAULT '[]',
+                     permissions_json TEXT NOT NULL DEFAULT '[]',
+                     profile_id TEXT,
+                     fingerprint_json TEXT NOT NULL DEFAULT '{}',
+                     metadata_json TEXT NOT NULL DEFAULT '{}',
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_desktop_applications_status
+                     ON desktop_applications(status, approved, updated_at DESC);
+                 -- A profile can be written by only one Core/owner at a time.
+                 -- This is runtime metadata and is intentionally not
+                 -- included in user snapshots.
+                 CREATE TABLE IF NOT EXISTS desktop_automation_leases (
+                     profile_key TEXT PRIMARY KEY,
+                     session_id TEXT NOT NULL,
+                     app_id TEXT NOT NULL,
+                     owner TEXT NOT NULL,
+                     lease_id TEXT NOT NULL,
+                     acquired_at TEXT NOT NULL,
+                     expires_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_desktop_automation_leases_expiry
+                     ON desktop_automation_leases(expires_at);
+                 -- Route and consultation rows are metadata projections only.
+                 -- They intentionally do not contain prompts, context, browser
+                 -- snapshots, cookies, tokens, or complete web replies.
+                 CREATE TABLE IF NOT EXISTS agent_route_runs (
+                     dispatch_id TEXT PRIMARY KEY,
+                     consultation_id TEXT,
+                     parent_session_id TEXT NOT NULL,
+                     parent_turn_id TEXT,
+                     mode TEXT NOT NULL,
+                     route_id TEXT NOT NULL,
+                     provider_profile_id TEXT,
+                     continuation_of TEXT,
+                     status TEXT NOT NULL,
+                     started_at TEXT NOT NULL,
+                     completed_at TEXT,
+                     latency_ms REAL,
+                     error_code TEXT,
+                     result_length INTEGER NOT NULL DEFAULT 0,
+                     summary_hash TEXT,
+                     retryable INTEGER NOT NULL DEFAULT 0,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_agent_route_runs_parent
+                     ON agent_route_runs(parent_session_id, started_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_agent_route_runs_consultation
+                     ON agent_route_runs(consultation_id, started_at);
+                 CREATE TABLE IF NOT EXISTS agent_consultations (
+                     consultation_id TEXT PRIMARY KEY,
+                     parent_session_id TEXT NOT NULL,
+                     parent_turn_id TEXT,
+                     decision_kind TEXT NOT NULL,
+                     status TEXT NOT NULL,
+                     max_members INTEGER NOT NULL,
+                     successful_count INTEGER NOT NULL DEFAULT 0,
+                     failed_count INTEGER NOT NULL DEFAULT 0,
+                     disagreement_detected INTEGER NOT NULL DEFAULT 0,
+                     untrusted_external INTEGER NOT NULL DEFAULT 1,
+                     member_metadata_json TEXT NOT NULL DEFAULT '[]',
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_agent_consultations_parent
+                     ON agent_consultations(parent_session_id, created_at DESC);
                  """
             )
             plugin_columns = {
@@ -1195,6 +1435,621 @@ class Storage:
                 (next_status, now, last_used_at, archived_at, profile_id),
             )
         return self.get_browser_profile(profile_id)
+
+    # Desktop application declarations and profile leases are runtime
+    # projections.  They deliberately do not participate in user snapshots.
+    def get_desktop_application(self, app_id: str) -> dict[str, Any] | None:
+        identifier = _bounded_identifier(app_id, "app_id")
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM desktop_applications WHERE app_id=?", (identifier,)
+            ).fetchone()
+        return self._desktop_application_row(row) if row is not None else None
+
+    def list_desktop_applications(self, *, include_disabled: bool = True) -> list[dict[str, Any]]:
+        where = "" if include_disabled else "WHERE status NOT IN ('disabled', 'revoked')"
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT * FROM desktop_applications {where} ORDER BY updated_at DESC, name COLLATE NOCASE"
+            ).fetchall()
+        return [self._desktop_application_row(row) for row in rows]
+
+    def upsert_desktop_application(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("desktop application must be an object")
+        app_id = _bounded_identifier(value.get("app_id"), "app_id")
+        name = _bounded_text(value.get("name"), 240)
+        if not name:
+            raise ValueError("desktop application name must not be empty")
+        adapter_id = _bounded_identifier(value.get("adapter_id"), "adapter_id")
+        transport = _bounded_enum(
+            value.get("transport", "app-protocol"),
+            {"app-protocol", "electron-cdp", "windows-uia", "foreground"},
+            "transport",
+        )
+        status = _bounded_enum(
+            value.get("status", "unconfigured"),
+            {
+                "unconfigured",
+                "configured",
+                "ready",
+                "running",
+                "unavailable",
+                "disabled",
+                "error",
+                "revoked",
+            },
+            "status",
+        )
+
+        def _string_list(raw: Any, field: str) -> list[str]:
+            if raw is None:
+                return []
+            if not isinstance(raw, (list, tuple)):
+                raise ValueError(f"{field} must be an array")
+            result: list[str] = []
+            for item in list(raw)[:64]:
+                text = _bounded_text(item, 160)
+                if not text or "\\" in text or "/" in text:
+                    raise ValueError(f"{field} contains an invalid value")
+                if text not in result:
+                    result.append(text)
+            return result
+
+        capabilities = _string_list(value.get("capabilities"), "capabilities")
+        permissions = _string_list(value.get("permissions"), "permissions")
+        profile_id = _optional_identifier(value.get("profile_id"))
+        fingerprint = _bounded_projection(value.get("fingerprint") or {})
+        metadata = _bounded_projection(value.get("metadata") or {})
+        now = utc_now()
+        created_at = _optional_timestamp(value.get("created_at")) or now
+        updated_at = _optional_timestamp(value.get("updated_at")) or now
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO desktop_applications(
+                    app_id, name, adapter_id, transport, status, approved,
+                    managed, capabilities_json, permissions_json, profile_id,
+                    fingerprint_json, metadata_json, created_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(app_id) DO UPDATE SET
+                    name=excluded.name,
+                    adapter_id=excluded.adapter_id,
+                    transport=excluded.transport,
+                    status=excluded.status,
+                    approved=excluded.approved,
+                    managed=excluded.managed,
+                    capabilities_json=excluded.capabilities_json,
+                    permissions_json=excluded.permissions_json,
+                    profile_id=excluded.profile_id,
+                    fingerprint_json=excluded.fingerprint_json,
+                    metadata_json=excluded.metadata_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    app_id,
+                    name,
+                    adapter_id,
+                    transport,
+                    status,
+                    int(value.get("approved") is True),
+                    int(value.get("managed") is True),
+                    json.dumps(capabilities, ensure_ascii=False, sort_keys=True),
+                    json.dumps(permissions, ensure_ascii=False, sort_keys=True),
+                    profile_id,
+                    json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, allow_nan=False),
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True, allow_nan=False),
+                    created_at,
+                    updated_at,
+                ),
+            )
+        result = self.get_desktop_application(app_id)
+        if result is None:
+            raise RuntimeError("desktop application was not persisted")
+        return result
+
+    @staticmethod
+    def _desktop_application_row(row: sqlite3.Row) -> dict[str, Any]:
+        value = dict(row)
+        value["approved"] = bool(value.get("approved"))
+        value["managed"] = bool(value.get("managed"))
+        for column, output, fallback in (
+            ("capabilities_json", "capabilities", []),
+            ("permissions_json", "permissions", []),
+            ("fingerprint_json", "fingerprint", {}),
+            ("metadata_json", "metadata", {}),
+        ):
+            try:
+                decoded = json.loads(value.pop(column))
+            except (TypeError, ValueError):
+                decoded = fallback
+            value[output] = decoded
+        value["profile_configured"] = bool(value.get("profile_id"))
+        return value
+
+    def get_desktop_automation_lease(self, profile_key: str) -> dict[str, Any] | None:
+        identifier = _bounded_identifier(profile_key, "profile_key")
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM desktop_automation_leases WHERE profile_key=?", (identifier,)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def acquire_desktop_automation_lease(
+        self,
+        *,
+        profile_key: str,
+        session_id: str,
+        app_id: str,
+        owner: str,
+        lease_id: str,
+        expires_at: str,
+    ) -> dict[str, Any] | None:
+        """Acquire a single profile lease, reclaiming only an expired row."""
+
+        profile_key = _bounded_identifier(profile_key, "profile_key")
+        session_id = _bounded_identifier(session_id, "session_id")
+        app_id = _bounded_identifier(app_id, "app_id")
+        owner = _bounded_enum(owner, {"agent", "manual", "system"}, "owner")
+        lease_id = _bounded_identifier(lease_id, "lease_id")
+        expires_at = _bounded_timestamp(expires_at, "expires_at")
+        acquired_at = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                "DELETE FROM desktop_automation_leases WHERE profile_key=? AND expires_at<=?",
+                (profile_key, acquired_at),
+            )
+            current = self._connection.execute(
+                "SELECT * FROM desktop_automation_leases WHERE profile_key=?", (profile_key,)
+            ).fetchone()
+            if current is not None and (
+                str(current["lease_id"]) != lease_id or str(current["session_id"]) != session_id
+            ):
+                return None
+            self._connection.execute(
+                """
+                INSERT INTO desktop_automation_leases(
+                    profile_key, session_id, app_id, owner, lease_id,
+                    acquired_at, expires_at
+                ) VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                    session_id=excluded.session_id,
+                    app_id=excluded.app_id,
+                    owner=excluded.owner,
+                    lease_id=excluded.lease_id,
+                    acquired_at=excluded.acquired_at,
+                    expires_at=excluded.expires_at
+                """,
+                (profile_key, session_id, app_id, owner, lease_id, acquired_at, expires_at),
+            )
+        return self.get_desktop_automation_lease(profile_key)
+
+    def upsert_desktop_automation_lease(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("desktop lease must be an object")
+        result = self.acquire_desktop_automation_lease(
+            profile_key=str(value.get("profile_key") or ""),
+            session_id=str(value.get("session_id") or ""),
+            app_id=str(value.get("app_id") or ""),
+            owner=str(value.get("owner") or ""),
+            lease_id=str(value.get("lease_id") or ""),
+            expires_at=str(value.get("expires_at") or ""),
+        )
+        if result is None:
+            raise ValueError("desktop profile is already leased")
+        return result
+
+    def release_desktop_automation_lease(
+        self,
+        *,
+        profile_key: str,
+        lease_id: str,
+        session_id: str | None = None,
+    ) -> bool:
+        profile_key = _bounded_identifier(profile_key, "profile_key")
+        lease_id = _bounded_identifier(lease_id, "lease_id")
+        clauses = ["profile_key=?", "lease_id=?"]
+        values: list[Any] = [profile_key, lease_id]
+        if session_id is not None:
+            clauses.append("session_id=?")
+            values.append(_bounded_identifier(session_id, "session_id"))
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                f"DELETE FROM desktop_automation_leases WHERE {' AND '.join(clauses)}", values
+            )
+        return cursor.rowcount > 0
+
+    def list_desktop_automation_leases(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM desktop_automation_leases ORDER BY expires_at, profile_key"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_expired_desktop_automation_leases(self, *, now: str | None = None) -> int:
+        cutoff = _bounded_timestamp(now, "now") if now is not None else utc_now()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM desktop_automation_leases WHERE expires_at<=?", (cutoff,)
+            )
+        return cursor.rowcount
+
+    # Web-chat account profiles deliberately keep only non-secret metadata.
+    # Browser cookies and session material remain in the OS-managed browser
+    # profile selected by BrowserSkill; they never pass through this table.
+    def get_web_chat_profile(self, profile_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM web_chat_profiles WHERE id=?", (profile_id,)
+            ).fetchone()
+        return self._web_chat_profile_row(row) if row is not None else None
+
+    def list_web_chat_profiles(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
+        where = "" if include_archived else "WHERE archived_at IS NULL"
+        with self._lock:
+            rows = self._connection.execute(
+                f"""
+                SELECT * FROM web_chat_profiles
+                {where}
+                ORDER BY
+                    CASE status WHEN 'ready' THEN 0 WHEN 'needs-auth' THEN 1 ELSE 2 END,
+                    COALESCE(last_used_at, updated_at) DESC,
+                    name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [self._web_chat_profile_row(row) for row in rows]
+
+    def create_web_chat_profile(
+        self,
+        *,
+        profile_id: str,
+        name: str,
+        adapter_id: str,
+        site_key: str,
+        browser_profile_id: str,
+        browser_instance: str | None,
+        chat_url: str,
+        status: str,
+        auth_state: str,
+        auto_chat_enabled: bool,
+        allowed_actions: list[str],
+        budget_policy: str,
+        config: dict[str, Any],
+        adapter_version: str,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO web_chat_profiles(
+                    id, name, adapter_id, site_key, browser_profile_id,
+                    browser_instance, chat_url, status, auth_state,
+                    auto_chat_enabled, allowed_actions_json, budget_policy,
+                    config_json, adapter_version, created_at, updated_at,
+                    last_checked_at, last_used_at, archived_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    profile_id,
+                    name,
+                    adapter_id,
+                    site_key,
+                    browser_profile_id,
+                    browser_instance,
+                    chat_url,
+                    status,
+                    auth_state,
+                    int(auto_chat_enabled),
+                    json.dumps(allowed_actions, ensure_ascii=False, sort_keys=True),
+                    budget_policy,
+                    json.dumps(config, ensure_ascii=False, sort_keys=True),
+                    adapter_version,
+                    now,
+                    now,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+        profile = self.get_web_chat_profile(profile_id)
+        assert profile is not None
+        return profile
+
+    def update_web_chat_profile(
+        self,
+        profile_id: str,
+        *,
+        name: str | None = None,
+        adapter_id: str | None = None,
+        site_key: str | None = None,
+        browser_profile_id: str | None = None,
+        adapter_version: str | None = None,
+        status: str | None = None,
+        auth_state: str | None = None,
+        auto_chat_enabled: bool | None = None,
+        allowed_actions: list[str] | None = None,
+        budget_policy: str | None = None,
+        config: dict[str, Any] | None = None,
+        browser_instance: str | None = None,
+        chat_url: str | None = None,
+        last_checked: bool = False,
+        mark_used: bool = False,
+        archived: bool | None = None,
+    ) -> dict[str, Any] | None:
+        current = self.get_web_chat_profile(profile_id)
+        if current is None:
+            return None
+        now = utc_now()
+        next_name = str(current.get("name") or "") if name is None else str(name)
+        next_adapter = str(current.get("adapter_id") or "") if adapter_id is None else str(adapter_id)
+        next_site_key = str(current.get("site_key") or "") if site_key is None else str(site_key)
+        next_browser_profile = str(current.get("browser_profile_id") or "") if browser_profile_id is None else str(browser_profile_id)
+        next_adapter_version = str(current.get("adapter_version") or "") if adapter_version is None else str(adapter_version)
+        next_status = str(status or current["status"])
+        next_auth = str(auth_state or current["auth_state"])
+        next_auto = bool(current.get("auto_chat_enabled")) if auto_chat_enabled is None else bool(auto_chat_enabled)
+        next_actions = list(current.get("allowed_actions") or []) if allowed_actions is None else list(allowed_actions)
+        next_budget = str(current.get("budget_policy") or "free-only") if budget_policy is None else str(budget_policy)
+        next_config = dict(current.get("config") or {}) if config is None else dict(config)
+        next_instance = current.get("browser_instance") if browser_instance is None else browser_instance
+        next_url = str(current.get("chat_url") or "") if chat_url is None else str(chat_url)
+        archived_at = current.get("archived_at")
+        if archived is True:
+            next_status = "archived"
+            archived_at = now
+            next_auto = False
+        elif archived is False:
+            archived_at = None
+            if next_status == "archived":
+                next_status = "needs-auth" if next_auth != "authorized" else "ready"
+        checked_at = now if last_checked else current.get("last_checked_at")
+        used_at = now if mark_used else current.get("last_used_at")
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                UPDATE web_chat_profiles
+                SET name=?, adapter_id=?, site_key=?, browser_profile_id=?,
+                    adapter_version=?, status=?, auth_state=?, auto_chat_enabled=?,
+                    allowed_actions_json=?, budget_policy=?, config_json=?,
+                    browser_instance=?, chat_url=?, updated_at=?,
+                    last_checked_at=?, last_used_at=?, archived_at=?
+                WHERE id=?
+                """,
+                (
+                    next_name,
+                    next_adapter,
+                    next_site_key,
+                    next_browser_profile,
+                    next_adapter_version,
+                    next_status,
+                    next_auth,
+                    int(next_auto),
+                    json.dumps(next_actions, ensure_ascii=False, sort_keys=True),
+                    next_budget,
+                    json.dumps(next_config, ensure_ascii=False, sort_keys=True),
+                    next_instance,
+                    next_url,
+                    now,
+                    checked_at,
+                    used_at,
+                    archived_at,
+                    profile_id,
+                ),
+            )
+        return self.get_web_chat_profile(profile_id)
+
+    @staticmethod
+    def _web_chat_profile_row(row: sqlite3.Row) -> dict[str, Any]:
+        value = dict(row)
+        value["auto_chat_enabled"] = bool(value.get("auto_chat_enabled"))
+        try:
+            value["allowed_actions"] = json.loads(value.pop("allowed_actions_json"))
+        except (TypeError, ValueError):
+            value["allowed_actions"] = []
+        try:
+            value["config"] = json.loads(value.pop("config_json"))
+        except (TypeError, ValueError):
+            value["config"] = {}
+        return value
+
+    # Dynamic route/consultation projections deliberately live outside the
+    # user-data snapshot tables.  They are resumable UI/audit metadata, not a
+    # second source of Agent activity state.
+    def upsert_agent_route_run(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("agent route run must be an object")
+        dispatch_id = _bounded_identifier(value.get("dispatch_id"), "dispatch_id")
+        parent_session_id = _bounded_identifier(value.get("parent_session_id"), "parent_session_id")
+        route_id = _bounded_identifier(value.get("route_id"), "route_id")
+        consultation_id = _optional_identifier(value.get("consultation_id"))
+        parent_turn_id = _optional_identifier(value.get("parent_turn_id"))
+        continuation_of = _optional_identifier(value.get("continuation_of"))
+        mode = _bounded_enum(value.get("mode"), {"web-worker", "consultation-panel"}, "mode")
+        status = _bounded_enum(
+            value.get("status"),
+            {"queued", "running", "completed", "partial", "failed", "cancelled", "waiting-human", "unknown", "interrupted"},
+            "status",
+        )
+        provider_profile_id = _optional_identifier(value.get("provider_profile_id"))
+        started_at = _bounded_timestamp(value.get("started_at") or utc_now(), "started_at")
+        completed_at = _optional_timestamp(value.get("completed_at"))
+        latency_ms = _bounded_number(value.get("latency_ms"), maximum=86_400_000)
+        result_length = _bounded_int(value.get("result_length", 0), maximum=1_000_000)
+        summary_hash = _safe_hash(value.get("summary_hash"))
+        error_code = _bounded_text(value.get("error_code"), 120) if value.get("error_code") else None
+        retryable = 1 if value.get("retryable") is True else 0
+        now = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO agent_route_runs(
+                    dispatch_id, consultation_id, parent_session_id, parent_turn_id,
+                    mode, route_id, provider_profile_id, continuation_of, status,
+                    started_at, completed_at, latency_ms, error_code, result_length,
+                    summary_hash, retryable, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(dispatch_id) DO UPDATE SET
+                    consultation_id=excluded.consultation_id,
+                    parent_session_id=excluded.parent_session_id,
+                    parent_turn_id=excluded.parent_turn_id,
+                    mode=excluded.mode,
+                    route_id=excluded.route_id,
+                    provider_profile_id=excluded.provider_profile_id,
+                    continuation_of=excluded.continuation_of,
+                    status=excluded.status,
+                    started_at=excluded.started_at,
+                    completed_at=excluded.completed_at,
+                    latency_ms=excluded.latency_ms,
+                    error_code=excluded.error_code,
+                    result_length=excluded.result_length,
+                    summary_hash=excluded.summary_hash,
+                    retryable=excluded.retryable,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    dispatch_id, consultation_id, parent_session_id, parent_turn_id,
+                    mode, route_id, provider_profile_id, continuation_of, status,
+                    started_at, completed_at, latency_ms, error_code, result_length,
+                    summary_hash, retryable, now,
+                ),
+            )
+        return self.get_agent_route_run(dispatch_id) or {}
+
+    def get_agent_route_run(self, dispatch_id: str) -> dict[str, Any] | None:
+        identifier = _bounded_identifier(dispatch_id, "dispatch_id")
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM agent_route_runs WHERE dispatch_id=?", (identifier,)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_agent_route_runs(
+        self, *, parent_session_id: str | None = None, consultation_id: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        if parent_session_id is not None:
+            parent_session_id = _bounded_identifier(parent_session_id, "parent_session_id")
+        if consultation_id is not None:
+            consultation_id = _bounded_identifier(consultation_id, "consultation_id")
+        limit = _bounded_int(limit, maximum=500, minimum=1)
+        clauses: list[str] = []
+        args: list[Any] = []
+        if parent_session_id:
+            clauses.append("parent_session_id=?")
+            args.append(parent_session_id)
+        if consultation_id:
+            clauses.append("consultation_id=?")
+            args.append(consultation_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT * FROM agent_route_runs {where} ORDER BY started_at DESC LIMIT ?",
+                (*args, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert_agent_consultation(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("agent consultation must be an object")
+        consultation_id = _bounded_identifier(value.get("consultation_id"), "consultation_id")
+        parent_session_id = _bounded_identifier(value.get("parent_session_id"), "parent_session_id")
+        parent_turn_id = _optional_identifier(value.get("parent_turn_id"))
+        decision_kind = _bounded_enum(value.get("decision_kind"), {"brainstorm", "plan-review", "fact-check", "counterexample", "small-answer"}, "decision_kind")
+        status = _bounded_enum(value.get("status"), {"queued", "running", "completed", "partial", "failed", "cancelled", "unknown", "interrupted"}, "status")
+        max_members = _bounded_int(value.get("max_members", 3), maximum=8, minimum=1)
+        successful_count = _bounded_int(value.get("successful_count", 0), maximum=8)
+        failed_count = _bounded_int(value.get("failed_count", 0), maximum=8)
+        disagreement = 1 if value.get("disagreement_detected") is True else 0
+        untrusted = 1 if value.get("untrusted_external", True) is not False else 0
+        members = value.get("member_metadata", value.get("members", []))
+        if not isinstance(members, list):
+            raise ValueError("consultation member metadata must be an array")
+        safe_members: list[dict[str, Any]] = []
+        for item in members[:8]:
+            if not isinstance(item, dict):
+                continue
+            # Keep only bounded identifiers/status/counters; never persist
+            # answer text, context, page snapshots, or error detail.
+            member: dict[str, Any] = {}
+            for key in ("dispatch_id", "route_id", "provider_profile_id"):
+                candidate = _optional_identifier(item.get(key))
+                if candidate:
+                    member[key] = candidate
+            member_status = item.get("status")
+            if member_status is not None:
+                member["status"] = _bounded_text(member_status, 40)
+            for key in ("latency_ms", "result_length"):
+                number = _bounded_number(item.get(key), maximum=86_400_000 if key == "latency_ms" else 1_000_000)
+                if number is not None:
+                    member[key] = number
+            error_code = _bounded_text(item.get("error_code"), 120) if item.get("error_code") else None
+            if error_code:
+                member["error_code"] = error_code
+            if member:
+                safe_members.append(member)
+        created_at = _bounded_timestamp(value.get("created_at") or utc_now(), "created_at")
+        updated_at = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO agent_consultations(
+                    consultation_id, parent_session_id, parent_turn_id, decision_kind,
+                    status, max_members, successful_count, failed_count,
+                    disagreement_detected, untrusted_external, member_metadata_json,
+                    created_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(consultation_id) DO UPDATE SET
+                    parent_session_id=excluded.parent_session_id,
+                    parent_turn_id=excluded.parent_turn_id,
+                    decision_kind=excluded.decision_kind,
+                    status=excluded.status,
+                    max_members=excluded.max_members,
+                    successful_count=excluded.successful_count,
+                    failed_count=excluded.failed_count,
+                    disagreement_detected=excluded.disagreement_detected,
+                    untrusted_external=excluded.untrusted_external,
+                    member_metadata_json=excluded.member_metadata_json,
+                    created_at=excluded.created_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    consultation_id, parent_session_id, parent_turn_id, decision_kind,
+                    status, max_members, successful_count, failed_count,
+                    disagreement, untrusted, json.dumps(safe_members, ensure_ascii=False, sort_keys=True),
+                    created_at, updated_at,
+                ),
+            )
+        return self.get_agent_consultation(consultation_id) or {}
+
+    def get_agent_consultation(self, consultation_id: str) -> dict[str, Any] | None:
+        identifier = _bounded_identifier(consultation_id, "consultation_id")
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM agent_consultations WHERE consultation_id=?", (identifier,)
+            ).fetchone()
+        if row is None:
+            return None
+        value = dict(row)
+        try:
+            value["member_metadata"] = json.loads(value.pop("member_metadata_json"))
+        except (TypeError, ValueError):
+            value["member_metadata"] = []
+        value["disagreement_detected"] = bool(value.get("disagreement_detected"))
+        value["untrusted_external"] = bool(value.get("untrusted_external"))
+        return value
+
+    def list_agent_consultations(self, *, parent_session_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        if parent_session_id is not None:
+            parent_session_id = _bounded_identifier(parent_session_id, "parent_session_id")
+        limit = _bounded_int(limit, maximum=500, minimum=1)
+        if parent_session_id:
+            query = "SELECT consultation_id FROM agent_consultations WHERE parent_session_id=? ORDER BY created_at DESC LIMIT ?"
+            args: tuple[Any, ...] = (parent_session_id, limit)
+        else:
+            query = "SELECT consultation_id FROM agent_consultations ORDER BY created_at DESC LIMIT ?"
+            args = (limit,)
+        with self._lock:
+            rows = self._connection.execute(query, args).fetchall()
+        return [item for row in rows if (item := self.get_agent_consultation(str(row["consultation_id"]))) is not None]
 
     def get_browser_profile_lease(self, profile_id: str) -> dict[str, Any] | None:
         with self._lock:

@@ -1,0 +1,87 @@
+{
+  "schema_version": "sumika.model-evaluation-taskset/v1",
+  "task_set_id": "sumika-agent-core",
+  "version": "1.0.0",
+  "tasks": [
+    {
+      "id": "read-only-question",
+      "kind": "question",
+      "workload_version": "1",
+      "difficulty": "basic",
+      "risk": "low",
+      "required_capabilities": ["chat"],
+      "assertions": ["completed", "answer-structured"],
+      "label": "只读问答"
+    },
+    {
+      "id": "single-file-edit",
+      "kind": "code",
+      "workload_version": "1",
+      "difficulty": "moderate",
+      "risk": "normal",
+      "required_capabilities": ["chat", "tools", "workspace-write"],
+      "assertions": ["completed", "one-file-diff", "tests-observed"],
+      "label": "单文件修改"
+    },
+    {
+      "id": "multi-file-refactor",
+      "kind": "multi-file",
+      "workload_version": "1",
+      "difficulty": "complex",
+      "risk": "high",
+      "required_capabilities": ["chat", "tools", "workspace-write"],
+      "assertions": ["completed", "bounded-diff", "tests-observed"],
+      "label": "多文件重构"
+    },
+    {
+      "id": "tool-call",
+      "kind": "tool",
+      "workload_version": "1",
+      "difficulty": "moderate",
+      "risk": "normal",
+      "required_capabilities": ["chat", "tools"],
+      "assertions": ["completed", "tool-result-observed"],
+      "label": "工具调用"
+    },
+    {
+      "id": "plan-review",
+      "kind": "plan",
+      "workload_version": "1",
+      "difficulty": "complex",
+      "risk": "high",
+      "required_capabilities": ["chat", "plan", "tools", "approvals"],
+      "assertions": ["plan-presented", "approval-observed", "completed"],
+      "label": "计划审查"
+    },
+    {
+      "id": "mcp-call",
+      "kind": "mcp",
+      "workload_version": "1",
+      "difficulty": "complex",
+      "risk": "high",
+      "required_capabilities": ["chat", "tools", "mcp"],
+      "assertions": ["server-initialized", "tool-discovered", "completed"],
+      "label": "MCP 调用"
+    },
+    {
+      "id": "browser-approval",
+      "kind": "browser",
+      "workload_version": "1",
+      "difficulty": "complex",
+      "risk": "high",
+      "required_capabilities": ["chat", "tools", "browser", "approvals"],
+      "assertions": ["approval-observed", "bounded-navigation", "completed"],
+      "label": "浏览器审批"
+    },
+    {
+      "id": "workspace-recovery",
+      "kind": "recovery",
+      "workload_version": "1",
+      "difficulty": "complex",
+      "risk": "critical",
+      "required_capabilities": ["chat", "tools", "workspace-write", "checkpoint", "recovery"],
+      "assertions": ["checkpoint-created", "restore-previewed", "restored", "completed"],
+      "label": "工作区恢复"
+    }
+  ]
+}

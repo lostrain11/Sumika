@@ -73,8 +73,18 @@ class BrowserSkillClient:
             raise BrowserRuntimeError("BrowserSkill status was not an object")
         return value
 
-    def start_session(self) -> dict[str, Any]:
-        value = self.runner(("session", "start"))
+    def start_session(
+        self,
+        *,
+        browser: str | None = None,
+        no_focus: bool = False,
+    ) -> dict[str, Any]:
+        args = ["session", "start"]
+        if browser:
+            args.extend(["--browser", str(browser)])
+        if no_focus:
+            args.append("--no-focus")
+        value = self.runner(tuple(args))
         if not isinstance(value, dict):
             raise BrowserRuntimeError("BrowserSkill session start was not an object")
         return value
@@ -711,7 +721,9 @@ class BrowserRuntime:
         profile_id: str | None = None,
         character_id: str | None = None,
         agent_id: str | None = None,
+        browser_instance: str | None = None,
         approved: bool = False,
+        no_focus: bool = False,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise BrowserRuntimeError("Browser runtime is disabled")
@@ -744,7 +756,11 @@ class BrowserRuntime:
                 raise BrowserRuntimeError("named browser profile is already in use")
         if self.status()["ready"]:
             try:
-                backend_session = self.browser_skill.start_session()
+                backend_session = (
+                    self.browser_skill.start_session(browser=browser_instance, no_focus=bool(no_focus))
+                    if browser_instance
+                    else self.browser_skill.start_session(no_focus=bool(no_focus))
+                )
                 backend_session_id = str(backend_session.get("id") or backend_session.get("session_id") or "") or None
                 if backend_session_id:
                     state = "ready"
@@ -758,6 +774,7 @@ class BrowserRuntime:
             "profile_id": f"temporary-{session_id}" if profile == "temporary" else str(named_profile["id"]),
             "character_id": character_id,
             "agent_id": agent_id,
+            "browser_instance": str(browser_instance or "").strip() or None,
             "backend_session_id": backend_session_id,
             "state": state,
             "created_at": utc_now(),
@@ -766,6 +783,32 @@ class BrowserRuntime:
         }
         self.sessions[session_id] = item
         return dict(item)
+
+    def focus_session(self, session_id: str, *, tab_id: str | None = None) -> dict[str, Any]:
+        """Focus an owned Agent Window by selecting one of its tabs.
+
+        BrowserSkill does not expose a separate OS-window focus RPC. Selecting
+        the requested tab is the stable public operation and keeps this bridge
+        honest about that limitation.
+        """
+
+        item = self._session(session_id)
+        backend_session_id = item.get("backend_session_id")
+        if not backend_session_id:
+            return {"session_id": session_id, "focused": False, "reason": "BrowserSkill session is not connected"}
+        selected = str(tab_id or "").strip()
+        if not selected:
+            tabs = self.list_tabs(session_id).get("tabs", [])
+            selected = str(next((tab.get("id") for tab in tabs if isinstance(tab, dict) and tab.get("active")), "") or "")
+            if not selected and tabs:
+                selected = str(tabs[0].get("id") or "")
+        if not selected:
+            return {"session_id": session_id, "focused": False, "reason": "no-tab"}
+        try:
+            result = self.browser_skill.select_tab(str(backend_session_id), selected)
+        except BrowserRuntimeError as error:
+            raise BrowserRuntimeError(f"BrowserSkill window focus failed: {error}") from error
+        return {"session_id": session_id, "tab_id": selected, "focused": True, "result": _compact_browser_value(result)}
 
     def close_session(self, session_id: str) -> dict[str, Any]:
         item = self.sessions.get(session_id)

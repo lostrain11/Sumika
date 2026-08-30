@@ -20,11 +20,22 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .audio import AudioRuntime, AudioRuntimeError
 from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, SkillCatalog, SkillCatalogError, create_agent_runtime
+from .agent.routes import (
+    AGENT_ROUTE_SCHEMA,
+    ConsultationRequest,
+    RouteCoordinator,
+    RouteError,
+    RouteValidationError,
+    SubtaskDispatch,
+)
 from .avatar import AvatarError, AvatarManager
 from .capabilities import CapabilityCatalog, CapabilityCatalogError
 from .browser import (
     BrowserRuntime,
     BrowserRuntimeError,
+    WebChatRuntime,
+    WebChatRuntimeError,
+    WebChatProvider,
     looks_like_secret_text,
     normalize_domain,
 )
@@ -32,9 +43,15 @@ from .credentials import CredentialStore, credential_namespace_for_data_dir, def
 from .events import EventBus
 from .evolution import EvolutionRegistry
 from .diagnostics import close_logging, configure_logging, redact_text, safe_error
+from .desktop_automation import DesktopAutomationRuntime
 from .integrations import CCSwitchCompatibilityChecker
 from .memory import MemoryRuntime, MemoryRuntimeError
-from .model_policy import ModelPolicyError, ModelPolicyService
+from .model_policy import (
+    ModelPolicyError,
+    ModelPolicyService,
+    RoutingRequest,
+    routing_request_from_dict,
+)
 from .modules import ModuleCatalog, ModuleError
 from .observability import AgentObservability, classify_rpc_method
 from .plugins import PluginCatalog, PluginCatalogError
@@ -155,10 +172,32 @@ class CoreApplication:
         )
         self.agent.bind_credential_store(self.credentials)
         self.agent.set_event_sink(self._on_agent_runtime_event)
+        # Registration is inert: no external desktop process or window is
+        # started until an approved RPC explicitly opens a session.
+        self.desktop_automation = DesktopAutomationRuntime(
+            self.configured_data_dir,
+            storage=self.storage,
+            logger=self.logger,
+            agent_runtime=self.agent,
+        )
         self.browser = BrowserRuntime(
             self.configured_data_dir,
             logger=self.logger,
             storage=self.storage,
+        )
+        self.web_chat = WebChatRuntime(
+            self.storage,
+            self.browser,
+            logger=self.logger,
+        )
+        # Web workers and consultation panels are a capability bridge around
+        # WebChatRuntime.  They do not become a second Agent loop or a second
+        # source of DSH session state.
+        self.routes = RouteCoordinator(
+            self.web_chat,
+            self.storage,
+            logger=self.logger,
+            event_sink=self._on_route_event,
         )
         self.evolution_registry = EvolutionRegistry(ROOT_DIR / "docs" / "integrations" / "evolution-knowledge-registry.json")
         self.tasks = TaskManager(self.storage, self.events)
@@ -201,6 +240,7 @@ class CoreApplication:
         self.vision_providers.register(CommandVisionProvider())
         self._register_test_providers(test_providers)
         self._migrate_legacy_provider_settings()
+        self._sync_web_chat_providers()
         self._sync_plugin_providers()
         self.modules = ModuleCatalog(
             self.storage,
@@ -231,6 +271,7 @@ class CoreApplication:
             self.agent,
             self.configured_data_dir,
             logger=self.logger,
+            web_chat=self.web_chat,
         )
         self.capabilities = CapabilityCatalog(
             self.modules,
@@ -239,6 +280,7 @@ class CoreApplication:
             plugins=self.plugins,
             skills=self.skills,
             model_policy=self.model_policy,
+            desktop_automation=self.desktop_automation,
             logger=self.logger,
         )
         self.logger.info(
@@ -793,6 +835,31 @@ class CoreApplication:
             )
         )
 
+    def _on_route_event(self, event: dict[str, Any]) -> None:
+        """Project route/consultation lifecycle into the safe event stream."""
+
+        if not isinstance(event, dict):
+            return
+        event_type = str(event.get("event_type") or "agent.route.event")
+        payload = {
+            key: event.get(key)
+            for key in (
+                "dispatch_id",
+                "consultation_id",
+                "route_id",
+                "profile_id",
+                "occupancy",
+                "status",
+                "successful_count",
+                "failed_count",
+                "disagreement_detected",
+                "error_code",
+                "member_count",
+            )
+            if event.get(key) is not None
+        }
+        self.events.publish(EventEnvelope(event_type, payload))
+
     def _rpc(self, method: str, params: dict[str, Any]) -> Any:
         if method == "core.health":
             return {
@@ -835,17 +902,193 @@ class CoreApplication:
                 )
             except CapabilityCatalogError as exc:
                 raise JsonRpcError(-32034, str(exc)) from exc
+        if method == "desktop.automation.status":
+            return self.desktop_automation.status()
+        if method == "desktop.automation.catalog":
+            raw_refresh = params.get("refresh", False)
+            raw_unavailable = params.get("includeUnavailable", params.get("include_unavailable", True))
+            if not isinstance(raw_refresh, bool) or not isinstance(raw_unavailable, bool):
+                raise JsonRpcError(-32602, "refresh and includeUnavailable must be booleans")
+            return self.desktop_automation.catalog(
+                refresh=raw_refresh,
+                include_unavailable=raw_unavailable,
+            )
+        if method == "desktop.automation.register":
+            if params.get("approved") is not True:
+                raise JsonRpcError(-32031, "registering a desktop application requires explicit approval")
+            declaration = params.get("application") if isinstance(params.get("application"), dict) else params
+            try:
+                result = self.desktop_automation.register_application(
+                    declaration,
+                    approved=True,
+                    confirm_app_id=params.get("confirm_app_id") or params.get("confirmAppId"),
+                )
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.registered",
+                    {
+                        "app_id": result.get("app_id"),
+                        "adapter_id": result.get("adapter_id"),
+                        "status": result.get("status"),
+                    },
+                )
+            )
+            return result
+        if method == "desktop.automation.open":
+            app_id = str(params.get("app_id") or params.get("appId") or "").strip()
+            if not app_id:
+                raise JsonRpcError(-32602, "app_id is required")
+            if params.get("approved") is not True:
+                raise JsonRpcError(-32031, "opening a desktop application requires explicit approval")
+            options = params.get("options")
+            if options is not None and not isinstance(options, dict):
+                raise JsonRpcError(-32602, "options must be an object")
+            try:
+                result = self.desktop_automation.open_session(
+                    app_id,
+                    profile_id=str(params.get("profile_id") or params.get("profileId") or "") or None,
+                    owner=str(params.get("owner") or "agent"),
+                    options=options or {},
+                )
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            session = result.get("session") if isinstance(result, dict) else {}
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.opened",
+                    {
+                        "app_id": app_id,
+                        "session_id": session.get("session_id") if isinstance(session, dict) else None,
+                        "owner": session.get("owner") if isinstance(session, dict) else None,
+                    },
+                )
+            )
+            return result
+        if method == "desktop.automation.observe":
+            session_id = str(params.get("session_id") or params.get("sessionId") or "").strip()
+            if not session_id:
+                raise JsonRpcError(-32602, "session_id is required")
+            options = params.get("options")
+            if options is not None and not isinstance(options, dict):
+                raise JsonRpcError(-32602, "options must be an object")
+            try:
+                result = self.desktop_automation.observe(session_id, options or {})
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.observed",
+                    {"session_id": session_id, "status": result.get("status")},
+                    session_id=session_id,
+                )
+            )
+            return result
+        if method == "desktop.automation.act":
+            request = params.get("request") if isinstance(params.get("request"), dict) else dict(params)
+            if isinstance(params.get("request"), dict):
+                # Outer approval fields are deliberately copied only when the
+                # nested request did not provide them.
+                for key in ("approved", "approval_id", "approvalId"):
+                    if key not in request and key in params:
+                        request[key] = params[key]
+            try:
+                result = self.desktop_automation.act(request)
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.action.completed"
+                    if result.get("status") == "completed"
+                    else "desktop.automation.action.pending",
+                    {
+                        "session_id": result.get("session_id"),
+                        "action": result.get("action"),
+                        "status": result.get("status"),
+                        "risk": result.get("risk"),
+                        "error_code": result.get("error_code"),
+                    },
+                    session_id=result.get("session_id"),
+                )
+            )
+            return result
+        if method == "desktop.automation.close":
+            session_id = str(params.get("session_id") or params.get("sessionId") or "").strip()
+            if not session_id:
+                raise JsonRpcError(-32602, "session_id is required")
+            if params.get("approved") is not True:
+                raise JsonRpcError(-32031, "closing a desktop session requires explicit approval")
+            try:
+                result = self.desktop_automation.close_session(session_id)
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.closed",
+                    {"session_id": session_id, "closed": bool(result.get("closed"))},
+                    session_id=session_id,
+                )
+            )
+            return result
+        if method == "desktop.automation.approval":
+            try:
+                result = self.desktop_automation.approval(params)
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.approval.updated",
+                    {
+                        "operation": str(params.get("operation") or params.get("action") or "list"),
+                        "approved": bool(result.get("approved")) if isinstance(result, dict) else None,
+                    },
+                )
+            )
+            return result
+        if method == "desktop.automation.takeover":
+            session_id = str(params.get("session_id") or params.get("sessionId") or "").strip()
+            if not session_id:
+                raise JsonRpcError(-32602, "session_id is required")
+            enabled = params.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise JsonRpcError(-32602, "enabled must be a boolean")
+            try:
+                result = self.desktop_automation.takeover(
+                    session_id,
+                    enabled=enabled,
+                    approved=params.get("approved") is True,
+                )
+            except DesktopAutomationError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "desktop.automation.takeover.updated",
+                    {
+                        "session_id": session_id,
+                        "status": result.get("status"),
+                        "enabled": enabled,
+                    },
+                    session_id=session_id,
+                )
+            )
+            return result
         if method == "model.policy.route":
             raw_session = params.get("sessionId") or params.get("session_id")
             if raw_session is not None and not isinstance(raw_session, (str, int)):
                 raise JsonRpcError(-32602, "sessionId must be a scalar identifier")
+            raw_refresh = params.get("refresh", False)
+            if not isinstance(raw_refresh, bool):
+                raise JsonRpcError(-32602, "refresh must be a boolean")
             request_params = dict(params)
             request_params.pop("sessionId", None)
             request_params.pop("session_id", None)
+            request_params.pop("refresh", None)
             try:
                 result = self.model_policy.decide(
                     request_params,
                     session_id=str(raw_session).strip() if raw_session is not None else None,
+                    refresh=raw_refresh,
                 )
             except ModelPolicyError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
@@ -863,12 +1106,78 @@ class CoreApplication:
                 )
             )
             return result
+        if method == "model.policy.preflight":
+            raw_session = params.get("sessionId") or params.get("session_id")
+            if raw_session is not None and not isinstance(raw_session, (str, int)):
+                raise JsonRpcError(-32602, "sessionId must be a scalar identifier")
+            request_params = dict(params)
+            request_params.pop("sessionId", None)
+            request_params.pop("session_id", None)
+            request_params.pop("refresh", None)
+            try:
+                result = self.model_policy.preflight(
+                    request_params,
+                    session_id=str(raw_session).strip() if raw_session is not None else None,
+                )
+            except ModelPolicyError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            decision = result.get("decision") if isinstance(result, dict) else {}
+            self.events.publish(
+                EventEnvelope(
+                    "model.policy.preflighted",
+                    {
+                        "selected_route": decision.get("selected_route"),
+                        "status": decision.get("status"),
+                        "requires_confirmation": bool(decision.get("requires_confirmation")),
+                        "policy_version": decision.get("policy_version"),
+                    },
+                    session_id=str(raw_session).strip() if raw_session is not None else None,
+                )
+            )
+            return result
+        if method == "model.policy.apply":
+            raw_session = params.get("sessionId") or params.get("session_id")
+            if not isinstance(raw_session, (str, int)) or isinstance(raw_session, bool) or not str(raw_session).strip():
+                raise JsonRpcError(-32602, "sessionId must be a non-empty identifier")
+            session_id = str(raw_session).strip()
+            decision = params.get("decision")
+            if not isinstance(decision, dict):
+                request_params = dict(params)
+                request_params.pop("sessionId", None)
+                request_params.pop("session_id", None)
+                request_params.pop("approved", None)
+                request_params.pop("decision", None)
+                try:
+                    preflight = self.model_policy.preflight(request_params, session_id=session_id)
+                except ModelPolicyError as exc:
+                    raise JsonRpcError(-32602, str(exc)) from exc
+                decision = preflight.get("decision") if isinstance(preflight, dict) else None
+            result = self._apply_agent_route(
+                decision,
+                session_id=session_id,
+                approved=params.get("approved") is True,
+            )
+            if result.get("applied"):
+                self.events.publish(
+                    EventEnvelope(
+                        "model.policy.applied",
+                        {
+                            "session_id": session_id,
+                            "selected_route": result.get("route_id"),
+                        },
+                        session_id=session_id,
+                    )
+                )
+            return result
         if method == "model.policy.quota":
             raw_refresh = params.get("refresh", False)
             if not isinstance(raw_refresh, bool):
                 raise JsonRpcError(-32602, "refresh must be a boolean")
+            raw_force = params.get("force", False)
+            if not isinstance(raw_force, bool):
+                raise JsonRpcError(-32602, "force must be a boolean")
             try:
-                return self.model_policy.quota_status(refresh=raw_refresh)
+                return self.model_policy.quota_status(refresh=raw_refresh, force=raw_force)
             except ModelPolicyError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
         if method == "agent.observability.status":
@@ -1047,6 +1356,28 @@ class CoreApplication:
             return result
         if method == "agent.session.create":
             request = dict(params)
+            routing_result = self._agent_routing_preflight(request, mode="execute")
+            routing_decision = routing_result.get("decision") if isinstance(routing_result, dict) else None
+            routing_entry = routing_decision.get("selected_entry") if isinstance(routing_decision, dict) else None
+            routing_approved = self._routing_approved(request)
+            if routing_result is not None:
+                if not isinstance(routing_decision, dict) or not routing_decision.get("selected_route"):
+                    return {
+                        "accepted": False,
+                        "session_created": False,
+                        "routing": routing_result,
+                    }
+                if routing_decision.get("requires_confirmation") and not routing_approved:
+                    return {
+                        "accepted": False,
+                        "session_created": False,
+                        "routing": routing_result,
+                        "reason": "confirmation-required",
+                    }
+                if isinstance(routing_entry, dict) and routing_entry.get("provider_profile_id"):
+                    if not self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
+                        raise JsonRpcError(-32032, "当前 Agent runtime 不支持 Provider 档案桥接")
+                    request["provider_profile_id"] = routing_entry["provider_profile_id"]
             workspace = None
             if self._agent_workspace_safety_active():
                 workspace, _ = self._agent_workspace_binding(request)
@@ -1054,7 +1385,14 @@ class CoreApplication:
                 request.pop("cwd", None)
                 request["workspaceId"] = workspace["id"]
             provider_binding = None
-            if self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
+            # A harness-native route is selected after the session exists;
+            # profile routes still use the established provider bridge before
+            # session creation.  With no routing request, retain the legacy
+            # active-profile behavior exactly as before.
+            needs_profile_binding = routing_result is None or bool(
+                isinstance(routing_entry, dict) and routing_entry.get("provider_profile_id")
+            )
+            if self.agent.supports(AgentCapability.PROVIDER_BRIDGE) and needs_profile_binding:
                 try:
                     provider_profile = self._agent_provider_profile(request, refresh_health=True)
                     if provider_profile.get("status") != "available":
@@ -1087,6 +1425,36 @@ class CoreApplication:
                     "provider": provider_binding,
                     "selected_model": selected.get("selected") if isinstance(selected, dict) else selected,
                 }
+            if routing_result is not None:
+                session_id = result.get("sessionId") or result.get("id")
+                if not session_id:
+                    raise JsonRpcError(-32030, "Agent runtime did not return a session id for model routing")
+                if isinstance(routing_entry, dict) and routing_entry.get("provider_profile_id"):
+                    applied = {
+                        "applied": True,
+                        "route_id": routing_decision.get("selected_route"),
+                        "decision": routing_decision,
+                    }
+                    if provider_binding:
+                        applied["provider"] = provider_binding
+                        applied["selected_model"] = result.get("selected_model")
+                else:
+                    applied = self._apply_agent_route(
+                        routing_decision,
+                        session_id=str(session_id),
+                        approved=True,
+                    )
+                result = {**result, "routing": {**routing_result, "applied": applied}}
+                self.events.publish(
+                    EventEnvelope(
+                        "model.policy.applied",
+                        {
+                            "session_id": str(session_id),
+                            "selected_route": routing_decision.get("selected_route"),
+                        },
+                        session_id=str(session_id),
+                    )
+                )
             self.events.publish(
                 EventEnvelope(
                     "agent.session.created",
@@ -1701,6 +2069,31 @@ class CoreApplication:
             requested_mode = str(request.get("mode") or "execute").strip().lower()
             if requested_mode == "readonly" and not self.agent.supports(AgentCapability.READONLY):
                 raise JsonRpcError(-32030, "the current Agent runtime does not support readonly mode")
+            routing_result = None
+            routing_applied = None
+            routing_session_id = request.get("sessionId") or request.get("session_id")
+            if routing_session_id is not None:
+                routing_result = self._agent_routing_preflight(
+                    request,
+                    text=str(request.get("text") or ""),
+                    mode=requested_mode,
+                    session_id=str(routing_session_id),
+                )
+                if routing_result is not None:
+                    routing_decision = routing_result.get("decision") if isinstance(routing_result, dict) else None
+                    if not isinstance(routing_decision, dict) or not routing_decision.get("selected_route"):
+                        return {"accepted": False, "routing": routing_result}
+                    if routing_decision.get("requires_confirmation") and not self._routing_approved(request):
+                        return {"accepted": False, "routing": routing_result, "reason": "confirmation-required"}
+                    routing_applied = self._apply_agent_route(
+                        routing_decision,
+                        session_id=str(routing_session_id),
+                        approved=True,
+                    )
+                    request.pop("routing", None)
+                    request.pop("routing_policy", None)
+                    request.pop("routingApproved", None)
+                    request.pop("routing_approved", None)
             if self._agent_workspace_safety_active():
                 session_id = request.get("sessionId") or request.get("session_id")
                 if (
@@ -1772,6 +2165,22 @@ class CoreApplication:
                 raise JsonRpcError(-32030, str(exc)) from exc
             if checkpoint:
                 result = {**result, "workspace_checkpoint": checkpoint}
+            if routing_result is not None:
+                result = {
+                    **result,
+                    "routing": {**routing_result, "applied": routing_applied},
+                }
+                if routing_applied and routing_applied.get("applied"):
+                    self.events.publish(
+                        EventEnvelope(
+                            "model.policy.applied",
+                            {
+                                "session_id": request.get("sessionId") or request.get("session_id"),
+                                "selected_route": routing_applied.get("route_id"),
+                            },
+                            session_id=request.get("sessionId") or request.get("session_id"),
+                        )
+                    )
             self.events.publish(
                 EventEnvelope(
                     "agent.turn.started",
@@ -2183,8 +2592,366 @@ class CoreApplication:
                 )
             )
             return event
+        if method == "sumika.route.catalog":
+            include_templates = params.get("include_templates", params.get("includeTemplates", True))
+            if not isinstance(include_templates, bool):
+                raise JsonRpcError(-32602, "include_templates must be a boolean")
+            return self.routes.catalog(include_templates=include_templates)
+        if method == "sumika.route.dispatch":
+            raw = dict(params)
+            # The bridge is intentionally web-only in this milestone.  A
+            # caller must identify the parent Agent session; routes are
+            # selected from consented BrowserSkill profiles only.
+            raw.setdefault("mode", "web-worker")
+            try:
+                result = self.routes.dispatch(
+                    raw,
+                    route_id=str(params.get("route_id") or params.get("routeId") or "") or None,
+                    wait=bool(params.get("wait")),
+                )
+            except (RouteValidationError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.route.dispatched",
+                    {
+                        "dispatch_id": (result.get("dispatch") or {}).get("dispatch_id") if isinstance(result, dict) else None,
+                        "route_id": (result.get("dispatch") or {}).get("route_id") if isinstance(result, dict) else None,
+                        "accepted": bool(result.get("accepted")) if isinstance(result, dict) else False,
+                    },
+                    session_id=params.get("parent_session_id") or params.get("parentSessionId"),
+                )
+            )
+            return result
+        if method == "sumika.route.status":
+            dispatch_id = params.get("dispatch_id") or params.get("dispatchId")
+            if not dispatch_id:
+                raise JsonRpcError(-32602, "dispatch_id is required")
+            try:
+                return self.routes.status(str(dispatch_id))
+            except (RouteValidationError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.consultation.start":
+            try:
+                result = self.routes.start_consultation(params, wait=bool(params.get("wait")))
+            except (RouteValidationError, RouteError, ValueError, TypeError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.consultation.requested",
+                    {
+                        "consultation_id": result.get("consultation_id") if isinstance(result, dict) else None,
+                        "status": result.get("status") if isinstance(result, dict) else None,
+                        "member_count": len(result.get("members") or []) if isinstance(result, dict) else 0,
+                    },
+                    session_id=params.get("parent_session_id") or params.get("parentSessionId"),
+                )
+            )
+            return result
+        if method == "sumika.consultation.status":
+            consultation_id = params.get("consultation_id") or params.get("consultationId")
+            if consultation_id:
+                try:
+                    return self.routes.consultation_status(str(consultation_id))
+                except (RouteValidationError, RouteError) as exc:
+                    raise JsonRpcError(-32602, str(exc)) from exc
+            try:
+                return {
+                    "schema": "agent-consultation/v1",
+                    "consultations": self.routes.list_consultations(
+                        parent_session_id=params.get("parent_session_id") or params.get("parentSessionId"),
+                        limit=int(params.get("limit") or 50),
+                    ),
+                }
+            except (RouteValidationError, RouteError, ValueError, TypeError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.cancel":
+            consultation_id = params.get("consultation_id") or params.get("consultationId")
+            dispatch_id = params.get("dispatch_id") or params.get("dispatchId")
+            try:
+                if consultation_id:
+                    return self.routes.cancel_consultation(str(consultation_id))
+                if dispatch_id:
+                    return self.routes.cancel(str(dispatch_id))
+            except (RouteValidationError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            raise JsonRpcError(-32602, "dispatch_id or consultation_id is required")
+        if method == "sumika.route.retry":
+            dispatch_id = params.get("dispatch_id") or params.get("dispatchId")
+            if not dispatch_id:
+                raise JsonRpcError(-32602, "dispatch_id is required")
+            try:
+                return self.routes.retry(str(dispatch_id))
+            except (RouteValidationError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.occupancy":
+            profile_id = params.get("profile_id") or params.get("profileId")
+            if not profile_id:
+                raise JsonRpcError(-32602, "profile_id is required")
+            owner = str(params.get("owner") or params.get("occupancy") or "manual")
+            try:
+                return self.routes.set_occupancy(str(profile_id), owner)
+            except (RouteValidationError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.takeover":
+            profile_id = params.get("profile_id") or params.get("profileId")
+            if not profile_id:
+                raise JsonRpcError(-32602, "profile_id is required")
+            try:
+                return self.routes.request_takeover(str(profile_id))
+            except (RouteValidationError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.bridge_tools":
+            # This is a descriptive bridge catalog.  It does not claim that a
+            # fixed DSH build has dynamically registered native tools.
+            return {
+                "schema": AGENT_ROUTE_SCHEMA,
+                "runtime": self.agent.runtime_id,
+                "registered": False,
+                "status": "bridge-available",
+                "tools": [
+                    {"name": "sumika.route.catalog", "description": "List consented web routes"},
+                    {"name": "sumika.route.dispatch", "description": "Dispatch one isolated web worker"},
+                    {"name": "sumika.route.status", "description": "Read one web worker status"},
+                    {"name": "sumika.consultation.start", "description": "Ask independent web profiles in parallel"},
+                    {"name": "sumika.consultation.status", "description": "Read consultation progress and untrusted results"},
+                    {"name": "sumika.route.cancel", "description": "Cancel a pending route or consultation"},
+                    {"name": "sumika.route.retry", "description": "Retry only a confirmed pre-send failure"},
+                ],
+            }
         if method == "browser.status":
             return self.browser.status()
+        if method == "browser.web_chat.adapters":
+            return {
+                "schema": "web-chat/v1",
+                "adapters": self.web_chat.list_adapters(),
+            }
+        if method == "browser.web_chat.profiles":
+            return {
+                "schema": "web-chat/v1",
+                "profiles": self.web_chat.list_profiles(
+                    include_archived=bool(params.get("include_archived"))
+                ),
+            }
+        if method == "browser.web_chat.profile.create":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "creating a web-chat profile requires explicit approval")
+            raw_config = params.get("config")
+            if raw_config is not None and not isinstance(raw_config, dict):
+                raise JsonRpcError(-32602, "web-chat profile config must be an object")
+            try:
+                result = self.web_chat.create_profile(
+                    name=str(params.get("name") or ""),
+                    adapter_id=str(params.get("adapter_id") or ""),
+                    browser_profile_id=str(params.get("browser_profile_id") or ""),
+                    browser_instance=str(params.get("browser_instance")) if params.get("browser_instance") else None,
+                    config=raw_config,
+                    budget_policy=str(params.get("budget_policy") or "free-only"),
+                    draft=(bool(params["draft"]) if "draft" in params else None),
+                    approved=True,
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.profile.created",
+                    {"profile": _redact_web_chat_payload(result)},
+                )
+            )
+            return result
+        if method == "browser.web_chat.profile.update":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "editing a web-chat profile requires explicit approval")
+            raw_config = params.get("config")
+            if raw_config is not None and not isinstance(raw_config, dict):
+                raise JsonRpcError(-32602, "web-chat profile config must be an object")
+            try:
+                result = self.web_chat.update_profile(
+                    str(params.get("profile_id") or params.get("id") or ""),
+                    name=str(params["name"]) if "name" in params else None,
+                    adapter_id=str(params["adapter_id"]) if "adapter_id" in params else None,
+                    site_key=str(params["site_key"]) if "site_key" in params else None,
+                    browser_profile_id=str(params["browser_profile_id"]) if "browser_profile_id" in params else None,
+                    browser_instance=str(params["browser_instance"]) if "browser_instance" in params else None,
+                    config=raw_config,
+                    budget_policy=str(params["budget_policy"]) if "budget_policy" in params else None,
+                    draft=(bool(params["draft"]) if "draft" in params else None),
+                    approved=True,
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.profile.updated",
+                    {"profile": _redact_web_chat_payload(result)},
+                )
+            )
+            return result
+        if method == "browser.web_chat.profile.authorize":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "opening a web-chat login window requires explicit approval")
+            try:
+                result = self.web_chat.authorize_profile(
+                    str(params.get("profile_id") or ""), approved=True
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            if result.get("id"):
+                self.routes.set_occupancy(str(result["id"]), "manual")
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.login.requested",
+                    {"profile": _redact_web_chat_payload(result), "requires_human": True},
+                )
+            )
+            return result
+        if method == "browser.web_chat.profile.open":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "opening a web-chat profile requires explicit approval")
+            try:
+                result = self.web_chat.open_profile(str(params.get("profile_id") or ""), approved=True)
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            if result.get("id"):
+                self.routes.set_occupancy(str(result["id"]), "manual")
+            self.events.publish(EventEnvelope("browser.web_chat.window.opened", {"profile_id": result.get("id"), "session_id": result.get("session_id"), "tab_id": result.get("tab_id")}))
+            return result
+        if method == "browser.web_chat.profile.focus":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "focusing a web-chat profile requires explicit approval")
+            try:
+                result = self.web_chat.focus_profile(
+                    str(params.get("profile_id") or ""),
+                    tab_id=str(params.get("tab_id")) if params.get("tab_id") else None,
+                    approved=True,
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            if result.get("id"):
+                self.routes.set_occupancy(str(result["id"]), "manual")
+            self.events.publish(EventEnvelope("browser.web_chat.window.focused", {"profile_id": result.get("id"), "session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "focused": bool(result.get("focused"))}))
+            return result
+        if method == "browser.web_chat.profile.close":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "closing a web-chat profile requires explicit approval")
+            profile_id = str(params.get("profile_id") or "")
+            try:
+                result = self.web_chat.close_profile(profile_id, approved=True)
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.routes.set_occupancy(profile_id, "idle")
+            self.events.publish(EventEnvelope("browser.web_chat.window.closed", {"profile_id": profile_id, "session_id": result.get("session_id")}))
+            return result
+        if method == "browser.web_chat.profile.check":
+            try:
+                result = self.web_chat.check_profile(
+                    str(params.get("profile_id") or ""),
+                    approved=bool(params.get("approved")),
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.login.checked",
+                    {"profile": _redact_web_chat_payload(result), "ready": bool(result.get("ready"))},
+                )
+            )
+            return result
+        if method == "browser.web_chat.profile.consent":
+            actions = params.get("allowed_actions")
+            if actions is not None and not isinstance(actions, list):
+                raise JsonRpcError(-32602, "allowed_actions must be an array")
+            try:
+                result = self.web_chat.set_consent(
+                    str(params.get("profile_id") or ""),
+                    enabled=bool(params.get("enabled")),
+                    allowed_actions=actions,
+                    approved=bool(params.get("approved")),
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.consent.changed",
+                    {"profile": _redact_web_chat_payload(result), "enabled": bool(result.get("auto_chat_enabled"))},
+                )
+            )
+            return result
+        if method == "browser.web_chat.profile.activate":
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "activating a web-chat profile requires explicit approval")
+            profile_id = str(params.get("profile_id") or params.get("id") or "")
+            try:
+                profile = self.web_chat.activate_profile(profile_id, approved=True)
+                result_module = self.modules.update(
+                    "llm",
+                    enabled=True,
+                    implementation_id=f"web-chat:{profile_id}",
+                    config={"profile_id": profile_id},
+                )
+            except (WebChatRuntimeError, ModuleError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self._sync_web_chat_providers()
+            result = {
+                "profile": profile,
+                "module": self._module("llm"),
+                "privacy": self._privacy_status(),
+                "activated": True,
+            }
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.profile.activated",
+                    {"profile": _redact_web_chat_payload(profile), "module_id": result_module.get("id")},
+                )
+            )
+            return result
+        if method in {"browser.web_chat.profile.archive", "browser.web_chat.profile.restore"}:
+            if not params.get("approved"):
+                raise JsonRpcError(-32031, "changing a web-chat profile requires explicit approval")
+            try:
+                if method.endswith("archive"):
+                    if str(params.get("profile_id") or "") == self._active_web_chat_profile_id():
+                        raise WebChatRuntimeError("The active web-chat profile cannot be archived")
+                    result = self.web_chat.archive_profile(str(params.get("profile_id") or ""), approved=True)
+                    event_type = "browser.web_chat.profile.archived"
+                else:
+                    result = self.web_chat.restore_profile(str(params.get("profile_id") or ""), approved=True)
+                    event_type = "browser.web_chat.profile.restored"
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(EventEnvelope(event_type, {"profile": _redact_web_chat_payload(result)}))
+            return result
+        if method == "browser.web_chat.send":
+            raw_text = params.get("text")
+            if not isinstance(raw_text, str) or not raw_text.strip():
+                raise JsonRpcError(-32602, "web-chat text must be a non-empty string")
+            try:
+                result = self.routes.manual_send(
+                    str(params.get("profile_id") or ""), raw_text
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32000, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.message.completed" if result.get("ok") else "browser.web_chat.message.pending",
+                    {
+                        "profile_id": result.get("profile_id"),
+                        "ok": bool(result.get("ok")),
+                        "pending": bool(result.get("pending")),
+                        "requires_human": bool(result.get("requires_human")),
+                        "requires_approval": bool(result.get("requires_approval")),
+                        "response_chars": len(str(result.get("text") or "")) if result.get("ok") else 0,
+                    },
+                )
+            )
+            return result
         if method == "browser.policy.evaluate":
             try:
                 result = self.browser.evaluate_policy(params)
@@ -2265,11 +3032,29 @@ class CoreApplication:
                     profile_id=str(params["profile_id"]) if params.get("profile_id") else None,
                     character_id=str(params["character_id"]) if params.get("character_id") else None,
                     agent_id=str(params["agent_id"]) if params.get("agent_id") else None,
+                    browser_instance=str(params["browser_instance"]) if params.get("browser_instance") else None,
                     approved=bool(params.get("approved")),
+                    no_focus=bool(params.get("no_focus", False)),
                 )
             except BrowserRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
             self.events.publish(EventEnvelope("browser.session.created", {"session": _redact_browser_payload(result)}))
+            return result
+        if method == "browser.session.focus":
+            try:
+                result = self.browser.focus_session(
+                    str(params.get("session_id") or params.get("id") or ""),
+                    tab_id=str(params.get("tab_id")) if params.get("tab_id") else None,
+                )
+            except BrowserRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "browser.session.focused",
+                    {"session_id": result.get("session_id"), "tab_id": result.get("tab_id"), "focused": bool(result.get("focused"))},
+                    session_id=result.get("session_id"),
+                )
+            )
             return result
         if method == "browser.session.close":
             try:
@@ -2777,6 +3562,19 @@ class CoreApplication:
                     profile = self.storage.get_provider_profile(str(profile_id))
                 if selected_adapter == "openai-compatible" and (not profile or profile.get("status") != "available"):
                     raise JsonRpcError(-32602, "Test and activate a ready provider profile before enabling LLM")
+                if isinstance(selected_adapter, str) and selected_adapter.startswith("web-chat:"):
+                    expected_profile_id = selected_adapter.removeprefix("web-chat:")
+                    if not profile_id or str(profile_id) != expected_profile_id:
+                        raise JsonRpcError(-32602, "web-chat implementation requires its matching profile_id")
+                    web_profile = self.storage.get_web_chat_profile(expected_profile_id)
+                    if web_profile is None or web_profile.get("archived_at"):
+                        raise JsonRpcError(-32602, "The selected web-chat profile is archived or unavailable")
+                    try:
+                        web_health = self.web_chat.health(expected_profile_id)
+                    except WebChatRuntimeError as exc:
+                        raise JsonRpcError(-32602, str(exc)) from exc
+                    if not web_health.get("ok"):
+                        raise JsonRpcError(-32602, str(web_health.get("reason") or "Test and authorize the web-chat profile before enabling LLM"))
             try:
                 result = self.modules.update(
                     module_id,
@@ -3326,6 +4124,51 @@ class CoreApplication:
             if hasattr(self, "vision"):
                 self.vision.reconcile()
 
+    def _sync_web_chat_providers(self) -> None:
+        """Project consented web-chat account profiles into the LLM registry.
+
+        The registry is only a runtime projection.  Profile metadata remains
+        owned by ``WebChatRuntime`` and browser cookies remain in the dedicated
+        BrowserSkill profile.  A profile can therefore be archived or revoked
+        without touching any other Provider or chat history.
+        """
+
+        if not hasattr(self, "providers") or not hasattr(self, "web_chat"):
+            return
+        desired: set[str] = set()
+        try:
+            profiles = self.web_chat.list_profiles(include_archived=False)
+        except Exception as error:
+            self.logger.info("web chat provider sync skipped error_type=%s", type(error).__name__)
+            profiles = []
+        for profile in profiles:
+            if not isinstance(profile, dict) or profile.get("archived_at"):
+                continue
+            profile_id = str(profile.get("id") or "").strip()
+            if not profile_id:
+                continue
+            provider_id = f"web-chat:{profile_id}"
+            desired.add(provider_id)
+            if self.providers.has(provider_id):
+                provider = self.providers.get(provider_id)
+                refresh = getattr(provider, "refresh", None)
+                if callable(refresh):
+                    refresh()
+                continue
+            try:
+                self.providers.register(WebChatProvider(self.web_chat, profile_id))
+            except Exception as error:
+                self.logger.info(
+                    "web chat provider registration skipped profile=%s error_type=%s",
+                    profile_id,
+                    type(error).__name__,
+                )
+        for info in self.providers.list():
+            if info.id.startswith("web-chat:") and info.id not in desired:
+                self.providers.unregister(info.id)
+        if hasattr(self, "modules"):
+            self.modules.refresh()
+
     def _create_snapshot(
         self,
         name: str,
@@ -3372,6 +4215,164 @@ class CoreApplication:
             "task_id": task.get("id"),
         }
 
+    @staticmethod
+    def _agent_routing_config(
+        params: dict[str, Any],
+        *,
+        text: str = "",
+        mode: str = "execute",
+    ) -> dict[str, Any] | None:
+        """Normalize the optional per-turn model-policy request.
+
+        Existing Agent callers remain on their explicitly selected Provider
+        unless they send ``routing``/``routing_policy`` (or
+        ``auto_route=true``).  This keeps old sessions stable while exposing a
+        single opt-in boundary for recommendation and automatic routing.
+        """
+
+        raw = params.get("routing")
+        if raw is None:
+            raw = params.get("routing_policy")
+        if raw is None and params.get("auto_route") is not True:
+            return None
+        if raw is True or raw is None:
+            raw = {}
+        elif isinstance(raw, str):
+            raw = {"confirmation_mode": raw}
+        if not isinstance(raw, dict):
+            raise JsonRpcError(-32602, "routing must be an object or a confirmation mode")
+        config = dict(raw)
+        # Accept the short top-level aliases used by the UI and CLI.
+        for key in (
+            "difficulty",
+            "risk",
+            "task_kind",
+            "taskKind",
+            "budget_policy",
+            "budgetPolicy",
+            "confirmation_mode",
+            "confirmationMode",
+            "required_capabilities",
+            "requiredCapabilities",
+            "privacy_constraints",
+            "privacyConstraints",
+            "preferred_route",
+            "preferredRoute",
+            "min_quality_tier",
+            "minQualityTier",
+        ):
+            if key not in config and key in params:
+                config[key] = params[key]
+        if not str(config.get("task_kind", config.get("taskKind", ""))).strip():
+            config["task_kind"] = "plan" if str(mode).lower() == "plan" else "code"
+        if not str(config.get("task_text", config.get("taskText", config.get("text", "")))).strip():
+            config["task_text"] = str(text or params.get("text") or "")[:4000]
+        if params.get("characterId") is not None and "character_id" not in config:
+            config["character_id"] = params.get("characterId")
+        if params.get("agentPreset") is not None and "agent_preset_id" not in config:
+            config["agent_preset_id"] = params.get("agentPreset")
+        return config
+
+    def _agent_routing_preflight(
+        self,
+        params: dict[str, Any],
+        *,
+        text: str = "",
+        mode: str = "execute",
+        session_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        config = self._agent_routing_config(params, text=text, mode=mode)
+        if config is None:
+            return None
+        try:
+            result = self.model_policy.preflight(config, session_id=session_id)
+        except ModelPolicyError as exc:
+            raise JsonRpcError(-32602, str(exc)) from exc
+        decision = result.get("decision") if isinstance(result, dict) else None
+        if not isinstance(decision, dict):
+            raise JsonRpcError(-32032, "模型策略没有返回有效决策")
+        return result
+
+    def _apply_agent_route(
+        self,
+        decision: dict[str, Any],
+        *,
+        session_id: str | None,
+        approved: bool,
+    ) -> dict[str, Any]:
+        """Apply one already preflighted route through the active harness."""
+
+        if not isinstance(decision, dict):
+            raise JsonRpcError(-32032, "模型策略决策无效")
+        selected = decision.get("selected_entry")
+        if not isinstance(selected, dict) or not decision.get("selected_route"):
+            return {"applied": False, "reason": "no-compatible-route", "decision": decision}
+        if bool(decision.get("requires_confirmation")) and not approved:
+            return {"applied": False, "reason": "confirmation-required", "decision": decision}
+        if not session_id:
+            # A profile can be synchronized before a new session, but a
+            # harness-only model cannot be selected until the runtime returns a
+            # session id.  The create path handles profile routes separately.
+            if not selected.get("provider_profile_id"):
+                raise JsonRpcError(-32032, "所选 Harness 模型需要先创建 Agent 会话")
+            return {"applied": False, "reason": "deferred-until-session", "decision": decision}
+
+        profile_id = selected.get("provider_profile_id")
+        if profile_id:
+            if not self.agent.supports(AgentCapability.PROVIDER_BRIDGE):
+                raise JsonRpcError(-32032, "当前 Agent runtime 不支持 Provider 档案桥接")
+            try:
+                profile = self._agent_provider_profile(
+                    {"provider_profile_id": str(profile_id)},
+                    refresh_health=True,
+                )
+                if profile.get("status") != "available":
+                    raise ProviderProfileError("所选 Provider 档案当前不可用")
+                binding = self.agent.sync_provider_profile(profile)
+                selected_model = self.agent.select_model(
+                    {
+                        "session_id": session_id,
+                        "provider": binding["route_id"],
+                        "model": binding["model"],
+                    }
+                )
+            except (AgentRuntimeError, ProviderProfileError) as exc:
+                raise JsonRpcError(-32032, str(exc)) from exc
+            return {
+                "applied": True,
+                "route_id": decision.get("selected_route"),
+                "provider": binding,
+                "selected_model": selected_model,
+                "decision": decision,
+            }
+
+        harness_id = str(selected.get("harness_id") or "").strip()
+        if harness_id and harness_id != str(self.agent.runtime_id):
+            raise JsonRpcError(-32032, "所选模型属于另一个 Agent runtime")
+        provider = str(selected.get("provider_id") or "").strip()
+        model = str(selected.get("model_id") or "").strip()
+        if not provider or not model:
+            raise JsonRpcError(-32032, "所选模型缺少 Provider 或模型标识")
+        try:
+            selected_model = self.agent.select_model(
+                {"session_id": session_id, "provider": provider, "model": model}
+            )
+        except AgentRuntimeError as exc:
+            raise JsonRpcError(-32032, str(exc)) from exc
+        return {
+            "applied": True,
+            "route_id": decision.get("selected_route"),
+            "selected_model": selected_model,
+            "decision": decision,
+        }
+
+    @staticmethod
+    def _routing_approved(params: dict[str, Any]) -> bool:
+        if params.get("routingApproved") is True or params.get("routing_approved") is True:
+            return True
+        raw = params.get("routing") or params.get("routing_policy")
+        return isinstance(raw, dict) and raw.get("approved") is True
+
     def _active_provider_profile_id(self) -> str | None:
         setting = self.storage.get_module_setting("llm")
         if (
@@ -3382,6 +4383,27 @@ class CoreApplication:
             return None
         profile_id = (setting.get("config") or {}).get("profile_id")
         return str(profile_id) if isinstance(profile_id, str) and profile_id else None
+
+    def _active_web_chat_profile_id(self) -> str | None:
+        """Return the enabled web-chat profile selected by the LLM module.
+
+        Web-chat profiles are intentionally not mixed with ``provider_profiles``:
+        their authentication material belongs to BrowserSkill.  Keeping this
+        lookup separate prevents Agent/provider bridge code from accidentally
+        attempting to read a browser profile as an API credential.
+        """
+
+        setting = self.storage.get_module_setting("llm")
+        if not setting or not bool(setting.get("enabled")):
+            return None
+        implementation_id = str(setting.get("implementation_id") or "")
+        if not implementation_id.startswith("web-chat:"):
+            return None
+        suffix = implementation_id.removeprefix("web-chat:").strip()
+        profile_id = (setting.get("config") or {}).get("profile_id")
+        if not suffix or not isinstance(profile_id, str) or profile_id.strip() != suffix:
+            return None
+        return suffix
 
     def _agent_provider_profile(
         self,
@@ -3562,32 +4584,77 @@ class CoreApplication:
                 self.provider_profiles.health(active_profile_id)
             except ProviderProfileError:
                 pass
+        active_web_profile_id = self._active_web_chat_profile_id()
+        if active_web_profile_id:
+            # ``health`` is metadata-only for web accounts.  It does not read
+            # page content or start a browser session, but keeps the module
+            # status honest after an archive/restore or consent change.
+            try:
+                self.web_chat.health(active_web_profile_id)
+            except WebChatRuntimeError:
+                pass
         return [self._decorate_module(module) for module in self.modules.list()]
 
     def _module(self, module_id: str) -> dict[str, Any]:
         return self._decorate_module(self.modules.get(module_id))
 
     def _decorate_module(self, module: dict[str, Any]) -> dict[str, Any]:
-        if module.get("id") != "llm" or module.get("implementation_id") != "openai-compatible":
+        if module.get("id") != "llm":
+            return module
+        implementation_id = str(module.get("implementation_id") or "")
+        is_api_profile = implementation_id == "openai-compatible"
+        is_web_profile = implementation_id.startswith("web-chat:")
+        if not is_api_profile and not is_web_profile:
             return module
         result = dict(module)
         profile_id = result.get("config", {}).get("profile_id")
-        profile = self.storage.get_provider_profile(str(profile_id)) if profile_id else None
-        public_profile = self.provider_profiles.public(profile) if profile else None
-        result["profile_id"] = profile_id
-        result["profile"] = public_profile
-        if result.get("enabled"):
-            profile_status = (public_profile or {}).get("status")
-            result["status"] = {
+        if is_web_profile:
+            expected_id = implementation_id.removeprefix("web-chat:")
+            if not isinstance(profile_id, str) or profile_id != expected_id:
+                profile_id = expected_id or None
+            profile = self.storage.get_web_chat_profile(str(profile_id)) if profile_id else None
+            try:
+                public_profile = self.web_chat.get_profile(str(profile_id), include_archived=True) if profile else None
+            except WebChatRuntimeError as exc:
+                # A malformed imported/snapshot row must not take down the
+                # module and privacy endpoints.  Keep the implementation
+                # visible as unavailable until the profile is repaired.
+                self.logger.info(
+                    "web chat profile projection unavailable profile=%s error_type=%s",
+                    profile_id,
+                    type(exc).__name__,
+                )
+                public_profile = None
+            status_map = {
+                "ready": "available",
+                "needs-auth": "unconfigured",
+                "unavailable": "error",
+                "configured": "unconfigured",
+                "draft": "unconfigured",
+                "archived": "error",
+            }
+        else:
+            profile = self.storage.get_provider_profile(str(profile_id)) if profile_id else None
+            public_profile = self.provider_profiles.public(profile) if profile else None
+            status_map = {
                 "available": "available",
                 "draft": "unconfigured",
                 "unavailable": "error",
                 "archived": "error",
-            }.get(str(profile_status), "unconfigured")
+            }
+        result["profile_id"] = profile_id
+        result["profile"] = public_profile
+        if result.get("enabled"):
+            profile_status = (public_profile or {}).get("status")
+            result["status"] = status_map.get(str(profile_status), "unconfigured")
         implementation = dict(result.get("implementation") or {})
         implementation["status"] = result["status"]
         result["implementation"] = implementation
         result["config_schema"] = {}
+        if is_web_profile:
+            result["processing_location"] = "cloud"
+            result["auth_state"] = (public_profile or {}).get("auth_state", "unknown")
+            result["requires_human_login"] = (public_profile or {}).get("auth_state") != "authorized"
         return result
 
     def _privacy_status(self) -> dict[str, Any]:
@@ -3615,10 +4682,29 @@ class CoreApplication:
         if not self.modules.is_enabled("llm"):
             raise JsonRpcError(-32010, "LLM module is disabled")
         configured_provider_id = self.modules.selected_implementation("llm") or "openai-compatible"
-        profile_id = self.modules.selected_profile("llm") if configured_provider_id == "openai-compatible" else None
+        configured_profile_id = self.modules.selected_profile("llm")
+        profile_id = configured_profile_id if configured_provider_id == "openai-compatible" else None
+        web_profile_id = None
         runtime_provider = None
         event_provider_id = configured_provider_id
-        if profile_id:
+        if configured_provider_id.startswith("web-chat:"):
+            # Web accounts are projected into the same LLM registry as other
+            # real providers, but their credentials remain in BrowserSkill.
+            expected_profile_id = configured_provider_id.removeprefix("web-chat:").strip()
+            if not expected_profile_id or configured_profile_id != expected_profile_id:
+                raise JsonRpcError(-32010, "网页聊天模块的 profile_id 与实现不匹配；请重新选择连接")
+            web_profile_id = expected_profile_id
+            self._sync_web_chat_providers()
+            if not self.providers.has(configured_provider_id):
+                raise JsonRpcError(-32010, "网页聊天档案不可用；请先在 Agent 页检查登录状态")
+            runtime_provider = self.providers.get(configured_provider_id)
+            try:
+                health = runtime_provider.health_check()
+            except Exception as exc:
+                raise JsonRpcError(-32010, f"网页聊天档案健康检查失败：{safe_error(exc)['message']}") from exc
+            if not health.get("ok"):
+                raise JsonRpcError(-32010, str(health.get("reason") or "网页聊天档案尚未授权"))
+        elif profile_id:
             try:
                 health = self.provider_profiles.health(profile_id)
                 profile = health.get("profile") if isinstance(health, dict) else None
@@ -3711,6 +4797,14 @@ class CoreApplication:
         answer = "".join(pieces)
         if profile_id:
             self.provider_profiles.mark_used(profile_id)
+        if web_profile_id:
+            # ``send_message`` normally records usage itself.  Refreshing the
+            # metadata here also covers a compatible provider wrapper that
+            # returns a successful stream without updating the profile.
+            try:
+                self.web_chat.mark_used(web_profile_id)
+            except WebChatRuntimeError:
+                pass
         assistant = Message(role="assistant", content=answer, character_id=character_id)
         self.storage.append_message(session_id, assistant)
         self.events.publish(EventEnvelope("message.created", {"message": assistant.to_dict()}, session_id, character_id))
@@ -3725,7 +4819,15 @@ class CoreApplication:
         try:
             self.logger.info("core shutdown requested uptime_seconds=%.3f", time.monotonic() - self.started_at)
             self.providers.close()
+            self.desktop_automation.close()
             self.agent.close()
+            # Mark queued/running web workers interrupted before BrowserSkill
+            # sessions are torn down.  They are never replayed on restart.
+            self.routes.close()
+            # WebChatRuntime owns only the sessions it created.  Release them
+            # before BrowserRuntime tears down the underlying BrowserSkill
+            # sessions and named-profile leases.
+            self.web_chat.close()
             self.browser.close()
             self.audio.close()
             self.vision.close()
@@ -3758,7 +4860,12 @@ class CoreApplication:
             "avatar_count": len(self.avatar.list_models()),
             "event_count": self.storage.count_events(),
             "agent_runtime": self.agent.status(),
+            "desktop_automation": self.desktop_automation.status(),
             "browser_runtime": self.browser.status(),
+            "agent_routes": {
+                "catalog": self.routes.catalog(include_templates=False),
+                "consultations": self.routes.list_consultations(limit=20),
+            },
             "workspace_checkpoint_count": len(self.workspace.list_checkpoints()["checkpoints"]),
             "evolution_registry": self.evolution_registry.check(),
             "agent_observability": self.observability.status(),
@@ -3881,6 +4988,14 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             include_archived = (query.get("include_archived") or ["false"])[0].lower() == "true"
             self._send_json(self.application.rpc("browser.profiles", {"include_archived": include_archived}))
+            return
+        if parsed.path == "/api/browser/web-chat/adapters":
+            self._send_json(self.application.rpc("browser.web_chat.adapters", {}))
+            return
+        if parsed.path == "/api/browser/web-chat/profiles":
+            query = parse_qs(parsed.query)
+            include_archived = (query.get("include_archived") or ["false"])[0].lower() == "true"
+            self._send_json(self.application.rpc("browser.web_chat.profiles", {"include_archived": include_archived}))
             return
         if parsed.path == "/api/browser/downloads":
             self._send_json(self.application.rpc("browser.downloads", {}))
@@ -4707,12 +5822,51 @@ def _redact_browser_payload(value: Any) -> Any:
         "profile_id",
         "character_id",
         "agent_id",
+        "browser_instance",
         "status",
         "state",
         "created_at",
         "updated_at",
         "expires_at",
         "lease_expires_at",
+    }
+    return {key: value[key] for key in allowed if key in value}
+
+
+def _redact_web_chat_payload(value: Any) -> Any:
+    """Project web-account metadata without page text or credentials."""
+
+    if not isinstance(value, dict):
+        return {}
+    allowed = {
+        "id",
+        "name",
+        "adapter_id",
+        "adapter_name",
+        "site_key",
+        "browser_profile_id",
+        "browser_instance",
+        "chat_url",
+        "status",
+        "auth_state",
+        "auto_chat_enabled",
+        "allowed_actions",
+        "budget_policy",
+        "adapter_version",
+        "created_at",
+        "updated_at",
+        "last_checked_at",
+        "last_used_at",
+        "archived_at",
+        "active_session",
+        "credentials_stored_in",
+        "ready",
+        "reason",
+        "requires_human",
+        "credentials_excluded",
+        "human_action",
+        "session_id",
+        "tab_id",
     }
     return {key: value[key] for key in allowed if key in value}
 

@@ -516,6 +516,130 @@ class AgentServerTests(unittest.TestCase):
         self.assertIn("agent.session.forked", str(events))
         self.assertIn("child-1", str(events))
 
+    def test_model_policy_preflight_without_a_candidate_does_not_create_a_session(self):
+        decision = {
+            "status": "no-compatible-route",
+            "selected_route": None,
+            "selected_entry": None,
+            "requires_confirmation": True,
+            "reason_codes": ["no_compatible_route"],
+        }
+        with patch.object(
+            self.application.model_policy,
+            "preflight",
+            return_value={"decision": decision},
+        ) as preflight, patch.object(self.application.agent, "create_session") as create_session:
+            result = self.application.rpc(
+                "agent.session.create",
+                {"routing": {"taskKind": "code"}},
+            )
+
+        self.assertFalse(result["accepted"])
+        self.assertFalse(result["session_created"])
+        preflight.assert_called_once()
+        create_session.assert_not_called()
+
+    def test_model_policy_confirmation_precedes_provider_binding_and_model_selection(self):
+        profile = {
+            "id": "profile-zhipu",
+            "status": "available",
+            "name": "Zhipu fixture",
+            "config": {"model": "glm-4.5-air"},
+        }
+        decision = {
+            "status": "needs-confirmation",
+            "selected_route": "profile:profile-zhipu:glm-4.5-air",
+            "selected_entry": {
+                "route_id": "profile:profile-zhipu:glm-4.5-air",
+                "provider_profile_id": "profile-zhipu",
+                "model_id": "glm-4.5-air",
+            },
+            "requires_confirmation": True,
+        }
+        with (
+            patch.object(self.application.model_policy, "preflight", return_value={"decision": decision}),
+            patch.object(
+                self.application.agent,
+                "supports",
+                side_effect=lambda capability: capability == AgentCapability.PROVIDER_BRIDGE,
+            ),
+            patch.object(self.application, "_agent_provider_profile", return_value=profile) as provider_profile,
+            patch.object(
+                self.application.agent,
+                "sync_provider_profile",
+                return_value={"profile_id": profile["id"], "route_id": "zhipu-fixture", "model": "glm-4.5-air"},
+            ) as sync_provider,
+            patch.object(self.application.agent, "create_session", return_value={"sessionId": "session-confirmed"}) as create_session,
+            patch.object(
+                self.application.agent,
+                "select_model",
+                return_value={"selected": {"provider": "zhipu-fixture", "model": "glm-4.5-air"}},
+            ) as select_model,
+        ):
+            pending = self.application.rpc(
+                "agent.session.create",
+                {"routing": {"taskKind": "code"}},
+            )
+            self.assertFalse(pending["accepted"])
+            self.assertFalse(pending["session_created"])
+            provider_profile.assert_not_called()
+            sync_provider.assert_not_called()
+            create_session.assert_not_called()
+            select_model.assert_not_called()
+
+            result = self.application.rpc(
+                "agent.session.create",
+                {
+                    "routing": {"taskKind": "code"},
+                    "routingApproved": True,
+                },
+            )
+
+        self.assertEqual(result["sessionId"], "session-confirmed")
+        provider_profile.assert_called_once()
+        provider_params = provider_profile.call_args.args[0]
+        self.assertEqual(provider_params["provider_profile_id"], "profile-zhipu")
+        self.assertTrue(provider_profile.call_args.kwargs["refresh_health"])
+        sync_provider.assert_called_once_with(profile)
+        create_session.assert_called_once()
+        select_model.assert_called_once_with(
+            {
+                "session_id": "session-confirmed",
+                "provider": "zhipu-fixture",
+                "model": "glm-4.5-air",
+            }
+        )
+
+    def test_prompt_preflight_failure_does_not_create_a_workspace_checkpoint(self):
+        decision = {
+            "status": "no-compatible-route",
+            "selected_route": None,
+            "selected_entry": None,
+            "requires_confirmation": True,
+            "reason_codes": ["quality_gate"],
+        }
+        with (
+            patch.object(self.application.model_policy, "preflight", return_value={"decision": decision}) as preflight,
+            patch.object(self.application, "_agent_workspace_safety_active", return_value=True),
+            patch.object(self.application.workspace, "create_checkpoint") as create_checkpoint,
+            patch.object(self.application.agent, "prompt") as prompt,
+        ):
+            result = self.application.rpc(
+                "agent.session.prompt",
+                {
+                    "sessionId": "session-1",
+                    "mode": "execute",
+                    "text": "make a change",
+                    "routing": {"taskKind": "code"},
+                },
+            )
+
+        self.assertFalse(result["accepted"])
+        self.assertIn("routing", result)
+        preflight.assert_called_once()
+        create_checkpoint.assert_not_called()
+        prompt.assert_not_called()
+
     def test_agent_task_projection_rpc_is_read_only_and_bounded(self):
         projection = {
             "available": True,

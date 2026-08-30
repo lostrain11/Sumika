@@ -25,6 +25,7 @@ API、协议、类名和代码标识保留 English identifier。
 - [macOS 启动](../README_zh.md#macos)
 - [Linux 启动](../README_zh.md#linux)
 - [桌面 Shell 与桌宠](architecture/desktop-shell.md)
+- [桌面自动化工具包](architecture/desktop-automation.md)
 - [本地模型与 Ollama](architecture/local-model.md)
 - [入门指南与 UI 参考](ui/reference-map.md)
 - [Avatar 资产说明](../assets/avatars/README.md)
@@ -54,6 +55,7 @@ API、协议、类名和代码标识保留 English identifier。
 - [前端 Shell 说明](../frontend/README.md)
 - [Echo provider 示例](../plugins/examples/echo-provider/README.md)
 - [Echo tool 示例](../plugins/examples/echo-tool/README.md)
+- [Desktop automation DSH bridge](../plugins/dsh-desktop-automation/README.md)
 - [第三方声明](../THIRD_PARTY_NOTICES.md)
 
 ## 外部集成与来源

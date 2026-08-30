@@ -21,8 +21,8 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `5a8a4cb`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, and the unified capability catalog projection with source-failure reporting (verified in the current worktree on 2026-08-29)
-- Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter
+- Last verified commit: `133bc90`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, the unified capability catalog projection with source-failure reporting, the `model-policy/v1` catalog/router, ZCode global-model/quota hooks, TTL observations, confirmation-gated Agent integration, the `web-chat/v1` BrowserSkill profile adapters with fail-closed snapshot handling, and the runtime-neutral desktop automation contracts/DSH bridge (verified in the current worktree on 2026-08-31)
+- Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
 - DSH integration: [DSH Agent](integrations/dsh-agent.md)
@@ -32,9 +32,9 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 ## 当前里程碑
 
-**Phase 3 - MCP、Skills、Preset（已完成并暂停，2026-08-29）**
+**Phase 3 后续 - 模型策略与额度边界（基础闭环已实现，2026-08-30）**
 
-Phase 0、1、2 和 3 均已完成。当前不开始 Phase 4；后续只做维护性回归或用户明确授权的真实账号/浏览器冒烟。
+Phase 0、1、2 和 3 均已完成；本次恢复只补充模型策略的基础路由、公开模型目录和保守额度观测，Phase 4 仍不开始。
 
 Phase 0 已完成：执行契约、固定恢复顺序和文档检查边界；WorkspaceRuntime 的检查、checkpoint、diff、恢复、worktree、patch 审阅和本地 commit 已接入 Agent 页。Phase 1 已完成：固定 DSH `0.1.1-rc.2` 的启动、健康检查、Provider route 桥接和安全凭据注入；隔离 OpenAI-compatible SSE stub 已通过 Session、模型选择、prompt、事件和最终 snapshot 协议闭环。
 
@@ -46,9 +46,9 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 ## 接下来的三个动作
 
-1. 维护性运行完整回归和隔离 Phase 0–3 验收，发现偏差时只修复已实现边界。
-2. 在用户明确授权的任务中完成 BrowserSkill 人工接管、登录审批和一次真实受控写操作；凭据只由用户在隔离窗口输入。
-3. 等待用户明确恢复后再开始 Phase 4；在此之前不引入新的工作区、浏览器或插件能力。
+1. 模型策略、网页聊天适配器与固定评测器的 Python、前端、Rust、文档和敏感信息回归已通过；保持当前工作树改动可追踪。
+2. 在用户明确授权的环境中分别运行 ZCode、智谱和 Ollama 的只读 preflight；只记录健康/额度状态，不恢复或输出凭据。ZCode 自动发现已通过，本机模型目录可读，额度仍为 `unknown`。
+3. 用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；继续保持推荐后确认，不自动切换生产路由。
 
 ## 固定决策
 
@@ -58,6 +58,8 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 - DSH 没有可靠 rollback RPC，因此 checkpoint、diff 和恢复由独立 `WorkspaceRuntime` 负责，并通过工具暴露给 Harness。
 - 社区插件必须在隔离 Profile 中验证许可证、API、权限和卸载恢复后才能启用。
 - 一键启动只复用和检查用户已安装的固定 Runtime，不自动安装或更新软件。
+- 模型策略使用 `model-policy/v1`；`difficulty=auto` 目前是保守规则，ZCode 额度只有在公开 app-server capability 存在时才读取，未知额度不得标为免费。ZCode adapter 默认 `SUMIKA_ZCODE_PROTOCOL=auto`，可用 `SUMIKA_ZCODE_NODE` + `SUMIKA_ZCODE_SCRIPT` 配置 Node 打包入口，或显式开启 `SUMIKA_ZCODE_AUTODISCOVER=1` 解析公开 bundle；不读取 ZCode 私有配置。
+- 路由默认推荐后确认；无候选、未确认、额度耗尽或健康失败时，Session、Provider 绑定和 Execute checkpoint 均不得先行创建。
 - 正式文件修改只发生在独立 worktree、分支或等价的可恢复 Workspace 中。
 
 ## 明确暂缓
@@ -80,8 +82,8 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 当前工作树已通过：
 
-- Python unittest: 314 tests（含 retry、凭据桥接、WorkspaceRuntime、历史游标、usage/context 投影、turn ledger、Agent observability sink/日聚合、Provider 端点停止后的被动健康刷新，以及 Plan Review 回答/取消协议）；
-- Playwright: 42 tests（含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页，以及 Plan Review 三种操作）；
+- Python unittest: 383 tests（含 retry、凭据桥接、WorkspaceRuntime、历史游标、usage/context 投影、turn ledger、Agent observability sink/日聚合、Provider 端点停止后的被动健康刷新、模型策略和 ZCode quota/目录、现代 runtimeModel 校验、网页聊天登录/授权/归档/回复与快照边界，以及 Plan Review 回答/取消协议）；
+- Playwright: 47 tests（含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml`;
@@ -115,10 +117,9 @@ Preset mount validation 已通过固定 DSH 实机验证；无鉴权 stdio MCP s
 
 Provider 与 MCP 密钥只保存在 Windows Credential Manager；桌面 helper 通过私有 NUL v2 协议注入受管 DSH 启动环境。Python/Rust/UI 隔离和真实 Provider 只读回合曾通过隔离验收；当前 Provider 是否可用必须以最新 preflight/health 结果为准。
 
-Agent observability 已接入 Core RPC/DSH event 边界：`.sumika*/logs/agent-observability/`
-只写 bounded JSONL receipt，按 UTC 日输出 p50/p95 与结果/资源汇总；不写提示词、模型输出、
-工具参数/结果、文件内容、凭据或 Cookie。`python tools/aggregate_agent_day.py --write`
-可离线生成摘要；`agent.acceptance.evidence` 与 `--real-session` 可把既有真实闭环投影为布尔值、计数、枚举和耗时。固定诊断包、版本化真实评测夹具和候选推荐仍未实现。
+ZCode app-server 适配器已通过隔离现代 wire fixture：工作区 session、Provider/`available` 模型目录、MCP 状态、子 Agent、事件归一化、运行时偏好应答、短模型选择和完整 `runtimeModel` 校验；现代能力不再宣称 `readonly`、附件或队列。现有标准 JSON-RPC fixture 仍通过 `auto` 探测回归；真实 ZCode 自动发现实测可读到 2 个模型（`glm-5.1`、`glm-4.7`），公开额度接口未提供，保持 `unknown`。
+
+Agent observability 已接入 Core RPC/DSH event 边界：`.sumika*/logs/agent-observability/` 只写 bounded JSONL receipt，按 UTC 日输出 p50/p95 与结果/资源汇总；不写提示词、模型输出、工具参数/结果、文件内容、凭据或 Cookie。`python tools/aggregate_agent_day.py --write` 可离线生成摘要；`agent.acceptance.evidence` 与 `--real-session` 可把既有真实闭环投影为布尔值、计数、枚举和耗时。模型策略基础 catalog、确定性难度推断、额度 TTL、固定评测任务集和推荐前确认已通过 2026-08-30 回归；长期样本质量判定、学习型分类器和自动路由仍未实现。
 
 Skills/Subagents 专项：隔离工作区中的 `.agents/skills` fixture 已被 `skill.list` 发现，
 `/sumika-smoke` 的正文注入已在 OpenAI-compatible stub 请求中确认；DSH `subagent`

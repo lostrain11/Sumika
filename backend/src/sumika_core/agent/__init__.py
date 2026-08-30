@@ -6,6 +6,20 @@ from .contracts import AgentCapability, AgentRuntime, AgentRuntimeError, Unavail
 from .models import AgentApproval, AgentEvent
 from .registry import AgentRuntimeRegistry, create_agent_runtime
 from .skill_catalog import SkillCatalog, SkillCatalogError
+from .routes import (
+    AGENT_CONSULTATION_SCHEMA,
+    AGENT_ROUTE_SCHEMA,
+    ConsultationMemberResult,
+    ConsultationRequest,
+    ConsultationResult,
+    RouteCoordinator,
+    RouteDescriptor,
+    RouteError,
+    RouteValidationError,
+    SubtaskDispatch,
+    SubtaskResult,
+    WebRouteCoordinator,
+)
 
 if TYPE_CHECKING:
     from .adapters.dsh.config import DSHRuntimeConfig
@@ -47,5 +61,17 @@ __all__ = [
     "ZCodeAgentRuntime",
     "ZCodeRuntimeConfig",
     "UnavailableAgentRuntime",
+    "AGENT_ROUTE_SCHEMA",
+    "AGENT_CONSULTATION_SCHEMA",
+    "ConsultationMemberResult",
+    "ConsultationRequest",
+    "ConsultationResult",
+    "RouteCoordinator",
+    "WebRouteCoordinator",
+    "RouteDescriptor",
+    "RouteError",
+    "RouteValidationError",
+    "SubtaskDispatch",
+    "SubtaskResult",
     "create_agent_runtime",
 ]
