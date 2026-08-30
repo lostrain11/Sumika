@@ -21,7 +21,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `133bc90`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, the unified capability catalog projection with source-failure reporting, the `model-policy/v1` catalog/router, ZCode global-model/quota hooks, TTL observations, confirmation-gated Agent integration, the `web-chat/v1` BrowserSkill profile adapters with fail-closed snapshot handling, and the runtime-neutral desktop automation contracts/DSH bridge (verified in the current worktree on 2026-08-31)
+- Last verified commit: `f9a2116`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, the unified capability catalog projection with source-failure reporting, the `model-policy/v1` catalog/router, ZCode global-model/quota hooks, TTL observations, confirmation-gated Agent integration, the `web-chat/v1` BrowserSkill profile adapters with fail-closed snapshot handling, and the runtime-neutral desktop automation contracts/DSH bridge (verified and pushed on 2026-08-31)
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
@@ -46,7 +46,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 ## 接下来的三个动作
 
-1. 模型策略、网页聊天适配器与固定评测器的 Python、前端、Rust、文档和敏感信息回归已通过；保持当前工作树改动可追踪。
+1. 模型策略、网页聊天适配器、固定评测器与桌面自动化基础桥的 Python、前端、Rust、文档和敏感信息回归已通过，并已推送提交 `f9a2116`；保持后续工作树改动可追踪。
 2. 在用户明确授权的环境中分别运行 ZCode、智谱和 Ollama 的只读 preflight；只记录健康/额度状态，不恢复或输出凭据。ZCode 自动发现已通过，本机模型目录可读，额度仍为 `unknown`。
 3. 用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；继续保持推荐后确认，不自动切换生产路由。
 
