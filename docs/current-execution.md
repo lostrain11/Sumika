@@ -21,7 +21,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `97e0e09`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, the unified capability catalog projection with source-failure reporting, the `model-policy/v1` catalog/router, ZCode global-model/quota hooks, TTL observations, confirmation-gated Agent integration, the `web-chat/v1` BrowserSkill profile adapters with fail-closed snapshot handling, and the runtime-neutral desktop automation contracts/DSH bridge plus a standard-library Electron CDP runner (verified in the current worktree; not yet committed). A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
+- Last verified commit: `073dbe7`; the runtime-neutral desktop automation contracts/DSH bridge, standard-library Electron CDP runner, dynamic route supervisor, and associated tests are committed and pushed on 2026-08-31. A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
@@ -46,7 +46,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 ## 接下来的三个动作
 
-1. 保持 CDP runner 新增文件可追踪并等待提交范围确认；专项与全量回归已通过。
+1. 保持已推送的 CDP runner、动态路由和插件变更可追踪；专项与全量回归已通过。
 2. 真实 ZCode CDP 只读 smoke 已完成；后续若要验证 click/fill/send，必须另行明确动作和审批边界，当前不自动执行。
 3. 继续用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；保持推荐后确认，不自动切换生产路由。
 
