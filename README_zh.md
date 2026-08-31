@@ -1,10 +1,83 @@
-# Sumika
+<div align="center">
+  <a href="src-tauri/icons/sumika-icon-sharp-256.png">
+    <img src="src-tauri/icons/sumika-icon-sharp-256.png" alt="Sumika 图标" width="128">
+  </a>
+  <h1>Sumika</h1>
+  <p><strong>本地优先、运行时中立的桌面 Agent 工作伴侣。</strong></p>
+  <p>
+    <a href="README.md">English version</a>
+    · <a href="docs/README.md">文档中心</a>
+    · <a href="https://github.com/lostrain11/Sumika/issues">问题反馈</a>
+  </p>
+  <p>
+    <a href="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml">
+      <img src="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml/badge.svg" alt="CI 状态">
+    </a>
+    <img src="https://img.shields.io/badge/version-0.1.0-2563EB" alt="版本 0.1.0">
+    <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11 或更高">
+    <img src="https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=111111" alt="Tauri 2">
+    <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-5b6472" alt="Windows macOS Linux">
+    <img src="https://img.shields.io/badge/status-Phase%203%20foundation-2f855a" alt="第三阶段基础能力">
+  </p>
+</div>
 
-[English version](README.md)
+> Sumika 将角色与 Avatar 桌面壳、可替换的 Agent 运行时、本地数据、明确的
+> 审批和 Provider 无关的能力边界放在同一个项目中。它的目标是从私人伴侣
+> 逐步成长为可靠的日常工作台，同时不把任何单一厂商或 Harness 固定成永久核心。
 
-Sumika 是一个本地优先、模块化的桌面私人助手基础项目。
+## 项目概览
 
-## 平台支持
+<table>
+  <tr>
+    <td width="25%"><strong>本地优先</strong><br>默认把数据和运行时边界留在用户自己的电脑上。</td>
+    <td width="25%"><strong>实现可替换</strong><br>Provider、网页 Worker、桌面软件和 Harness 都通过明确适配器接入。</td>
+    <td width="25%"><strong>面向 Agent</strong><br>逐步提供会话、计划、工具、审批、MCP、Skills、Subagents 和工作区安全能力。</td>
+    <td width="25%"><strong>桌面伴侣</strong><br>角色、VRM Avatar 和透明桌宠始终是产品的一等能力。</td>
+  </tr>
+</table>
+
+| 领域 | 当前状态 |
+| --- | --- |
+| 桌面端 | Windows 已支持；macOS/Linux Tauri 桌面壳为实验性 |
+| Agent 运行时 | 运行时中立契约与 DeepSeek Harness 适配器 |
+| 动态路由 | 带证据的 Supervisor 和受限 Worker 派发；生产自动路由仍受门控 |
+| 网页工作台 | 隔离 BrowserSkill 档案、审批、接管和网页聊天投影 |
+| 工作区安全 | Git worktree、checkpoint、diff 审阅、恢复和本地提交门控 |
+| 角色与 Avatar | 人格编辑器、VRM 查看器、视线/头部跟随和桌宠展示 |
+
+[状态矩阵](docs/status-matrix.md)是完成度的唯一事实源。本页只总结已核实的边界，
+不会把暂缓能力写成已经交付的功能。
+
+## 从这里开始
+
+| 目标 | 入口 |
+| --- | --- |
+| 在 Windows 上运行 Sumika | [Windows 快速启动](#windows) |
+| 了解项目架构 | [架构索引](docs/architecture/README.md) |
+| 查看真实完成度 | [状态矩阵](docs/status-matrix.md) |
+| 安全恢复开发上下文 | [当前执行契约](docs/current-execution.md) |
+| 配置 Provider 和模型 | [Provider 档案](docs/architecture/provider-profiles.md) |
+
+~~~mermaid
+flowchart LR
+    UI[Vue / Tauri 界面] --> CORE[Sumika Core]
+    CORE --> RUNTIME[AgentRuntime 适配器]
+    RUNTIME --> DSH[DSH]
+    CORE --> ROUTE[DynamicRouteSupervisor]
+    ROUTE --> WORKERS[Provider / Web / Harness / Desktop Worker]
+    CORE --> WS[WorkspaceRuntime]
+    WS --> GIT[Git worktree / checkpoint]
+~~~
+
+Supervisor 不是第二个语言模型 Agent。它负责能力证据、权限、预算、占用和重试规则；
+语义判断仍由编排运行时完成。DSH 是当前适配器，但不是角色、Avatar、工作区或路由
+契约的基类。
+
+---
+
+下面继续提供平台、模型、Avatar、安全和参与开发的详细说明。
+
+## 平台详情
 
 | 平台 | Python 核心与浏览器界面 | Tauri 桌面端 |
 | --- | --- | --- |

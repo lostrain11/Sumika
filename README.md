@@ -1,10 +1,86 @@
-# Sumika
+<div align="center">
+  <a href="src-tauri/icons/sumika-icon-sharp-256.png">
+    <img src="src-tauri/icons/sumika-icon-sharp-256.png" alt="Sumika icon" width="128">
+  </a>
+  <h1>Sumika</h1>
+  <p><strong>A local-first, runtime-neutral desktop companion for agentic work.</strong></p>
+  <p>
+    <a href="README_zh.md">中文版</a>
+    · <a href="docs/README.md">Documentation</a>
+    · <a href="https://github.com/lostrain11/Sumika/issues">Issues</a>
+  </p>
+  <p>
+    <a href="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml">
+      <img src="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml/badge.svg" alt="CI status">
+    </a>
+    <img src="https://img.shields.io/badge/version-0.1.0-2563EB" alt="Version 0.1.0">
+    <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11 or newer">
+    <img src="https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=111111" alt="Tauri 2">
+    <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-5b6472" alt="Windows macOS Linux">
+    <img src="https://img.shields.io/badge/status-Phase%203%20foundation-2f855a" alt="Phase 3 foundation">
+  </p>
+</div>
 
-[中文版](README_zh.md)
+> Sumika brings a character and Avatar desktop shell together with a replaceable
+> Agent runtime, local data, explicit approvals, and provider-neutral capability
+> boundaries. It is built to grow from a private companion into a dependable
+> daily workbench without making one vendor or harness the permanent core.
 
-Sumika is a local-first, modular foundation for a desktop private companion.
+## Project snapshot
 
-## Platform support
+<table>
+  <tr>
+    <td width="25%"><strong>Local first</strong><br>Data and runtime boundaries stay on the user's machine by default.</td>
+    <td width="25%"><strong>Replaceable routes</strong><br>Providers, web workers, desktop apps, and harnesses use explicit adapters.</td>
+    <td width="25%"><strong>Agent ready</strong><br>Sessions, plans, tools, approvals, MCP, Skills, Subagents, and workspace safety are exposed incrementally.</td>
+    <td width="25%"><strong>Companion shell</strong><br>Characters, VRM Avatar rendering, and a transparent desktop pet remain first-class features.</td>
+  </tr>
+</table>
+
+| Area | Current status |
+| --- | --- |
+| Desktop shell | Windows supported; macOS/Linux Tauri shell experimental |
+| Agent runtime | Runtime-neutral contract with a DeepSeek Harness adapter |
+| Dynamic routing | Evidence-aware supervisor and bounded worker dispatch; production auto-routing remains gated |
+| Web workbench | Isolated BrowserSkill profiles, approvals, takeover, and web-chat projection |
+| Workspace safety | Git worktrees, checkpoints, diff review, restore, and local commit gates |
+| Character and Avatar | Persona editor, VRM viewer, gaze/head tracking, and desktop-pet presentation |
+
+The [status matrix](docs/status-matrix.md) is the single source of truth for
+completion status. This page summarizes verified boundaries and deliberately
+does not advertise deferred work as finished.
+
+## Start here
+
+| Need | Link |
+| --- | --- |
+| Run Sumika on Windows | [Windows quick start](#windows) |
+| Understand the architecture | [Architecture index](docs/architecture/README.md) |
+| Check what is really implemented | [Status matrix](docs/status-matrix.md) |
+| Resume development safely | [Current execution contract](docs/current-execution.md) |
+| Configure providers and models | [Provider profiles](docs/architecture/provider-profiles.md) |
+
+```mermaid
+flowchart LR
+    UI[Vue / Tauri UI] --> CORE[Sumika Core]
+    CORE --> RUNTIME[AgentRuntime adapter]
+    RUNTIME --> DSH[DSH]
+    CORE --> ROUTE[DynamicRouteSupervisor]
+    ROUTE --> WORKERS[Provider / Web / Harness / Desktop workers]
+    CORE --> WS[WorkspaceRuntime]
+    WS --> GIT[Git worktree / checkpoint]
+```
+
+The supervisor is not a second language-model agent. It applies capability
+evidence, permissions, budget, occupancy, and retry rules while the orchestrator
+runtime makes semantic decisions. DSH is the current adapter, not a dependency
+of the character, Avatar, workspace, or routing contracts.
+
+---
+
+The detailed platform, model, Avatar, security, and contribution notes follow.
+
+## Platform details
 
 | Platform | Python core and browser UI | Tauri desktop shell |
 | --- | --- | --- |
