@@ -21,7 +21,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `073dbe7`; the runtime-neutral desktop automation contracts/DSH bridge, standard-library Electron CDP runner, dynamic route supervisor, and associated tests are committed and pushed on 2026-08-31. The current working tree additionally contains the explicit model-evaluation capture contract and turn-boundary regression tests; those changes are verified locally but not committed yet. A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
+- Last verified commit: `2fb421e`; the runtime-neutral desktop automation contracts/DSH bridge, standard-library Electron CDP runner, dynamic route supervisor, explicit model-evaluation capture contract, turn-boundary regression tests, and associated tests are committed and locally verified on 2026-09-01. A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
@@ -32,7 +32,7 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 ## 当前里程碑
 
-**Phase 3 后续 - 模型策略、额度边界与桌面自动化（评测捕获与边界回归已验证，2026-08-31）**
+**Phase 3 后续 - 模型策略、额度边界与桌面自动化（评测捕获与边界回归已验证，2026-09-01）**
 
 Phase 0、1、2 和 3 均已完成；本次恢复补充模型策略的基础路由、公开模型目录、保守额度观测和 CDP transport 加固，Phase 4 仍不开始。
 
@@ -46,8 +46,8 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 ## 接下来的三个动作
 
-1. 审阅并提交当前显式评测捕获与 turn 边界回归变更；不要暂存或处理现有运行数据。
-2. 继续用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；捕获必须由维护 Agent 显式选择并带 `--opt-in`。
+1. 在获得明确的隔离 handoff 后，用 `tools/fixtures/model-evaluation-v1.json` 收集首批样本；捕获必须由维护 Agent 显式选择并带 `--opt-in`。
+2. 复核固定版本 cohort 和证据门槛；不足 3 次重复或含敏感内容时不参与推荐。
 3. 保持推荐后确认和禁止静默付费切换；真实 ZCode CDP 的 click/fill/send 仍须另行明确动作和审批边界。
 
 ## 固定决策
