@@ -553,6 +553,15 @@ class Storage:
                      result_length INTEGER NOT NULL DEFAULT 0,
                      summary_hash TEXT,
                      retryable INTEGER NOT NULL DEFAULT 0,
+                     runtime_id TEXT NOT NULL DEFAULT 'unknown',
+                     executor TEXT NOT NULL DEFAULT 'unknown',
+                     transport TEXT NOT NULL DEFAULT 'unknown',
+                     side_effect TEXT NOT NULL DEFAULT 'none',
+                     evidence_hash TEXT,
+                     budget_impact_json TEXT NOT NULL DEFAULT '{}',
+                     workspace_access TEXT NOT NULL DEFAULT 'none',
+                     required_capabilities_json TEXT NOT NULL DEFAULT '["text"]',
+                     depth INTEGER NOT NULL DEFAULT 0,
                      updated_at TEXT NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS idx_agent_route_runs_parent
@@ -594,6 +603,24 @@ class Storage:
                 self._connection.execute(
                     "ALTER TABLE plugin_registrations ADD COLUMN entrypoint_sha256 TEXT NOT NULL DEFAULT ''"
                 )
+            route_columns = {
+                str(row[1])
+                for row in self._connection.execute("PRAGMA table_info(agent_route_runs)").fetchall()
+            }
+            route_migrations = {
+                "runtime_id": "ALTER TABLE agent_route_runs ADD COLUMN runtime_id TEXT NOT NULL DEFAULT 'unknown'",
+                "executor": "ALTER TABLE agent_route_runs ADD COLUMN executor TEXT NOT NULL DEFAULT 'unknown'",
+                "transport": "ALTER TABLE agent_route_runs ADD COLUMN transport TEXT NOT NULL DEFAULT 'unknown'",
+                "side_effect": "ALTER TABLE agent_route_runs ADD COLUMN side_effect TEXT NOT NULL DEFAULT 'none'",
+                "evidence_hash": "ALTER TABLE agent_route_runs ADD COLUMN evidence_hash TEXT",
+                "budget_impact_json": "ALTER TABLE agent_route_runs ADD COLUMN budget_impact_json TEXT NOT NULL DEFAULT '{}'",
+                "workspace_access": "ALTER TABLE agent_route_runs ADD COLUMN workspace_access TEXT NOT NULL DEFAULT 'none'",
+                "required_capabilities_json": "ALTER TABLE agent_route_runs ADD COLUMN required_capabilities_json TEXT NOT NULL DEFAULT '[\"text\"]'",
+                "depth": "ALTER TABLE agent_route_runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
+            }
+            for column, statement in route_migrations.items():
+                if column not in route_columns:
+                    self._connection.execute(statement)
             self._connection.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -1864,10 +1891,28 @@ class Storage:
         consultation_id = _optional_identifier(value.get("consultation_id"))
         parent_turn_id = _optional_identifier(value.get("parent_turn_id"))
         continuation_of = _optional_identifier(value.get("continuation_of"))
-        mode = _bounded_enum(value.get("mode"), {"web-worker", "consultation-panel"}, "mode")
+        # ``web-worker`` and ``consultation-panel`` were the first public
+        # modes.  Keep accepting them while allowing the runtime-neutral
+        # supervisor's bounded worker modes on the same metadata table.
+        mode = _bounded_text(value.get("mode"), 80).lower()
+        if re.fullmatch(r"[a-z][a-z0-9._:-]{0,79}", mode) is None:
+            raise ValueError("mode is invalid")
         status = _bounded_enum(
             value.get("status"),
-            {"queued", "running", "completed", "partial", "failed", "cancelled", "waiting-human", "unknown", "interrupted"},
+            {
+                "queued",
+                "running",
+                "completed",
+                "partial",
+                "failed",
+                "cancelled",
+                "waiting-human",
+                "unknown",
+                "interrupted",
+                # The runtime-neutral supervisor records this state before
+                # any paid, unknown-quota, or side-effecting worker starts.
+                "needs-confirmation",
+            },
             "status",
         )
         provider_profile_id = _optional_identifier(value.get("provider_profile_id"))
@@ -1878,6 +1923,43 @@ class Storage:
         summary_hash = _safe_hash(value.get("summary_hash"))
         error_code = _bounded_text(value.get("error_code"), 120) if value.get("error_code") else None
         retryable = 1 if value.get("retryable") is True else 0
+        runtime_id = _bounded_text(value.get("runtime_id"), 120).lower() or "unknown"
+        if re.fullmatch(r"[a-z][a-z0-9._:-]{0,119}", runtime_id) is None:
+            raise ValueError("runtime_id is invalid")
+        executor = _bounded_text(value.get("executor"), 120).lower() or "unknown"
+        if re.fullmatch(r"[a-z][a-z0-9._:-]{0,119}", executor) is None:
+            raise ValueError("executor is invalid")
+        transport = _bounded_text(value.get("transport"), 120).lower() or "unknown"
+        if re.fullmatch(r"[a-z][a-z0-9._:-]{0,119}", transport) is None:
+            raise ValueError("transport is invalid")
+        side_effect = _bounded_enum(value.get("side_effect", "none"), {"none", "read", "write", "external"}, "side_effect")
+        evidence_hash = _safe_hash(value.get("evidence_hash"))
+        budget_impact = value.get("budget_impact", value.get("budget_impact_json", {}))
+        if isinstance(budget_impact, str):
+            try:
+                budget_impact = json.loads(budget_impact)
+            except (TypeError, ValueError):
+                budget_impact = {}
+        if not isinstance(budget_impact, dict):
+            budget_impact = {}
+        budget_impact = _bounded_projection(budget_impact)
+        workspace_access = _bounded_enum(value.get("workspace_access", "none"), {"none", "read-only", "isolated-worktree"}, "workspace_access")
+        required_capabilities = value.get("required_capabilities", value.get("required_capabilities_json", ["text"]))
+        if isinstance(required_capabilities, str):
+            try:
+                required_capabilities = json.loads(required_capabilities)
+            except (TypeError, ValueError):
+                required_capabilities = [required_capabilities]
+        if not isinstance(required_capabilities, list):
+            required_capabilities = []
+        safe_capabilities = []
+        for capability in required_capabilities[:16]:
+            candidate = _bounded_text(capability, 120).lower()
+            if candidate and re.fullmatch(r"[a-z][a-z0-9._:-]{0,119}", candidate) is not None and candidate not in safe_capabilities:
+                safe_capabilities.append(candidate)
+        if not safe_capabilities:
+            safe_capabilities = ["text"]
+        depth = _bounded_int(value.get("depth", 0), maximum=1)
         now = utc_now()
         with self._lock, self._connection:
             self._connection.execute(
@@ -1886,8 +1968,10 @@ class Storage:
                     dispatch_id, consultation_id, parent_session_id, parent_turn_id,
                     mode, route_id, provider_profile_id, continuation_of, status,
                     started_at, completed_at, latency_ms, error_code, result_length,
-                    summary_hash, retryable, updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    summary_hash, retryable, runtime_id, executor, transport,
+                    side_effect, evidence_hash, budget_impact_json,
+                    workspace_access, required_capabilities_json, depth, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(dispatch_id) DO UPDATE SET
                     consultation_id=excluded.consultation_id,
                     parent_session_id=excluded.parent_session_id,
@@ -1904,13 +1988,24 @@ class Storage:
                     result_length=excluded.result_length,
                     summary_hash=excluded.summary_hash,
                     retryable=excluded.retryable,
+                    runtime_id=excluded.runtime_id,
+                    executor=excluded.executor,
+                    transport=excluded.transport,
+                    side_effect=excluded.side_effect,
+                    evidence_hash=excluded.evidence_hash,
+                    budget_impact_json=excluded.budget_impact_json,
+                    workspace_access=excluded.workspace_access,
+                    required_capabilities_json=excluded.required_capabilities_json,
+                    depth=excluded.depth,
                     updated_at=excluded.updated_at
                 """,
                 (
                     dispatch_id, consultation_id, parent_session_id, parent_turn_id,
                     mode, route_id, provider_profile_id, continuation_of, status,
                     started_at, completed_at, latency_ms, error_code, result_length,
-                    summary_hash, retryable, now,
+                    summary_hash, retryable, runtime_id, executor, transport,
+                    side_effect, evidence_hash, json.dumps(budget_impact, ensure_ascii=False, sort_keys=True),
+                    workspace_access, json.dumps(safe_capabilities, ensure_ascii=False), depth, now,
                 ),
             )
         return self.get_agent_route_run(dispatch_id) or {}
@@ -1954,7 +2049,7 @@ class Storage:
         parent_session_id = _bounded_identifier(value.get("parent_session_id"), "parent_session_id")
         parent_turn_id = _optional_identifier(value.get("parent_turn_id"))
         decision_kind = _bounded_enum(value.get("decision_kind"), {"brainstorm", "plan-review", "fact-check", "counterexample", "small-answer"}, "decision_kind")
-        status = _bounded_enum(value.get("status"), {"queued", "running", "completed", "partial", "failed", "cancelled", "unknown", "interrupted"}, "status")
+        status = _bounded_enum(value.get("status"), {"queued", "running", "completed", "partial", "failed", "cancelled", "waiting-human", "unknown", "interrupted"}, "status")
         max_members = _bounded_int(value.get("max_members", 3), maximum=8, minimum=1)
         successful_count = _bounded_int(value.get("successful_count", 0), maximum=8)
         failed_count = _bounded_int(value.get("failed_count", 0), maximum=8)

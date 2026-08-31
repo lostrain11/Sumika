@@ -21,7 +21,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `f9a2116`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, the unified capability catalog projection with source-failure reporting, the `model-policy/v1` catalog/router, ZCode global-model/quota hooks, TTL observations, confirmation-gated Agent integration, the `web-chat/v1` BrowserSkill profile adapters with fail-closed snapshot handling, and the runtime-neutral desktop automation contracts/DSH bridge (verified and pushed on 2026-08-31)
+- Last verified commit: `97e0e09`; current worktree additionally contains the WorkspaceRuntime safety/commit bridge, Execute and Plan-approval checkpoint protection, DSH protocol/MCP credential bridge, Agent task projection with bounded turn ledger, BrowserSkill launcher discovery, bounded usage/context presentation, content-independent Agent observability sink/daily aggregator, the unified capability catalog projection with source-failure reporting, the `model-policy/v1` catalog/router, ZCode global-model/quota hooks, TTL observations, confirmation-gated Agent integration, the `web-chat/v1` BrowserSkill profile adapters with fail-closed snapshot handling, and the runtime-neutral desktop automation contracts/DSH bridge plus a standard-library Electron CDP runner (verified in the current worktree; not yet committed). A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
@@ -32,9 +32,9 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 ## 当前里程碑
 
-**Phase 3 后续 - 模型策略与额度边界（基础闭环已实现，2026-08-30）**
+**Phase 3 后续 - 模型策略、额度边界与桌面自动化（基础闭环已实现，2026-08-31）**
 
-Phase 0、1、2 和 3 均已完成；本次恢复只补充模型策略的基础路由、公开模型目录和保守额度观测，Phase 4 仍不开始。
+Phase 0、1、2 和 3 均已完成；本次恢复补充模型策略的基础路由、公开模型目录、保守额度观测和 CDP transport 加固，Phase 4 仍不开始。
 
 Phase 0 已完成：执行契约、固定恢复顺序和文档检查边界；WorkspaceRuntime 的检查、checkpoint、diff、恢复、worktree、patch 审阅和本地 commit 已接入 Agent 页。Phase 1 已完成：固定 DSH `0.1.1-rc.2` 的启动、健康检查、Provider route 桥接和安全凭据注入；隔离 OpenAI-compatible SSE stub 已通过 Session、模型选择、prompt、事件和最终 snapshot 协议闭环。
 
@@ -46,9 +46,9 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 ## 接下来的三个动作
 
-1. 模型策略、网页聊天适配器、固定评测器与桌面自动化基础桥的 Python、前端、Rust、文档和敏感信息回归已通过，并已推送提交 `f9a2116`；保持后续工作树改动可追踪。
-2. 在用户明确授权的环境中分别运行 ZCode、智谱和 Ollama 的只读 preflight；只记录健康/额度状态，不恢复或输出凭据。ZCode 自动发现已通过，本机模型目录可读，额度仍为 `unknown`。
-3. 用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；继续保持推荐后确认，不自动切换生产路由。
+1. 保持 CDP runner 新增文件可追踪并等待提交范围确认；专项与全量回归已通过。
+2. 真实 ZCode CDP 只读 smoke 已完成；后续若要验证 click/fill/send，必须另行明确动作和审批边界，当前不自动执行。
+3. 继续用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；保持推荐后确认，不自动切换生产路由。
 
 ## 固定决策
 
@@ -77,19 +77,22 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 - 真实 Provider 若缺少凭据必须请用户重新输入，不得从 SQLite、日志或聊天恢复；安全启动注入已实现，模型质量仍待持续对照评估。
 - 上一次隔离验收中，BrowserSkill CLI `0.1.11`、受管 Edge Agent profile 和 `ext-v0.1.7` 的 protocol 1.1 检查均通过，自动读写 smoke 已通过；人工接管请求因本轮没有用户操作而超时。当前 `8772` 实例的最新 `browser.status` 报告为 CLI 未发现、Provider `phase1-test-ollama-1p7b` 不可用，因此不能把历史验收当作当前就绪状态；真实登录审批和写操作仍需用户在明确任务中授权。
 - 隔离 SSE stub 已验证 DSH 协议，但不会替代真实模型；真实模型复杂任务质量仍需用户主动配置 Provider 后单独评估，Sumika 不读取历史密钥或自动安装模型。
+- 真实 ZCode CDP 只读 smoke 已于 2026-08-31 通过：`http://127.0.0.1:9222` 返回 Electron 版本信息，发现 1 个 page target（标题 `ZCode`），页面 `readyState=complete`；观察请求关闭正文读取，仅保留标题、URL scheme 和控件计数。端口和用户实例在 smoke 后仍保持运行。尚未验证发送、填写、登录或任何敏感动作。
 
 ## 验证记录
 
 当前工作树已通过：
 
-- Python unittest: 383 tests（含 retry、凭据桥接、WorkspaceRuntime、历史游标、usage/context 投影、turn ledger、Agent observability sink/日聚合、Provider 端点停止后的被动健康刷新、模型策略和 ZCode quota/目录、现代 runtimeModel 校验、网页聊天登录/授权/归档/回复与快照边界，以及 Plan Review 回答/取消协议）；
-- Playwright: 47 tests（含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
+- Python unittest: 407 tests（含上述基线，以及标准库 CDP transport 的 loopback、目标发现、固定 DOM 动作、路径、Unicode 转义和 contenteditable 边界）；
+- Playwright: 47 tests（47 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml`;
 - `python tools/check_docs.py`;
 - all `tools/*.ps1` PowerShell parser checks;
 - `git diff --check`；
+- `backend/tests/test_cdp_transport.py`: 4 项专项测试通过；
+- 真实 ZCode CDP smoke（2026-08-31）：`health`、已有 `ZCode` page `open`、`observe(include_text=false)` 和 runner 断开通过；端口仍监听且 page target 数量未增加。
 - BrowserSkill 实机：CLI `0.1.11` 与官方 `ext-v0.1.7` 发布包 SHA-256 校验通过；
   daemon、扩展和 browser protocol 检查均通过。Sumika policy companion 已以内容指纹化 tarball
   安装到受管 DSH profile；新启动的固定 DSH `0.1.1-rc.2` 已完成

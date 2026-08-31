@@ -152,18 +152,31 @@ class ElectronCdpClient:
         *,
         runner: Callable[[str, Mapping[str, Any]], Any] | None = None,
         timeout: float = 3.0,
+        builtin: bool = False,
     ) -> None:
         self.endpoint = str(endpoint or "").rstrip("/")
         self.runner = runner
         self.timeout = max(0.2, min(float(timeout), 30.0))
+        self._builtin_runner = None
+        if self.runner is None and builtin:
+            from .cdp import StdlibCdpRunner
+
+            self._builtin_runner = StdlibCdpRunner(self.endpoint, timeout=self.timeout)
+            self.runner = self._builtin_runner
 
     @property
     def available(self) -> bool:
         try:
             parsed = urlparse(self.endpoint)
+            hostname = (parsed.hostname or "").lower()
+            port = parsed.port
         except ValueError:
             return False
-        return parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        if parsed.scheme.lower() not in {"http", "https"} or hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return False
+        if port is not None and not 1 <= port <= 65_535:
+            return False
+        return parsed.username is None and parsed.password is None and not parsed.query and not parsed.fragment
 
     def _call(self, operation: str, payload: Mapping[str, Any]) -> Any:
         if self.runner is None:
@@ -223,6 +236,11 @@ class ElectronCdpClient:
 
     def takeover(self, native_session_id: str, enabled: bool) -> Any:
         return self._call("takeover", {"session_id": native_session_id, "enabled": enabled})
+
+    def shutdown(self) -> None:
+        shutdown = getattr(self.runner, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
 
 
 class WindowsUiAutomationClient:
@@ -439,6 +457,36 @@ class ZCodeDesktopAdapter(DesktopAdapter):
         self.logger = logger
         self._owns_runtime = False
         self._handles: dict[str, tuple[str, str]] = {}
+        self._cdp_clients: dict[str, ElectronCdpClient] = {}
+        self._applications: dict[str, DesktopApplication] = {}
+
+    def _remember_application(self, application: DesktopApplication) -> None:
+        self._applications[application.app_id] = application
+
+    def _cdp_for_session(self, session: DesktopSession) -> ElectronCdpClient | None:
+        application = self._applications.get(session.app_id)
+        return self._cdp_for(application) if application is not None else self.cdp
+
+    def _cdp_for(self, application: DesktopApplication) -> ElectronCdpClient | None:
+        if self.cdp is not None:
+            return self.cdp
+        config = application.config if isinstance(application.config, Mapping) else {}
+        if config.get("enable_cdp") is not True and config.get("cdp_enabled") is not True:
+            return None
+        endpoint = config.get("cdp_endpoint")
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            return None
+        key = endpoint.strip()
+        cached = self._cdp_clients.get(key)
+        if cached is not None:
+            return cached
+        try:
+            client = ElectronCdpClient(key, timeout=float(config.get("cdp_timeout", 3.0) or 3.0), builtin=True)
+        except (DesktopAutomationError, TypeError, ValueError) as error:
+            self._log_info("zcode cdp configuration rejected error_type=%s", type(error).__name__)
+            return None
+        self._cdp_clients[key] = client
+        return client
 
     def _ensure_runtime(self, application: DesktopApplication) -> Any:
         if self.runtime is not None:
@@ -472,6 +520,7 @@ class ZCodeDesktopAdapter(DesktopAdapter):
         return _safe_result(value) if isinstance(value, Mapping) else {"ok": bool(value), "state": "ready" if value else "unavailable"}
 
     def health(self, application: DesktopApplication) -> dict[str, Any]:
+        self._remember_application(application)
         # An unconfigured built-in entry is reported without starting a child.
         if not application.config and self.runtime is None and self.runtime_factory is None:
             return {"ok": False, "state": "unconfigured", "adapter_id": self.adapter_id}
@@ -479,15 +528,23 @@ class ZCodeDesktopAdapter(DesktopAdapter):
         result = self._health_value(runtime)
         if result.get("ok"):
             return {"ok": True, "state": "ready", "transport": "app-protocol", "result": result}
-        if self.cdp is not None:
-            cdp = self.cdp.health()
-            if cdp.get("ok"):
-                return {"ok": True, "state": "ready", "transport": "electron-cdp", "result": cdp}
+        cdp_client = self._cdp_for(application)
+        cdp_result: dict[str, Any] | None = None
+        if cdp_client is not None:
+            try:
+                cdp_result = cdp_client.health()
+            except DesktopAutomationError as error:
+                cdp_result = {"ok": False, "state": "unavailable", "error_code": error.code}
+            if cdp_result.get("ok"):
+                return {"ok": True, "state": "ready", "transport": "electron-cdp", "result": cdp_result}
         if self.uia is not None:
             uia = self.uia.health()
             if uia.get("ok"):
                 return {"ok": True, "state": "ready", "transport": "windows-uia", "result": uia}
-        return {"ok": False, "state": "unavailable", "transport": "app-protocol", "result": result}
+        response = {"ok": False, "state": "unavailable", "transport": "app-protocol", "result": result}
+        if cdp_result is not None:
+            response["cdp"] = _safe_result(cdp_result)
+        return response
 
     def _open_protocol(self, application: DesktopApplication, profile_id: str, options: Mapping[str, Any]) -> dict[str, Any]:
         runtime = self._ensure_runtime(application)
@@ -510,16 +567,21 @@ class ZCodeDesktopAdapter(DesktopAdapter):
         return {"native_session_id": native, "transport": "app-protocol", "state": "ready", "result": _safe_result(value)}
 
     def open(self, application: DesktopApplication, profile_id: str, options: Mapping[str, Any]) -> dict[str, Any]:
+        self._remember_application(application)
         try:
             value = self._open_protocol(application, profile_id, options)
             return value
         except DesktopAutomationError as protocol_error:
             # Fallbacks are only considered when explicitly configured.  A
             # missing app-server never silently grants foreground control.
-            if self.cdp is not None:
-                health = self.cdp.health()
+            cdp_client = self._cdp_for(application)
+            if cdp_client is not None:
+                try:
+                    health = cdp_client.health()
+                except DesktopAutomationError:
+                    health = {"ok": False}
                 if health.get("ok"):
-                    value = self.cdp.open(application, profile_id, options)
+                    value = cdp_client.open(application, profile_id, options)
                     native = _native_id(value) or f"cdp-{uuid4().hex[:12]}"
                     return {"native_session_id": native, "transport": "electron-cdp", "state": "ready", "result": _safe_result(value)}
             if self.uia is not None and options.get("allow_uia") is True:
@@ -545,8 +607,11 @@ class ZCodeDesktopAdapter(DesktopAdapter):
             if runtime is None:
                 raise DesktopAutomationError("ZCode runtime is unavailable", code="zcode-app-server-unavailable")
             value = runtime.snapshot({"sessionId": native, **dict(options)})
-        elif transport == "electron-cdp" and self.cdp is not None:
-            value = self.cdp.observe(native, options)
+        elif transport == "electron-cdp":
+            cdp_client = self._cdp_for_session(session)
+            if cdp_client is None:
+                raise DesktopAutomationError("desktop observation transport is unavailable", code="adapter-unavailable")
+            value = cdp_client.observe(native, options)
         elif transport == "windows-uia" and self.uia is not None:
             value = self.uia.observe(native, options)
         else:
@@ -579,8 +644,11 @@ class ZCodeDesktopAdapter(DesktopAdapter):
             if request.action == "focus":
                 return {"completed": True, "focused": True, "logical": True}
             raise DesktopAutomationError("ZCode app-server does not expose this UI action", code="zcode-ui-action-unavailable")
-        if transport == "electron-cdp" and self.cdp is not None:
-            return _safe_result(self.cdp.act(native, request))
+        if transport == "electron-cdp":
+            cdp_client = self._cdp_for_session(session)
+            if cdp_client is None:
+                raise DesktopAutomationError("desktop action transport is unavailable", code="adapter-unavailable")
+            return _safe_result(cdp_client.act(native, request))
         if transport == "windows-uia" and self.uia is not None:
             return _safe_result(self.uia.act(native, request))
         raise DesktopAutomationError("desktop action transport is unavailable", code="adapter-unavailable")
@@ -590,8 +658,11 @@ class ZCodeDesktopAdapter(DesktopAdapter):
         if handle is None:
             return {"closed": True, "already_closed": True}
         native, transport = handle
-        if transport == "electron-cdp" and self.cdp is not None:
-            return {"closed": True, "result": _safe_result(self.cdp.close(native))}
+        if transport == "electron-cdp":
+            cdp_client = self._cdp_for_session(session)
+            if cdp_client is not None:
+                return {"closed": True, "result": _safe_result(cdp_client.close(native))}
+            return {"closed": True}
         if transport == "windows-uia" and self.uia is not None:
             return {"closed": True, "result": _safe_result(self.uia.close(native))}
         # Closing a logical app-server Session is intentionally separate from
@@ -600,16 +671,17 @@ class ZCodeDesktopAdapter(DesktopAdapter):
 
     def takeover(self, session: DesktopSession, *, enabled: bool) -> dict[str, Any]:
         native, transport = self._handle(session)
+        cdp_client = self._cdp_for_session(session)
         if not enabled:
-            if transport == "electron-cdp" and self.cdp is not None:
-                return {"enabled": False, "result": _safe_result(self.cdp.takeover(native, False))}
+            if transport == "electron-cdp" and cdp_client is not None:
+                return {"enabled": False, "result": _safe_result(cdp_client.takeover(native, False))}
             if transport == "windows-uia" and self.uia is not None:
                 return {"enabled": False, "result": _safe_result(self.uia.takeover(native, False))}
             return {"enabled": False, "logical": True}
         if not self.foreground_enabled:
             raise DesktopAutomationError("foreground takeover is disabled", code="foreground-takeover-disabled")
-        if transport == "electron-cdp" and self.cdp is not None:
-            return {"enabled": True, "result": _safe_result(self.cdp.takeover(native, True))}
+        if transport == "electron-cdp" and cdp_client is not None:
+            return {"enabled": True, "result": _safe_result(cdp_client.takeover(native, True))}
         if transport == "windows-uia" and self.uia is not None:
             return {"enabled": True, "result": _safe_result(self.uia.takeover(native, True))}
         raise DesktopAutomationError("foreground takeover is unavailable for this transport", code="foreground-takeover-unavailable")
@@ -629,6 +701,19 @@ class ZCodeDesktopAdapter(DesktopAdapter):
                 pass
         self.runtime = None if self._owns_runtime else self.runtime
         self._handles.clear()
+        self._applications.clear()
+        clients = list(self._cdp_clients.values())
+        self._cdp_clients.clear()
+        for client in clients:
+            try:
+                client.shutdown()
+            except Exception:
+                pass
+        if self.cdp is not None and self.cdp not in clients:
+            try:
+                self.cdp.shutdown()
+            except Exception:
+                pass
 
 
 __all__ = [

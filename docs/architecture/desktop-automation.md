@@ -30,6 +30,32 @@ takeover(native_session_id, enabled) -> value  # optional
 
 `ZCodeDesktopAdapter` 目前优先使用公开 `app-server`，只有显式配置且协议可用时才尝试 CDP/UIA；缺失 app-server 不会静默开启前台输入。
 
+### Electron CDP 配置
+
+仓库内置的 `StdlibCdpRunner` 不需要额外 Python 包。只有在应用登记配置中同时
+提供 `enable_cdp: true` 和 loopback `cdp_endpoint` 时，`ZCodeDesktopAdapter`
+才会创建它；例如：
+
+```json
+{
+  "app_id": "zcode",
+  "adapter_id": "zcode-desktop",
+  "approved": true,
+  "config": {
+    "enable_cdp": true,
+    "cdp_endpoint": "http://127.0.0.1:9222"
+  }
+}
+```
+
+用户需要自行关闭并以 `--remote-debugging-port=9222` 启动目标 Electron 应用，
+再从 `desktop.automation.catalog` 刷新状态。Sumika 不会替用户重启应用、打开
+`/json/new` 目标或关闭目标窗口。runner 只附加已有 page target，支持固定的
+`observe`、`click`、`focus`、`fill`（包括 `input`、`textarea` 和 `contenteditable`）、
+`select`、`press` 和 `send` 动作；不暴露
+任意 `Runtime.evaluate`、raw CDP、网络检查或全局鼠标键盘。`send` 只得到 DOM
+事件已派发的证据，远端是否真正接收仍返回 `unknown/possibly-sent`。
+
 ## 生命周期与授权
 
 - 应用登记、启动和关闭都要求 `approved: true`；目录和 `observe` 是只读入口。
@@ -47,11 +73,11 @@ SQLite 只保存应用声明和租约的有界元数据，不保存 executable�
 
 ## 当前限制
 
-本仓库提供 CDP/UIA 的安全 transport client 和可注入 runner，未捆绑第三方 WebSocket、UIA 或全局输入依赖。真实应用必须由用户明确提供启动/连接方式，并在隔离环境完成许可证、权限、卸载恢复和端到端验证后再登记。前台接管默认关闭；BrowserSkill 仍是独立的浏览器能力，不通过本工具包控制用户的 Edge。
+本仓库提供 CDP/UIA 的安全 transport client、标准库 CDP runner 和可注入 runner，未捆绑第三方 WebSocket、UIA 或全局输入依赖。真实应用必须由用户明确提供启动/连接方式，并在隔离环境完成许可证、权限、卸载恢复和端到端验证后再登记。前台接管默认关闭；BrowserSkill 仍是独立的浏览器能力，不通过本工具包控制用户的 Edge。
 
 ## 验证入口
 
-- Python 契约：[桌面自动化测试](../../backend/tests/test_desktop_automation.py)
+- Python 契约：[桌面自动化测试](../../backend/tests/test_desktop_automation.py)；[CDP transport 测试](../../backend/tests/test_cdp_transport.py)
 - Core RPC：`desktop.automation.status`、`catalog`、`register`、`open`、`observe`、`act`、`close`、`approval`、`takeover`
 - DSH bridge：[插件 README](../../plugins/dsh-desktop-automation/README.md) 与 [policy tests](../../plugins/dsh-desktop-automation/test/policy.test.mjs)
 

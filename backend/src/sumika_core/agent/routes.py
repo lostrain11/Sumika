@@ -28,6 +28,7 @@ from uuid import uuid4
 
 AGENT_ROUTE_SCHEMA = "agent-route/v1"
 AGENT_CONSULTATION_SCHEMA = "agent-consultation/v1"
+ROUTE_EVIDENCE_SCHEMA = "route-evidence/v1"
 UNTRUSTED_WEB_RESULT_LABEL = "UNTRUSTED_WEB_RESULT"
 
 ROUTE_MODES = frozenset({"web-worker", "consultation-panel"})
@@ -47,6 +48,20 @@ RUN_STATES = frozenset(
         "interrupted",
     }
 )
+EVIDENCE_TYPES = frozenset(
+    {
+        "adapter-declaration",
+        "protocol-probe",
+        "smoke",
+        "real-run",
+        "usage",
+        "official-pricing",
+        "user-confirmation",
+        "unknown",
+    }
+)
+WORKSPACE_ACCESS = frozenset({"none", "read-only", "isolated-worktree"})
+SIDE_EFFECTS = frozenset({"none", "read", "write", "external"})
 
 
 class RouteError(RuntimeError):
@@ -211,6 +226,81 @@ def _confidence(value: Any) -> float | None:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteEvidence:
+    """Traceable evidence used to describe a route.
+
+    Evidence is advisory metadata: the supervisor still applies hard safety
+    and capability gates.  Expired observations are exposed as ``unknown``
+    instead of silently being treated as current.
+    """
+
+    evidence_id: str
+    evidence_type: str
+    source: str
+    version: str = ""
+    observed_at: str = field(default_factory=_now)
+    expires_at: str | None = None
+    confidence: float | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_id", _id(self.evidence_id, "evidence_id") or "")
+        kind = _token(self.evidence_type, "evidence_type", default="unknown").lower()
+        if kind not in EVIDENCE_TYPES:
+            raise RouteValidationError("evidence_type is invalid")
+        object.__setattr__(self, "evidence_type", kind)
+        object.__setattr__(self, "source", _bounded_text(self.source, "source", 400))
+        object.__setattr__(self, "version", sanitize_text(str(self.version or ""), limit=120))
+        object.__setattr__(self, "observed_at", _bounded_text(str(self.observed_at or _now()), "observed_at", 80))
+        object.__setattr__(self, "expires_at", _bounded_text(str(self.expires_at), "expires_at", 80) if self.expires_at else None)
+        object.__setattr__(self, "confidence", _confidence(self.confidence))
+        safe_details = sanitize_context(self.details, budget=4_000) if isinstance(self.details, Mapping) else {}
+        object.__setattr__(self, "details", safe_details)
+
+    @property
+    def fresh(self) -> bool:
+        if not self.expires_at:
+            return True
+        try:
+            expiry = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            return expiry > datetime.now(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": ROUTE_EVIDENCE_SCHEMA,
+            "evidence_id": self.evidence_id,
+            "evidence_type": self.evidence_type,
+            "source": self.source,
+            "version": self.version,
+            "observed_at": self.observed_at,
+            "expires_at": self.expires_at,
+            "confidence": self.confidence,
+            "details": self.details,
+            "fresh": self.fresh,
+            "effective_type": self.evidence_type if self.fresh else "unknown",
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "RouteEvidence":
+        if not isinstance(value, Mapping):
+            raise RouteValidationError("route evidence must be an object")
+        return cls(
+            evidence_id=str(value.get("evidence_id") or value.get("evidenceId") or f"evidence-{uuid4().hex[:16]}"),
+            evidence_type=str(value.get("evidence_type") or value.get("type") or value.get("kind") or "unknown"),
+            source=str(value.get("source") or "unknown"),
+            version=str(value.get("version") or ""),
+            observed_at=str(value.get("observed_at") or value.get("observedAt") or _now()),
+            expires_at=value.get("expires_at") or value.get("expiresAt"),
+            confidence=value.get("confidence"),
+            details=value.get("details") if isinstance(value.get("details"), Mapping) else {},
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RouteDescriptor:
     route_id: str
     kind: str
@@ -227,6 +317,12 @@ class RouteDescriptor:
     requires_confirmation: bool = False
     reason: str | None = None
     source: str = "web-chat"
+    runtime_id: str = "unknown"
+    executor: str = "web"
+    transport: str = "unknown"
+    side_effect: str = "none"
+    quota_consent: str = "unknown"
+    evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "route_id", _id(self.route_id, "route_id") or "")
@@ -242,6 +338,18 @@ class RouteDescriptor:
             raise RouteValidationError("route status is invalid")
         if self.occupancy not in {"idle", "agent", "manual", "waiting"}:
             raise RouteValidationError("route occupancy is invalid")
+        object.__setattr__(self, "runtime_id", _token(self.runtime_id, "runtime_id", default="unknown"))
+        object.__setattr__(self, "executor", _token(self.executor, "executor", default="web"))
+        object.__setattr__(self, "transport", _token(self.transport, "transport", default="unknown"))
+        side_effect = str(self.side_effect or "none").strip().lower()
+        if side_effect not in SIDE_EFFECTS:
+            raise RouteValidationError("route side_effect is invalid")
+        object.__setattr__(self, "side_effect", side_effect)
+        object.__setattr__(self, "quota_consent", _token(self.quota_consent, "quota_consent", default="unknown"))
+        refs = []
+        for ref in self.evidence_refs[:16]:
+            refs.append(_id(ref, "evidence_ref") or "")
+        object.__setattr__(self, "evidence_refs", tuple(ref for ref in refs if ref))
 
     @property
     def available(self) -> bool:
@@ -265,6 +373,12 @@ class RouteDescriptor:
             "requires_confirmation": self.requires_confirmation,
             "reason": self.reason,
             "source": self.source,
+            "runtime_id": self.runtime_id,
+            "executor": self.executor,
+            "transport": self.transport,
+            "side_effect": self.side_effect,
+            "quota_consent": self.quota_consent,
+            "evidence_refs": list(self.evidence_refs),
         }
 
 
@@ -344,6 +458,11 @@ class SubtaskDispatch:
     continuation_of: str | None = None
     role: str = "independent reviewer"
     consultation_id: str | None = None
+    deadline_at: str | None = None
+    workspace_access: str = "none"
+    required_capabilities: tuple[str, ...] = ("text",)
+    depth: int = 0
+    runtime_id: str = "unknown"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dispatch_id", _id(self.dispatch_id, "dispatch_id") or "")
@@ -357,6 +476,16 @@ class SubtaskDispatch:
         object.__setattr__(self, "continuation_of", _id(self.continuation_of, "continuation_of", required=False))
         object.__setattr__(self, "role", sanitize_text(str(self.role or "independent reviewer"), limit=240))
         object.__setattr__(self, "consultation_id", _id(self.consultation_id, "consultation_id", required=False))
+        object.__setattr__(self, "deadline_at", _bounded_text(str(self.deadline_at), "deadline_at", 80) if self.deadline_at else None)
+        workspace_access = str(self.workspace_access or "none").strip().lower()
+        if workspace_access not in WORKSPACE_ACCESS:
+            raise RouteValidationError("workspace_access is invalid")
+        object.__setattr__(self, "workspace_access", workspace_access)
+        capabilities = tuple(_token(item, "required_capability") for item in self.required_capabilities[:16])
+        object.__setattr__(self, "required_capabilities", capabilities or ("text",))
+        if isinstance(self.depth, bool) or not isinstance(self.depth, int) or not 0 <= self.depth <= 1:
+            raise RouteValidationError("depth must be 0 or 1")
+        object.__setattr__(self, "runtime_id", _token(self.runtime_id, "runtime_id", default="unknown"))
 
     def prompt(self, decision_kind: str | None = None) -> str:
         context = json.dumps(self.context_refs, ensure_ascii=False, sort_keys=True, default=str)
@@ -385,6 +514,11 @@ class SubtaskDispatch:
             "mode": self.mode,
             "continuation_of": self.continuation_of,
             "role": self.role,
+            "deadline_at": self.deadline_at,
+            "workspace_access": self.workspace_access,
+            "required_capabilities": list(self.required_capabilities),
+            "depth": self.depth,
+            "runtime_id": self.runtime_id,
         }
 
 
@@ -401,6 +535,10 @@ class SubtaskResult:
     error_code: str | None = None
     untrusted_external: bool = True
     consultation_id: str | None = None
+    structured_result: Any = None
+    artifacts: tuple[dict[str, Any], ...] = ()
+    runtime_id: str = "unknown"
+    retryable: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dispatch_id", _id(self.dispatch_id, "dispatch_id") or "")
@@ -420,6 +558,26 @@ class SubtaskResult:
                 object.__setattr__(self, "latency_ms", None)
         object.__setattr__(self, "error_code", _token(self.error_code, "error_code", default="") if self.error_code else None)
         object.__setattr__(self, "consultation_id", _id(self.consultation_id, "consultation_id", required=False))
+        structured = self.structured_result
+        if structured is not None and not isinstance(structured, (Mapping, list, tuple, str, int, float, bool)):
+            raise RouteValidationError("structured_result contains unsupported values")
+        if isinstance(structured, tuple):
+            structured = list(structured)
+        if isinstance(structured, Mapping):
+            structured = sanitize_context(structured, budget=8_000)
+        elif isinstance(structured, list):
+            structured = sanitize_context(structured, budget=8_000)
+        elif isinstance(structured, str):
+            structured = sanitize_text(structured, limit=8_000)
+        object.__setattr__(self, "structured_result", structured)
+        safe_artifacts: list[dict[str, Any]] = []
+        for item in self.artifacts[:16]:
+            if not isinstance(item, Mapping):
+                continue
+            safe_artifacts.append(sanitize_context(dict(item), budget=2_000))
+        object.__setattr__(self, "artifacts", tuple(safe_artifacts))
+        object.__setattr__(self, "runtime_id", _token(self.runtime_id, "runtime_id", default="unknown"))
+        object.__setattr__(self, "retryable", bool(self.retryable))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -436,6 +594,10 @@ class SubtaskResult:
             "error_code": self.error_code,
             "untrusted_external": True,
             "trust_label": UNTRUSTED_WEB_RESULT_LABEL,
+            "structured_result": self.structured_result,
+            "artifacts": list(self.artifacts),
+            "runtime_id": self.runtime_id,
+            "retryable": self.retryable,
         }
 
 
@@ -1173,7 +1335,9 @@ WebRouteCoordinator = RouteCoordinator
 __all__ = [
     "AGENT_ROUTE_SCHEMA",
     "AGENT_CONSULTATION_SCHEMA",
+    "ROUTE_EVIDENCE_SCHEMA",
     "UNTRUSTED_WEB_RESULT_LABEL",
+    "RouteEvidence",
     "ConsultationMemberResult",
     "ConsultationRequest",
     "ConsultationResult",

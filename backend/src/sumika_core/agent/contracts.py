@@ -33,6 +33,7 @@ class AgentCapability(str, Enum):
     PRESETS = "presets"
     MODELS = "models"
     SESSION_FORK = "session-fork"
+    SESSION_CLOSE = "session-close"
     RAW_EXPORT = "raw-export"
     WORKSPACES = "workspaces"
     PROVIDER_BRIDGE = "provider-bridge"
@@ -50,6 +51,12 @@ class AgentCapability(str, Enum):
     INTERACTIONS = "interactions"
     EVENT_INGEST = "event-ingest"
     RETRY = "retry"
+
+
+# Route/worker contracts intentionally live beside the stable Agent runtime
+# contract.  They are small value objects and do not import a Harness adapter.
+ROUTE_WORKSPACE_ACCESS = frozenset({"none", "read-only", "isolated-worktree"})
+ROUTE_SIDE_EFFECTS = frozenset({"none", "read", "write", "external"})
 
 
 class AgentRuntime(ABC):
@@ -90,6 +97,17 @@ class AgentRuntime(ABC):
     @abstractmethod
     def cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
+
+    def close_session(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Best-effort close for an isolated worker session.
+
+        Harnesses that do not expose a public session-close operation may keep
+        the default explicit unsupported result; Core process shutdown still
+        closes the runtime itself.
+        """
+
+        del params
+        self._unsupported(AgentCapability.SESSION_CLOSE, "session close")
 
     def retry_prompt(self, params: dict[str, Any]) -> dict[str, Any]:
         """Retry the latest failed user target without exposing its body."""

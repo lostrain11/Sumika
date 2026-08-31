@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from sumika_core.agent import AgentCapability, AgentRuntimeError
+from sumika_core.agent.supervisor import ProviderWorker, RuntimeRouteDescriptor
 from sumika_core.protocol.jsonrpc import JsonRpcError
 from sumika_core.server import CoreApplication
 from sumika_core.workspace import WorkspaceError
@@ -538,6 +539,410 @@ class AgentServerTests(unittest.TestCase):
         self.assertFalse(result["session_created"])
         preflight.assert_called_once()
         create_session.assert_not_called()
+
+    def test_route_bridge_handshake_requires_ready_runtime_and_exact_tool_set(self):
+        tools = [
+            "sumika_route_catalog",
+            "sumika_route_replan",
+            "sumika_route_dispatch",
+            "sumika_route_status",
+            "sumika_consultation_start",
+            "sumika_consultation_status",
+            "sumika_route_cancel",
+            "sumika_route_retry",
+        ]
+        pending = self.application.rpc(
+            "sumika.route.bridge_tools",
+            {
+                "register": True,
+                "plugin_id": "sumika.dsh-route-bridge",
+                "plugin_version": "0.1.0",
+                "tools": tools,
+            },
+        )
+        self.assertFalse(pending["registered"])
+        self.assertEqual(pending["status"], "runtime-unavailable")
+
+        with patch.object(self.application.agent, "status", return_value={"state": "ready", "ready": True}):
+            registered = self.application.rpc(
+                "sumika.route.bridge_tools",
+                {
+                    "register": True,
+                    "plugin_id": "sumika.dsh-route-bridge",
+                    "plugin_version": "0.1.0",
+                    "tools": tools,
+                },
+            )
+        self.assertTrue(registered["registered"])
+        self.assertEqual(registered["status"], "registered")
+        self.assertEqual(registered["plugin"]["id"], "sumika.dsh-route-bridge")
+        self.assertEqual(len(registered["tools"]), 8)
+
+        with patch.object(self.application.agent, "status", return_value={"state": "ready", "ready": True}):
+            mismatch = self.application.rpc(
+                "sumika.route.bridge_tools",
+                {
+                    "register": True,
+                    "plugin_id": "sumika.dsh-route-bridge",
+                    "plugin_version": "0.1.0",
+                    "tools": tools[:-1],
+                },
+            )
+        self.assertFalse(mismatch["registered"])
+        self.assertEqual(mismatch["status"], "tool-set-mismatch")
+
+    def test_route_bridge_handshake_rejects_malformed_registration_and_clears(self):
+        with self.assertRaises(JsonRpcError) as error:
+            self.application.rpc(
+                "sumika.route.bridge_tools",
+                {"register": "yes"},
+            )
+        self.assertEqual(error.exception.code, -32602)
+        with self.assertRaises(JsonRpcError) as error:
+            self.application.rpc(
+                "sumika.route.bridge_tools",
+                {
+                    "register": True,
+                    "plugin_id": "sumika.dsh-route-bridge",
+                    "plugin_version": "0.1.0",
+                    "tools": ["sumika_route_catalog", "sumika_route_catalog"],
+                },
+            )
+        self.assertEqual(error.exception.code, -32602)
+
+        self.application._route_bridge_registrations["sumika.dsh-route-bridge"] = {
+            "plugin_id": "sumika.dsh-route-bridge",
+            "plugin_version": "0.1.0",
+            "tools": (),
+            "registered_at": "2026-08-31T00:00:00+00:00",
+        }
+        cleared = self.application.rpc(
+            "sumika.route.bridge_tools",
+            {"plugin_id": "sumika.dsh-route-bridge", "unregister": True},
+        )
+        self.assertFalse(cleared["registered"])
+        self.assertEqual(cleared["status"], "unregistered")
+
+    def test_consultation_rpc_prefers_modern_supervisor_for_routable_web_route(self):
+        self.application.route_supervisor.set_route_catalog(
+            [
+                RuntimeRouteDescriptor(
+                    route_id="web:modern-profile",
+                    kind="web-worker",
+                    label="Modern web profile",
+                    runtime_id="browserskill",
+                    executor="web-coordinator",
+                    transport="browser-dom",
+                    provider_profile_id="modern-profile",
+                    provider_key="modern-provider",
+                    capabilities=("text", "chat", "browser"),
+                    status="ready",
+                    routable=True,
+                    source_kind="web-chat",
+                    auth_state="authorized",
+                    health_state="healthy",
+                    quota_consent="granted",
+                    quota_state="unknown",
+                    cost_class="unknown",
+                )
+            ]
+        )
+        modern_result = {
+            "schema": "agent-consultation/v1",
+            "consultation_id": "consultation-modern",
+            "status": "running",
+            "members": [],
+        }
+        with (
+            patch.object(self.application.route_supervisor, "start_consultation", return_value=modern_result) as modern,
+            patch.object(self.application.routes, "start_consultation") as legacy,
+        ):
+            result = self.application.rpc(
+                "sumika.consultation.start",
+                {
+                    "consultation_id": "consultation-modern",
+                    "parent_session_id": "session-modern",
+                    "question": "use the modern route",
+                    "decision_kind": "brainstorm",
+                    "max_members": 1,
+                },
+            )
+        self.assertEqual(result["consultation_id"], "consultation-modern")
+        modern.assert_called_once()
+        legacy.assert_not_called()
+
+    def test_consultation_rpc_keeps_legacy_route_id_on_legacy_coordinator(self):
+        legacy_result = {
+            "schema": "agent-consultation/v1",
+            "consultation_id": "consultation-legacy",
+            "status": "failed",
+            "members": [],
+        }
+        self.application.route_supervisor.set_route_catalog(
+            [
+                RuntimeRouteDescriptor(
+                    route_id="web:modern-profile",
+                    kind="web-worker",
+                    label="Modern web profile",
+                    runtime_id="browserskill",
+                    executor="web-coordinator",
+                    transport="browser-dom",
+                    provider_profile_id="modern-profile",
+                    provider_key="modern-provider",
+                    capabilities=("text",),
+                    status="ready",
+                    routable=True,
+                    source_kind="web-chat",
+                    auth_state="authorized",
+                    health_state="healthy",
+                    quota_consent="granted",
+                    quota_state="unknown",
+                    cost_class="unknown",
+                )
+            ]
+        )
+        with (
+            patch.object(self.application.route_supervisor, "start_consultation") as modern,
+            patch.object(self.application.routes, "start_consultation", return_value=legacy_result) as legacy,
+        ):
+            result = self.application.rpc(
+                "sumika.consultation.start",
+                {
+                    "consultation_id": "consultation-legacy",
+                    "parent_session_id": "session-legacy",
+                    "question": "old route spelling",
+                    "decision_kind": "small-answer",
+                    "route_constraints": {"route_ids": ["web-chat:legacy-profile"]},
+                    "max_members": 1,
+                },
+            )
+        self.assertEqual(result["consultation_id"], "consultation-legacy")
+        legacy.assert_called_once()
+        modern.assert_not_called()
+
+    @staticmethod
+    def _modern_web_route(route_id, *, provider_key, profile_id=None, occupancy="idle", quota_consent="granted"):
+        return RuntimeRouteDescriptor(
+            route_id=route_id,
+            kind="web-worker",
+            label=route_id,
+            runtime_id="browserskill",
+            executor="fixture-web",
+            transport="browser-dom",
+            provider_profile_id=profile_id or route_id,
+            provider_key=provider_key,
+            capabilities=("text", "chat", "browser"),
+            status="ready",
+            routable=True,
+            occupancy=occupancy,
+            source_kind="web-chat",
+            auth_state="authorized",
+            health_state="healthy",
+            quota_consent=quota_consent,
+            quota_state="unknown",
+            cost_class="unknown",
+            processing_location="cloud",
+        )
+
+    def _install_modern_web_routes(self, routes, executor):
+        for route in routes:
+            self.application.route_supervisor.register_route(
+                route,
+                worker=ProviderWorker(executor, worker_id=f"worker-{route.route_id}", runtime_id="browserskill"),
+            )
+
+    def test_modern_consultation_rpc_runs_distinct_web_providers(self):
+        calls = []
+
+        def execute(dispatch, route, cancel_event):
+            calls.append(route.route_id)
+            return {"status": "completed", "answer": f"opinion-{route.route_id}"}
+
+        routes = [
+            self._modern_web_route("web:provider-a-1", provider_key="provider-a", profile_id="profile-a-1"),
+            self._modern_web_route("web:provider-a-2", provider_key="provider-a", profile_id="profile-a-2"),
+            self._modern_web_route("web:provider-b", provider_key="provider-b", profile_id="profile-b"),
+        ]
+        self._install_modern_web_routes(routes, execute)
+
+        result = self.application.rpc(
+            "sumika.consultation.start",
+            {
+                "consultation_id": "consultation-rpc-panel",
+                "parent_session_id": "session-rpc-panel",
+                "parent_turn_id": "turn-rpc-panel",
+                "question": "compare independent approaches",
+                "decision_kind": "brainstorm",
+                "max_members": 3,
+                "wait": True,
+                "timeout": 2,
+            },
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["successful_count"], 2)
+        self.assertEqual({item["route_id"] for item in result["members"]}, {"web:provider-a-1", "web:provider-b"})
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(result["disagreement_detected"])
+        self.assertTrue(result["untrusted_external"])
+
+    def test_modern_consultation_rpc_exposes_partial_and_total_failures(self):
+        def execute(dispatch, route, cancel_event):
+            if route.route_id.endswith("fail"):
+                return {"status": "failed", "error_code": "site-unavailable"}
+            return {"status": "completed", "answer": "one opinion"}
+
+        partial_routes = [
+            self._modern_web_route("web:rpc-ok", provider_key="rpc-ok", profile_id="rpc-ok"),
+            self._modern_web_route("web:rpc-fail", provider_key="rpc-fail", profile_id="rpc-fail"),
+        ]
+        self._install_modern_web_routes(partial_routes, execute)
+        partial = self.application.rpc(
+            "sumika.consultation.start",
+            {
+                "consultation_id": "consultation-rpc-partial",
+                "parent_session_id": "session-rpc-failures",
+                "question": "check partial failure",
+                "decision_kind": "fact-check",
+                "max_members": 2,
+                "wait": True,
+                "timeout": 2,
+            },
+        )
+        self.assertEqual(partial["status"], "partial")
+        self.assertEqual(partial["successful_count"], 1)
+        self.assertEqual(partial["failed_count"], 1)
+        failed_member = next(item for item in partial["members"] if item["status"] == "failed")
+        self.assertIsNone(failed_member["answer"])
+        self.assertEqual(failed_member["error_code"], "site-unavailable")
+
+        total_routes = [
+            self._modern_web_route("web:rpc-total-fail-a", provider_key="rpc-total-a", profile_id="rpc-total-a"),
+            self._modern_web_route("web:rpc-total-fail-b", provider_key="rpc-total-b", profile_id="rpc-total-b"),
+        ]
+        self._install_modern_web_routes(total_routes, lambda dispatch, route, cancel_event: {"status": "failed", "error_code": "all-sites-down"})
+        total = self.application.rpc(
+            "sumika.consultation.start",
+            {
+                "consultation_id": "consultation-rpc-total",
+                "parent_session_id": "session-rpc-failures",
+                "question": "check total failure",
+                "decision_kind": "fact-check",
+                "route_constraints": {"route_ids": [route.route_id for route in total_routes]},
+                "max_members": 2,
+                "wait": True,
+                "timeout": 2,
+            },
+        )
+        self.assertEqual(total["status"], "failed")
+        self.assertEqual(total["successful_count"], 0)
+        self.assertEqual(total["failed_count"], 2)
+        self.assertTrue(all(item["answer"] is None for item in total["members"]))
+
+    def test_modern_route_rpc_keeps_unknown_quota_gated_and_filters_unavailable(self):
+        calls = []
+        unknown = self._modern_web_route(
+            "web:unknown-quota",
+            provider_key="unknown-quota-provider",
+            profile_id="unknown-quota-profile",
+            quota_consent="unknown",
+        )
+        unavailable = RuntimeRouteDescriptor.from_value(
+            {
+                **unknown.to_dict(),
+                "route_id": "web:unavailable",
+                "provider_profile_id": "unavailable-profile",
+                "provider_key": "unavailable-provider",
+                "status": "unavailable",
+                "routable": False,
+            }
+        )
+        self._install_modern_web_routes(
+            [unknown, unavailable],
+            lambda dispatch, route, cancel_event: calls.append(route.route_id) or {"status": "completed", "answer": "must not run"},
+        )
+
+        catalog = self.application.route_supervisor.catalog(include_unavailable=False)
+        self.assertEqual(
+            [item["route_id"] for item in catalog["routes"] if item["route_id"] in {unknown.route_id, unavailable.route_id}],
+            [unknown.route_id],
+        )
+        gated = self.application.rpc(
+            "sumika.consultation.start",
+            {
+                "consultation_id": "consultation-rpc-unknown-quota",
+                "parent_session_id": "session-rpc-unknown-quota",
+                "question": "unknown quota must ask",
+                "decision_kind": "small-answer",
+                "max_members": 1,
+            },
+        )
+        self.assertEqual(gated["status"], "waiting-human")
+        self.assertEqual(gated["members"][0]["status"], "waiting-human")
+        self.assertEqual(gated["members"][0]["error_code"], "confirmation-required")
+        self.assertEqual(calls, [])
+
+    def test_legacy_profile_occupancy_updates_modern_route_projection(self):
+        calls = []
+        route = self._modern_web_route(
+            "web:lease-profile",
+            provider_key="lease-provider",
+            profile_id="lease-profile",
+        )
+        self._install_modern_web_routes(
+            [route],
+            lambda dispatch, selected, cancel_event: calls.append(selected.route_id) or {"status": "completed", "answer": "ok"},
+        )
+
+        occupied = self.application.rpc(
+            "sumika.route.occupancy",
+            {"profile_id": "lease-profile", "owner": "manual"},
+        )
+        self.assertEqual(occupied["occupancy"], "manual")
+        projected = next(
+            item for item in self.application.route_supervisor.catalog()["routes"]
+            if item["route_id"] == route.route_id
+        )
+        self.assertEqual(projected["occupancy"], "manual")
+        self.assertFalse(projected["available"])
+
+        blocked = self.application.rpc(
+            "sumika.consultation.start",
+            {
+                "consultation_id": "consultation-rpc-lease-blocked",
+                "parent_session_id": "session-rpc-lease",
+                "question": "do not race manual operator",
+                "decision_kind": "small-answer",
+                "max_members": 1,
+            },
+        )
+        self.assertEqual(blocked["status"], "failed")
+        self.assertEqual(calls, [])
+
+        released = self.application.rpc(
+            "sumika.route.occupancy",
+            {"profile_id": "lease-profile", "owner": "idle"},
+        )
+        self.assertEqual(released["occupancy"], "idle")
+        projected = next(
+            item for item in self.application.route_supervisor.catalog()["routes"]
+            if item["route_id"] == route.route_id
+        )
+        self.assertTrue(projected["available"])
+        resumed = self.application.rpc(
+            "sumika.consultation.start",
+            {
+                "consultation_id": "consultation-rpc-lease-released",
+                "parent_session_id": "session-rpc-lease",
+                "question": "run after release",
+                "decision_kind": "small-answer",
+                "max_members": 1,
+                "wait": True,
+                "timeout": 2,
+            },
+        )
+        self.assertEqual(resumed["status"], "completed")
+        self.assertEqual(calls, [route.route_id])
 
     def test_model_policy_confirmation_precedes_provider_binding_and_model_selection(self):
         profile = {

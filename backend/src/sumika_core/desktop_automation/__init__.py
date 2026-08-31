@@ -11,6 +11,7 @@ from .adapters import (
     WindowsUiAutomationClient,
     ZCodeDesktopAdapter,
 )
+from .cdp import StdlibCdpRunner
 from .audit import AUDIT_SCHEMA_VERSION, DesktopAuditSink
 from .contracts import (
     DESKTOP_ACTION_SCHEMA,
@@ -48,6 +49,7 @@ __all__ = [
     "DesktopSession",
     "ElectronCdpClient",
     "MemoryDesktopAdapter",
+    "StdlibCdpRunner",
     "TransportDesktopAdapter",
     "WindowsUiAutomationClient",
     "ZCodeDesktopAdapter",

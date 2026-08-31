@@ -1,0 +1,7 @@
+- insert:
+    - id: sumika-route-bridge
+      name: "@sumika/dsh-route-bridge"
+      config:
+        endpoint: "http://127.0.0.1:8771/rpc"
+        policyTimeoutMs: 1500
+        enabled: true

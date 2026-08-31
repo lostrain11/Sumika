@@ -1,0 +1,23 @@
+{
+  "id": "sumika.dsh-route-bridge",
+  "version": "0.1.0",
+  "capabilities": ["tool"],
+  "entrypoint": "lib/index.mjs",
+  "runtime": "external-process",
+  "sdk_range": ">=0.1,<1.0",
+  "permissions": [
+    "sumika.route.catalog",
+    "sumika.route.replan",
+    "sumika.route.dispatch",
+    "sumika.route.status",
+    "sumika.route.cancel",
+    "sumika.route.retry",
+    "sumika.consultation.start",
+    "sumika.consultation.status"
+  ],
+  "dependencies": [],
+  "resource_requirements": {
+    "network": "loopback-only",
+    "filesystem": "none"
+  }
+}

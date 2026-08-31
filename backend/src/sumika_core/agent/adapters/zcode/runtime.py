@@ -407,6 +407,7 @@ class ZCodeAgentRuntime(AgentRuntime):
         self._initialized = False
         self._event_sink: Any = None
         self._event_lock = threading.RLock()
+        self._event_listeners: set[Any] = set()
         self._pending_server_requests: set[str] = set()
         self._advertised_capabilities: set[AgentCapability] | None = None
         self._advertised_features: set[str] = set()
@@ -916,6 +917,24 @@ class ZCodeAgentRuntime(AgentRuntime):
         result.update({"session_id": session_id, "accepted": bool(result.get("accepted", True))})
         return result
 
+    def close_session(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Close one isolated session when the public app-server exposes it."""
+
+        self._ensure_initialized()
+        session_id = _session_id(params)
+        if self._is_modern:
+            value = self._transport.request("session/close", {"sessionId": session_id})
+        else:
+            value = self._call_variants(
+                ("session/close", "thread/close", "session.close"),
+                {"sessionId": session_id},
+            )
+        result = _compact_public(value)
+        if not isinstance(result, dict):
+            result = {"value": result}
+        result.update({"session_id": session_id, "accepted": bool(result.get("accepted", True))})
+        return result
+
     def search_sessions(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self._ensure_initialized()
         if self._is_modern:
@@ -1326,6 +1345,20 @@ class ZCodeAgentRuntime(AgentRuntime):
     def set_event_sink(self, sink: Any) -> None:
         self._event_sink = sink
 
+    def add_event_listener(self, listener: Any) -> Any:
+        """Subscribe to normalized events without replacing Core's sink."""
+
+        if not callable(listener):
+            raise AgentRuntimeError("event listener must be callable")
+        with self._event_lock:
+            self._event_listeners.add(listener)
+
+        def remove() -> None:
+            with self._event_lock:
+                self._event_listeners.discard(listener)
+
+        return remove
+
     def bind_credential_store(self, credential_store: Any) -> None:
         # ZCode owns its login state.  Deliberately do not retain or inspect
         # Sumika's credential store here.
@@ -1340,6 +1373,7 @@ class ZCodeAgentRuntime(AgentRuntime):
         self._advertised_capabilities = None
         with self._event_lock:
             self._pending_server_requests.clear()
+            self._event_listeners.clear()
 
     def _reset_after_transport_loss(self) -> None:
         if self._transport.alive:
@@ -1477,13 +1511,21 @@ class ZCodeAgentRuntime(AgentRuntime):
             event = self.normalize_event(payload)
         except AgentRuntimeError:
             return
-        sink = self._event_sink
+        with self._event_lock:
+            sink = self._event_sink
+            listeners = tuple(self._event_listeners)
         if sink is not None:
             try:
                 sink(event)
             except Exception as error:
                 if self.logger:
                     self.logger.info("zcode event sink failed error_type=%s", type(error).__name__)
+        for listener in listeners:
+            try:
+                listener(event)
+            except Exception as error:
+                if self.logger:
+                    self.logger.info("zcode event listener failed error_type=%s", type(error).__name__)
 
     def supports(self, capability: AgentCapability | str) -> bool:
         try:

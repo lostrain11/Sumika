@@ -247,6 +247,13 @@ class RoutingRequest:
     character_id: str | None = None
     agent_preset_id: str | None = None
     task_text: str = ""
+    # Runtime-neutral context used by DynamicRouteSupervisor.  These fields
+    # are optional so existing model-policy callers and persisted requests
+    # remain wire-compatible.
+    trigger_event: str | None = None
+    task_stage: str | None = None
+    remaining_budget: float | None = None
+    parent_turn_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task_kind", _safe_text(self.task_kind, 80).lower() or "chat")
@@ -282,6 +289,22 @@ class RoutingRequest:
         object.__setattr__(self, "character_id", _safe_text(self.character_id, 120) if self.character_id else None)
         object.__setattr__(self, "agent_preset_id", _safe_text(self.agent_preset_id, 160) if self.agent_preset_id else None)
         object.__setattr__(self, "task_text", _safe_text(self.task_text, 4000))
+        trigger = _safe_text(self.trigger_event, 80).lower() if self.trigger_event else None
+        stage = _safe_text(self.task_stage, 80).lower() if self.task_stage else None
+        if trigger and any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._:-" for char in trigger):
+            raise ModelPolicyError("trigger_event contains unsupported characters")
+        if stage and any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._:-" for char in stage):
+            raise ModelPolicyError("task_stage contains unsupported characters")
+        budget = self.remaining_budget
+        if budget is not None:
+            if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(float(budget)) or float(budget) < 0:
+                raise ModelPolicyError("remaining_budget must be a finite non-negative number")
+            budget = round(float(budget), 6)
+        parent_turn = _safe_text(self.parent_turn_id, 240) if self.parent_turn_id else None
+        object.__setattr__(self, "trigger_event", trigger)
+        object.__setattr__(self, "task_stage", stage)
+        object.__setattr__(self, "remaining_budget", budget)
+        object.__setattr__(self, "parent_turn_id", parent_turn)
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -869,7 +892,10 @@ class ModelPolicyService:
                 provider_id=source_id,
                 model_id="web-session",
                 display_name=label,
-                capabilities=("chat", "browser"),
+                # ``text`` is the runtime-neutral capability consumed by the
+                # route supervisor.  Keep the more specific labels as well
+                # so existing Modules/UI projections remain compatible.
+                capabilities=("text", "chat", "browser"),
                 quality_tier="unknown",
                 cost_class="unknown",
                 processing_location="cloud",
@@ -883,6 +909,7 @@ class ModelPolicyService:
                     "requires_user_login": True,
                     "quota_source": "provider_web_account",
                     "authorization_boundary": "manual-login",
+                    "quota_consent": "unknown",
                 },
             )
             for source_id, label in sources
@@ -906,13 +933,21 @@ class ModelPolicyService:
             status = _safe_text(profile.get("status"), 40).lower() or "unknown"
             consented = profile.get("auto_chat_enabled") is True and "chat.send" in set(profile.get("allowed_actions") or [])
             ready = status == "ready" and auth_state == "authorized"
+            # Keep the profile/session ownership boundary visible to the
+            # runtime-neutral route layer.  ``agent_occupied`` is the local
+            # coordinator's active write marker; an ``other-core`` lease is a
+            # hard handoff boundary.  A lease owned by this Core is not
+            # inferred to be manual here because the same BrowserSkill
+            # session may be reused for a later Agent turn.
+            lease_owner = _safe_text(profile.get("browser_profile_lease_owner"), 40).lower()
+            occupancy = "agent" if profile.get("agent_occupied") is True else "waiting" if lease_owner == "other-core" else "idle"
             entries.append(
                 ModelCatalogEntry(
                     route_id=f"web:{profile_id}",
                     provider_id=f"web-chat:{profile_id}",
                     model_id=model_id,
                     display_name=f"{_safe_text(profile.get('name') or profile_id, 160)} · 网页聊天",
-                    capabilities=("chat", "browser"),
+                    capabilities=("text", "chat", "browser"),
                     quality_tier=_quality_from_model(model_id),
                     # Web accounts do not expose a verified quota source.  A
                     # profile-level ``free-only`` preference is a safety
@@ -934,6 +969,12 @@ class ModelPolicyService:
                         "authorization_boundary": "one-time-chat-consent",
                         "quota_source": "provider_web_account",
                         "budget_policy": _safe_text(profile.get("budget_policy"), 40) or "free-only",
+                        # Automatic chat consent is also the explicit
+                        # profile-level permission to spend an unknown web
+                        # quota.  It is not evidence that the site is free;
+                        # the route remains ``cost_class=unknown``.
+                        "quota_consent": "granted" if consented else "unknown",
+                        "occupancy": occupancy,
                     },
                 )
             )
@@ -1140,6 +1181,10 @@ def routing_request_from_dict(value: Mapping[str, Any]) -> RoutingRequest:
         character_id=value.get("character_id", value.get("characterId")),
         agent_preset_id=value.get("agent_preset_id", value.get("agentPresetId")),
         task_text=value.get("task_text", value.get("taskText", value.get("text", ""))),
+        trigger_event=value.get("trigger_event", value.get("triggerEvent")),
+        task_stage=value.get("task_stage", value.get("taskStage")),
+        remaining_budget=value.get("remaining_budget", value.get("remainingBudget")),
+        parent_turn_id=value.get("parent_turn_id", value.get("parentTurnId")),
     )
 
 

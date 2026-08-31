@@ -20,6 +20,28 @@ from .routes import (
     SubtaskResult,
     WebRouteCoordinator,
 )
+from .supervisor import (
+    DynamicRouteEvidence,
+    DynamicRouteSupervisor,
+    DynamicRoutingRequest,
+    DynamicSubtaskDispatch,
+    DynamicSubtaskResult,
+    EvidenceResolver,
+    ExternalHarnessWorker,
+    NativeChildAgentWorker,
+    ProviderWorker,
+    RuntimeRouteDescriptor,
+    RouteEvidence as SupervisorRouteEvidence,
+    WorkerAdapter,
+    WorkerRegistry,
+    WebWorker,
+)
+from .runtime_workers import (
+    LegacyWebWorker,
+    NativeRuntimeWorker,
+    ProviderProfileWorker,
+    ZCodeExternalHarnessWorker,
+)
 
 if TYPE_CHECKING:
     from .adapters.dsh.config import DSHRuntimeConfig
@@ -74,4 +96,22 @@ __all__ = [
     "SubtaskDispatch",
     "SubtaskResult",
     "create_agent_runtime",
+    "DynamicRouteEvidence",
+    "SupervisorRouteEvidence",
+    "DynamicRouteSupervisor",
+    "DynamicRoutingRequest",
+    "DynamicSubtaskDispatch",
+    "DynamicSubtaskResult",
+    "EvidenceResolver",
+    "RuntimeRouteDescriptor",
+    "WorkerAdapter",
+    "WorkerRegistry",
+    "ProviderWorker",
+    "WebWorker",
+    "NativeChildAgentWorker",
+    "ExternalHarnessWorker",
+    "ProviderProfileWorker",
+    "LegacyWebWorker",
+    "NativeRuntimeWorker",
+    "ZCodeExternalHarnessWorker",
 ]
