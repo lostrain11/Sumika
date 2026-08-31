@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Mapping, Protocol
 
 from ..protocol.models import utc_now
 
@@ -57,6 +57,52 @@ class AgentCapability(str, Enum):
 # contract.  They are small value objects and do not import a Harness adapter.
 ROUTE_WORKSPACE_ACCESS = frozenset({"none", "read-only", "isolated-worktree"})
 ROUTE_SIDE_EFFECTS = frozenset({"none", "read", "write", "external"})
+
+
+class ExternalHarnessClient(Protocol):
+    """Minimal public client boundary for an optional child Harness.
+
+    Sumika never reaches into a Harness' credential store or private files.
+    An adapter only needs to expose the operations it supports; optional
+    methods are discovered by the route worker and unsupported operations fail
+    closed.  ``runtime_models`` and ``quota_status`` are read-only discovery
+    hooks used by the model policy before a worker is dispatched.
+    """
+
+    runtime_id: str
+
+    def health(self) -> Mapping[str, Any]: ...
+
+    def runtime_models(self, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]: ...
+
+    def create_session(self, params: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def prompt(self, params: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def cancel(self, params: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def close_session(self, params: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+
+class ExternalRouteSource(Protocol):
+    """Model-policy source and Worker factory for an external Harness.
+
+    Implementations may be supplied by a first-party or community adapter.
+    The source returns only bounded, non-secret catalog metadata; authentication
+    and account state remain inside the external client.
+    """
+
+    source_id: str
+    worker_id: str
+
+    def model_entries(
+        self,
+        *,
+        refresh: bool = False,
+        session_id: str | None = None,
+    ) -> list[Any]: ...
+
+    def worker(self) -> Any: ...
 
 
 class AgentRuntime(ABC):

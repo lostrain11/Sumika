@@ -20,6 +20,9 @@ from typing import Any, Iterable, Mapping
 
 TASK_SET_SCHEMA_VERSION = "sumika.model-evaluation-taskset/v1"
 EVALUATION_SCHEMA_VERSION = "sumika.model-evaluation/v1"
+# A separate envelope makes it explicit that a caller opted into projecting
+# an already-finished run.  It is intentionally not a log/database format.
+CAPTURE_SCHEMA_VERSION = "sumika.model-evaluation-capture/v1"
 DEFAULT_MIN_REPETITIONS = 3
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+~\-]{0,159}$")
@@ -37,6 +40,14 @@ _SENSITIVE_KEYS = frozenset(
         "outputs",
         "response",
         "responses",
+        "answer",
+        "answers",
+        "question",
+        "questions",
+        "context",
+        "context_refs",
+        "workspace",
+        "artifacts",
         "content",
         "body",
         "text",
@@ -62,6 +73,30 @@ _SENSITIVE_KEYS = frozenset(
         "secret",
     }
 )
+
+_CAPTURE_TERMINAL_STATES = frozenset(
+    {"completed", "failed", "cancelled", "rejected", "unknown", "interrupted", "partial"}
+)
+_CAPTURE_METRIC_KEYS = frozenset(
+    {
+        "success",
+        "outcome",
+        "tool_success",
+        "retry_count",
+        "latency_ms",
+        "estimated_cost",
+        "quota_units",
+        "quality_passed",
+        "user_correction",
+        "approval_count",
+        "error_class",
+        "observed_at",
+    }
+)
+_CAPTURE_RUN_KEYS = frozenset(
+    {"task_id", "route_id", "status", "latency_ms", "retry_count", "error_code", "started_at", "completed_at"}
+)
+_CAPTURE_SPEC_KEYS = frozenset({"schema_version", "task_id", "route_id", "manifest", "run", "metrics"})
 
 
 class EvaluationValidationError(ValueError):
@@ -146,6 +181,30 @@ def _check_no_sensitive_keys(value: Any) -> None:
             raise EvaluationValidationError("nested-list-too-large")
         for child in value:
             _check_no_sensitive_keys(child)
+
+
+def _capture_field(value: Any, name: str, default: Any = None) -> Any:
+    """Read one explicitly named field without serializing an arbitrary object."""
+
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _capture_label(value: Any, field_name: str, *, default: str = "unknown", allow_unknown: bool = True) -> str:
+    """Validate a generated label and reject values that look like secrets/paths."""
+
+    candidate = default if value in (None, "") else value
+    if not isinstance(candidate, str):
+        candidate = str(candidate)
+    candidate = candidate.strip()
+    # Route metadata is not a place to carry credentials or a user-specific
+    # absolute path.  Keep the rejection code content-free.
+    if re.search(r"(?i)(?:^|[\s:=])(sk-[A-Za-z0-9]|bearer\s+|eyJ[A-Za-z0-9_-]{8,})", candidate):
+        raise EvaluationValidationError("forbidden-value")
+    if re.match(r"^(?:[A-Za-z]:[\\/]|[\\/]{2}|/)", candidate):
+        raise EvaluationValidationError("absolute-path-forbidden")
+    return _label(candidate, field_name, allow_unknown=allow_unknown)
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +324,7 @@ class EvaluationManifest:
     def from_dict(cls, value: Mapping[str, Any], task_set: EvaluationTaskSet) -> "EvaluationManifest":
         if not isinstance(value, Mapping):
             raise EvaluationValidationError("manifest-must-be-object")
+        _check_no_sensitive_keys(value)
         allowed = {
             "task_set_id", "task_set_version", "harness_id", "harness_version", "adapter_id", "adapter_version",
             "provider_kind", "model_id", "model_version", "hardware_class", "privacy_policy", "cache_state",
@@ -393,6 +453,364 @@ class EvaluationRecord:
             "error_class": self.error_class,
             "observed_at": self.observed_at,
         }
+
+
+def manifest_from_route(
+    route: Any,
+    task_set: EvaluationTaskSet,
+    *,
+    harness_id: str = "unknown",
+    harness_version: str = "unknown",
+    adapter_id: str | None = None,
+    adapter_version: str = "unknown",
+    hardware_class: str = "unknown",
+    privacy_policy: str = "unknown",
+    cache_state: str = "unknown",
+) -> EvaluationManifest:
+    """Build a manifest from an adapter-owned route without copying metadata.
+
+    Only a fixed set of scalar route fields is read.  In particular, this
+    helper never serializes a route or its metadata, so a path or credential
+    accidentally attached by an adapter cannot enter an evaluation record.
+    """
+
+    if not isinstance(task_set, EvaluationTaskSet):
+        raise EvaluationValidationError("task-set-invalid")
+    if route is None:
+        raise EvaluationValidationError("route-required")
+    if isinstance(route, Mapping):
+        _check_no_sensitive_keys(route)
+    metadata = _capture_field(route, "metadata", {})
+    if isinstance(metadata, Mapping):
+        _check_no_sensitive_keys(metadata)
+    model_entry = metadata.get("model_entry") if isinstance(metadata, Mapping) else None
+    if not isinstance(model_entry, Mapping):
+        model_entry = {}
+    else:
+        _check_no_sensitive_keys(model_entry)
+
+    def scalar(name: str, *sources: Mapping[str, Any] | None, default: Any = None) -> Any:
+        direct = _capture_field(route, name, None)
+        if direct not in (None, ""):
+            return direct
+        for source in sources:
+            if isinstance(source, Mapping) and source.get(name) not in (None, ""):
+                return source.get(name)
+        return default
+
+    route_id = _capture_label(scalar("route_id"), "route-id", allow_unknown=False)
+    provider_kind = _capture_label(
+        scalar("provider_kind", model_entry, metadata if isinstance(metadata, Mapping) else None, default=_capture_field(route, "source_kind", "unknown")),
+        "provider-kind",
+    )
+    model_id = _capture_label(
+        scalar("model_id", model_entry, metadata if isinstance(metadata, Mapping) else None, default=route_id),
+        "model-id",
+        allow_unknown=False,
+    )
+    model_version = _capture_label(
+        scalar("model_version", model_entry, metadata if isinstance(metadata, Mapping) else None, default=_capture_field(route, "version", "unknown")),
+        "model-version",
+    )
+    runtime = _capture_label(harness_id, "harness-id")
+    runtime_version = _capture_label(harness_version, "harness-version")
+    adapter = _capture_label(adapter_id or _capture_field(route, "adapter_id", None) or "unknown", "adapter-id")
+    adapter_ver = _capture_label(adapter_version, "adapter-version")
+    hardware = _capture_label(hardware_class, "hardware-class")
+    privacy = _capture_label(privacy_policy, "privacy-policy")
+    cache = _capture_label(cache_state, "cache-state")
+    return EvaluationManifest(
+        task_set_id=task_set.id,
+        task_set_version=task_set.version,
+        harness_id=runtime,
+        harness_version=runtime_version,
+        adapter_id=adapter,
+        adapter_version=adapter_ver,
+        provider_kind=provider_kind,
+        model_id=model_id,
+        model_version=model_version,
+        hardware_class=hardware,
+        privacy_policy=privacy,
+        cache_state=cache,
+    )
+
+
+def _capture_run_status(run: Any) -> tuple[str, Any]:
+    raw_status = _capture_field(run, "status", None)
+    if raw_status in (None, ""):
+        raise EvaluationValidationError("run-status-required")
+    status = str(raw_status).strip().lower()
+    if status in {"queued", "running"}:
+        raise EvaluationValidationError("run-not-terminal")
+    result = _capture_field(run, "result", None)
+    # An internal Supervisor _Run has a result object.  Read only its status
+    # and never call to_dict(), which could contain an answer body.
+    result_status = _capture_field(result, "status", None)
+    if result_status:
+        result_status = str(result_status).strip().lower()
+        if result_status not in _CAPTURE_TERMINAL_STATES:
+            raise EvaluationValidationError("result-status-invalid")
+        if status in _CAPTURE_TERMINAL_STATES and status != result_status:
+            raise EvaluationValidationError("run-status-mismatch")
+        status = result_status
+    if status not in _CAPTURE_TERMINAL_STATES:
+        raise EvaluationValidationError("run-status-invalid")
+    return status, result
+
+
+def _capture_run_route_id(run: Any, route: Any = None) -> Any:
+    direct = _capture_field(run, "route_id", None)
+    if direct not in (None, ""):
+        return direct
+    dispatch = _capture_field(run, "dispatch", None)
+    nested = _capture_field(dispatch, "route_id", None)
+    if nested not in (None, ""):
+        return nested
+    return _capture_field(route, "route_id", None)
+
+
+def capture_evaluation_sample(
+    run: Any,
+    task_set: EvaluationTaskSet,
+    *,
+    task_id: str,
+    manifest: EvaluationManifest | Mapping[str, Any] | None = None,
+    route: Any = None,
+    opt_in: bool = False,
+    metrics: Mapping[str, Any] | None = None,
+) -> EvaluationRecord:
+    """Project one finished run into a content-free evaluation record.
+
+    The explicit opt-in is intentional.  This function does not inspect logs,
+    databases, prompts, answers, files, or browser state; callers must hand it
+    one already-selected run and task label.
+    """
+
+    if opt_in is not True:
+        raise EvaluationValidationError("capture-opt-in-required")
+    if not isinstance(task_set, EvaluationTaskSet):
+        raise EvaluationValidationError("task-set-invalid")
+    task = task_set.task(task_id)
+    if isinstance(run, Mapping):
+        _check_no_sensitive_keys(run)
+        allowed_run = set(_CAPTURE_RUN_KEYS) | {"schema_version"}
+        if set(run) - allowed_run:
+            raise EvaluationValidationError("run-contains-unsupported-field")
+    status, result = _capture_run_status(run)
+    if manifest is None:
+        selected_route = route
+        if selected_route is None:
+            selected_route = _capture_field(run, "route", None)
+        if selected_route is None:
+            raise EvaluationValidationError("manifest-required")
+        manifest_obj = manifest_from_route(selected_route, task_set)
+    elif isinstance(manifest, EvaluationManifest):
+        manifest_obj = manifest
+        if manifest_obj.task_set_id != task_set.id or manifest_obj.task_set_version != task_set.version:
+            raise EvaluationValidationError("manifest-task-set-mismatch")
+    else:
+        manifest_obj = EvaluationManifest.from_dict(manifest, task_set)
+
+    if metrics is not None and not isinstance(metrics, Mapping):
+        raise EvaluationValidationError("metrics-invalid")
+    supplied = dict(metrics or {})
+    _check_no_sensitive_keys(supplied)
+    if set(supplied) - _CAPTURE_METRIC_KEYS:
+        raise EvaluationValidationError("metrics-contains-unsupported-field")
+    result_latency = _capture_field(result, "latency_ms", None)
+    result_error = _capture_field(result, "error_code", None)
+    result_error_class = supplied.pop("error_class", None)
+    if result_error_class not in (None, ""):
+        result_error_class = _capture_label(result_error_class, "error-class")
+    if result_error_class in (None, "") and result_error:
+        result_error_class = _capture_label(result_error, "error-class")
+    values: dict[str, Any] = {
+        "schema_version": EVALUATION_SCHEMA_VERSION,
+        "task_id": task.id,
+        "route_id": _capture_label(
+            _capture_run_route_id(run, route) or manifest_obj.model_id,
+            "route-id",
+            allow_unknown=False,
+        ),
+        "manifest": manifest_obj.to_dict(),
+        "success": status == "completed",
+        "outcome": {"partial": "unknown", "interrupted": "unknown"}.get(status, status),
+        "latency_ms": supplied.pop("latency_ms", None),
+        "retry_count": supplied.pop("retry_count", _capture_field(run, "retry_count", 0)),
+        "error_class": result_error_class,
+        "observed_at": supplied.pop("observed_at", None) or _capture_field(run, "completed_at", None) or _now(),
+    }
+    if values["latency_ms"] is None:
+        values["latency_ms"] = result_latency or _capture_field(run, "latency_ms", None)
+    # A caller may add outcome/quality booleans, but never turn a non-success
+    # terminal state into a successful sample.
+    for name in ("success", "outcome"):
+        supplied.pop(name, None)
+    values.update(supplied)
+    if values["outcome"] != "completed":
+        values["success"] = False
+    return EvaluationRecord.from_dict(values, task_set)
+
+
+def capture_evaluation_records(
+    runs: Iterable[Any],
+    task_set: EvaluationTaskSet,
+    *,
+    task_id: str | None = None,
+    task_ids: Iterable[str] | None = None,
+    manifest: EvaluationManifest | Mapping[str, Any] | None = None,
+    manifests: Iterable[EvaluationManifest | Mapping[str, Any]] | None = None,
+    route: Any = None,
+    metrics: Mapping[str, Any] | None = None,
+    opt_in: bool = False,
+) -> list[EvaluationRecord]:
+    """Capture a bounded batch of explicitly selected terminal runs.
+
+    ``task_id``/``manifest``/``metrics`` may be shared by the batch; callers
+    that need per-run values can provide the corresponding plural iterables.
+    No automatic discovery from logs, storage, or runtime objects is done.
+    """
+
+    if opt_in is not True:
+        raise EvaluationValidationError("capture-opt-in-required")
+    values = list(runs)
+    if len(values) > 256:
+        raise EvaluationValidationError("capture-limit-exceeded")
+    ids = list(task_ids) if task_ids is not None else []
+    if ids and len(ids) != len(values):
+        raise EvaluationValidationError("task-ids-length-mismatch")
+    manifest_values = list(manifests) if manifests is not None else []
+    if manifest_values and len(manifest_values) != len(values):
+        raise EvaluationValidationError("manifests-length-mismatch")
+    captured: list[EvaluationRecord] = []
+    for index, run in enumerate(values):
+        selected_task = ids[index] if ids else task_id or _capture_field(run, "task_id", None)
+        if not selected_task:
+            raise EvaluationValidationError("task-id-required")
+        selected_manifest = manifest_values[index] if manifest_values else manifest
+        selected_metrics = metrics
+        if callable(metrics):
+            selected_metrics = metrics(run, index)
+        selected_route = route(run, index) if callable(route) else route
+        captured.append(
+            capture_evaluation_sample(
+                run,
+                task_set,
+                task_id=str(selected_task),
+                manifest=selected_manifest,
+                route=selected_route,
+                metrics=selected_metrics,
+                opt_in=True,
+            )
+        )
+    return captured
+
+
+def capture_evaluation_payload(records: Iterable[EvaluationRecord]) -> dict[str, Any]:
+    """Return a bounded capture envelope suitable for an offline CLI."""
+
+    output: list[dict[str, Any]] = []
+    values = list(records)
+    if len(values) > 256:
+        raise EvaluationValidationError("capture-limit-exceeded")
+    for record in values:
+        if not isinstance(record, EvaluationRecord):
+            raise EvaluationValidationError("capture-records-invalid")
+        output.append(record.to_dict())
+    return {"schema_version": CAPTURE_SCHEMA_VERSION, "records": output}
+
+
+def load_capture_specs(
+    path: str | Path,
+    task_set: EvaluationTaskSet,
+    *,
+    opt_in: bool = False,
+) -> tuple[list[EvaluationRecord], list[dict[str, Any]]]:
+    """Load explicit capture specs without reading runtime state.
+
+    The file is a handoff from an isolated runner, not a log source.  Only
+    the fixed ``run`` and ``metrics`` allowlists are accepted, and errors are
+    reduced to line numbers plus stable codes.
+    """
+
+    if opt_in is not True:
+        return [], [{"line": 0, "code": "capture-opt-in-required"}]
+    source = Path(path)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as error:
+        return [], [{"line": 0, "code": "input-unreadable", "error_type": type(error).__name__}]
+    raw_items: list[tuple[int, Any]] = []
+    if source.suffix.lower() == ".jsonl":
+        for line_number, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                raw_items.append((line_number, json.loads(line)))
+            except (ValueError, json.JSONDecodeError):
+                raw_items.append((line_number, None))
+    else:
+        try:
+            payload = json.loads(text)
+        except (ValueError, json.JSONDecodeError):
+            return [], [{"line": 1, "code": "input-json-invalid"}]
+        if isinstance(payload, Mapping) and isinstance(payload.get("captures"), list):
+            payload = payload["captures"]
+        elif isinstance(payload, Mapping) and payload.get("schema_version") == CAPTURE_SCHEMA_VERSION and isinstance(payload.get("records"), list):
+            payload = payload["records"]
+        if not isinstance(payload, list):
+            return [], [{"line": 1, "code": "input-captures-must-be-list"}]
+        raw_items = list(enumerate(payload, 1))
+
+    records: list[EvaluationRecord] = []
+    errors: list[dict[str, Any]] = []
+    for line_number, raw in raw_items[:256]:
+        if raw is None:
+            errors.append({"line": line_number, "code": "capture-json-invalid"})
+            continue
+        try:
+            if not isinstance(raw, Mapping):
+                raise EvaluationValidationError("capture-must-be-object")
+            _check_no_sensitive_keys(raw)
+            if set(raw) - _CAPTURE_SPEC_KEYS and raw.get("schema_version") != EVALUATION_SCHEMA_VERSION:
+                raise EvaluationValidationError("capture-contains-unsupported-field")
+            schema = raw.get("schema_version", CAPTURE_SCHEMA_VERSION)
+            if schema == EVALUATION_SCHEMA_VERSION:
+                # Existing offline records may be deliberately re-used, but
+                # they still pass the same strict EvaluationRecord parser.
+                records.append(EvaluationRecord.from_dict(raw, task_set))
+                continue
+            if schema != CAPTURE_SCHEMA_VERSION:
+                raise EvaluationValidationError("capture-schema-unsupported")
+            task_id = raw.get("task_id")
+            run = raw.get("run")
+            if not isinstance(run, Mapping):
+                raise EvaluationValidationError("capture-run-required")
+            if raw.get("route_id") not in (None, ""):
+                run = {**run, "route_id": raw["route_id"]}
+            if set(run) - _CAPTURE_RUN_KEYS:
+                raise EvaluationValidationError("capture-run-contains-unsupported-field")
+            metrics = raw.get("metrics", {})
+            if not isinstance(metrics, Mapping):
+                raise EvaluationValidationError("capture-metrics-invalid")
+            manifest = raw.get("manifest")
+            if not isinstance(manifest, Mapping):
+                raise EvaluationValidationError("capture-manifest-required")
+            records.append(
+                capture_evaluation_sample(
+                    run,
+                    task_set,
+                    task_id=str(task_id or ""),
+                    manifest=manifest,
+                    opt_in=True,
+                    metrics=metrics,
+                )
+            )
+        except EvaluationValidationError as error:
+            errors.append({"line": line_number, "code": error.code})
+    if len(raw_items) > 256:
+        errors.append({"line": 0, "code": "capture-limit-exceeded"})
+    return records, errors
 
 
 def _percentile(values: list[float], percentile: float) -> float | None:
@@ -587,6 +1005,7 @@ def load_records(path: str | Path, task_set: EvaluationTaskSet) -> tuple[list[Ev
 
 
 __all__ = [
+    "CAPTURE_SCHEMA_VERSION",
     "DEFAULT_MIN_REPETITIONS",
     "EVALUATION_SCHEMA_VERSION",
     "EvaluationManifest",
@@ -596,5 +1015,10 @@ __all__ = [
     "EvaluationValidationError",
     "TASK_SET_SCHEMA_VERSION",
     "aggregate_evaluations",
+    "capture_evaluation_payload",
+    "capture_evaluation_records",
+    "capture_evaluation_sample",
+    "load_capture_specs",
     "load_records",
+    "manifest_from_route",
 ]

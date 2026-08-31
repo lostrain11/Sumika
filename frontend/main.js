@@ -36,6 +36,8 @@ const state = {
   webWorkbenchWorkerDispatchId: "",
   webWorkbenchManualDrafts: {},
   webWorkbenchManualResults: {},
+  webWorkbenchManualAttempts: {},
+  webWorkbenchPendingResults: [],
   webWorkbenchSelectedProfileId: "",
   webWorkbenchNotice: "",
   webWorkbenchBusy: null,
@@ -2427,6 +2429,53 @@ function safeWebWorkbenchText(value, limit = 6000) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
+function webAttemptStatusLabel(status) {
+  return ({
+    accepted: "已接收",
+    running: "等待网页回复",
+    completed: "已完成",
+    failed: "发送前失败",
+    "possibly-sent": "已发送但未确认",
+    "waiting-human": "等待人工操作",
+    cancelled: "已停止",
+    interrupted: "已中断",
+    unknown: "状态未知",
+  })[String(status || "unknown")] || String(status || "未知");
+}
+
+function webAttemptActive(result) {
+  return ["accepted", "running"].includes(String(result?.status || ""));
+}
+
+function renderWebWorkbenchManualResult(profileId, result) {
+  const status = String(result?.status || (result?.ok ? "completed" : "unknown"));
+  const text = result?.text || result?.result?.answer || "";
+  const attemptId = result?.attempt_id || state.webWorkbenchManualAttempts?.[profileId] || "";
+  const canCancel = Boolean(attemptId && webAttemptActive(result));
+  const retryable = result?.retryable === true && result?.possibly_sent !== true;
+  const controls = canCancel
+    ? `<button class="ghost-button" type="button" data-web-workbench-manual-cancel="${escapeHtml(attemptId)}">停止等待</button>`
+    : retryable
+      ? `<button class="ghost-button" type="button" data-web-workbench-manual-retry="${escapeHtml(attemptId)}">重试</button>`
+      : "";
+  const body = status === "completed" && text
+    ? `<small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(text)).replaceAll("\n", "<br>")}</p>`
+    : `<p class="${status === "failed" ? "plugin-error" : ""}">${escapeHtml(result?.reason || result?.error_code || webAttemptStatusLabel(status))}</p>`;
+  return `<article class="web-workbench-manual-result" data-web-workbench-manual-result="${escapeHtml(profileId)}"><strong>${escapeHtml(state.webChatProfiles.find((item) => item.id === profileId)?.name || profileId)}</strong><span class="web-workbench-member-status ${escapeHtml(status)}">${escapeHtml(webAttemptStatusLabel(status))}</span>${body}<div>${controls}</div></article>`;
+}
+
+function renderWebWorkbenchPendingResult(item) {
+  const result = item?.result || {};
+  const status = String(item?.status || result.status || "unknown");
+  const answer = result.answer || result.summary || "";
+  const dispatchId = String(item?.dispatch_id || result.dispatch_id || "");
+  const retryable = result.retryable === true && result.possibly_sent !== true;
+  const retry = retryable && dispatchId
+    ? `<button class="ghost-button" type="button" data-web-workbench-retry="${escapeHtml(dispatchId)}">重试</button>`
+    : "";
+  return `<article class="web-workbench-manual-result web-workbench-pending-result" data-web-workbench-pending="${escapeHtml(dispatchId)}"><div><strong>${escapeHtml(item?.route_id || "Worker 结果")}</strong><span class="web-workbench-member-status ${escapeHtml(status)}">${escapeHtml(webAttemptStatusLabel(status))}</span></div><small class="web-workbench-trust-label">${item?.worker_kind === "web" ? "UNTRUSTED_WEB_RESULT" : "待主 Agent 接收"}</small>${answer ? `<p>${escapeHtml(safeWebWorkbenchText(answer)).replaceAll("\n", "<br>")}</p>` : `<p class="plugin-error">${escapeHtml(result.error_code || "没有可显示的结果正文")}</p>`}<div>${retry}${dispatchId ? `<button class="ghost-button" type="button" data-web-workbench-ack="${escapeHtml(dispatchId)}">标记已接收</button>` : ""}</div></article>`;
+}
+
 function webWorkbenchProfiles() {
   const routes = Array.isArray(state.webWorkbenchCatalog?.routes) ? state.webWorkbenchCatalog.routes : [];
   return routes.filter((route) => route?.provider_profile_id).map((route) => ({
@@ -2472,8 +2521,9 @@ function renderWebWorkbench() {
   const manualOptions = profiles.filter(({ route }) => route.routable).map(({ route, profile }) => `<option value="${escapeHtml(profile?.id || route.provider_profile_id)}" ${state.webWorkbenchSelectedProfileId === (profile?.id || route.provider_profile_id) ? "selected" : ""}>${escapeHtml(route.label || profile?.name || route.adapter_id)}</option>`).join("");
   const workerOptions = readyRoutes.map((route) => `<option value="${escapeHtml(route.route_id)}" ${workerDraft.route_id === route.route_id ? "selected" : ""}>${escapeHtml(route.label)} · ${escapeHtml(route.adapter_id || route.provider_key)}</option>`).join("");
   const consultationRows = (state.webWorkbenchConsultations || []).map(renderWebWorkbenchConsultation).join("") || `<div class="empty-column">还没有咨询记录；主 Agent 或你可以在需要时动态发起。</div>`;
+  const pendingRows = (state.webWorkbenchPendingResults || []).map(renderWebWorkbenchPendingResult).join("") || `<div class="empty-column">没有等待主 Agent 接收的 Worker 结果。</div>`;
   const notice = state.webWorkbenchNotice ? `<div class="agent-notice" role="status">${escapeHtml(state.webWorkbenchNotice)}</div>` : "";
-  return renderPageFrame("网页工作台", "管理隔离 BrowserSkill 网页 Profile，执行单次网页子任务或并行咨询；网页回答始终是不可信外部结果。", `${notice}<section class="web-workbench-safety"><strong>隔离与额度边界</strong><p>网页运行在 Sumika 管理的 Agent Window，不复用你的 Edge 标签页。额度固定显示 <code>unknown</code>；不会因为“通常免费”而保证免费，也不会静默切换到付费 API。</p></section><section class="web-workbench-panel" data-web-workbench-catalog><div class="panel-heading"><div><strong>网页 Profiles</strong><small>${escapeHtml(String(catalog.routable_count ?? 0))} 个可咨询 · ${escapeHtml(String(routes.length))} 个目录项 · 最近刷新只读取元数据</small></div><button class="small-button" id="web-workbench-refresh" type="button" ${state.webWorkbenchCatalogBusy ? "disabled" : ""}>${state.webWorkbenchCatalogBusy ? "刷新中" : "刷新目录"}</button></div><div class="web-workbench-profile-list">${profiles.map(({ route, profile }) => renderWebWorkbenchProfile(route, profile)).join("") || `<div class="empty-column">尚未配置网页 Profile。可在模块页创建并完成隔离登录。</div>`}</div>${templates.length ? `<details class="web-workbench-templates"><summary>可配置网页模板（不会直接路由）</summary><div>${templates.map((route) => renderWebWorkbenchProfile(route, null)).join("")}</div></details>` : ""}</section><section class="web-workbench-two-column"><section class="web-workbench-panel"><div class="panel-heading"><div><strong>手动网页查询</strong><small>不经过主 Agent；仍使用同一命名 Profile 的独占写租约。</small></div></div><form id="web-workbench-manual-form" class="web-workbench-form"><label><span>网页 Profile</span><select name="profile_id" ${manualOptions ? "" : "disabled"} required><option value="">选择已授权 Profile</option>${manualOptions}</select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="输入一个独立的小问题" required>${escapeHtml(state.webWorkbenchManualDrafts[state.webWorkbenchSelectedProfileId] || "")}</textarea></label><button class="outline-button" type="submit" ${manualOptions && !state.webWorkbenchBusy ? "" : "disabled"}>发送网页问题</button></form><div class="web-workbench-manual-results">${Object.entries(state.webWorkbenchManualResults || {}).map(([profileId, result]) => `<article class="web-workbench-manual-result" data-web-workbench-manual-result="${escapeHtml(profileId)}"><strong>${escapeHtml(state.webChatProfiles.find((item) => item.id === profileId)?.name || profileId)}</strong>${result?.ok ? `<small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(result.text)).replaceAll("\n", "<br>")}</p>` : `<p class="plugin-error">${escapeHtml(result?.reason || result?.error_code || "网页查询未完成")}</p>`}</article>`).join("") || `<div class="empty-column">尚无手动回答</div>`}</div></section><section class="web-workbench-panel"><div class="panel-heading"><div><strong>Web Worker</strong><small>一次明确网页子任务；由你选择路由，结果不会直接修改文件。</small></div></div><form id="web-workbench-worker-form" class="web-workbench-form"><label><span>路由</span><select name="route_id" ${workerOptions ? "" : "disabled"} required><option value="">选择可咨询 Profile</option>${workerOptions}</select></label><label class="web-workbench-wide"><span>子任务</span><textarea name="question" rows="3" maxlength="16000" placeholder="例如：只检查这个 API 设计的一个风险点" required>${escapeHtml(workerDraft.question || "")}</textarea></label><button class="outline-button" type="submit" ${workerOptions && !state.webWorkbenchBusy ? "" : "disabled"}>交给 Web Worker</button></form><div class="web-workbench-worker-result">${state.webWorkbenchWorkerResult ? `<article class="web-workbench-manual-result"><strong>${escapeHtml(state.webWorkbenchWorkerResult.status || "结果")}</strong><small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(state.webWorkbenchWorkerResult.result?.answer || state.webWorkbenchWorkerResult.reason || "暂无回答")).replaceAll("\n", "<br>")}</p></article>` : `<div class="empty-column">尚无 Web Worker 回合</div>`}</div></section></section><section class="web-workbench-panel web-workbench-consultation-panel"><div class="panel-heading"><div><strong>多模型咨询面板</strong><small>每次在当前 turn 动态创建 1–3 个不同网页 Provider；成员互相看不到答案。</small></div><div class="web-workbench-panel-actions"><button class="ghost-button" type="button" data-web-workbench-pause-all ${state.webWorkbenchBusy ? "disabled" : ""}>暂停 Agent 咨询</button><button class="ghost-button" type="button" data-web-workbench-continue-latest ${state.webWorkbenchBusy ? "disabled" : ""}>继续最近咨询</button></div></div><form id="web-workbench-consultation-form" class="web-workbench-form"><label><span>决策类型</span><select name="decision_kind"><option value="brainstorm" ${consultationDraft.decision_kind === "brainstorm" ? "selected" : ""}>brainstorm · 头脑风暴</option><option value="plan-review" ${consultationDraft.decision_kind === "plan-review" ? "selected" : ""}>plan-review · 计划复核</option><option value="fact-check" ${consultationDraft.decision_kind === "fact-check" ? "selected" : ""}>fact-check · 事实核查</option><option value="counterexample" ${consultationDraft.decision_kind === "counterexample" ? "selected" : ""}>counterexample · 反例</option><option value="small-answer" ${consultationDraft.decision_kind === "small-answer" ? "selected" : ""}>small-answer · 小问题</option></select></label><label><span>成员数</span><select name="max_members"><option value="1" ${Number(consultationDraft.max_members) === 1 ? "selected" : ""}>1 · single-opinion</option><option value="2" ${Number(consultationDraft.max_members) === 2 ? "selected" : ""}>2</option><option value="3" ${Number(consultationDraft.max_members) !== 1 && Number(consultationDraft.max_members) !== 2 ? "selected" : ""}>3</option></select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="让多个网页模型独立评审同一个问题" required>${escapeHtml(consultationDraft.question || "")}</textarea></label><label class="web-workbench-wide"><span>必要上下文（可选，禁止粘贴凭据文件）</span><textarea name="context" rows="2" maxlength="24000" placeholder="目标、短 diff 或脱敏工具结果">${escapeHtml(consultationDraft.context || "")}</textarea></label><button class="outline-button" type="submit" ${readyRoutes.length && !state.webWorkbenchBusy ? "" : "disabled"}>启动咨询面板</button></form><div class="web-workbench-consultations">${consultationRows}</div></section>`);
+  return renderPageFrame("网页工作台", "管理隔离 BrowserSkill 网页 Profile，执行单次网页子任务或并行咨询；网页回答始终是不可信外部结果。", `${notice}<section class="web-workbench-safety"><strong>隔离与额度边界</strong><p>网页运行在 Sumika 管理的 Agent Window，不复用你的 Edge 标签页。额度固定显示 <code>unknown</code>；不会因为“通常免费”而保证免费，也不会静默切换到付费 API。</p></section><section class="web-workbench-panel" data-web-workbench-catalog><div class="panel-heading"><div><strong>网页 Profiles</strong><small>${escapeHtml(String(catalog.routable_count ?? 0))} 个可咨询 · ${escapeHtml(String(routes.length))} 个目录项 · 最近刷新只读取元数据</small></div><button class="small-button" id="web-workbench-refresh" type="button" ${state.webWorkbenchCatalogBusy ? "disabled" : ""}>${state.webWorkbenchCatalogBusy ? "刷新中" : "刷新目录"}</button></div><div class="web-workbench-profile-list">${profiles.map(({ route, profile }) => renderWebWorkbenchProfile(route, profile)).join("") || `<div class="empty-column">尚未配置网页 Profile。可在模块页创建并完成隔离登录。</div>`}</div>${templates.length ? `<details class="web-workbench-templates"><summary>可配置网页模板（不会直接路由）</summary><div>${templates.map((route) => renderWebWorkbenchProfile(route, null)).join("")}</div></details>` : ""}</section><section class="web-workbench-two-column"><section class="web-workbench-panel"><div class="panel-heading"><div><strong>手动网页查询</strong><small>不经过主 Agent；仍使用同一命名 Profile 的独占写租约。</small></div></div><form id="web-workbench-manual-form" class="web-workbench-form"><label><span>网页 Profile</span><select name="profile_id" ${manualOptions ? "" : "disabled"} required><option value="">选择已授权 Profile</option>${manualOptions}</select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="输入一个独立的小问题" required>${escapeHtml(state.webWorkbenchManualDrafts[state.webWorkbenchSelectedProfileId] || "")}</textarea></label><button class="outline-button" type="submit" ${manualOptions && !state.webWorkbenchBusy ? "" : "disabled"}>发送网页问题</button></form><div class="web-workbench-manual-results">${Object.entries(state.webWorkbenchManualResults || {}).map(([profileId, result]) => renderWebWorkbenchManualResult(profileId, result)).join("") || `<div class="empty-column">尚无手动回答</div>`}</div></section><section class="web-workbench-panel"><div class="panel-heading"><div><strong>Web Worker</strong><small>一次明确网页子任务；由你选择路由，结果不会直接修改文件。</small></div></div><form id="web-workbench-worker-form" class="web-workbench-form"><label><span>路由</span><select name="route_id" ${workerOptions ? "" : "disabled"} required><option value="">选择可咨询 Profile</option>${workerOptions}</select></label><label class="web-workbench-wide"><span>子任务</span><textarea name="question" rows="3" maxlength="16000" placeholder="例如：只检查这个 API 设计的一个风险点" required>${escapeHtml(workerDraft.question || "")}</textarea></label><button class="outline-button" type="submit" ${workerOptions && !state.webWorkbenchBusy ? "" : "disabled"}>交给 Web Worker</button></form><div class="web-workbench-worker-result">${state.webWorkbenchWorkerResult ? `<article class="web-workbench-manual-result"><strong>${escapeHtml(state.webWorkbenchWorkerResult.status || "结果")}</strong><small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(state.webWorkbenchWorkerResult.result?.answer || state.webWorkbenchWorkerResult.reason || "暂无回答")).replaceAll("\n", "<br>")}</p></article>` : `<div class="empty-column">尚无 Web Worker 回合</div>`}</div></section></section><section class="web-workbench-panel web-workbench-pending-panel"><div class="panel-heading"><div><strong>待接收 Worker 结果</strong><small>主 Agent 通过下一次 route.status/pending 调用读取；不会自动修改文件。</small></div></div><div class="web-workbench-pending-results">${pendingRows}</div></section><section class="web-workbench-panel web-workbench-consultation-panel"><div class="panel-heading"><div><strong>多模型咨询面板</strong><small>每次在当前 turn 动态创建 1–3 个不同网页 Provider；成员互相看不到答案。</small></div><div class="web-workbench-panel-actions"><button class="ghost-button" type="button" data-web-workbench-pause-all ${state.webWorkbenchBusy ? "disabled" : ""}>暂停 Agent 咨询</button><button class="ghost-button" type="button" data-web-workbench-continue-latest ${state.webWorkbenchBusy ? "disabled" : ""}>继续最近咨询</button></div></div><form id="web-workbench-consultation-form" class="web-workbench-form"><label><span>决策类型</span><select name="decision_kind"><option value="brainstorm" ${consultationDraft.decision_kind === "brainstorm" ? "selected" : ""}>brainstorm · 头脑风暴</option><option value="plan-review" ${consultationDraft.decision_kind === "plan-review" ? "selected" : ""}>plan-review · 计划复核</option><option value="fact-check" ${consultationDraft.decision_kind === "fact-check" ? "selected" : ""}>fact-check · 事实核查</option><option value="counterexample" ${consultationDraft.decision_kind === "counterexample" ? "selected" : ""}>counterexample · 反例</option><option value="small-answer" ${consultationDraft.decision_kind === "small-answer" ? "selected" : ""}>small-answer · 小问题</option></select></label><label><span>成员数</span><select name="max_members"><option value="1" ${Number(consultationDraft.max_members) === 1 ? "selected" : ""}>1 · single-opinion</option><option value="2" ${Number(consultationDraft.max_members) === 2 ? "selected" : ""}>2</option><option value="3" ${Number(consultationDraft.max_members) !== 1 && Number(consultationDraft.max_members) !== 2 ? "selected" : ""}>3</option></select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="让多个网页模型独立评审同一个问题" required>${escapeHtml(consultationDraft.question || "")}</textarea></label><label class="web-workbench-wide"><span>必要上下文（可选，禁止粘贴凭据文件）</span><textarea name="context" rows="2" maxlength="24000" placeholder="目标、短 diff 或脱敏工具结果">${escapeHtml(consultationDraft.context || "")}</textarea></label><button class="outline-button" type="submit" ${readyRoutes.length && !state.webWorkbenchBusy ? "" : "disabled"}>启动咨询面板</button></form><div class="web-workbench-consultations">${consultationRows}</div></section>`);
 }
 
 function webWorkbenchParentSessionId() {
@@ -2508,9 +2558,13 @@ function webWorkbenchRememberRequest(request) {
 }
 
 function webWorkbenchShouldPoll() {
+  const manualActive = Object.entries(state.webWorkbenchManualAttempts || {}).some(([profileId, attemptId]) => (
+    Boolean(attemptId) && webAttemptActive(state.webWorkbenchManualResults?.[profileId])
+  ));
   return Boolean(
     ["queued", "running"].includes(String(state.webWorkbenchWorkerResult?.status || ""))
-    || (state.webWorkbenchConsultations || []).some(webWorkbenchActiveConsultation),
+    || (state.webWorkbenchConsultations || []).some(webWorkbenchActiveConsultation)
+    || manualActive,
   );
 }
 
@@ -2541,6 +2595,19 @@ async function loadWebWorkbenchConsultations(shouldRender = true) {
   if (webWorkbenchShouldPoll()) scheduleWebWorkbenchPoll();
 }
 
+async function loadWebWorkbenchPending(shouldRender = true) {
+  try {
+    const result = await rpc("sumika.route.pending", {
+      parent_session_id: webWorkbenchParentSessionId(),
+      limit: 50,
+    });
+    state.webWorkbenchPendingResults = Array.isArray(result?.results) ? result.results : [];
+  } catch (error) {
+    if (shouldRender) state.webWorkbenchNotice = `待接收结果读取失败：${String(error.message || "未知错误").slice(0, 240)}`;
+  }
+  if (shouldRender) render();
+}
+
 async function loadWebWorkbenchData(shouldRender = true, refresh = false) {
   if (state.webWorkbenchCatalogBusy) return;
   state.webWorkbenchCatalogBusy = true;
@@ -2554,6 +2621,7 @@ async function loadWebWorkbenchData(shouldRender = true, refresh = false) {
       refresh: Boolean(refresh),
     });
     await loadWebWorkbenchConsultations(false);
+    await loadWebWorkbenchPending(false);
     const profiles = webWorkbenchProfiles();
     if (!profiles.some(({ profile }) => profile?.id === state.webWorkbenchSelectedProfileId)) {
       state.webWorkbenchSelectedProfileId = profiles.find(({ route }) => route.routable)?.profile?.id || "";
@@ -2574,14 +2642,28 @@ async function pollWebWorkbenchRuns() {
   if (!webWorkbenchShouldPoll()) return;
   state.webWorkbenchPollInFlight = true;
   try {
+    for (const [profileId, attemptId] of Object.entries(state.webWorkbenchManualAttempts || {})) {
+      const current = state.webWorkbenchManualResults?.[profileId];
+      if (!attemptId || !webAttemptActive(current)) continue;
+      const result = await rpc("browser.web_chat.message.status", { attempt_id: attemptId });
+      state.webWorkbenchManualResults = {
+        ...state.webWorkbenchManualResults,
+        [profileId]: result,
+      };
+      if (result?.status === "completed") {
+        state.webWorkbenchManualDrafts = { ...state.webWorkbenchManualDrafts, [profileId]: "" };
+      }
+    }
     if (state.webWorkbenchWorkerDispatchId) {
       const result = await rpc("sumika.route.status", { dispatch_id: state.webWorkbenchWorkerDispatchId });
-      const dispatch = result?.dispatch || result;
-      if (dispatch && typeof dispatch === "object") {
-        state.webWorkbenchWorkerResult = dispatch;
+      if (result && typeof result === "object") {
+        // Keep the outer lifecycle projection.  Flattening to ``dispatch``
+        // drops terminal status, retryability and possibly-sent markers.
+        state.webWorkbenchWorkerResult = result;
       }
     }
     await loadWebWorkbenchConsultations(false);
+    await loadWebWorkbenchPending(false);
     // Occupancy is derived from the coordinator and can change while a worker
     // finishes; refresh the catalog before repainting the controls.
     state.webWorkbenchCatalog = await rpc("sumika.route.catalog", { include_templates: true });
@@ -2717,21 +2799,72 @@ async function sendWebWorkbenchManual(event) {
   state.webWorkbenchSelectedProfileId = profileId;
   state.webWorkbenchManualDrafts = { ...state.webWorkbenchManualDrafts, [profileId]: question };
   state.webWorkbenchBusy = "manual-send";
-  state.webWorkbenchNotice = "正在通过隔离网页发送；不会把回答自动交给主 Agent。";
+  state.webWorkbenchNotice = "正在通过隔离网页发送；回答会在同一 attempt 中更新，不会重复发送。";
   render();
   try {
-    const result = await rpc("browser.web_chat.send", { profile_id: profileId, text: question });
+    const result = await rpc("browser.web_chat.message.start", {
+      profile_id: profileId,
+      text: question,
+      owner: "manual",
+    });
+    const attemptId = String(result?.attempt_id || "").trim();
+    state.webWorkbenchManualAttempts = {
+      ...state.webWorkbenchManualAttempts,
+      [profileId]: attemptId,
+    };
     state.webWorkbenchManualResults = { ...state.webWorkbenchManualResults, [profileId]: result };
-    state.webWorkbenchManualDrafts = { ...state.webWorkbenchManualDrafts, [profileId]: "" };
-    state.webWorkbenchNotice = result?.ok
-      ? "网页回答已返回，并标记为 UNTRUSTED_WEB_RESULT。"
-      : String(result?.reason || result?.error_code || "网页查询未完成");
+    if (result?.accepted && attemptId) {
+      state.webWorkbenchManualDrafts = { ...state.webWorkbenchManualDrafts, [profileId]: "" };
+      state.webWorkbenchNotice = "网页消息已发送；正在等待同一 attempt 的明确回复。";
+      scheduleWebWorkbenchPoll();
+    } else {
+      state.webWorkbenchNotice = String(result?.reason || result?.error_code || "网页查询未接受");
+    }
   } catch (error) {
     state.webWorkbenchManualResults = { ...state.webWorkbenchManualResults, [profileId]: { ok: false, reason: error.message } };
     state.webWorkbenchNotice = `网页查询失败：${error.message}`;
   } finally {
     state.webWorkbenchBusy = null;
+    render();
+    void loadWebWorkbenchData(false, false);
+  }
+}
+
+async function cancelWebWorkbenchManual(attemptId) {
+  const identifier = String(attemptId || "").trim();
+  if (!identifier || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `manual-cancel:${identifier}`;
+  state.webWorkbenchNotice = "正在停止网页回合；已发送的消息不会自动重发。";
+  render();
+  try {
+    const result = await rpc("browser.web_chat.message.cancel", { attempt_id: identifier });
+    const profileId = Object.entries(state.webWorkbenchManualAttempts || {}).find(([, value]) => value === identifier)?.[0];
+    if (profileId) {
+      state.webWorkbenchManualResults = { ...state.webWorkbenchManualResults, [profileId]: result };
+    }
+  } catch (error) {
+    state.webWorkbenchNotice = `停止网页回合失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
     await loadWebWorkbenchData(false, false);
+    render();
+  }
+}
+
+async function acknowledgeWebWorkbenchPending(dispatchId) {
+  const identifier = String(dispatchId || "").trim();
+  if (!identifier || state.webWorkbenchBusy) return;
+  state.webWorkbenchBusy = `route-ack:${identifier}`;
+  state.webWorkbenchNotice = "正在确认已收到 Worker 结果…";
+  render();
+  try {
+    await rpc("sumika.route.ack", { dispatch_id: identifier });
+    state.webWorkbenchPendingResults = state.webWorkbenchPendingResults.filter((item) => item.dispatch_id !== identifier);
+    state.webWorkbenchNotice = "Worker 结果已确认；正文不会被自动执行。";
+  } catch (error) {
+    state.webWorkbenchNotice = `确认 Worker 结果失败：${error.message}`;
+  } finally {
+    state.webWorkbenchBusy = null;
     render();
   }
 }
@@ -3670,6 +3803,12 @@ function bindEvents() {
   }));
   document.querySelectorAll("[data-web-workbench-retry]").forEach((element) => element.addEventListener("click", () => {
     void retryWebWorkbenchDispatch(element.dataset.webWorkbenchRetry);
+  }));
+  document.querySelectorAll("[data-web-workbench-manual-cancel]").forEach((element) => element.addEventListener("click", () => {
+    void cancelWebWorkbenchManual(element.dataset.webWorkbenchManualCancel);
+  }));
+  document.querySelectorAll("[data-web-workbench-ack]").forEach((element) => element.addEventListener("click", () => {
+    void acknowledgeWebWorkbenchPending(element.dataset.webWorkbenchAck);
   }));
   document.querySelector("[data-web-workbench-pause-all]")?.addEventListener("click", () => {
     void pauseAllWebWorkbenchConsultations();

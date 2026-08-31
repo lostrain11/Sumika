@@ -4,7 +4,9 @@ This optional plugin exposes Sumika's runtime-neutral route supervisor to a
 managed DSH profile.  It adds route catalog/replan/dispatch/status/cancel/retry
 tools and the consultation start/status tools.  DSH remains the owner of the
 parent Agent turn; the Core only validates, schedules, and returns bounded
-worker results.
+worker results.  The bridge exposes the full route lifecycle, including
+explicit turn arming and the pending-result mailbox used when a Harness cannot
+inject a result into an active turn.
 
 Install only in a managed, reviewed DSH profile:
 
@@ -32,8 +34,21 @@ isolated-worktree and approval gates.
 
 `sumika_route_catalog`, `sumika_route_replan`, `sumika_route_dispatch`,
 `sumika_route_status`, `sumika_consultation_start`,
-`sumika_consultation_status`, `sumika_route_cancel`, and
-`sumika_route_retry`.
+`sumika_consultation_status`, `sumika_route_cancel`, `sumika_route_retry`,
+`sumika_route_arm`, `sumika_route_pending`, and `sumika_route_ack`.
+
+The normal turn-boundary sequence is:
+
+1. The parent Agent calls `sumika_route_arm` with an explicit request.
+2. The bridge receives a `turn.started`, `tool.completed`, `approval.resolved`,
+   `turn.completed`, or `turn.failed` boundary from the Runtime.
+3. The parent Agent reads `sumika_route_pending` when the Runtime cannot inject
+   a child result directly, then calls `sumika_route_ack` exactly once per
+   result.
+
+`sumika_route_dispatch` and `sumika_consultation_start` can still be used
+directly for work that should begin immediately.  The Core, rather than the
+plugin, enforces concurrency, budget, consent, and retry rules.
 
 Parent session/turn identifiers are taken from explicit arguments when given,
 otherwise from the DSH execution context.  The bridge never forwards the

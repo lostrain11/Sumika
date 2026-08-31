@@ -17,9 +17,14 @@ from sumika_core.agent.supervisor import (
     ExternalHarnessWorker,
     ProviderWorker,
     RuntimeRouteDescriptor,
+    SupervisorValidationError,
     WorkerRegistry,
 )
+from sumika_core.model_evaluation import EvaluationTaskSet
 from sumika_core.storage import Storage
+
+
+TASK_SET_PATH = __import__("pathlib").Path(__file__).resolve().parents[2] / "tools" / "fixtures" / "model-evaluation-v1.json"
 
 
 def _route(route_id: str, *, kind: str = "provider", **overrides):
@@ -101,6 +106,100 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertIn("kind", catalog["workers"][0])
         self.assertEqual(catalog["evidence_schema"], "route-evidence/v1")
 
+    def test_public_boolean_contracts_reject_string_and_numeric_values(self):
+        boolean_fields = (
+            (RuntimeRouteDescriptor, {"route_id": "bool-route", "kind": "provider", "label": "bool", "routable": "false"}),
+            (RuntimeRouteDescriptor, {"route_id": "bool-route-confirm", "kind": "provider", "label": "bool", "requires_confirmation": "false"}),
+        )
+        for constructor, values in boolean_fields:
+            with self.subTest(values=values):
+                with self.assertRaisesRegex(SupervisorValidationError, "boolean"):
+                    constructor(**values)
+
+        request_base = {"parent_session_id": "bool-session", "question": "boolean"}
+        for field, value in (("auto_dispatch", "false"), ("quota_consent", 0), ("confirmed", "false")):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(SupervisorValidationError, "boolean"):
+                    from sumika_core.agent.supervisor import DynamicRoutingRequest
+
+                    DynamicRoutingRequest(**request_base, **{field: value})
+
+        route = _route("bool-result")
+        dispatch = DynamicSubtaskDispatch(
+            dispatch_id="bool-dispatch",
+            parent_session_id="bool-session",
+            route_id=route.route_id,
+            question="boolean result",
+        )
+        for field, value in (("quota_consent", "false"), ("confirmed", 1)):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(SupervisorValidationError, "boolean"):
+                    DynamicSubtaskDispatch(
+                        dispatch_id=f"bool-dispatch-{field}",
+                        parent_session_id="bool-session",
+                        route_id=route.route_id,
+                        question="boolean result",
+                        **{field: value},
+                    )
+        for field, value in (("retryable", "false"), ("possibly_sent", 0), ("untrusted_external", "false")):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(SupervisorValidationError, "boolean"):
+                    from sumika_core.agent.supervisor import DynamicSubtaskResult
+
+                    DynamicSubtaskResult.from_value({field: value}, dispatch)
+
+    def test_dispatch_applies_capability_privacy_quality_and_evidence_gates(self):
+        calls = []
+
+        def execute(dispatch):
+            calls.append(dispatch.dispatch_id)
+            return {"status": "completed", "answer": "must not run"}
+
+        routes = [
+            _route("gate-capability", capabilities=("text",)),
+            _route("gate-privacy", processing_location="cloud"),
+            _route("gate-quality", quality_tier="basic"),
+            _route("gate-evidence", quality_tier="strong"),
+        ]
+        supervisor = self.make_supervisor(routes, [(route.route_id, ProviderWorker(execute, worker_id=route.route_id)) for route in routes])
+
+        cases = (
+            ("gate-capability", {"required_capabilities": ("tools",)}, "missing-capability"),
+            ("gate-privacy", {"privacy_constraints": ("local-only",)}, "privacy-constraint"),
+            ("gate-quality", {"difficulty": "complex"}, "quality-gate"),
+            ("gate-evidence", {"risk": "high"}, "evidence-insufficient"),
+        )
+        for route_id, options, error_code in cases:
+            with self.subTest(route_id=route_id):
+                result = supervisor.dispatch(
+                    {
+                        "parent_session_id": "gate-session",
+                        "route_id": route_id,
+                        "question": "gate check",
+                        **options,
+                    }
+                )
+                self.assertFalse(result["accepted"])
+                self.assertEqual(result["error_code"], error_code)
+        self.assertEqual(calls, [])
+
+    def test_explicit_unknown_quality_route_remains_dispatchable(self):
+        route = _route("gate-unknown-quality", quality_tier="unknown")
+        supervisor = self.make_supervisor(
+            [route],
+            [(route.route_id, ProviderWorker(lambda _: {"status": "completed", "answer": "ok"}, worker_id=route.route_id))],
+        )
+        result = supervisor.dispatch(
+            {
+                "parent_session_id": "gate-explicit",
+                "route_id": route.route_id,
+                "question": "explicit compatibility route",
+                "difficulty": "complex",
+            },
+            wait=True,
+        )
+        self.assertEqual(result["status"], "completed")
+
     def test_only_event_boundaries_replan_and_duplicate_event_is_ignored(self):
         route = _route("route-event", cost_class="local")
         worker = ProviderWorker(lambda dispatch: {"status": "completed", "answer": "event-result"}, worker_id="route-event")
@@ -125,6 +224,204 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertIn("turn.started", EVENT_BOUNDARIES)
         dispatch_id = accepted["dispatch"]["dispatch_id"]
         self.assertEqual(supervisor.wait(dispatch_id, timeout=2)["status"], "completed")
+
+    def test_nested_event_envelope_id_is_deduplicated_but_result_id_is_ignored(self):
+        route = _route("route-nested-event")
+        calls = []
+
+        def execute(dispatch):
+            calls.append(dispatch.dispatch_id)
+            return {"status": "completed", "answer": "nested-result"}
+
+        supervisor = self.make_supervisor(
+            [route],
+            [(route.route_id, ProviderWorker(execute, worker_id=route.route_id))],
+        )
+        request = {
+            "parent_session_id": "session-nested-event",
+            "parent_turn_id": "turn-nested-event",
+            "route_id": route.route_id,
+            "question": "nested boundary",
+            "confirmation_mode": "automatic",
+            "auto_dispatch": True,
+        }
+        envelope = {
+            "method": "session/event",
+            "params": {
+                "event": {
+                    "type": "turn.started",
+                    "id": "nested-event-1",
+                    "sessionId": "session-nested-event",
+                    "turnId": "turn-nested-event",
+                },
+                "result": {"id": "user-result-id"},
+            },
+        }
+        first = supervisor.handle_event(envelope, request)
+        self.assertEqual(first["status"], "dispatched")
+        duplicate = supervisor.handle_event(envelope, request)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(supervisor.wait(first["dispatch"]["dispatch_id"], timeout=2)["status"], "completed")
+
+        # A normal application result with ``status: completed`` and an ID is
+        # not a turn boundary and must not cause a second dispatch.
+        ordinary = supervisor.handle_event(
+            {"result": {"status": "completed", "id": "ordinary-result"}},
+            request,
+        )
+        self.assertFalse(ordinary["accepted"])
+        self.assertEqual(ordinary["reason"], "not-event-boundary")
+        self.assertEqual(len(calls), 1)
+
+    def test_nested_extensions_event_id_consumes_session_armed_request_once(self):
+        route = _route("route-armed-nested")
+        worker = ProviderWorker(
+            lambda dispatch: {"status": "completed", "answer": dispatch.question},
+            worker_id=route.route_id,
+        )
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+        armed = supervisor.arm_turn(
+            {
+                "parent_session_id": "session-armed-nested",
+                "parent_turn_id": "turn-armed-nested",
+                "route_id": route.route_id,
+                "question": "armed once",
+                "trigger_event": "turn.completed",
+                "confirmation_mode": "automatic",
+                "auto_dispatch": True,
+            }
+        )
+        self.assertTrue(armed["armed"])
+        event = {
+            "extensions": {
+                "event": {
+                    "eventId": "extensions-event-1",
+                    "type": "turn.completed",
+                    "sessionId": "session-armed-nested",
+                    "turnId": "turn-armed-nested",
+                }
+            }
+        }
+        first = supervisor.handle_event(event)
+        self.assertEqual(first["status"], "dispatched")
+        duplicate = supervisor.handle_event(event)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(supervisor.wait(first["dispatch"]["dispatch_id"], timeout=2)["status"], "completed")
+
+    def test_session_level_boundary_does_not_guess_when_multiple_turns_are_armed(self):
+        route = _route("route-ambiguous-session")
+        worker = ProviderWorker(
+            lambda dispatch: {"status": "completed", "answer": dispatch.question},
+            worker_id=route.route_id,
+        )
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+        for turn_id in ("turn-a", "turn-b"):
+            supervisor.arm_turn(
+                {
+                    "parent_session_id": "session-ambiguous",
+                    "parent_turn_id": turn_id,
+                    "route_id": route.route_id,
+                    "question": turn_id,
+                    "trigger_event": "turn.completed",
+                    "confirmation_mode": "automatic",
+                    "auto_dispatch": True,
+                }
+            )
+        result = supervisor.handle_event(
+            {"event": {"type": "turn.completed", "event_id": "ambiguous-1", "sessionId": "session-ambiguous"}}
+        )
+        self.assertTrue(result["accepted"])
+        self.assertFalse(result["replanned"])
+        self.assertEqual(result["reason"], "no-routing-request")
+        self.assertEqual(supervisor.active_runs(), [])
+
+    def test_boundary_replan_can_select_a_new_worker_only_from_an_explicit_request(self):
+        calls = []
+
+        def make_worker(label):
+            def execute(dispatch):
+                calls.append(label)
+                return {"status": "completed", "answer": f"{label}-answer"}
+
+            return ProviderWorker(execute, worker_id=f"worker-{label}")
+
+        first = _route("route-first")
+        second = _route("route-second")
+        supervisor = self.make_supervisor(
+            [first, second],
+            [(first.route_id, make_worker("first")), (second.route_id, make_worker("second"))],
+        )
+        initial = {
+            "parent_session_id": "session-boundary",
+            "parent_turn_id": "turn-boundary",
+            "question": "initial worker",
+            "route_id": first.route_id,
+            "confirmation_mode": "automatic",
+            "auto_dispatch": True,
+        }
+        started = supervisor.handle_event({"event_type": "turn.started", "event_id": "boundary-1"}, initial)
+        self.assertEqual(started["status"], "dispatched")
+        self.assertEqual(supervisor.wait(started["dispatch"]["dispatch_id"], timeout=2)["status"], "completed")
+
+        # A streaming event cannot trigger an implicit semantic split.
+        rejected = supervisor.handle_event(
+            {"event_type": "model.streaming", "event_id": "boundary-stream"},
+            dict(initial, route_id=second.route_id, question="must not dispatch"),
+        )
+        self.assertFalse(rejected["accepted"])
+        self.assertEqual(rejected["reason"], "not-event-boundary")
+
+        # At the next permitted boundary, the main Agent supplies a new,
+        # explicit request.  The supervisor may then choose the other worker.
+        next_request = dict(initial, route_id=second.route_id, question="follow-up worker")
+        replanned = supervisor.handle_event({"event_type": "tool.completed", "event_id": "boundary-2"}, next_request)
+        self.assertEqual(replanned["status"], "dispatched")
+        self.assertEqual(supervisor.wait(replanned["dispatch"]["dispatch_id"], timeout=2)["status"], "completed")
+        self.assertEqual(calls, ["first", "second"])
+
+    def test_supervisor_evaluation_capture_is_explicit_and_terminal_only(self):
+        task_set = EvaluationTaskSet.from_file(TASK_SET_PATH)
+        route = _route("route-capture")
+        worker = ProviderWorker(
+            lambda dispatch: {"status": "completed", "answer": "answer-body-must-not-be-captured"},
+            worker_id=route.route_id,
+        )
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+        dispatched = supervisor.dispatch(
+            {
+                "parent_session_id": "session-capture",
+                "parent_turn_id": "turn-capture",
+                "route_id": route.route_id,
+                "question": "question-body-must-not-be-captured",
+            },
+            wait=True,
+        )
+        dispatch_id = dispatched["dispatch_id"]
+        with self.assertRaisesRegex(SupervisorValidationError, "capture-opt-in-required"):
+            supervisor.capture_evaluation_sample(dispatch_id, task_set, task_id="read-only-question")
+        captured = supervisor.capture_evaluation_sample(
+            dispatch_id,
+            task_set,
+            task_id="read-only-question",
+            opt_in=True,
+            manifest={
+                "task_set_id": "sumika-agent-core",
+                "task_set_version": "1.0.0",
+                "harness_id": "dsh",
+                "harness_version": "fixture",
+                "adapter_id": "fixture-adapter",
+                "adapter_version": "1",
+                "provider_kind": "local",
+                "model_id": "fixture-model",
+                "model_version": "1",
+                "hardware_class": "fixture",
+                "privacy_policy": "local-only",
+                "cache_state": "cold",
+            },
+        )
+        serialized = json.dumps(captured.to_dict(), ensure_ascii=False)
+        self.assertNotIn("answer-body-must-not-be-captured", serialized)
+        self.assertNotIn("question-body-must-not-be-captured", serialized)
 
     def test_three_concurrent_and_four_total_dispatch_limits_are_enforced(self):
         started = [threading.Event() for _ in range(3)]
@@ -543,6 +840,191 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertEqual(panel["status"], "failed")
         self.assertEqual(panel["members"], [])
         self.assertEqual(calls, [])
+
+    def test_consultation_continuation_reuses_only_prior_profiles(self):
+        calls: list[str] = []
+
+        routes = [
+            _route(
+                "web-cont-a",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id="profile-cont-a",
+                provider_key="provider-cont-a",
+                runtime_id="browserskill",
+                transport="browser-dom",
+                processing_location="cloud",
+                auth_state="authorized",
+                health_state="healthy",
+                quota_state="unknown",
+                quota_consent="granted",
+                cost_class="unknown",
+                capabilities=("text", "chat", "browser"),
+            ),
+            _route(
+                "web-cont-b",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id="profile-cont-b",
+                provider_key="provider-cont-b",
+                runtime_id="browserskill",
+                transport="browser-dom",
+                processing_location="cloud",
+                auth_state="authorized",
+                health_state="healthy",
+                quota_state="unknown",
+                quota_consent="granted",
+                cost_class="unknown",
+                capabilities=("text", "chat", "browser"),
+            ),
+            _route(
+                "web-cont-new",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id="profile-cont-new",
+                provider_key="provider-cont-new",
+                runtime_id="browserskill",
+                transport="browser-dom",
+                processing_location="cloud",
+                auth_state="authorized",
+                health_state="healthy",
+                quota_state="unknown",
+                quota_consent="granted",
+                cost_class="unknown",
+                capabilities=("text", "chat", "browser"),
+            ),
+        ]
+
+        def worker(dispatch, route, cancel_event):
+            calls.append(route.route_id)
+            return {"status": "completed", "answer": route.route_id}
+
+        supervisor = self.make_supervisor(
+            routes,
+            [(route.route_id, ProviderWorker(worker, worker_id=route.route_id)) for route in routes],
+        )
+        first = supervisor.start_consultation(
+            {
+                "consultation_id": "consultation-cont-first",
+                "parent_session_id": "session-continuation",
+                "question": "first opinions",
+                "decision_kind": "brainstorm",
+                "max_members": 2,
+            },
+            wait=True,
+            timeout=2,
+        )
+        self.assertEqual(first["status"], "completed")
+        first_routes = {item["route_id"] for item in first["members"]}
+        self.assertEqual(first_routes, {"web-cont-a", "web-cont-b"})
+
+        second = supervisor.start_consultation(
+            {
+                "consultation_id": "consultation-cont-second",
+                "parent_session_id": "session-continuation",
+                "question": "follow-up opinions",
+                "decision_kind": "fact-check",
+                "max_members": 3,
+                "continuation_of": "consultation-cont-first",
+            },
+            wait=True,
+            timeout=2,
+        )
+        self.assertEqual(second["status"], "completed")
+        second_routes = {item["route_id"] for item in second["members"]}
+        self.assertEqual(second_routes, first_routes)
+        self.assertNotIn("web-cont-new", second_routes)
+        second_dispatches = [
+            item
+            for item in supervisor.list_runs(parent_session_id="session-continuation")
+            if item["dispatch"].get("consultation_id") == "consultation-cont-second"
+        ]
+        self.assertTrue(second_dispatches)
+        self.assertTrue(all(item["dispatch"].get("continuation_of") == "consultation-cont-first" for item in second_dispatches))
+
+    def test_unknown_consultation_continuation_fails_closed(self):
+        route = _route(
+            "web-cont-only",
+            kind="web-worker",
+            source_kind="web-chat",
+            provider_profile_id="profile-cont-only",
+            provider_key="provider-cont-only",
+            runtime_id="browserskill",
+            transport="browser-dom",
+            processing_location="cloud",
+            auth_state="authorized",
+            health_state="healthy",
+            quota_state="unknown",
+            quota_consent="granted",
+            cost_class="unknown",
+            capabilities=("text", "chat", "browser"),
+        )
+        calls: list[str] = []
+        supervisor = self.make_supervisor(
+            [route],
+            [(route.route_id, ProviderWorker(lambda *_: calls.append("called"), worker_id=route.route_id))],
+        )
+        result = supervisor.start_consultation(
+            {
+                "consultation_id": "consultation-cont-missing",
+                "parent_session_id": "session-continuation-missing",
+                "question": "must not choose a replacement",
+                "decision_kind": "small-answer",
+                "continuation_of": "consultation-does-not-exist",
+            },
+            wait=True,
+            timeout=1,
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["members"], [])
+        self.assertEqual(calls, [])
+
+    def test_consultation_excludes_unverified_or_unconsented_web_routes(self):
+        routes = [
+            _route(
+                "web-auth-unknown",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id="profile-auth-unknown",
+                provider_key="provider-auth-unknown",
+                auth_state="unknown",
+                health_state="healthy",
+                quota_state="unknown",
+                quota_consent="granted",
+                cost_class="unknown",
+                capabilities=("text", "chat", "browser"),
+            ),
+            _route(
+                "web-quota-unknown",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id="profile-quota-unknown",
+                provider_key="provider-quota-unknown",
+                auth_state="authorized",
+                health_state="healthy",
+                quota_state="unknown",
+                quota_consent="unknown",
+                cost_class="unknown",
+                capabilities=("text", "chat", "browser"),
+            ),
+        ]
+        supervisor = self.make_supervisor(
+            routes,
+            [(route.route_id, ProviderWorker(lambda *_: {"status": "completed", "answer": "must not run"}, worker_id=route.route_id)) for route in routes],
+        )
+        result = supervisor.start_consultation(
+            {
+                "consultation_id": "consultation-unverified-web",
+                "parent_session_id": "session-unverified-web",
+                "question": "requires verified profiles",
+                "decision_kind": "small-answer",
+                "max_members": 2,
+            }
+        )
+        self.assertEqual(result["status"], "waiting-human")
+        self.assertEqual(len(result["members"]), 1)
+        self.assertEqual(result["members"][0]["status"], "waiting-human")
+        self.assertEqual(result["members"][0]["error_code"], "confirmation-required")
 
     def test_occupancy_projection_blocks_and_then_restores_a_profile_route(self):
         route = _route(

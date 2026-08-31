@@ -13,7 +13,10 @@
     "sumika.route.cancel",
     "sumika.route.retry",
     "sumika.consultation.start",
-    "sumika.consultation.status"
+    "sumika.consultation.status",
+    "sumika.route.arm",
+    "sumika.route.pending",
+    "sumika.route.ack"
   ],
   "dependencies": [],
   "resource_requirements": {

@@ -50,6 +50,7 @@ EVENT_BOUNDARIES = frozenset(
         "approval.resolved",
         "turn.completed",
         "turn.failed",
+        "turn.cancelled",
     }
 )
 WORKER_KINDS = frozenset(
@@ -138,6 +139,27 @@ def _token(value: Any, field_name: str, *, default: str = "unknown") -> str:
     if re.fullmatch(r"[A-Za-z0-9._:-]+", candidate) is None:
         raise SupervisorValidationError(f"{field_name} is invalid")
     return candidate
+
+
+_MISSING = object()
+
+
+def _strict_bool(value: Any, field_name: str, *, default: Any = _MISSING) -> bool:
+    """Accept only JSON booleans at public contract boundaries.
+
+    Python's ``bool`` coercion turns values such as ``"false"`` and ``1`` into
+    ``True``.  That is unsafe for routing and approval fields, so callers must
+    either provide a real boolean or omit the field and use the declared
+    default.
+    """
+
+    if value is _MISSING:
+        if default is _MISSING:
+            raise SupervisorValidationError(f"{field_name} must be boolean")
+        value = default
+    if type(value) is not bool:
+        raise SupervisorValidationError(f"{field_name} must be boolean")
+    return value
 
 
 def _safe_context(value: Any, *, budget: int = 28_000) -> Any:
@@ -546,6 +568,8 @@ class RuntimeRouteDescriptor:
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "occupancy", occupancy)
         object.__setattr__(self, "quota_state", quota_state)
+        object.__setattr__(self, "routable", _strict_bool(self.routable, "routable"))
+        object.__setattr__(self, "requires_confirmation", _strict_bool(self.requires_confirmation, "requires_confirmation"))
         object.__setattr__(self, "source", sanitize_text(str(self.source or "core"), limit=120))
         object.__setattr__(self, "source_kind", _token(self.source_kind, "source_kind"))
         quality = str(self.quality_tier or "unknown").strip().lower()
@@ -763,7 +787,9 @@ class DynamicRoutingRequest:
         object.__setattr__(self, "route_id", _identifier(self.route_id, "route_id", required=False))
         object.__setattr__(self, "context_refs", _safe_context(self.context_refs))
         object.__setattr__(self, "decision_key", _safe_question(self.decision_key, limit=240) if self.decision_key else None)
-        object.__setattr__(self, "confirmed", bool(self.confirmed))
+        object.__setattr__(self, "auto_dispatch", _strict_bool(self.auto_dispatch, "auto_dispatch"))
+        object.__setattr__(self, "quota_consent", _strict_bool(self.quota_consent, "quota_consent"))
+        object.__setattr__(self, "confirmed", _strict_bool(self.confirmed, "confirmed"))
         object.__setattr__(self, "metadata", _safe_context(self.metadata, budget=2_000) if isinstance(self.metadata, Mapping) else {})
 
     @classmethod
@@ -909,6 +935,9 @@ class DynamicSubtaskDispatch:
     confirmed: bool = False
     budget_policy: str = "prefer-free"
     risk: str = "normal"
+    difficulty: str = "auto"
+    privacy_constraints: tuple[str, ...] = ()
+    min_quality_tier: str | None = None
     budget_remaining: float | None = None
     role: str = "worker"
     consultation_id: str | None = None
@@ -952,8 +981,8 @@ class DynamicSubtaskDispatch:
         object.__setattr__(self, "runtime_id", _token(self.runtime_id, "runtime_id"))
         object.__setattr__(self, "executor", _token(self.executor, "executor"))
         object.__setattr__(self, "transport", _token(self.transport, "transport"))
-        object.__setattr__(self, "quota_consent", bool(self.quota_consent))
-        object.__setattr__(self, "confirmed", bool(self.confirmed))
+        object.__setattr__(self, "quota_consent", _strict_bool(self.quota_consent, "quota_consent"))
+        object.__setattr__(self, "confirmed", _strict_bool(self.confirmed, "confirmed"))
         budget_policy = _token(self.budget_policy, "budget_policy", default="prefer-free")
         if budget_policy not in {"prefer-free", "free-only", "allow-paid", "no-paid"}:
             raise SupervisorValidationError("budget_policy is invalid")
@@ -962,6 +991,18 @@ class DynamicSubtaskDispatch:
         if risk not in {"low", "normal", "high", "critical"}:
             raise SupervisorValidationError("risk is invalid")
         object.__setattr__(self, "risk", risk)
+        difficulty = str(self.difficulty or "auto").strip().lower()
+        if difficulty not in {"auto", "trivial", "basic", "moderate", "complex", "critical"}:
+            raise SupervisorValidationError("difficulty is invalid")
+        object.__setattr__(self, "difficulty", difficulty)
+        privacy = self.privacy_constraints
+        if isinstance(privacy, str):
+            privacy = (privacy,)
+        object.__setattr__(self, "privacy_constraints", tuple(_token(item, "privacy_constraint") for item in tuple(privacy or ())[:24]))
+        quality = str(self.min_quality_tier or "").strip().lower() or None
+        if quality and quality not in QUALITY_ORDER:
+            raise SupervisorValidationError("min_quality_tier is invalid")
+        object.__setattr__(self, "min_quality_tier", quality)
         if self.budget_remaining is not None:
             if isinstance(self.budget_remaining, bool) or not isinstance(self.budget_remaining, (int, float)) or self.budget_remaining < 0:
                 raise SupervisorValidationError("budget_remaining must be non-negative")
@@ -1002,6 +1043,8 @@ class DynamicSubtaskDispatch:
             "executorId": "executor",
             "quotaConsent": "quota_consent",
             "budgetPolicy": "budget_policy",
+            "privacyConstraints": "privacy_constraints",
+            "minQualityTier": "min_quality_tier",
             "consultationId": "consultation_id",
             # Bridges commonly call the user-facing field ``text`` or
             # ``prompt``.  Normalize it before validation so every worker
@@ -1019,7 +1062,7 @@ class DynamicSubtaskDispatch:
             raw["route_id"] = route_id
         if worker_kind and not raw.get("worker_kind"):
             raw["worker_kind"] = worker_kind
-        for key in ("requested_capabilities", "required_capabilities"):
+        for key in ("requested_capabilities", "required_capabilities", "privacy_constraints"):
             if isinstance(raw.get(key), str):
                 raw[key] = (raw[key],)
         raw.setdefault("dispatch_id", f"dispatch-{uuid4().hex[:16]}")
@@ -1057,6 +1100,9 @@ class DynamicSubtaskDispatch:
             "confirmed": self.confirmed,
             "budget_policy": self.budget_policy,
             "risk": self.risk,
+            "difficulty": self.difficulty,
+            "privacy_constraints": list(self.privacy_constraints),
+            "min_quality_tier": self.min_quality_tier,
             "budget_remaining": self.budget_remaining,
             "role": self.role,
             "consultation_id": self.consultation_id,
@@ -1140,8 +1186,11 @@ class DynamicSubtaskResult:
         object.__setattr__(self, "artifacts_metadata", tuple(artifacts))
         object.__setattr__(self, "artifacts", tuple(artifacts))
         object.__setattr__(self, "runtime_id", _token(self.runtime_id, "runtime_id"))
-        object.__setattr__(self, "retryable", bool(self.retryable) and not bool(self.possibly_sent))
-        object.__setattr__(self, "possibly_sent", bool(self.possibly_sent))
+        possibly_sent = _strict_bool(self.possibly_sent, "possibly_sent")
+        retryable = _strict_bool(self.retryable, "retryable")
+        object.__setattr__(self, "possibly_sent", possibly_sent)
+        object.__setattr__(self, "retryable", retryable and not possibly_sent)
+        object.__setattr__(self, "untrusted_external", _strict_bool(self.untrusted_external, "untrusted_external"))
         object.__setattr__(self, "budget_impact", _safe_context(self.budget_impact, budget=1_000) if isinstance(self.budget_impact, Mapping) else {})
 
     @classmethod
@@ -1161,6 +1210,11 @@ class DynamicSubtaskResult:
         else:
             raw = {"status": "completed", "structured_result": str(value)}
         artifacts = raw.get("artifacts_metadata", raw.get("artifacts", ()))
+        possibly_sent_value = raw.get("possibly_sent", _MISSING)
+        if possibly_sent_value is _MISSING:
+            sent_state = raw.get("sent_state")
+            possibly_sent_value = isinstance(sent_state, str) and sent_state in {"possibly-sent", "unknown"}
+        untrusted_default = dispatch.worker_kind in {"web", "web-worker", "external-harness", "zcode"}
         return cls(
             dispatch_id=str(raw.get("dispatch_id") or dispatch.dispatch_id),
             route_id=str(raw.get("route_id") or dispatch.route_id),
@@ -1175,9 +1229,9 @@ class DynamicSubtaskResult:
             error_code=raw.get("error_code"),
             artifacts_metadata=tuple(artifacts or ()) if isinstance(artifacts, (list, tuple)) else (),
             artifacts=tuple(artifacts or ()) if isinstance(artifacts, (list, tuple)) else (),
-            retryable=bool(raw.get("retryable")),
-            possibly_sent=bool(raw.get("possibly_sent") or raw.get("sent_state") in {"possibly-sent", "unknown"}),
-            untrusted_external=bool(raw.get("untrusted_external", dispatch.worker_kind in {"web", "web-worker", "external-harness", "zcode"})),
+            retryable=_strict_bool(raw.get("retryable", False), "retryable"),
+            possibly_sent=_strict_bool(possibly_sent_value, "possibly_sent"),
+            untrusted_external=_strict_bool(raw.get("untrusted_external", untrusted_default), "untrusted_external"),
             runtime_id=str(raw.get("runtime_id") or "unknown"),
             budget_impact=raw.get("budget_impact") if isinstance(raw.get("budget_impact"), Mapping) else {},
         )
@@ -1400,6 +1454,9 @@ class _Run:
     fingerprint: str = ""
     evidence_hashes: tuple[str, ...] = ()
     active_released: bool = False
+    mailbox_acknowledged: bool = False
+    finalized: bool = False
+    terminal_event_emitted: bool = False
 
 
 class DynamicRouteSupervisor:
@@ -1455,6 +1512,11 @@ class DynamicRouteSupervisor:
         self._dedupe: dict[str, str] = {}
         self._turn_dispatch_counts: dict[tuple[str, str], int] = {}
         self._turn_active_counts: dict[tuple[str, str], int] = {}
+        # A parent Harness reads completed worker results through this
+        # volatile mailbox.  It is intentionally not reconstructed from
+        # SQLite: a restart must never replay an external request.
+        self._turn_requests: dict[tuple[str, str], DynamicRoutingRequest] = {}
+        self._mailbox: dict[tuple[str, str], list[str]] = {}
         self._seen_events: list[str] = []
         self._closed = False
         initial_routes = routes if routes is not None else route_catalog
@@ -1576,15 +1638,240 @@ class DynamicRouteSupervisor:
         return self.worker_registry.register(worker_id, worker, **kwargs)
 
     # ---- event boundary / replanning -------------------------------------------
+    def arm_turn(self, value: Any, *, replace: bool = False) -> dict[str, Any]:
+        """Register explicit routing context for a future event boundary.
+
+        Events alone are never allowed to invent a subtask.  A Harness may
+        arm a turn with a validated request, then send a boundary event later;
+        ``handle_event`` will consume that exact request once at the boundary.
+        The request body remains memory-only.
+        """
+
+        if self._closed:
+            raise SupervisorError("route supervisor is closed")
+        request = DynamicRoutingRequest.from_value(value)
+        key = self._turn_key(request.parent_session_id, request.parent_turn_id)
+        with self._lock:
+            existing = self._turn_requests.get(key)
+            if existing is not None and not replace:
+                return {
+                    "schema": SUPERVISOR_SCHEMA,
+                    "armed": False,
+                    "reason": "turn-already-armed",
+                    "parent_session_id": request.parent_session_id,
+                    "parent_turn_id": request.parent_turn_id,
+                    "request": existing.to_dict(),
+                }
+            self._turn_requests[key] = request
+        self._emit(
+            "route.turn.armed",
+            {
+                "parent_session_id": request.parent_session_id,
+                "parent_turn_id": request.parent_turn_id,
+                "trigger_event": request.trigger_event,
+            },
+        )
+        return {
+            "schema": SUPERVISOR_SCHEMA,
+            "armed": True,
+            "parent_session_id": request.parent_session_id,
+            "parent_turn_id": request.parent_turn_id,
+            "request": request.to_dict(),
+        }
+
+    def _event_parent_key(self, payload: Mapping[str, Any]) -> tuple[str, str] | None:
+        """Extract IDs from common nested envelopes without guessing.
+
+        A few Harness versions omit ``turnId`` on session-level notifications.
+        In that case a session-level fallback is safe only when exactly one
+        request is armed for the session.  If more than one candidate exists,
+        returning ``None`` is intentional: dispatching to the wrong turn is
+        worse than asking the parent Agent to provide an explicit ID.
+        """
+
+        def mappings(value: Any, depth: int = 0) -> list[Mapping[str, Any]]:
+            if depth > 5:
+                return []
+            if not isinstance(value, Mapping):
+                if isinstance(value, (list, tuple)):
+                    result: list[Mapping[str, Any]] = []
+                    for item in list(value)[:32]:
+                        result.extend(mappings(item, depth + 1))
+                    return result
+                return []
+            result = [value]
+            for key in ("extensions", "event", "params", "data", "payload", "result"):
+                nested = value.get(key)
+                if isinstance(nested, (Mapping, list, tuple)):
+                    result.extend(mappings(nested, depth + 1))
+            return result
+
+        rows = mappings(payload)
+
+        def first(names: tuple[str, ...]) -> Any:
+            for row in rows:
+                for name in names:
+                    value = row.get(name)
+                    if value not in (None, ""):
+                        return value
+            return None
+
+        session = first((
+            "parent_session_id", "parentSessionId", "session_id", "sessionId",
+            "thread_id", "threadId",
+        ))
+        turn = first(("parent_turn_id", "parentTurnId", "turn_id", "turnId"))
+        if session in (None, ""):
+            return None
+        try:
+            session_id = _identifier(session, "parent_session_id") or ""
+            turn_id = _identifier(turn, "parent_turn_id", required=False)
+        except SupervisorValidationError:
+            return None
+        if turn_id:
+            return self._turn_key(session_id, turn_id)
+        with self._lock:
+            candidates = [key for key in self._turn_requests if key[0] == session_id]
+        # Prefer an explicitly session-scoped request if one was armed.
+        session_key = self._turn_key(session_id, None)
+        if session_key in candidates:
+            return session_key
+        return candidates[0] if len(candidates) == 1 else None
+
+    @staticmethod
+    def _event_type(payload: Mapping[str, Any]) -> str:
+        """Find a boundary marker in a normalized or nested event envelope."""
+
+        def walk(value: Any, depth: int = 0) -> list[Mapping[str, Any]]:
+            if depth > 5:
+                return []
+            if not isinstance(value, Mapping):
+                if isinstance(value, (list, tuple)):
+                    result: list[Mapping[str, Any]] = []
+                    for item in list(value)[:32]:
+                        result.extend(walk(item, depth + 1))
+                    return result
+                return []
+            result = [value]
+            for key in ("extensions", "event", "params", "data", "payload", "result"):
+                nested = value.get(key)
+                if isinstance(nested, (Mapping, list, tuple)):
+                    result.extend(walk(nested, depth + 1))
+            return result
+
+        def normalize(value: Any) -> str:
+            return str(value or "").strip().lower().replace("/", ".").replace("_", ".").replace("-", ".")
+
+        explicit: list[str] = []
+        states: list[str] = []
+        rows = walk(payload)
+        for row in rows:
+            for key in ("event_type", "type", "method", "name"):
+                value = normalize(row.get(key))
+                if value:
+                    explicit.append(value)
+            row_marker = normalize(row.get("event_type") or row.get("type") or row.get("method") or row.get("name"))
+            if "turn" in row_marker:
+                for key in ("state", "status"):
+                    value = normalize(row.get(key))
+                    if value:
+                        states.append(value)
+            turn = row.get("turn")
+            if isinstance(turn, Mapping):
+                for key in ("type", "event_type", "method"):
+                    value = normalize(turn.get(key))
+                    if value:
+                        explicit.append(value)
+                for key in ("state", "status"):
+                    value = normalize(turn.get(key))
+                    if value:
+                        states.append(value)
+        if any(value in {"turn.failed", "turn.fail", "turn.error", "turn.failure", "model.request.failed", "runtime.error", "turn.aborted"} or "model.request.failed" in value for value in explicit) or any(value in {"failed", "error", "failure"} for value in states):
+            return "turn.failed"
+        if any(value in {"turn.cancelled", "turn.canceled", "turn.cancel", "turn.stopped", "turn.interrupted", "turn.aborted"} for value in explicit) or any(value in {"cancelled", "canceled", "stopped", "interrupted", "aborted"} for value in states):
+            return "turn.cancelled"
+        if any(value in {"turn.started", "turn.start"} for value in explicit):
+            return "turn.started"
+        if any(value in {"turn.completed", "turn.complete", "turn.end", "turn.ended", "turn.success"} for value in explicit):
+            return "turn.completed"
+        if any(value in {"tool.completed", "tool.result"} for value in explicit):
+            return "tool.completed"
+        if any(value in {"approval.resolved", "approval.resolve"} for value in explicit):
+            return "approval.resolved"
+        return ""
+
+    @staticmethod
+    def _event_id(payload: Mapping[str, Any]) -> str:
+        """Extract an event identity without treating arbitrary result IDs as events.
+
+        Harness adapters use a few different envelopes.  ``event_id`` and
+        ``eventId`` are explicit wherever they occur in a known envelope;
+        bare ``id`` is accepted only on an ``event`` object or a mapping that
+        carries an explicit boundary marker.  In particular, IDs under
+        ``result`` are user payload and must not participate in event
+        de-duplication.
+        """
+
+        def normalize(value: Any) -> str:
+            return str(value or "").strip().lower().replace("/", ".").replace("_", ".").replace("-", ".")
+
+        boundary_markers = {
+            "turn.started", "turn.start", "turn.completed", "turn.complete",
+            "turn.end", "turn.ended", "turn.success", "turn.failed", "turn.fail",
+            "turn.error", "turn.failure", "turn.cancelled", "turn.canceled",
+            "turn.cancel", "turn.stopped", "turn.interrupted", "turn.aborted",
+            "tool.completed", "tool.result", "approval.resolved", "approval.resolve",
+        }
+
+        def valid(value: Any) -> str | None:
+            candidate = str(value or "").strip()
+            if not candidate or len(candidate) > 240 or any(ord(char) < 32 or ord(char) == 127 for char in candidate):
+                return None
+            return candidate
+
+        # ``result`` is intentionally absent from this traversal.  A result
+        # may contain arbitrary application objects whose ``id`` has no
+        # relationship to the transport event.
+        queue: list[tuple[Mapping[str, Any], tuple[str, ...]]] = [(payload, ())]
+        while queue:
+            row, path = queue.pop(0)
+            for key in ("event_id", "eventId"):
+                found = valid(row.get(key))
+                if found:
+                    return found
+
+            markers = {
+                normalize(row.get(key))
+                for key in ("event_type", "type", "method", "name")
+                if row.get(key) not in (None, "")
+            }
+            is_event_object = path and path[-1] == "event"
+            if is_event_object or markers.intersection(boundary_markers):
+                found = valid(row.get("id"))
+                if found:
+                    return found
+
+            for key in ("extensions", "event", "params", "data", "payload"):
+                nested = row.get(key)
+                if isinstance(nested, Mapping):
+                    queue.append((nested, path + (key,)))
+                elif isinstance(nested, (list, tuple)):
+                    queue.extend(
+                        (item, path + (key,))
+                        for item in list(nested)[:32]
+                        if isinstance(item, Mapping)
+                    )
+        return ""
+
     def handle_event(self, event: Mapping[str, Any] | Any, request: Any = None, *, dispatch_selected: bool | None = None) -> dict[str, Any]:
         if not isinstance(event, Mapping):
             event_type = str(getattr(event, "event_type", getattr(event, "type", "")) or "").strip().lower()
-            event_id = str(getattr(event, "event_id", "") or "")
+            event_id = str(getattr(event, "event_id", getattr(event, "eventId", "")) or "")
             payload = {"event_type": event_type, "event_id": event_id}
         else:
             payload = dict(event)
-            event_type = str(payload.get("event_type") or payload.get("type") or payload.get("method") or "").strip().lower()
-            event_id = str(payload.get("event_id") or payload.get("eventId") or "").strip()
+            event_type = self._event_type(payload)
+            event_id = self._event_id(payload)
         if event_type not in EVENT_BOUNDARIES:
             return {"schema": SUPERVISOR_SCHEMA, "accepted": False, "replanned": False, "reason": "not-event-boundary", "event_type": event_type or None}
         if event_id:
@@ -1594,12 +1881,47 @@ class DynamicRouteSupervisor:
                 self._seen_events.append(event_id)
                 if len(self._seen_events) > 512:
                     self._seen_events = self._seen_events[-512:]
+        armed_key: tuple[str, str] | None = None
+        request_supplied = request is not None
         if request is None:
             request = payload.get("routing_request") or payload.get("routingRequest") or payload.get("route_request") or payload.get("routeRequest")
+            request_supplied = request is not None
+        if request is None:
+            armed_key = self._event_parent_key(payload)
+            if armed_key is not None:
+                with self._lock:
+                    request = self._turn_requests.get(armed_key)
+                request_supplied = request is not None
         if request is None:
             self._emit("route.replan.boundary", {"event_type": event_type})
             return {"schema": SUPERVISOR_SCHEMA, "accepted": True, "replanned": False, "reason": "no-routing-request", "event_type": event_type}
+        try:
+            requested_event = DynamicRoutingRequest.from_value(request).trigger_event
+        except SupervisorValidationError:
+            requested_event = None
+        if requested_event and requested_event != event_type:
+            return {
+                "schema": SUPERVISOR_SCHEMA,
+                "accepted": True,
+                "replanned": False,
+                "reason": "waiting-for-trigger-event",
+                "event_type": event_type,
+                "trigger_event": requested_event,
+            }
         result = self.replan(request, trigger_event=event_type, dispatch_selected=dispatch_selected)
+        # Event-driven requests are one-shot.  ``replan`` stores a request so
+        # callers can use it directly as a future arm, but ``handle_event``
+        # has already consumed the current boundary and must not replay the
+        # same dispatch on a later terminal notification.
+        if request_supplied:
+            try:
+                armed_request = DynamicRoutingRequest.from_value(request)
+                key = armed_key or self._turn_key(armed_request.parent_session_id, armed_request.parent_turn_id)
+            except SupervisorValidationError:
+                key = armed_key
+            if key is not None:
+                with self._lock:
+                    self._turn_requests.pop(key, None)
         return result
 
     on_event = handle_event
@@ -1639,6 +1961,10 @@ class DynamicRouteSupervisor:
             raise SupervisorValidationError("replan requires an event boundary")
         if event and routing.trigger_event != event:
             routing = replace(routing, trigger_event=event)
+        # ``replan`` is itself an explicit semantic request, so it may arm
+        # the same turn for a subsequent boundary without consulting logs.
+        with self._lock:
+            self._turn_requests[self._turn_key(routing.parent_session_id, routing.parent_turn_id)] = routing
         candidates, rejected = self._eligible_routes(routing)
         if not candidates:
             result = {
@@ -1691,6 +2017,9 @@ class DynamicRouteSupervisor:
                 worker_kind=self._worker_kind(selected),
                 context_refs=routing.context_refs,
                 requested_capabilities=routing.required_capabilities,
+                privacy_constraints=routing.privacy_constraints,
+                min_quality_tier=routing.min_quality_tier,
+                difficulty=routing.difficulty,
                 workspace_access=routing.workspace_access,
                 depth=routing.depth,
                 decision_key=routing.decision_key,
@@ -1701,6 +2030,10 @@ class DynamicRouteSupervisor:
                 confirmed=routing.confirmed,
                 budget_policy=routing.budget_policy,
                 risk=routing.risk,
+                runtime_id=selected.runtime_id,
+                executor=selected.executor,
+                transport=selected.transport,
+                metadata=routing.metadata,
             )
             result["dispatch"] = self.dispatch(dispatch, wait=False)
             result["status"] = "dispatched" if result["dispatch"].get("accepted") else result["dispatch"].get("status", "failed")
@@ -1774,40 +2107,40 @@ class DynamicRouteSupervisor:
             if request.route_id and route.route_id != request.route_id:
                 reject("route_preference")
                 continue
+            # Desktop routes represent an application control surface, not a
+            # general-purpose model.  They may only enter an automatic
+            # recommendation when the Agent explicitly asks for desktop
+            # capability or names the route.  This prevents an ordinary chat
+            # request from being sorted onto a local UI adapter merely because
+            # it is cheap and healthy.
+            is_desktop = (
+                route.kind in {"desktop-app", "desktop-automation"}
+                or route.source_kind == "desktop-automation"
+                or route.executor == "desktop-automation"
+                or route.runtime_id == "desktop"
+            )
+            if is_desktop and not (
+                request.route_id == route.route_id
+                or request.preferred_route == route.route_id
+                or "desktop" in {item.lower() for item in request.required_capabilities}
+            ):
+                reject("desktop_route_requires_explicit_request")
+                continue
             if not route.available:
                 reject("route_not_ready")
                 continue
-            if not set(request.required_capabilities).issubset(set(route.capabilities)):
-                reject("missing_capability")
+            compatibility_error = self._route_compatibility(
+                route,
+                required_capabilities=request.required_capabilities,
+                privacy_constraints=request.privacy_constraints,
+                difficulty=request.difficulty,
+                risk=request.risk,
+                min_quality_tier=request.min_quality_tier,
+                explicit_route=request.route_id == route.route_id or request.preferred_route == route.route_id,
+            )
+            if compatibility_error:
+                reject(compatibility_error)
                 continue
-            privacy = {item.lower() for item in request.privacy_constraints}
-            if ("local-only" in privacy or "disallow-cloud" in privacy) and route.processing_location != "local":
-                reject("privacy_constraint")
-                continue
-            if "cloud-only" in privacy and route.processing_location == "local":
-                reject("privacy_constraint")
-                continue
-            if "no-browser" in privacy and route.requires_browser:
-                reject("privacy_constraint")
-                continue
-            if route.auth_state not in {"authorized", "not-required", "unknown"}:
-                reject("auth_not_ready")
-                continue
-            if route.health_state not in {"healthy", "ready", "available", "unknown"}:
-                reject("health_not_ready")
-                continue
-            if route.quota_state in {"exhausted", "expired", "blocked", "needs-auth"}:
-                reject(f"quota_{route.quota_state}")
-                continue
-            quality = request.min_quality_tier or {"trivial": "basic", "basic": "basic", "moderate": "standard", "complex": "strong", "critical": "premium"}.get(request.difficulty, "standard")
-            if request.risk in {"high", "critical"} and QUALITY_ORDER.get(quality, 0) < QUALITY_ORDER["strong"]:
-                quality = "strong"
-            if QUALITY_ORDER.get(route.quality_tier, 0) < QUALITY_ORDER.get(quality, 0):
-                # Routes with unknown quality may still be explicitly selected
-                # by the user, but are not automatic recommendations.
-                if request.preferred_route != route.route_id:
-                    reject("quality_gate")
-                    continue
             if request.budget_policy in {"free-only", "no-paid"} and route.cost_class not in {"free-limited", "local"}:
                 reject("paid_disallowed")
                 continue
@@ -1815,11 +2148,6 @@ class DynamicRouteSupervisor:
             if request.budget_remaining is not None and isinstance(estimate, (int, float)) and not isinstance(estimate, bool) and float(estimate) > request.budget_remaining:
                 reject("budget_exceeded")
                 continue
-            if request.risk in {"high", "critical"}:
-                evidence = self.evidence.resolve(route.route_id, purpose="capability", refs=route.evidence_refs)
-                if evidence is None or evidence.effective_type not in {"smoke", "fixed-smoke", "real-run", "repeated-real-run"}:
-                    reject("evidence_insufficient")
-                    continue
             selected.append(route)
         return selected, rejected
 
@@ -1851,6 +2179,77 @@ class DynamicRouteSupervisor:
         )
 
     @staticmethod
+    def _required_quality(*, difficulty: str = "auto", risk: str = "normal", min_quality_tier: str | None = None) -> str:
+        """Return the same conservative quality floor for every dispatch path."""
+
+        if min_quality_tier:
+            required = min_quality_tier
+        else:
+            required = {
+                "trivial": "basic",
+                "basic": "basic",
+                "moderate": "standard",
+                "complex": "strong",
+                "critical": "premium",
+            }.get(difficulty, "standard")
+        if risk in {"high", "critical"} and QUALITY_ORDER.get(required, 0) < QUALITY_ORDER["strong"]:
+            required = "strong"
+        return required
+
+    def _route_compatibility(
+        self,
+        route: RuntimeRouteDescriptor,
+        *,
+        required_capabilities: Iterable[str] = (),
+        privacy_constraints: Iterable[str] = (),
+        difficulty: str = "auto",
+        risk: str = "normal",
+        min_quality_tier: str | None = None,
+        explicit_route: bool = False,
+    ) -> str | None:
+        """Apply capability, privacy, health, quality, and evidence gates.
+
+        The returned reason uses the catalog's stable underscore spelling.  The
+        direct dispatch API converts it to its historical hyphenated error code.
+        Keeping this in one helper prevents a hand-built dispatch from bypassing
+        gates that are applied during ``replan``.
+        """
+
+        if not set(required_capabilities).issubset(set(route.capabilities)):
+            return "missing_capability"
+        privacy = {str(item).strip().lower() for item in privacy_constraints}
+        if ("local-only" in privacy or "disallow-cloud" in privacy) and route.processing_location != "local":
+            return "privacy_constraint"
+        if "cloud-only" in privacy and route.processing_location == "local":
+            return "privacy_constraint"
+        if "no-browser" in privacy and route.requires_browser:
+            return "privacy_constraint"
+        if "no-third-party" in privacy and route.source_kind not in {"builtin", "local", "provider"}:
+            return "privacy_constraint"
+        if route.auth_state not in {"authorized", "not-required", "unknown"}:
+            return "auth_not_ready"
+        if route.health_state not in {"healthy", "ready", "available", "unknown"}:
+            return "health_not_ready"
+        if route.quota_state in {"exhausted", "expired", "blocked", "needs-auth"}:
+            return f"quota_{route.quota_state}"
+
+        required_quality = self._required_quality(
+            difficulty=difficulty,
+            risk=risk,
+            min_quality_tier=min_quality_tier,
+        )
+        if QUALITY_ORDER.get(route.quality_tier, 0) < QUALITY_ORDER.get(required_quality, 0):
+            # An explicitly selected route with unknown quality is retained for
+            # backward compatibility, but it is never an automatic candidate.
+            if not (explicit_route and route.quality_tier == "unknown"):
+                return "quality_gate"
+        if risk in {"high", "critical"}:
+            evidence = self.evidence.resolve(route.route_id, purpose="capability", refs=route.evidence_refs)
+            if evidence is None or evidence.effective_type not in {"smoke", "fixed-smoke", "real-run", "repeated-real-run"}:
+                return "evidence_insufficient"
+        return None
+
+    @staticmethod
     def _confirmation_needed(route: RuntimeRouteDescriptor, request: DynamicRoutingRequest) -> tuple[bool, list[str]]:
         reasons = ["safety_and_capability_gates_passed"]
         needs = request.confirmation_mode != "automatic" and not request.confirmed
@@ -1875,6 +2274,47 @@ class DynamicRouteSupervisor:
         return needs, reasons
 
     # ---- dispatch lifecycle -----------------------------------------------------
+    @staticmethod
+    def _hydrate_dispatch_metadata(
+        dispatch: DynamicSubtaskDispatch,
+        route: RuntimeRouteDescriptor,
+    ) -> tuple[DynamicSubtaskDispatch | None, str | None]:
+        """Fill omitted route metadata and reject explicit contradictions.
+
+        RPC callers commonly provide only a ``route_id``.  The worker still
+        needs the selected runtime, executor and transport in its receipt, so
+        the neutral descriptor supplies values that are explicitly omitted
+        (the contract's ``unknown`` defaults).  A caller-provided conflicting
+        value is rejected instead of being silently overwritten; this keeps
+        safety/audit metadata truthful and fail-closed.
+        """
+
+        updates: dict[str, Any] = {}
+        mismatches: list[str] = []
+        for field_name in ("runtime_id", "executor", "transport"):
+            actual = str(getattr(dispatch, field_name, "") or "").strip().lower()
+            expected = str(getattr(route, field_name, "") or "").strip().lower()
+            if actual in {"", "unknown"}:
+                if expected not in {"", "unknown"}:
+                    updates[field_name] = expected
+            elif expected not in {"", "unknown"} and actual != expected:
+                mismatches.append(field_name)
+
+        # ``none`` is the dispatch default, not permission to downgrade a
+        # route declared as write/external.  Upgrade the omitted default so
+        # the existing workspace and approval gates remain effective.
+        actual_side_effect = str(dispatch.side_effect or "none").strip().lower()
+        expected_side_effect = str(route.side_effect or "none").strip().lower()
+        if actual_side_effect == "none":
+            if expected_side_effect != "none":
+                updates["side_effect"] = expected_side_effect
+        elif expected_side_effect != "none" and actual_side_effect != expected_side_effect:
+            mismatches.append("side_effect")
+
+        if mismatches:
+            return None, "route-metadata-mismatch"
+        return replace(dispatch, **updates) if updates else dispatch, None
+
     def dispatch(self, value: Any, *, route_id: str | None = None, wait: bool = False, timeout: float | None = None) -> dict[str, Any]:
         if self._closed:
             raise SupervisorError("route supervisor is closed")
@@ -1885,19 +2325,24 @@ class DynamicRouteSupervisor:
             return self._rejected_dispatch(dispatch, "route-not-found")
         if dispatch.worker_kind == "provider" and route.kind.lower() not in {"provider", "model", "api"}:
             dispatch = replace(dispatch, worker_kind=self._worker_kind(route))
+        dispatch, metadata_error = self._hydrate_dispatch_metadata(dispatch, route)
+        if metadata_error:
+            # Keep the caller's original projection in the rejection so an
+            # integration can see which supplied metadata was inconsistent.
+            return self._rejected_dispatch(dispatch or DynamicSubtaskDispatch.from_value(value, route_id=route.route_id), metadata_error)
         if dispatch.depth > self.max_depth:
             return self._rejected_dispatch(dispatch, "max-depth")
-        # A hand-built dispatch must obey the same terminal state gates as
-        # ``replan``.  In particular, a routable descriptor must never be
-        # allowed to run after an observed quota has been exhausted or its
-        # authentication/health state has become invalid between catalog and
-        # dispatch.
-        if route.quota_state in {"exhausted", "expired", "blocked", "needs-auth"}:
-            return self._rejected_dispatch(dispatch, f"quota-{route.quota_state}")
-        if route.auth_state not in {"authorized", "not-required", "unknown"}:
-            return self._rejected_dispatch(dispatch, "auth-not-ready")
-        if route.health_state not in {"healthy", "ready", "available", "unknown"}:
-            return self._rejected_dispatch(dispatch, "health-not-ready")
+        compatibility_error = self._route_compatibility(
+            route,
+            required_capabilities=dispatch.required_capabilities,
+            privacy_constraints=dispatch.privacy_constraints,
+            difficulty=dispatch.difficulty,
+            risk=dispatch.risk,
+            min_quality_tier=dispatch.min_quality_tier,
+            explicit_route=True,
+        )
+        if compatibility_error:
+            return self._rejected_dispatch(dispatch, compatibility_error.replace("_", "-"))
         if route.occupancy in {"manual", "waiting"}:
             return self._rejected_dispatch(dispatch, "route-occupied", status="waiting-human")
         # Dispatch is also a public boundary (not only ``replan``), so apply
@@ -1996,7 +2441,11 @@ class DynamicRouteSupervisor:
                     latency_ms=elapsed,
                     error_code="deadline-exceeded",
                     retryable=False,
-                    possibly_sent=result.possibly_sent,
+                    # The worker had the entire deadline to cross its
+                    # transport boundary.  Even if an adapter omitted an
+                    # explicit sent marker, a late callback must never be
+                    # replayed automatically.
+                    possibly_sent=True,
                     runtime_id=result.runtime_id,
                 )
             worker_runtime = getattr(record.worker, "runtime_id", None)
@@ -2008,40 +2457,71 @@ class DynamicRouteSupervisor:
             # Error class, not exception text, is safe metadata and enough for
             # retry diagnostics.  Never include worker response/prompt data.
             code = _token(type(exc).__name__, "error_code", default="worker-error")
-            return DynamicSubtaskResult(record.dispatch.dispatch_id, record.route.route_id, record.dispatch.worker_kind, status="failed", latency_ms=elapsed, error_code=code, retryable=True, runtime_id=getattr(record.worker, "runtime_id", "unknown"))
+            # Once a worker executor has started, the supervisor cannot prove
+            # that a remote request was not accepted.  Treat the failure as
+            # non-replayable unless the adapter explicitly raises a
+            # pre-send marker with ``possibly_sent=False``.
+            possibly_sent = bool(getattr(exc, "possibly_sent", True))
+            retryable = bool(getattr(exc, "retryable", False)) and not possibly_sent
+            return DynamicSubtaskResult(record.dispatch.dispatch_id, record.route.route_id, record.dispatch.worker_kind, status="failed", latency_ms=elapsed, error_code=code, retryable=retryable, possibly_sent=possibly_sent, runtime_id=getattr(record.worker, "runtime_id", "unknown"))
 
     def _future_done(self, record: _Run, future: Future[Any]) -> None:
         try:
             result = future.result()
         except Exception as exc:
-            result = DynamicSubtaskResult(record.dispatch.dispatch_id, record.route.route_id, record.dispatch.worker_kind, status="failed", error_code=_token(type(exc).__name__, "error_code", default="worker-error"), retryable=True, runtime_id=getattr(record.worker, "runtime_id", "unknown"))
+            possibly_sent = bool(getattr(exc, "possibly_sent", True))
+            result = DynamicSubtaskResult(record.dispatch.dispatch_id, record.route.route_id, record.dispatch.worker_kind, status="failed", error_code=_token(type(exc).__name__, "error_code", default="worker-error"), retryable=bool(getattr(exc, "retryable", False)) and not possibly_sent, possibly_sent=possibly_sent, runtime_id=getattr(record.worker, "runtime_id", "unknown"))
         if not isinstance(result, DynamicSubtaskResult):
             result = DynamicSubtaskResult.from_value(result, record.dispatch)
         self._finish(record, result)
 
     def _finish(self, record: _Run, result: DynamicSubtaskResult) -> None:
+        """Finalize one run exactly once and publish its bounded outcome.
+
+        Cancellation, deadline and shutdown can race with a worker callback.
+        ``finalized`` is the single idempotence gate; a late callback is
+        intentionally ignored so it cannot overwrite a non-replayable result
+        or enqueue a duplicate mailbox item.
+        """
+
         with self._lock:
-            if record.status == "unknown" and record.error_code == "deadline-exceeded":
-                # A timed-out worker may still unwind in the executor.  Keep
-                # the externally visible deadline outcome and never present a
-                # late response as if it were accepted.
-                result = replace(result, status="unknown", answer=None, summary=None, error_code="deadline-exceeded", retryable=False)
-            if record.status == "interrupted" and result.status != "interrupted":
-                # Shutdown wins over a late worker callback.  The callback may
-                # still unwind in the executor, but it must not turn a
-                # non-replayable interrupted run into an ordinary cancellation.
-                result = replace(result, status="interrupted", answer=None, summary=None, error_code="core-shutdown", retryable=False)
-            elif record.status == "cancelled" and result.status != "cancelled":
-                result = replace(result, status="cancelled", answer=None, summary=None, error_code="cancelled", retryable=False)
+            if record.finalized:
+                return
+            forced_status = record.status if record.status in {"cancelled", "interrupted", "unknown", "waiting-human", "needs-confirmation"} else None
+            forced_error = record.error_code if forced_status else None
+            if forced_status == "unknown" and forced_error != "deadline-exceeded":
+                forced_error = forced_error or "unknown"
+            if forced_status == "cancelled":
+                forced_error = forced_error or "cancelled"
+            if forced_status == "interrupted":
+                forced_error = forced_error or "core-shutdown"
+            if forced_status:
+                # A forced lifecycle outcome never exposes a late answer.
+                result = replace(
+                    result,
+                    status=forced_status,
+                    answer=None,
+                    summary=None,
+                    error_code=forced_error,
+                    retryable=False,
+                    possibly_sent=bool(result.possibly_sent or record.started_at or forced_status in {"unknown", "cancelled", "interrupted"}),
+                )
+            elif result.status in {"queued", "running"}:
+                result = replace(result, status="unknown", answer=None, summary=None, error_code="invalid-terminal-result", retryable=False, possibly_sent=True)
             record.result = result
             record.status = result.status
             record.completed_at = _now()
             record.latency_ms = result.latency_ms
             record.error_code = result.error_code
             record.retryable = bool(result.retryable and not result.possibly_sent)
+            record.finalized = True
             self._release_active(record)
+            self._queue_mailbox_result(record)
+            emit = not record.terminal_event_emitted
+            record.terminal_event_emitted = True
         self._persist(record)
-        self._emit(f"route.dispatch.{result.status}", self._event_metadata(record))
+        if emit:
+            self._emit(f"route.dispatch.{result.status}", self._event_metadata(record))
         self._update_consultation(record.dispatch.consultation_id)
 
     def _rejected_dispatch(self, dispatch: DynamicSubtaskDispatch, error_code: str, *, status: str = "failed") -> dict[str, Any]:
@@ -2049,7 +2529,26 @@ class DynamicRouteSupervisor:
         with self._lock:
             known_route = self._routes.get(dispatch.route_id)
         rejection_route = known_route or RuntimeRouteDescriptor(route_id=dispatch.route_id, kind=dispatch.worker_kind, label=dispatch.route_id)
-        record = _Run(dispatch=dispatch, route=rejection_route, worker=None, status=status, result=result, completed_at=_now(), error_code=error_code)
+        record = _Run(
+            dispatch=dispatch,
+            route=rejection_route,
+            worker=None,
+            status=status,
+            result=result,
+            completed_at=_now(),
+            error_code=error_code,
+            finalized=True,
+            terminal_event_emitted=True,
+        )
+        with self._lock:
+            # Rejections are terminal outcomes too.  Keeping them in the
+            # volatile run table lets the parent Agent explain why a planned
+            # worker did not run and acknowledge that outcome consistently.
+            existing = self._runs.get(dispatch.dispatch_id)
+            if existing is not None:
+                return {**self._public(existing), "accepted": False, "deduplicated": True}
+            self._runs[dispatch.dispatch_id] = record
+            self._queue_mailbox_result(record)
         self._persist(record)
         self._emit("route.dispatch.rejected", self._event_metadata(record))
         return {"schema": SUPERVISOR_SCHEMA, "accepted": False, "deduplicated": False, "status": status, "error_code": error_code, "dispatch": dispatch.to_dict()}
@@ -2067,12 +2566,25 @@ class DynamicRouteSupervisor:
                 future.result(timeout=max(0.0, float(limit)))
             except FutureTimeout:
                 with self._lock:
-                    if record.status in {"queued", "running"}:
+                    still_active = record.status in {"queued", "running"} and not record.finalized
+                    if still_active:
                         record.status = "unknown"
                         record.error_code = "deadline-exceeded"
                         record.cancel_event.set()
-                        self._release_active(record)
-                self._persist(record)
+                if still_active:
+                    self._finish(
+                        record,
+                        DynamicSubtaskResult(
+                            record.dispatch.dispatch_id,
+                            record.route.route_id,
+                            record.dispatch.worker_kind,
+                            status="unknown",
+                            error_code="deadline-exceeded",
+                            retryable=False,
+                            possibly_sent=True,
+                            runtime_id=getattr(record.worker, "runtime_id", "unknown"),
+                        ),
+                    )
             except Exception:
                 pass
         return self.status(identifier)
@@ -2097,6 +2609,154 @@ class DynamicRouteSupervisor:
             return {"schema": SUPERVISOR_SCHEMA, "found": False, "dispatch_id": identifier}
         return self._public(record)
 
+    def pending_results(
+        self,
+        parent_session_id: str,
+        parent_turn_id: str | None = None,
+        *,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Return terminal worker results waiting for parent acknowledgement.
+
+        Only the bounded dispatch projection and sanitized result are exposed;
+        the original question/context never appears in this mailbox API.
+        """
+
+        session = _identifier(parent_session_id, "parent_session_id") or ""
+        turn = _identifier(parent_turn_id, "parent_turn_id", required=False)
+        cap = max(1, min(int(limit), 100))
+        with self._lock:
+            keys = [self._turn_key(session, turn)] if turn else [key for key in self._mailbox if key[0] == session]
+            dispatch_ids: list[str] = []
+            for key in keys:
+                dispatch_ids.extend(self._mailbox.get(key, ()))
+            records = [self._runs[item] for item in dispatch_ids if item in self._runs]
+        records.sort(key=lambda item: (item.completed_at or item.created_at, item.dispatch.dispatch_id))
+        rows: list[dict[str, Any]] = []
+        for record in records[:cap]:
+            if record.result is None or record.mailbox_acknowledged:
+                continue
+            rows.append(
+                {
+                    "dispatch_id": record.dispatch.dispatch_id,
+                    "parent_session_id": record.dispatch.parent_session_id,
+                    "parent_turn_id": record.dispatch.parent_turn_id,
+                    "route_id": record.route.route_id,
+                    "worker_kind": record.dispatch.worker_kind,
+                    "status": record.status,
+                    "result": record.result.to_dict(),
+                    "completed_at": record.completed_at,
+                    "pending": True,
+                }
+            )
+        return {
+            "schema": SUPERVISOR_SCHEMA,
+            "parent_session_id": session,
+            "parent_turn_id": turn,
+            "results": rows,
+            "count": len(rows),
+        }
+
+    def acknowledge_result(self, dispatch_id: str) -> dict[str, Any]:
+        """Acknowledge one mailbox result; repeated acknowledgements are safe."""
+
+        identifier = _identifier(dispatch_id, "dispatch_id") or ""
+        with self._lock:
+            record = self._runs.get(identifier)
+            if record is None:
+                return {"schema": SUPERVISOR_SCHEMA, "found": False, "dispatch_id": identifier, "acknowledged": False}
+            if record.result is None or record.status in {"queued", "running"}:
+                return {
+                    "schema": SUPERVISOR_SCHEMA,
+                    "found": True,
+                    "dispatch_id": identifier,
+                    "acknowledged": False,
+                    "reason": "result-not-terminal",
+                }
+            already = record.mailbox_acknowledged
+            record.mailbox_acknowledged = True
+            key = self._turn_key(record.dispatch.parent_session_id, record.dispatch.parent_turn_id)
+            pending = self._mailbox.get(key)
+            if pending and identifier in pending:
+                self._mailbox[key] = [item for item in pending if item != identifier]
+                if not self._mailbox[key]:
+                    self._mailbox.pop(key, None)
+        if not already:
+            self._emit(
+                "route.result.acknowledged",
+                self._event_metadata(record),
+            )
+        return {
+            "schema": SUPERVISOR_SCHEMA,
+            "found": True,
+            "dispatch_id": identifier,
+            "acknowledged": True,
+            "idempotent": already,
+        }
+
+    def capture_evaluation_sample(
+        self,
+        dispatch_id: str,
+        task_set: Any,
+        *,
+        task_id: str,
+        opt_in: bool = False,
+        manifest: Any = None,
+        metrics: Mapping[str, Any] | None = None,
+        harness_id: str = "unknown",
+        harness_version: str = "unknown",
+        adapter_id: str | None = None,
+        adapter_version: str = "unknown",
+        hardware_class: str = "unknown",
+        privacy_policy: str = "unknown",
+        cache_state: str = "unknown",
+    ) -> Any:
+        """Project one terminal run into the offline evaluation contract.
+
+        This is deliberately opt-in and run-scoped.  The supervisor does not
+        scan logs or storage, and the evaluator reads only fixed scalar fields
+        from its private ``_Run`` object.  Callers receive an
+        ``EvaluationRecord`` and may explicitly serialize it for an offline
+        evaluation job.
+        """
+
+        if opt_in is not True:
+            raise SupervisorValidationError("capture-opt-in-required")
+        identifier = _identifier(dispatch_id, "dispatch_id") or ""
+        with self._lock:
+            record = self._runs.get(identifier)
+        if record is None:
+            raise SupervisorValidationError("unknown-dispatch")
+        if record.status in {"queued", "running"}:
+            raise SupervisorValidationError("run-not-terminal")
+        from ..model_evaluation import capture_evaluation_sample as _capture
+        from ..model_evaluation import manifest_from_route as _manifest
+
+        selected_manifest = manifest
+        if selected_manifest is None:
+            runtime = self.runtime
+            runtime_id = getattr(runtime, "runtime_id", None) or getattr(runtime, "id", None) or harness_id
+            runtime_version = getattr(runtime, "version", None) or harness_version
+            selected_manifest = _manifest(
+                record.route,
+                task_set,
+                harness_id=str(runtime_id or "unknown"),
+                harness_version=str(runtime_version or "unknown"),
+                adapter_id=adapter_id,
+                adapter_version=adapter_version,
+                hardware_class=hardware_class,
+                privacy_policy=privacy_policy,
+                cache_state=cache_state,
+            )
+        return _capture(
+            record,
+            task_set,
+            task_id=task_id,
+            manifest=selected_manifest,
+            opt_in=True,
+            metrics=metrics,
+        )
+
     get_status = status
 
     def list_runs(self, *, parent_session_id: str | None = None, parent_turn_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
@@ -2120,6 +2780,77 @@ class DynamicRouteSupervisor:
     runs = list_runs
 
     # ---- consultation lifecycle -----------------------------------------------
+    def _continuation_route_refs(
+        self,
+        continuation_of: str,
+    ) -> tuple[set[str], set[str]] | None:
+        """Resolve the exact routes/profiles used by a prior consultation.
+
+        A consultation continuation is a transport/session reuse request, not
+        permission to choose a fresh provider.  Resolve the previous member
+        metadata from the live supervisor first and use the bounded SQLite
+        projection only when the previous run is no longer in memory.  No
+        question, answer, browser state, or credential is read here.
+        """
+
+        identifier = _identifier(continuation_of, "continuation_of") or ""
+        member_rows: list[Any] = []
+        with self._lock:
+            consultation = self._consultations.get(identifier)
+            if consultation is not None:
+                member_rows = list(consultation.get("member_metadata") or ())
+            else:
+                run = self._runs.get(identifier)
+                if run is not None:
+                    member_rows = [
+                        {
+                            "route_id": run.route.route_id,
+                            "provider_profile_id": run.route.provider_profile_id,
+                        }
+                    ]
+
+        # A persisted consultation contains only the same bounded member
+        # metadata.  A persisted route run is also accepted for callers that
+        # use a dispatch id as ``continuation_of``.
+        if not member_rows and self.storage is not None:
+            getter = getattr(self.storage, "get_agent_consultation", None)
+            if callable(getter):
+                try:
+                    row = getter(identifier)
+                except Exception:
+                    row = None
+                if isinstance(row, Mapping):
+                    member_rows = list(row.get("member_metadata") or ())
+            if not member_rows:
+                run_getter = getattr(self.storage, "get_agent_route_run", None)
+                if callable(run_getter):
+                    try:
+                        row = run_getter(identifier)
+                    except Exception:
+                        row = None
+                    if isinstance(row, Mapping):
+                        member_rows = [row]
+
+        route_ids: set[str] = set()
+        profile_ids: set[str] = set()
+        for item in member_rows[:8]:
+            if not isinstance(item, Mapping):
+                continue
+            raw_route = item.get("route_id") or item.get("routeId")
+            raw_profile = item.get("provider_profile_id") or item.get("providerProfileId")
+            try:
+                route_id = _identifier(raw_route, "route_id", required=False)
+                profile_id = _identifier(raw_profile, "provider_profile_id", required=False)
+            except SupervisorValidationError:
+                continue
+            if route_id:
+                route_ids.add(route_id)
+            if profile_id:
+                profile_ids.add(profile_id)
+        if not route_ids and not profile_ids:
+            return None
+        return route_ids, profile_ids
+
     def _consultation_routes(self, request: ConsultationRequest) -> list[RuntimeRouteDescriptor]:
         """Select distinct, ready web routes for one consultation panel.
 
@@ -2132,6 +2863,26 @@ class DynamicRouteSupervisor:
         allowed_ids = constraints.get("route_ids") or constraints.get("routeIds")
         allowed = {str(item) for item in allowed_ids} if isinstance(allowed_ids, (list, tuple, set)) else set()
         required = set(request.required_capabilities or ("text",))
+        continuation_refs = (
+            self._continuation_route_refs(request.continuation_of)
+            if request.continuation_of
+            else None
+        )
+        # A missing continuation must fail closed.  In particular, never
+        # replace a vanished prior Profile with a different web provider.
+        if request.continuation_of and continuation_refs is None:
+            return []
+        continuation_route_ids, continuation_profiles = continuation_refs or (set(), set())
+        privacy = constraints.get("privacy_constraints") or constraints.get("privacyConstraints") or ()
+        if isinstance(privacy, str):
+            privacy = (privacy,)
+        difficulty = str(constraints.get("difficulty") or "basic").strip().lower()
+        risk = str(constraints.get("risk") or "normal").strip().lower()
+        min_quality = constraints.get("min_quality_tier") or constraints.get("minQualityTier")
+        # A consultation is advisory: an unmeasured web model may still be
+        # useful as an opinion, so the default quality floor is deliberately
+        # ``unknown``.  A caller can raise it explicitly through constraints.
+        quality_floor = str(min_quality).strip() if min_quality else "unknown"
         with self._lock:
             values = list(self._routes.values())
         selected: list[RuntimeRouteDescriptor] = []
@@ -2141,6 +2892,14 @@ class DynamicRouteSupervisor:
                 continue
             if allowed and route.route_id not in allowed:
                 continue
+            if request.continuation_of and not (
+                route.route_id in continuation_route_ids
+                or (
+                    route.provider_profile_id is not None
+                    and route.provider_profile_id in continuation_profiles
+                )
+            ):
+                continue
             # A panel member gets an independent BrowserSkill/Profile lease.
             # Do not select a route already owned by another Agent or waiting
             # for a manual handoff; the caller can retry after the lease is
@@ -2148,6 +2907,27 @@ class DynamicRouteSupervisor:
             if route.occupancy != "idle":
                 continue
             if not route.available or not required.issubset(set(route.capabilities)):
+                continue
+            # Automatic consultation may use only an already authorized and
+            # recently healthy Profile.  Unknown quota and paid routes are
+            # admitted only far enough for the normal dispatch gate to return
+            # ``waiting-human``; that gate never sends the browser message
+            # without explicit consent/confirmation.
+            if route.auth_state not in {"authorized", "not-required"}:
+                continue
+            if route.health_state not in {"healthy", "ready", "available"}:
+                continue
+            if route.quota_state in {"exhausted", "expired", "blocked", "needs-auth"}:
+                continue
+            if self._route_compatibility(
+                route,
+                required_capabilities=required,
+                privacy_constraints=privacy,
+                difficulty=difficulty,
+                risk=risk,
+                min_quality_tier=quality_floor,
+                explicit_route=False,
+            ):
                 continue
             provider = route.provider_key or route.adapter_id or route.route_id
             if provider in providers:
@@ -2213,10 +2993,19 @@ class DynamicRouteSupervisor:
                 run = self._runs.get(dispatch_id)
                 result = run.result if run is not None else None
                 if isinstance(result, DynamicSubtaskResult):
+                    member_status = result.status
+                    # The modern supervisor exposes a few lifecycle states
+                    # that the older web consultation contract does not.  A
+                    # member awaiting approval is a human boundary, never a
+                    # completed/failed answer.
+                    if member_status == "needs-confirmation":
+                        member_status = "waiting-human"
+                    elif member_status == "partial":
+                        member_status = "unknown"
                     member = ConsultationMemberResult(
                         result.dispatch_id,
                         result.route_id,
-                        result.status,
+                        member_status,
                         answer=result.answer,
                         summary=result.summary,
                         concerns=result.concerns,
@@ -2345,6 +3134,7 @@ class DynamicRouteSupervisor:
             # Keep the request only in memory for worker prompt construction.
             "request": request,
             "completion_emitted": False,
+            "continuation_of": request.continuation_of,
         }
         with self._lock:
             self._consultations[request.consultation_id] = consultation
@@ -2371,6 +3161,7 @@ class DynamicRouteSupervisor:
                 risk="normal",
                 role=roles[index % len(roles)],
                 consultation_id=request.consultation_id,
+                continuation_of=request.continuation_of,
             )
             with self._lock:
                 consultation["member_metadata"].append({
@@ -2478,16 +3269,26 @@ class DynamicRouteSupervisor:
             record = self._runs.get(identifier)
             if record is None:
                 return {"schema": SUPERVISOR_SCHEMA, "dispatch_id": identifier, "cancelled": False, "reason": "unknown-dispatch"}
-            if record.status in {"completed", "failed", "cancelled", "interrupted", "unknown"}:
+            if record.finalized or record.status in {"completed", "failed", "cancelled", "interrupted", "unknown"}:
                 return {**self._public(record), "cancelled": False, "reason": "already-finished"}
             record.cancel_event.set()
             record.status = "cancelled"
             record.error_code = "cancelled"
-            self._release_active(record)
             if record.future:
                 record.future.cancel()
-        self._persist(record)
-        self._emit("route.dispatch.cancelled", self._event_metadata(record))
+        self._finish(
+            record,
+            DynamicSubtaskResult(
+                record.dispatch.dispatch_id,
+                record.route.route_id,
+                record.dispatch.worker_kind,
+                status="cancelled",
+                error_code="cancelled",
+                retryable=False,
+                possibly_sent=bool(record.started_at),
+                runtime_id=getattr(record.worker, "runtime_id", "unknown"),
+            ),
+        )
         return {**self._public(record), "cancelled": True}
 
     def cancel_all(self, *, parent_session_id: str | None = None, parent_turn_id: str | None = None) -> list[dict[str, Any]]:
@@ -2523,6 +3324,33 @@ class DynamicRouteSupervisor:
     def _turn_key(self, session_id: str, turn_id: str | None) -> tuple[str, str]:
         return session_id, turn_id or "__session__"
 
+    def _queue_mailbox_result(self, record: _Run) -> None:
+        """Queue one terminal result for its explicit parent turn."""
+
+        if self._closed or record.result is None or record.status in {"queued", "running"}:
+            return
+        key = self._turn_key(record.dispatch.parent_session_id, record.dispatch.parent_turn_id)
+        pending = self._mailbox.setdefault(key, [])
+        dispatch_id = record.dispatch.dispatch_id
+        if dispatch_id not in pending and not record.mailbox_acknowledged:
+            pending.append(dispatch_id)
+        # Bound volatile memory.  Prefer dropping already acknowledged ids;
+        # otherwise retain the newest terminal outcomes.
+        if len(pending) > 128:
+            retained = [item for item in pending if item in self._runs and not self._runs[item].mailbox_acknowledged]
+            self._mailbox[key] = retained[-128:]
+        self._emit(
+            "route.result.pending",
+            {
+                "dispatch_id": dispatch_id,
+                "parent_session_id": record.dispatch.parent_session_id,
+                "parent_turn_id": record.dispatch.parent_turn_id,
+                "route_id": record.route.route_id,
+                "status": record.status,
+                "error_code": record.error_code,
+            },
+        )
+
     def _release_active(self, record: _Run) -> None:
         """Release a turn slot exactly once, even after cancellation/timeout."""
 
@@ -2550,6 +3378,14 @@ class DynamicRouteSupervisor:
                 "result": result,
                 "runtime_id": record.route.runtime_id,
                 "worker_kind": record.dispatch.worker_kind,
+                "started_at": record.started_at,
+                "completed_at": record.completed_at,
+                "latency_ms": record.latency_ms,
+                "error_code": record.error_code,
+                "retryable": bool(record.retryable),
+                "possibly_sent": bool(result.get("possibly_sent")) if result else bool(record.started_at),
+                "result_pending": bool(record.result is not None and not record.mailbox_acknowledged),
+                "result_acknowledged": bool(record.mailbox_acknowledged),
             }
             if result is not None and result.get("status") == "completed":
                 value["completed"] = True
@@ -2670,14 +3506,11 @@ class DynamicRouteSupervisor:
             if self._closed:
                 return
             self._closed = True
-            records = [record for record in self._runs.values() if record.status in {"queued", "running"}]
+            records = [record for record in self._runs.values() if record.status in {"queued", "running"} and not record.finalized]
             for record in records:
                 record.cancel_event.set()
                 record.status = "interrupted"
                 record.error_code = "core-shutdown"
-                record.completed_at = _now()
-                self._release_active(record)
-                self._persist(record)
                 if record.dispatch.consultation_id:
                     consultation_ids.add(record.dispatch.consultation_id)
             # A consultation can still be queued while all of its dispatches
@@ -2693,6 +3526,29 @@ class DynamicRouteSupervisor:
                     if str(item.get("status") or "") in {"queued", "running"}:
                         item["status"] = "interrupted"
                         item["error_code"] = "core-shutdown"
+            # Mailbox entries and armed requests are process-local.  They are
+            # deliberately discarded after interruption metadata is written so
+            # a newly started Core cannot replay an external worker.
+            self._mailbox.clear()
+            self._turn_requests.clear()
+
+        # Complete each active run through the same idempotent terminal path as
+        # explicit cancellation/deadline handling.  Late futures now observe
+        # ``finalized`` and cannot overwrite the interruption outcome.
+        for record in records:
+            self._finish(
+                record,
+                DynamicSubtaskResult(
+                    record.dispatch.dispatch_id,
+                    record.route.route_id,
+                    record.dispatch.worker_kind,
+                    status="interrupted",
+                    error_code="core-shutdown",
+                    retryable=False,
+                    possibly_sent=True,
+                    runtime_id=getattr(record.worker, "runtime_id", "unknown"),
+                ),
+            )
 
         # Recompute public member projections after the run records have been
         # marked.  This also persists the consultation-level interrupted state

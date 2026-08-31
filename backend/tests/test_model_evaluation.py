@@ -4,12 +4,16 @@ import unittest
 from pathlib import Path
 
 from sumika_core.model_evaluation import (
+    CAPTURE_SCHEMA_VERSION,
     EVALUATION_SCHEMA_VERSION,
     EvaluationManifest,
     EvaluationRecord,
     EvaluationTaskSet,
     EvaluationValidationError,
     aggregate_evaluations,
+    capture_evaluation_payload,
+    capture_evaluation_records,
+    capture_evaluation_sample,
     load_records,
 )
 
@@ -165,6 +169,67 @@ class ModelEvaluationTests(unittest.TestCase):
         with self.assertRaises(EvaluationValidationError) as context:
             EvaluationRecord.from_dict(row, self.task_set)
         self.assertEqual(context.exception.code, "observed-at-invalid")
+
+    def test_capture_requires_opt_in_and_terminal_run(self):
+        run = {
+            "route_id": "route-a",
+            "status": "completed",
+            "latency_ms": 123,
+            "retry_count": 0,
+            "completed_at": "2026-08-31T00:00:00+00:00",
+        }
+        with self.assertRaisesRegex(EvaluationValidationError, "capture-opt-in-required"):
+            capture_evaluation_sample(run, self.task_set, task_id="read-only-question")
+        running = dict(run, status="running")
+        with self.assertRaisesRegex(EvaluationValidationError, "run-not-terminal"):
+            capture_evaluation_sample(running, self.task_set, task_id="read-only-question", opt_in=True, manifest=manifest())
+
+    def test_capture_projects_only_safe_metrics_and_never_run_content(self):
+        run = {
+            "route_id": "route-a",
+            "status": "completed",
+            "latency_ms": 123,
+            "retry_count": 1,
+            "error_code": None,
+            "completed_at": "2026-08-31T00:00:00+00:00",
+        }
+        record_value = capture_evaluation_sample(
+            run,
+            self.task_set,
+            task_id="read-only-question",
+            opt_in=True,
+            manifest=manifest(),
+            metrics={"tool_success": True, "quality_passed": True, "approval_count": 1},
+        )
+        serialized = json.dumps(record_value.to_dict(), ensure_ascii=False)
+        self.assertEqual(record_value.route_id, "route-a")
+        self.assertEqual(record_value.latency_ms, 123.0)
+        self.assertNotIn("answer", serialized)
+        self.assertNotIn("question-body", serialized)
+        self.assertEqual(capture_evaluation_payload([record_value])["schema_version"], CAPTURE_SCHEMA_VERSION)
+
+    def test_capture_rejects_sensitive_or_arbitrary_fields(self):
+        run = {"route_id": "route-a", "status": "completed", "prompt": "private"}
+        with self.assertRaisesRegex(EvaluationValidationError, "forbidden-field"):
+            capture_evaluation_sample(run, self.task_set, task_id="read-only-question", opt_in=True, manifest=manifest())
+        run = {"route_id": "route-a", "status": "completed"}
+        with self.assertRaisesRegex(EvaluationValidationError, "forbidden-field"):
+            capture_evaluation_sample(run, self.task_set, task_id="read-only-question", opt_in=True, manifest=manifest(), metrics={"answer": "private"})
+
+    def test_capture_batch_uses_explicit_task_ids(self):
+        runs = [
+            {"route_id": "route-a", "status": "completed", "completed_at": "2026-08-31T00:00:00+00:00"},
+            {"route_id": "route-a", "status": "failed", "completed_at": "2026-08-31T00:00:01+00:00"},
+        ]
+        captured = capture_evaluation_records(
+            runs,
+            self.task_set,
+            task_ids=["read-only-question", "tool-call"],
+            manifest=manifest(),
+            opt_in=True,
+        )
+        self.assertEqual([item.task_id for item in captured], ["read-only-question", "tool-call"])
+        self.assertEqual(captured[1].outcome, "failed")
 
 
 if __name__ == "__main__":

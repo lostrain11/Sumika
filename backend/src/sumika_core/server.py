@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .audio import AudioRuntime, AudioRuntimeError
@@ -24,6 +24,9 @@ from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, SkillCatalo
 from .agent.adapters.zcode.config import config_from_env as zcode_config_from_env
 from .agent.adapters.zcode.runtime import ZCodeAgentRuntime
 from .agent.runtime_workers import (
+    DesktopAutomationWorker,
+    ExternalHarnessClientWorker,
+    ExternalHarnessRouteSource,
     LegacyWebWorker,
     NativeRuntimeWorker,
     ProviderProfileWorker,
@@ -160,6 +163,21 @@ ROUTE_BRIDGE_TOOL_NAMES = frozenset(
         "sumika_consultation_status",
         "sumika_route_cancel",
         "sumika_route_retry",
+        "sumika_route_arm",
+        "sumika_route_pending",
+        "sumika_route_ack",
+    }
+)
+ROUTE_BRIDGE_LEGACY_TOOL_NAMES = frozenset(
+    {
+        "sumika_route_catalog",
+        "sumika_route_replan",
+        "sumika_route_dispatch",
+        "sumika_route_status",
+        "sumika_consultation_start",
+        "sumika_consultation_status",
+        "sumika_route_cancel",
+        "sumika_route_retry",
     }
 )
 ROUTE_BRIDGE_CANONICAL_TOOLS = (
@@ -171,6 +189,9 @@ ROUTE_BRIDGE_CANONICAL_TOOLS = (
     {"name": "sumika.consultation.status", "description": "Read consultation progress and untrusted results"},
     {"name": "sumika.route.cancel", "description": "Cancel a pending route or consultation"},
     {"name": "sumika.route.retry", "description": "Retry only a confirmed pre-send failure"},
+    {"name": "sumika.route.arm", "description": "Arm an explicit parent turn request for a later boundary"},
+    {"name": "sumika.route.pending", "description": "Read terminal worker results waiting for parent acknowledgement"},
+    {"name": "sumika.route.ack", "description": "Acknowledge one terminal worker result"},
 )
 
 
@@ -199,35 +220,81 @@ def _route_quality_tier(model_id: Any) -> str:
 
 
 def _route_event_boundary(event: Mapping[str, Any] | Any) -> str | None:
-    """Normalize common Harness turn markers to supervisor boundaries."""
+    """Normalize public Harness turn markers to supervisor boundaries.
+
+    DSH emits a normalized ``session/event`` envelope whose actual event is
+    under ``extensions.event.type`` and whose terminal state is under
+    ``extensions.turn.state``.  ZCode uses the same outer envelope but puts
+    its wire method in ``extensions.method``.  Keep this parser deliberately
+    structural: arbitrary ``status=completed`` fields are not a turn boundary
+    unless a turn marker is present in the same envelope.
+    """
 
     if not isinstance(event, Mapping):
         return None
-    candidates: list[Any] = [event.get("event_type"), event.get("type"), event.get("method"), event.get("status")]
-    extensions = event.get("extensions")
-    if isinstance(extensions, Mapping):
-        turn = extensions.get("turn")
+
+    def mappings(value: Any, depth: int = 0) -> list[Mapping[str, Any]]:
+        if depth > 5:
+            return []
+        if not isinstance(value, Mapping):
+            if isinstance(value, (list, tuple)):
+                result: list[Mapping[str, Any]] = []
+                for item in list(value)[:32]:
+                    result.extend(mappings(item, depth + 1))
+                return result
+            return []
+        result = [value]
+        # These are protocol envelope keys.  Do not recursively inspect
+        # arbitrary response fields where a user-controlled ``type`` could
+        # accidentally become a scheduler trigger.
+        for key in ("extensions", "event", "params", "data", "payload", "result"):
+            nested = value.get(key)
+            if isinstance(nested, (Mapping, list, tuple)):
+                result.extend(mappings(nested, depth + 1))
+        return result
+
+    def marker(value: Any) -> str:
+        return str(value or "").strip().lower().replace("/", ".").replace("_", ".").replace("-", ".")
+
+    rows = mappings(event)
+    explicit: list[str] = []
+    turn_states: list[str] = []
+    for row in rows:
+        for key in ("event_type", "type", "method", "name"):
+            value = marker(row.get(key))
+            if value:
+                explicit.append(value)
+        # State is meaningful only on an explicitly named turn object or a
+        # turn end marker.  A generic model/tool ``status`` is not enough.
+        row_marker = marker(row.get("event_type") or row.get("type") or row.get("method") or row.get("name"))
+        if "turn" in row_marker or row is event and isinstance(row.get("extensions"), Mapping) and isinstance(row["extensions"].get("turn"), Mapping):
+            for key in ("state", "status"):
+                value = marker(row.get(key))
+                if value:
+                    turn_states.append(value)
+        turn = row.get("turn")
         if isinstance(turn, Mapping):
-            candidates.extend((turn.get("event_type"), turn.get("type"), turn.get("status"), turn.get("state")))
-    mapping = {
-        "turn.started": "turn.started",
-        "turn/start": "turn.started",
-        "turn.start": "turn.started",
-        "turn.completed": "turn.completed",
-        "turn/end": "turn.completed",
-        "turn.complete": "turn.completed",
-        "turn.failed": "turn.failed",
-        "turn/fail": "turn.failed",
-        "turn.failed": "turn.failed",
-        "tool.completed": "tool.completed",
-        "tool/result": "tool.completed",
-        "approval.resolved": "approval.resolved",
-        "approval/resolved": "approval.resolved",
-    }
-    for candidate in candidates:
-        key = str(candidate or "").strip().lower()
-        if key in mapping:
-            return mapping[key]
+            for key in ("type", "event_type", "method", "state", "status"):
+                value = marker(turn.get(key))
+                if value:
+                    (explicit if key not in {"state", "status"} else turn_states).append(value)
+
+    # Failure/cancellation states take precedence over a generic turn/end
+    # marker.  This covers DSH reason.kind and ZCode model_request_failed.
+    failure_markers = {"turn.failed", "turn.fail", "turn.error", "turn.failure", "model.request.failed", "runtime.error", "turn.aborted"}
+    cancel_markers = {"turn.cancelled", "turn.canceled", "turn.cancel", "turn.stopped", "turn.interrupted", "turn.aborted"}
+    if any(value in failure_markers or "model.request.failed" in value for value in explicit) or any(value in {"failed", "error", "failure"} for value in turn_states):
+        return "turn.failed"
+    if any(value in cancel_markers for value in explicit) or any(value in {"cancelled", "canceled", "stopped", "interrupted", "aborted"} for value in turn_states):
+        return "turn.cancelled"
+    if any(value in {"turn.started", "turn.start"} for value in explicit):
+        return "turn.started"
+    if any(value in {"turn.completed", "turn.complete", "turn.end", "turn.ended", "turn.success"} for value in explicit):
+        return "turn.completed"
+    if any(value in {"tool.completed", "tool.result"} for value in explicit):
+        return "tool.completed"
+    if any(value in {"approval.resolved", "approval.resolve"} for value in explicit):
+        return "approval.resolved"
     return None
 
 
@@ -239,6 +306,8 @@ class CoreApplication:
         test_providers: dict[str, list[Any]] | None = None,
         credential_store: CredentialStore | None = None,
         agent_runtime: AgentRuntime | None = None,
+        external_route_sources: Iterable[Any] | None = None,
+        route_sources: Iterable[Any] | None = None,
     ) -> None:
         configured_dir = data_dir or os.getenv("SUMIKA_DATA_DIR", str(ROOT_DIR / ".sumika"))
         self.data_dir = Path(configured_dir) if str(configured_dir) != ":memory:" else Path(".")
@@ -285,6 +354,17 @@ class CoreApplication:
         # ZCode itself is the selected main runtime, do not register it as a
         # child worker as that would create a self-referential route.
         self.zcode_runtime = self._create_optional_zcode_runtime()
+        # External Harnesses are explicit dependency-injection slots. Core
+        # never discovers a client, reads its credentials, or starts a
+        # process implicitly; callers may register a source before the route
+        # supervisor is initialized (the normal plugin/fixture path).
+        self._external_route_sources: dict[str, Any] = {}
+        self._external_route_workers: dict[str, Any] = {}
+        # Replaced sources may still have an in-flight request.  They are
+        # detached from routing immediately and closed once Core shuts down,
+        # rather than risking a transport close while a worker is active.
+        self._retired_external_workers: list[Any] = []
+        self._initial_external_route_sources = tuple(external_route_sources or ()) + tuple(route_sources or ())
         # Registration is inert: no external desktop process or window is
         # started until an approved RPC explicitly opens a session.
         self.desktop_automation = DesktopAutomationRuntime(
@@ -386,6 +466,7 @@ class CoreApplication:
             logger=self.logger,
             web_chat=self.web_chat,
         )
+        self._register_initial_external_route_sources()
         self._initialize_route_supervisor()
         self.capabilities = CapabilityCatalog(
             self.modules,
@@ -674,6 +755,235 @@ class CoreApplication:
         self._zcode_runtime_owned = True
         return runtime
 
+    def _register_initial_external_route_sources(self) -> None:
+        """Install explicitly supplied Harness sources before route startup.
+
+        This method is intentionally the only place where the optional
+        ZCode adapter is projected into the generic external-Harness slot.
+        The adapter remains dormant until an explicit catalog refresh or
+        dispatch asks it to do work.  Other Harnesses are supplied by plugins
+        or tests through the constructor/registration method below.
+        """
+
+        initial = self._initial_external_route_sources
+        self._initial_external_route_sources = ()
+        for source in initial:
+            try:
+                self.register_external_route_source(source)
+            except (ModelPolicyError, TypeError, ValueError) as exc:
+                self.logger.warning(
+                    "external route source registration skipped error_type=%s",
+                    type(exc).__name__,
+                )
+
+        # Keep the installed ZCode adapter available as a generic Harness
+        # source for compatibility, while retaining its protocol-specific
+        # event worker.  No ZCode desktop automation is involved here.
+        if self.zcode_runtime is not None:
+            try:
+                self.register_external_route_source(
+                    ExternalHarnessRouteSource(
+                        self.zcode_runtime,
+                        source_id="zcode",
+                        worker=ZCodeExternalHarnessWorker(self.zcode_runtime),
+                        cost_class="unknown",
+                        processing_location="cloud",
+                    )
+                )
+            except (ModelPolicyError, TypeError, ValueError) as exc:
+                self.logger.warning(
+                    "optional zcode route source unavailable error_type=%s",
+                    type(exc).__name__,
+                )
+
+    def register_external_route_source(
+        self,
+        source: Any,
+        *,
+        source_id: str | None = None,
+        worker: Any = None,
+        worker_factory: Any = None,
+        quota_consent: str | bool = "unknown",
+        cost_class: str = "unknown",
+        processing_location: str = "cloud",
+    ) -> str:
+        """Register one explicit, runtime-neutral external Harness source.
+
+        ``source`` may already implement ``model_entries`` and ``worker`` or
+        may be a public client exposing the common Harness methods.  In the
+        latter case Core wraps it without inspecting credentials or private
+        configuration.  Registration is safe to repeat; the newest source
+        replaces the previous source with the same identifier.
+        """
+
+        if source is None:
+            raise ModelPolicyError("external route source is required")
+        model_entries = getattr(source, "model_entries", None)
+        source_worker = getattr(source, "worker", None)
+        if not callable(model_entries) or not callable(source_worker):
+            source = ExternalHarnessRouteSource(
+                source,
+                source_id=source_id,
+                worker=worker,
+                worker_factory=worker_factory if callable(worker_factory) else None,
+                quota_consent=quota_consent,
+                cost_class=cost_class,
+                processing_location=processing_location,
+            )
+        elif worker is not None:
+            # A caller can override a source's worker while keeping its
+            # catalog implementation.  This is useful for protocol fixtures
+            # and does not alter the source's client.
+            source = ExternalHarnessRouteSource(
+                getattr(source, "client", source),
+                source_id=source_id or getattr(source, "source_id", None),
+                worker=worker,
+                quota_consent=quota_consent,
+                cost_class=cost_class,
+                processing_location=processing_location,
+            )
+        # Let the policy service validate/normalize the identifier before
+        # detaching an existing source.  If validation fails, the old source
+        # remains fully usable.
+        identifier = self.model_policy.register_route_source(source, source_id=source_id)
+        previous_source = self._external_route_sources.get(identifier)
+        previous_worker = self._external_route_workers.get(identifier)
+        if (previous_source is not None and previous_source is not source) or (
+            previous_source is None and previous_worker is not None
+        ):
+            self._detach_external_route_source(
+                identifier,
+                previous_source,
+                previous_worker,
+            )
+        self._external_route_sources[identifier] = source
+        if hasattr(self, "route_supervisor"):
+            self._bind_external_route_worker(identifier, source)
+            # A registration made after startup is visible immediately in the
+            # next local catalog projection; live probing remains explicit.
+            self._refresh_route_supervisor_catalog(refresh=False)
+        return identifier
+
+    # Short, discoverable alias used by plugin integrations.
+    register_external_harness = register_external_route_source
+
+    def unregister_external_route_source(self, source_id: str) -> bool:
+        """Remove an explicitly registered source and its route bindings."""
+
+        identifier = str(source_id or "").strip().lower()
+        if not identifier:
+            return False
+        source = self._external_route_sources.pop(identifier, None)
+        removed = self.model_policy.unregister_route_source(identifier)
+        worker = self._external_route_workers.get(identifier)
+        if source is not None or worker is not None:
+            self._detach_external_route_source(identifier, source, worker)
+        if hasattr(self, "route_supervisor"):
+            self._refresh_route_supervisor_catalog(refresh=False)
+        return bool(source is not None or removed)
+
+    unregister_external_harness = unregister_external_route_source
+
+    @staticmethod
+    def _external_source_worker_id(source_id: str, source: Any) -> str:
+        value = str(getattr(source, "worker_id", "") or "").strip()
+        if value:
+            return value
+        return f"external-{_route_identifier_fragment(source_id)}"
+
+    def _detach_external_route_source(
+        self,
+        source_id: str,
+        source: Any | None,
+        worker: Any | None = None,
+    ) -> None:
+        """Remove one external worker binding and close it when idle.
+
+        Source replacement is a lifecycle boundary.  Keeping the old worker
+        in ``WorkerRegistry`` would let stale route bindings execute against
+        a client that is no longer registered; reusing the old worker would
+        also silently discard the newly supplied client.  Active runs retain
+        their object reference until completion, so an in-flight transport is
+        not closed underneath them.
+        """
+
+        identifier = str(source_id or "").strip().lower()
+        old_worker = worker or self._external_route_workers.get(identifier)
+        self._external_route_workers.pop(identifier, None)
+        registry = getattr(getattr(self, "route_supervisor", None), "worker_registry", None)
+        worker_id = self._external_source_worker_id(identifier, source) if source is not None else f"external-{_route_identifier_fragment(identifier)}"
+        registered = registry.get(worker_id) if registry is not None and hasattr(registry, "get") else None
+        if registry is not None and callable(getattr(registry, "unregister", None)):
+            # A replacement can have a custom worker id.  Only remove the
+            # binding when it still points at the worker being detached.
+            should_unregister = registered is not None and (
+                old_worker is None or registered is old_worker
+            )
+            if should_unregister:
+                try:
+                    registry.unregister(worker_id)
+                except Exception as exc:
+                    self.logger.info(
+                        "external route worker unregister failed source=%s error_type=%s",
+                        identifier,
+                        type(exc).__name__,
+                    )
+
+        if old_worker is None:
+            return
+        # Do not close a worker that is still executing a dispatched request.
+        active = False
+        supervisor = getattr(self, "route_supervisor", None)
+        runs = getattr(supervisor, "_runs", None)
+        lock = getattr(supervisor, "_lock", None)
+        if isinstance(runs, dict):
+            try:
+                if lock is not None:
+                    with lock:
+                        active = any(
+                            getattr(record, "worker", None) is old_worker
+                            and getattr(record, "status", None) in {"queued", "running"}
+                            for record in runs.values()
+                        )
+                else:
+                    active = any(
+                        getattr(record, "worker", None) is old_worker
+                        and getattr(record, "status", None) in {"queued", "running"}
+                        for record in runs.values()
+                    )
+            except Exception:
+                active = True
+        if active:
+            if old_worker not in self._retired_external_workers:
+                self._retired_external_workers.append(old_worker)
+            return
+        closer = getattr(old_worker, "close", None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception as exc:
+                self.logger.info(
+                    "external route worker close failed source=%s error_type=%s",
+                    identifier,
+                    type(exc).__name__,
+                )
+
+    def _bind_external_route_worker(self, source_id: str, source: Any) -> Any | None:
+        """Create and register a source worker without probing its client."""
+
+        worker = self._external_route_workers.get(source_id)
+        if worker is None:
+            factory = getattr(source, "worker", None)
+            if not callable(factory):
+                return None
+            worker = factory()
+            if worker is None:
+                return None
+            self._external_route_workers[source_id] = worker
+        worker_id = self._external_source_worker_id(source_id, source)
+        self.route_supervisor.register_worker(worker_id, worker)
+        return worker
+
     def _initialize_route_supervisor(self) -> None:
         """Create the scheduler and install only inert route bindings."""
 
@@ -684,11 +994,29 @@ class CoreApplication:
         # Registering workers is dependency injection only.  None of these
         # constructors starts a process or performs a network request.
         registry.register("web-coordinator", LegacyWebWorker(self.routes))
-        if self.zcode_runtime is not None:
-            registry.register(
-                "zcode-external-harness",
-                ZCodeExternalHarnessWorker(self.zcode_runtime),
-            )
+        registry.register(
+            "desktop-automation",
+            DesktopAutomationWorker(self.desktop_automation),
+        )
+        # Bind every explicitly registered external Harness through the same
+        # worker slot.  The source factory is expected to be inert; no health
+        # or model probe occurs until an explicit catalog refresh.
+        for source_id, source in list(self._external_route_sources.items()):
+            try:
+                worker = self._external_route_workers.get(source_id)
+                if worker is None:
+                    factory = getattr(source, "worker", None)
+                    worker = factory() if callable(factory) else None
+                    if worker is not None:
+                        self._external_route_workers[source_id] = worker
+                if worker is not None:
+                    registry.register(self._external_source_worker_id(source_id, source), worker)
+            except Exception as exc:
+                self.logger.info(
+                    "external route worker registration failed source=%s error_type=%s",
+                    source_id,
+                    type(exc).__name__,
+                )
         if str(getattr(self.agent, "runtime_id", "")).strip().lower() not in {"", "unavailable"}:
             runtime_id = _route_identifier_fragment(getattr(self.agent, "runtime_id", "agent"))
             registry.register(
@@ -736,7 +1064,7 @@ class CoreApplication:
         # These two model-policy projections are read-only and do not probe a
         # Harness.  They keep the catalog useful before an external runtime is
         # started.
-        for method_name in ("_profile_entries", "_web_entries"):
+        for method_name in ("_profile_entries", "_web_entries", "external_entries"):
             method = getattr(self.model_policy, method_name, None)
             if callable(method):
                 try:
@@ -770,9 +1098,36 @@ class CoreApplication:
             self._route_supervisor_runtime_routes.extend(
                 self._runtime_model_routes_from_catalog(policy_catalog)
             )
-            self._zcode_route_cache = self._zcode_worker_routes(refresh=True)
+            # ZCode, when configured, is registered above as an external
+            # source.  The legacy projection is retained only for callers
+            # that explicitly use the old helper and must not duplicate the
+            # generic source entries in the live catalog.
+            self._zcode_route_cache = [] if "zcode" in self._external_route_sources else self._zcode_worker_routes(refresh=True)
+        # External Harness entries are projected by ``external_entries``
+        # above.  Never retain them in the generic runtime cache as well:
+        # otherwise an unregistered/replaced source can leave a stale route
+        # visible after the next local refresh, and the same model appears
+        # twice.  Native Harness routes (for example DSH itself) remain in
+        # this cache.
+        self._route_supervisor_runtime_routes = [
+            route
+            for route in self._route_supervisor_runtime_routes
+            if route.kind != "external-harness" and route.source_kind != "external-harness"
+        ]
         entries.extend(self._route_supervisor_runtime_routes)
         entries.extend(self._zcode_route_cache)
+        try:
+            desktop_catalog = self.desktop_automation.catalog(
+                refresh=refresh,
+                include_unavailable=True,
+            )
+        except Exception as exc:
+            desktop_catalog = None
+            self.logger.info(
+                "desktop route catalog unavailable error_type=%s",
+                type(exc).__name__,
+            )
+        entries.extend(self._desktop_application_routes(desktop_catalog))
 
         # Read the legacy coordinator's local occupancy projection as a
         # compatibility bridge.  The modern descriptor is rebuilt from the
@@ -853,12 +1208,104 @@ class CoreApplication:
                 continue
             source_kind = str(raw.get("source_kind") or "").lower()
             harness_id = str(raw.get("harness_id") or "").lower()
+            # External route sources have their own explicit projection and
+            # worker lifecycle.  Keeping them in the generic runtime cache
+            # would survive source removal and duplicate their entries.
+            if source_kind in {"external", "external-harness"}:
+                continue
             if source_kind != "harness" and not harness_id:
                 continue
             try:
                 result.append(self._model_entry_to_route(raw))
             except (TypeError, ValueError, RouteValidationError):
                 continue
+        return result
+
+    @staticmethod
+    def _desktop_application_routes(catalog: Any) -> list[RuntimeRouteDescriptor]:
+        """Project approved desktop applications into the neutral route slot.
+
+        The public desktop catalog intentionally omits launcher paths and
+        adapter configuration.  A route therefore carries only an ``app_id``
+        and safe capability/health metadata; ``DesktopAutomationRuntime``
+        remains authoritative for the real declaration and action approval.
+        """
+
+        rows = catalog.get("apps", []) if isinstance(catalog, Mapping) else []
+        result: list[RuntimeRouteDescriptor] = []
+        for raw in rows if isinstance(rows, list) else []:
+            if not isinstance(raw, Mapping) or raw.get("approved") is not True:
+                continue
+            app_id = str(raw.get("app_id") or "").strip()
+            adapter_id = str(raw.get("adapter_id") or "desktop").strip().lower()
+            if not app_id:
+                continue
+            status_value = str(raw.get("status") or "unavailable").strip().lower()
+            configured = raw.get("configured") is True
+            if status_value in {"ready", "running"}:
+                status = "ready"
+                health = "healthy"
+                routable = True
+            elif status_value == "configured" and configured:
+                status = "configured"
+                health = "unknown"
+                routable = True
+            else:
+                status = "unavailable"
+                health = "unavailable" if status_value in {"unavailable", "error", "disabled", "revoked"} else "unknown"
+                routable = False
+            lease_owner = str(raw.get("lease_owner") or "none").strip().lower()
+            if lease_owner == "manual":
+                occupancy = "manual"
+            elif lease_owner in {"agent", "system"}:
+                occupancy = "agent"
+            elif str(raw.get("lease_state") or "idle").lower() == "leased":
+                occupancy = "waiting"
+            else:
+                occupancy = "idle"
+            capabilities = ["desktop"]
+            for item in raw.get("capabilities") or ():
+                value = str(item).strip().lower().replace("_", "-")
+                if value and value not in capabilities:
+                    capabilities.append(value)
+            result.append(
+                RuntimeRouteDescriptor(
+                    route_id=f"desktop:{_route_identifier_fragment(app_id)}",
+                    kind="desktop-app",
+                    label=str(raw.get("name") or app_id),
+                    runtime_id="desktop",
+                    executor="desktop-automation",
+                    transport=str(raw.get("transport") or "app-protocol"),
+                    # Action-level effects are checked by the desktop runtime;
+                    # marking the entire route external would also block safe
+                    # observations before that more precise gate can run.
+                    side_effect="none",
+                    quota_consent="granted",
+                    provider_key=f"desktop-{_route_identifier_fragment(app_id)}",
+                    adapter_id=adapter_id or None,
+                    capabilities=tuple(capabilities),
+                    status=status,
+                    routable=routable,
+                    occupancy=occupancy,
+                    quota_state="not-applicable",
+                    requires_confirmation=False,
+                    reason=None if routable else f"desktop-app-{status_value or 'unavailable'}",
+                    source="desktop-automation",
+                    source_kind="desktop-automation",
+                    quality_tier="standard",
+                    cost_class="local",
+                    processing_location="local",
+                    auth_state="authorized",
+                    health_state=health,
+                    metadata={
+                        "app_id": app_id,
+                        "adapter_id": adapter_id,
+                        "approval_boundary": "desktop-runtime",
+                        "default_action": "send",
+                        "lease_owner": lease_owner,
+                    },
+                )
+            )
         return result
 
     def _model_entry_to_route(self, entry: Any) -> RuntimeRouteDescriptor:
@@ -887,6 +1334,7 @@ class CoreApplication:
         web_profile_id = str(metadata.get("web_profile_id") or "").strip()
         if source_kind == "web-chat" and profile_id and not web_profile_id:
             web_profile_id = profile_id
+        reason = raw.get("reason")
         if source_kind == "web-chat":
             web_route_key = web_profile_id or str(raw.get("provider_id") or raw.get("route_id") or "web")
             route_id = f"web:{_route_identifier_fragment(web_route_key)}"
@@ -901,10 +1349,29 @@ class CoreApplication:
                 route_id = f"provider:{provider}:{model}"
             route_id = _route_identifier_fragment(route_id, preserve_colons=True)
             harness_id = str(raw.get("harness_id") or "").strip().lower()
-            if harness_id == "zcode" and self.zcode_runtime is not None:
+            external_source_id = str(
+                metadata.get("external_source_id")
+                or raw.get("external_source_id")
+                or raw.get("externalSourceId")
+                or ""
+            ).strip().lower()
+            is_external = bool(
+                source_kind in {"external-harness", "external"}
+                or metadata.get("external_harness") is True
+                or metadata.get("externalHarness") is True
+                or external_source_id
+            )
+            if is_external:
+                external_source_id = external_source_id or harness_id
+                source = self._external_route_sources.get(external_source_id)
                 kind = "external-harness"
-                runtime_id = "zcode"
-                executor = "zcode-external-harness"
+                runtime_id = external_source_id or harness_id or "external"
+                executor = self._external_source_worker_id(external_source_id, source) if source is not None else f"external-{_route_identifier_fragment(runtime_id)}"
+                # A catalog entry from an unregistered source is useful for
+                # diagnostics, but it must never become dispatchable.
+                if source is None:
+                    metadata["routable"] = False
+                    metadata.setdefault("unavailable_reason", "external-source-not-registered")
             elif harness_id and harness_id == str(getattr(self.agent, "runtime_id", "")).lower():
                 kind = "native-child-agent"
                 runtime_id = harness_id
@@ -924,9 +1391,15 @@ class CoreApplication:
         else:
             status = "unknown"
         routable = bool(raw.get("routable", metadata.get("routable", False)))
-        if kind == "external-harness" and self.zcode_runtime is None:
-            routable = False
-            status = "unavailable"
+        if kind == "external-harness":
+            source_id = str(metadata.get("external_source_id") or raw.get("external_source_id") or raw.get("harness_id") or runtime_id).strip().lower()
+            source = self._external_route_sources.get(source_id)
+            if source is None:
+                routable = False
+                status = "unavailable"
+                reason = "external-source-not-registered"
+            else:
+                reason = raw.get("reason") or metadata.get("unavailable_reason")
         if kind == "web-worker":
             metadata["web_profile_id"] = web_profile_id or profile_id
         return RuntimeRouteDescriptor(
@@ -955,7 +1428,7 @@ class CoreApplication:
             occupancy=str(metadata.get("occupancy") or raw.get("occupancy") or "idle"),
             quota_state=str(raw.get("quota_state") or "unknown"),
             requires_confirmation=bool(raw.get("requires_confirmation", False)),
-            reason=raw.get("reason") or ("profile-not-ready" if not routable and kind == "web-worker" else None),
+            reason=reason or ("profile-not-ready" if not routable and kind == "web-worker" else None),
             source=source_kind or "core",
             source_kind=source_kind or "provider",
             quality_tier=str(raw.get("quality_tier") or "unknown"),
@@ -970,9 +1443,23 @@ class CoreApplication:
         if route.kind == "web-worker":
             return self.route_supervisor.worker_registry.get("web-coordinator")
         if route.kind == "external-harness":
-            return self.route_supervisor.worker_registry.get("zcode-external-harness")
+            source_id = str(
+                (route.metadata or {}).get("external_source_id")
+                if isinstance(route.metadata, Mapping)
+                else ""
+            ).strip().lower() or str(route.runtime_id or "").strip().lower()
+            source = self._external_route_sources.get(source_id)
+            if source is not None:
+                worker = self._bind_external_route_worker(source_id, source)
+                if worker is not None:
+                    return worker
+            # Keep descriptor-level lookup as a compatibility path for a
+            # plugin that registered a worker directly with the executor id.
+            return self.route_supervisor.worker_registry.get(route.executor)
         if route.kind == "native-child-agent":
             return self.route_supervisor.worker_registry.get(route.executor)
+        if route.kind == "desktop-app":
+            return self.route_supervisor.worker_registry.get("desktop-automation")
         if route.kind == "provider" and route.provider_profile_id:
             worker_id = f"provider-profile-{_route_identifier_fragment(route.provider_profile_id)}"
             worker = self.route_supervisor.worker_registry.get(worker_id)
@@ -1117,6 +1604,11 @@ class CoreApplication:
     def _zcode_worker_routes(self, *, refresh: bool = False) -> list[RuntimeRouteDescriptor]:
         """Probe the explicitly configured ZCode worker only on request."""
 
+        # Configured ZCode is normally represented by the generic external
+        # route source.  Keep this legacy helper for older callers, but avoid
+        # producing a second set of descriptors when that source is present.
+        if "zcode" in getattr(self, "_external_route_sources", {}):
+            return []
         runtime = self.zcode_runtime
         if runtime is None:
             return []
@@ -1209,7 +1701,8 @@ class CoreApplication:
             "workspace_access", "depth", "trigger_event", "selected_route",
             "requires_confirmation", "reason_codes", "duplicate", "accepted",
             "consultation_id", "successful_count", "failed_count",
-            "disagreement_detected", "member_count",
+            "disagreement_detected", "member_count", "result_pending",
+            "result_acknowledged", "armed", "pending",
         }
         payload = {key: event.get(key) for key in safe_keys if event.get(key) is not None}
         event_type = str(event.get("event_type") or "agent.route.event")
@@ -1554,19 +2047,7 @@ class CoreApplication:
         # the small set of public status spellings without treating arbitrary
         # model/tool events as permission to dispatch work.
         try:
-            boundary = _route_event_boundary(event)
-            if boundary and hasattr(self, "route_supervisor"):
-                supervisor_event = dict(event)
-                supervisor_event["event_type"] = boundary
-                self.route_supervisor.handle_event(
-                    supervisor_event,
-                    request=(
-                        event.get("routing_request")
-                        or event.get("routingRequest")
-                        or event.get("route_request")
-                        or event.get("routeRequest")
-                    ),
-                )
+            self._handle_route_boundary_event(event)
         except Exception as error:
             # A scheduler error must never break the primary Agent event
             # stream; it is reported as bounded diagnostics only.
@@ -1577,6 +2058,37 @@ class CoreApplication:
                 payload,
                 session_id=event.get("session_id"),
             )
+        )
+
+    def _handle_route_boundary_event(self, event: Mapping[str, Any] | Any) -> dict[str, Any] | None:
+        """Send one normalized runtime event through the route supervisor.
+
+        This helper is shared by the live runtime callback and the explicit
+        ``agent.event.ingest`` RPC.  Keeping both paths identical matters for
+        reconnects and fixture-driven integrations: an event received through
+        either path must have the same boundary and parent-turn semantics.
+        """
+
+        if not isinstance(event, Mapping) or not hasattr(self, "route_supervisor"):
+            return None
+        boundary = _route_event_boundary(event)
+        if not boundary:
+            return None
+        supervisor_event = dict(event)
+        supervisor_event["event_type"] = boundary
+        request = (
+            event.get("routing_request")
+            or event.get("routingRequest")
+            or event.get("route_request")
+            or event.get("routeRequest")
+        )
+        selected = event.get("dispatch_selected")
+        if not isinstance(selected, bool):
+            selected = event.get("dispatchSelected")
+        return self.route_supervisor.handle_event(
+            supervisor_event,
+            request=request,
+            dispatch_selected=selected if isinstance(selected, bool) else None,
         )
 
     def _on_route_event(self, event: dict[str, Any]) -> None:
@@ -1652,7 +2164,18 @@ class CoreApplication:
             "runtime": str(getattr(self.agent, "runtime_id", "unknown")),
             "registered": registered,
             "status": "registered" if registered else status,
-            "tools": [dict(item) for item in ROUTE_BRIDGE_CANONICAL_TOOLS],
+            "tools": [
+                dict(item)
+                for item in (
+                    tuple(
+                        item
+                        for item in ROUTE_BRIDGE_CANONICAL_TOOLS
+                        if not registration or item["name"].replace(".", "_") in set(registration.get("tools") or ())
+                    )
+                    if registration
+                    else ROUTE_BRIDGE_CANONICAL_TOOLS
+                )
+            ],
             "runtime_state": runtime_status["state"],
             "runtime_ready": runtime_status["ready"],
         }
@@ -1712,7 +2235,7 @@ class CoreApplication:
             tools.append(value.strip())
         if len(set(tools)) != len(tools):
             raise JsonRpcError(-32602, "tools must not contain duplicates")
-        if set(tools) != set(ROUTE_BRIDGE_TOOL_NAMES):
+        if set(tools) not in (ROUTE_BRIDGE_LEGACY_TOOL_NAMES, ROUTE_BRIDGE_TOOL_NAMES):
             return self._route_bridge_projection(
                 plugin_id=plugin_id,
                 status="tool-set-mismatch",
@@ -3484,6 +4007,14 @@ class CoreApplication:
                 event = self.agent.normalize_event(payload)
             except AgentRuntimeError as exc:
                 raise JsonRpcError(-32030, str(exc)) from exc
+            # Explicitly ingested events (for example after a transport
+            # reconnect) must enter the same dynamic-routing boundary path as
+            # live runtime notifications.  The helper is fail-safe and only
+            # acts on recognized turn/tool/approval boundaries.
+            try:
+                self._handle_route_boundary_event(event)
+            except Exception as error:
+                self.logger.info("ingested route event handling failed error_type=%s", type(error).__name__)
             self.events.publish(
                 EventEnvelope(
                     "agent.event",
@@ -3535,6 +4066,27 @@ class CoreApplication:
                 )
             except (RouteValidationError, SupervisorError, ValueError, TypeError) as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.arm":
+            source = params.get("request") if isinstance(params.get("request"), Mapping) else params
+            try:
+                result = self.route_supervisor.arm_turn(
+                    source,
+                    replace=params.get("replace") is True,
+                )
+            except (RouteValidationError, SupervisorError, ValueError, TypeError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self.events.publish(
+                EventEnvelope(
+                    "agent.route.turn.armed",
+                    {
+                        "parent_session_id": result.get("parent_session_id"),
+                        "parent_turn_id": result.get("parent_turn_id"),
+                        "armed": bool(result.get("armed")),
+                    },
+                    session_id=result.get("parent_session_id"),
+                )
+            )
+            return result
         if method == "sumika.route.dispatch":
             raw = dict(params)
             route_id = str(params.get("route_id") or params.get("routeId") or "").strip()
@@ -3599,6 +4151,27 @@ class CoreApplication:
                     return status
                 return self.routes.status(str(dispatch_id))
             except (RouteValidationError, SupervisorError, RouteError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.pending":
+            parent_session_id = params.get("parent_session_id") or params.get("parentSessionId") or params.get("session_id") or params.get("sessionId")
+            if not parent_session_id:
+                raise JsonRpcError(-32602, "parent_session_id is required")
+            parent_turn_id = params.get("parent_turn_id") or params.get("parentTurnId") or params.get("turn_id") or params.get("turnId")
+            try:
+                return self.route_supervisor.pending_results(
+                    str(parent_session_id),
+                    str(parent_turn_id) if parent_turn_id else None,
+                    limit=int(params.get("limit") or 50),
+                )
+            except (RouteValidationError, SupervisorError, ValueError, TypeError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "sumika.route.ack":
+            dispatch_id = params.get("dispatch_id") or params.get("dispatchId")
+            if not dispatch_id:
+                raise JsonRpcError(-32602, "dispatch_id is required")
+            try:
+                return self.route_supervisor.acknowledge_result(str(dispatch_id))
+            except (RouteValidationError, SupervisorError, ValueError, TypeError) as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
         if method == "sumika.consultation.start":
             # New clients use the runtime-neutral Supervisor whenever at
@@ -3914,6 +4487,53 @@ class CoreApplication:
             self._sync_web_chat_providers()
             self.events.publish(EventEnvelope(event_type, {"profile": _redact_web_chat_payload(result)}))
             return result
+        if method == "browser.web_chat.message.start":
+            raw_text = params.get("text")
+            if not isinstance(raw_text, str) or not raw_text.strip():
+                raise JsonRpcError(-32602, "web-chat text must be a non-empty string")
+            owner = str(params.get("owner") or "manual").strip().lower()
+            if owner not in {"manual", "agent"}:
+                raise JsonRpcError(-32602, "web-chat owner is invalid")
+            try:
+                result = self.web_chat.start_message(
+                    str(params.get("profile_id") or ""), raw_text, owner=owner
+                )
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32000, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self.events.publish(
+                EventEnvelope(
+                    "browser.web_chat.message.accepted" if result.get("accepted") else "browser.web_chat.message.rejected",
+                    {
+                        "profile_id": result.get("profile_id"),
+                        "attempt_id": result.get("attempt_id"),
+                        "status": result.get("status"),
+                        "owner": result.get("owner"),
+                        "possibly_sent": bool(result.get("possibly_sent")),
+                    },
+                )
+            )
+            return result
+        if method == "browser.web_chat.message.status":
+            attempt_id = params.get("attempt_id") or params.get("attemptId")
+            if not attempt_id:
+                raise JsonRpcError(-32602, "attempt_id is required")
+            return self.web_chat.message_status(str(attempt_id))
+        if method == "browser.web_chat.message.wait":
+            attempt_id = params.get("attempt_id") or params.get("attemptId")
+            if not attempt_id:
+                raise JsonRpcError(-32602, "attempt_id is required")
+            raw_timeout = params.get("timeout", 15)
+            try:
+                timeout = max(0.0, min(30.0, float(raw_timeout)))
+            except (TypeError, ValueError):
+                raise JsonRpcError(-32602, "timeout is invalid")
+            return self.web_chat.wait_message(str(attempt_id), timeout=timeout)
+        if method == "browser.web_chat.message.cancel":
+            attempt_id = params.get("attempt_id") or params.get("attemptId")
+            if not attempt_id:
+                raise JsonRpcError(-32602, "attempt_id is required")
+            return self.web_chat.cancel_message(str(attempt_id))
         if method == "browser.web_chat.send":
             raw_text = params.get("text")
             if not isinstance(raw_text, str) or not raw_text.strip():
@@ -3930,6 +4550,8 @@ class CoreApplication:
                     "browser.web_chat.message.completed" if result.get("ok") else "browser.web_chat.message.pending",
                     {
                         "profile_id": result.get("profile_id"),
+                        "attempt_id": result.get("attempt_id"),
+                        "status": result.get("status"),
                         "ok": bool(result.get("ok")),
                         "pending": bool(result.get("pending")),
                         "requires_human": bool(result.get("requires_human")),
@@ -5811,6 +6433,17 @@ class CoreApplication:
             # bindings.
             if hasattr(self, "route_supervisor"):
                 self.route_supervisor.close()
+            # Workers retired during source replacement are no longer in the
+            # supervisor registry, but an in-flight request may have kept
+            # them alive.  Close them during the owning Core shutdown.
+            for worker in list(getattr(self, "_retired_external_workers", ())):
+                closer = getattr(worker, "close", None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:
+                        pass
+            self._retired_external_workers = []
             self.providers.close()
             self.desktop_automation.close()
             self.agent.close()

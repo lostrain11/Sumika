@@ -37,9 +37,26 @@ function objectOrEmpty(value, field) {
   return value;
 }
 
+// Keep the DSH tool contract valid for bridge responses whose shape is owned
+// by the Core.  The policy client has already applied its bounded redaction.
+const GENERIC_OUTPUT = Object.freeze({
+  schema: { type: "json" },
+  render: (_args, value) => {
+    let text;
+    try {
+      const encoded = typeof value === "string" ? value : JSON.stringify(value);
+      text = encoded === undefined ? String(value) : encoded;
+    } catch {
+      text = "[unrenderable desktop result]";
+    }
+    return [{ type: "text", text: text.slice(0, 32000) }];
+  }
+});
+
 function installTool(ctx, client, specification) {
   ctx.tools.register(defineTool({
     ...specification,
+    output: specification.output || GENERIC_OUTPUT,
     async execute(args, exec) {
       const value = await specification.run(args || {}, exec, client);
       return value;
@@ -75,7 +92,7 @@ function apply(ctx, config = {}) {
       appId: { type: "string", required: true },
       profileId: { type: "string" },
       owner: { type: "string", description: "agent, manual, or system" },
-      options: { type: "object" },
+      options: { type: "object", additionalProperties: true },
       approved: { type: "boolean", description: "Must be true after the user/DSH approval gate." }
     },
     run: (args, exec, bridge) => {
@@ -98,7 +115,7 @@ function apply(ctx, config = {}) {
   installTool(ctx, client, {
     name: "desktop_app_observe",
     description: "Read a bounded observation from an owned desktop application session.",
-    parameters: { sessionId: { type: "string", required: true }, options: { type: "object" } },
+    parameters: { sessionId: { type: "string", required: true }, options: { type: "object", additionalProperties: true } },
     run: (args, exec, bridge) => bridge.call("desktop.automation.observe", {
       session_id: scalar(args.sessionId ?? args.session_id, "sessionId"),
       options: objectOrEmpty(args.options, "options")
@@ -110,7 +127,7 @@ function apply(ctx, config = {}) {
     name: "desktop_app_act",
     description: "Perform one structured action through an owned desktop session. Sensitive values must be entered by the user in the application window.",
     parameters: {
-      request: { type: "object", required: true },
+      request: { type: "object", additionalProperties: true, required: true },
       approved: { type: "boolean", description: "One-time approval for the requested action." },
       approvalId: { type: "string" }
     },

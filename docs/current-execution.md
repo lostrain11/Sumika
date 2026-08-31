@@ -21,7 +21,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `073dbe7`; the runtime-neutral desktop automation contracts/DSH bridge, standard-library Electron CDP runner, dynamic route supervisor, and associated tests are committed and pushed on 2026-08-31. A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
+- Last verified commit: `073dbe7`; the runtime-neutral desktop automation contracts/DSH bridge, standard-library Electron CDP runner, dynamic route supervisor, and associated tests are committed and pushed on 2026-08-31. The current working tree additionally contains the explicit model-evaluation capture contract and turn-boundary regression tests; those changes are verified locally but not committed yet. A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
@@ -32,7 +32,7 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 ## 当前里程碑
 
-**Phase 3 后续 - 模型策略、额度边界与桌面自动化（基础闭环已实现，2026-08-31）**
+**Phase 3 后续 - 模型策略、额度边界与桌面自动化（评测捕获与边界回归已验证，2026-08-31）**
 
 Phase 0、1、2 和 3 均已完成；本次恢复补充模型策略的基础路由、公开模型目录、保守额度观测和 CDP transport 加固，Phase 4 仍不开始。
 
@@ -46,9 +46,9 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 ## 接下来的三个动作
 
-1. 保持已推送的 CDP runner、动态路由和插件变更可追踪；专项与全量回归已通过。
-2. 真实 ZCode CDP 只读 smoke 已完成；后续若要验证 click/fill/send，必须另行明确动作和审批边界，当前不自动执行。
-3. 继续用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；保持推荐后确认，不自动切换生产路由。
+1. 审阅并提交当前显式评测捕获与 turn 边界回归变更；不要暂存或处理现有运行数据。
+2. 继续用 `tools/fixtures/model-evaluation-v1.json` 收集首批隔离样本并复核 cohort；捕获必须由维护 Agent 显式选择并带 `--opt-in`。
+3. 保持推荐后确认和禁止静默付费切换；真实 ZCode CDP 的 click/fill/send 仍须另行明确动作和审批边界。
 
 ## 固定决策
 
@@ -83,13 +83,13 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 当前工作树已通过：
 
-- Python unittest: 407 tests（含上述基线，以及标准库 CDP transport 的 loopback、目标发现、固定 DOM 动作、路径、Unicode 转义和 contenteditable 边界）；
+- Python unittest: 456 tests（含上述基线，以及动态路由 turn 边界、显式评测捕获、标准库 CDP transport 的 loopback、目标发现、固定 DOM 动作、路径、Unicode 转义和 contenteditable 边界）；Tools unittest: 57 tests（含文档、日用验收、评测器和显式评测捕获 CLI）；
 - Playwright: 47 tests（47 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml`;
 - `python tools/check_docs.py`;
-- all `tools/*.ps1` PowerShell parser checks;
+- all `tools/*.ps1` PowerShell parser checks；DSH route bridge、desktop automation 和 browser policy 插件分别通过 6、5、8 项 Node 测试，Python `compileall` 通过；
 - `git diff --check`；
 - `backend/tests/test_cdp_transport.py`: 4 项专项测试通过；
 - 真实 ZCode CDP smoke（2026-08-31）：`health`、已有 `ZCode` page `open`、`observe(include_text=false)` 和 runner 断开通过；端口仍监听且 page target 数量未增加。

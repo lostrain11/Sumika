@@ -250,14 +250,21 @@ class DesktopAutomationRuntime:
             if adapter_id not in self._adapters:
                 raise DesktopRegistrationError("adapter is not registered", code="adapter-not-registered")
         name = safe_text(value.get("name") or app_id, "name", 240, allow_empty=False)
-        transport = safe_text(value.get("transport") or getattr(self._adapters[adapter_id], "transport", "app-protocol"), "transport", 40, allow_empty=False).lower()
+        config = value.get("config") if isinstance(value.get("config"), Mapping) else {}
+        requested_transport = value.get("transport")
+        # ``enable_cdp`` was the original opt-in spelling for the built-in
+        # Electron client.  Preserve it as an explicit transport selection so
+        # the route projection and worker cannot later reinterpret it as an
+        # implicit fallback.
+        if requested_transport in (None, "") and config.get("enable_cdp") is True and config.get("cdp_endpoint"):
+            requested_transport = "electron-cdp"
+        transport = safe_text(requested_transport or getattr(self._adapters[adapter_id], "transport", "app-protocol"), "transport", 40, allow_empty=False).lower()
         status = safe_text(value.get("status") or ("configured" if value.get("config") else "unconfigured"), "status", 40).lower()
         capabilities = tuple(value.get("capabilities") or getattr(self._adapters[adapter_id], "capabilities", ("observe", "read")))
         permissions = tuple(value.get("permissions") or ())
         profile_id = value.get("profile_id") or value.get("profileId")
         if profile_id not in (None, ""):
             profile_id = safe_identifier(profile_id, "profile_id")
-        config = value.get("config") if isinstance(value.get("config"), Mapping) else {}
         self._validate_config(config)
         existing = self._apps.get(app_id)
         now = utc_now()
@@ -322,6 +329,12 @@ class DesktopAutomationRuntime:
             sessions = list(self._sessions.values())
         if refresh:
             for app in apps:
+                # A catalog refresh must not start or probe an application the
+                # user has not explicitly approved.  This matters for the
+                # inert built-in ZCode declaration and arbitrary registrations
+                # restored from the metadata projection.
+                if not app.approved:
+                    continue
                 adapter = adapters.get(app.adapter_id)
                 if adapter is None:
                     continue
@@ -364,11 +377,14 @@ class DesktopAutomationRuntime:
         with self._lock:
             count = sum(1 for session in self._sessions.values() if session.app_id == app.app_id and session.state == "open")
             lease_state = "idle"
+            lease_owner = "none"
             for lease in self._leases.values():
                 if lease.get("app_id") == app.app_id and not _expired(lease.get("expires_at")):
                     lease_state = "leased"
+                    owner = str(lease.get("owner") or "unknown").strip().lower()
+                    lease_owner = owner if owner in {"agent", "manual", "system"} else "unknown"
                     break
-        return app.to_public(session_count=count, lease_state=lease_state)
+        return app.to_public(session_count=count, lease_state=lease_state, lease_owner=lease_owner)
 
     # ------------------------------------------------------------------
     # Session and lease lifecycle
@@ -575,20 +591,30 @@ class DesktopAutomationRuntime:
                 raw = {"value": raw}
             safe_raw = _safe_public(raw)
             output_hash = hash_value(safe_raw)
-            if raw.get("possibly_sent") is True or raw.get("status") in {"unknown", "possibly-sent"}:
+            raw_status = str(raw.get("status") or "").strip().lower()
+            if raw.get("possibly_sent") is True or raw_status in {"unknown", "possibly-sent"}:
                 status = "unknown"
                 error_code = "possibly-sent"
                 reason = "无法确认发送是否成功；不会自动重试或切换其他模型"
                 retryable = False
-            elif raw.get("completed") is True or raw.get("accepted") is True or raw.get("ok") is True:
+            elif raw.get("completed") is True or raw_status == "completed":
                 status = "completed"
                 error_code = None
                 reason = None
                 retryable = False
+            elif raw_status in {"accepted", "running"} or raw.get("accepted") is True or raw.get("ok") is True:
+                # An app protocol commonly acknowledges that a command was
+                # accepted before the application finishes it.  Preserve that
+                # intermediate state; callers must observe a later explicit
+                # completion event and may never replay it automatically.
+                status = raw_status if raw_status in {"accepted", "running"} else "accepted"
+                error_code = "action-accepted"
+                reason = "动作已被应用接受，完成状态仍待观察"
+                retryable = False
             else:
-                status = "unknown" if request.action in {"send", "prompt", "type", "write"} else "completed"
-                error_code = "possibly-sent" if status == "unknown" else None
-                reason = "无法确认发送是否成功" if status == "unknown" else None
+                status = "unknown"
+                error_code = "action-status-unknown"
+                reason = "适配器未提供明确的完成状态"
                 retryable = False
             result = self._action_result(
                 request,

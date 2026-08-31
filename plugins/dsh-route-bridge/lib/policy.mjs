@@ -9,7 +9,10 @@ export const ROUTE_TOOLS = Object.freeze({
   sumika_consultation_start: "sumika.consultation.start",
   sumika_consultation_status: "sumika.consultation.status",
   sumika_route_cancel: "sumika.route.cancel",
-  sumika_route_retry: "sumika.route.retry"
+  sumika_route_retry: "sumika.route.retry",
+  sumika_route_arm: "sumika.route.arm",
+  sumika_route_pending: "sumika.route.pending",
+  sumika_route_ack: "sumika.route.ack"
 });
 
 export const ROUTE_BRIDGE_PLUGIN_ID = "sumika.dsh-route-bridge";
@@ -249,6 +252,22 @@ export function buildRoutePayload(toolName, args = {}, exec = {}) {
     case "sumika_route_status": {
       return { dispatch_id: isIdentifier(args.dispatch_id ?? args.dispatchId, { field: "dispatch_id" }) };
     }
+    case "sumika_route_arm": {
+      const source = args.request && typeof args.request === "object" ? { ...args.request, ...copyFields(args, ["parent_session_id", "parentSessionId", "parent_turn_id", "parentTurnId", "session_id", "sessionId"]) } : args;
+      const payload = normalizeRequest(source, exec);
+      payload.replace = boolean(args.replace, "replace", false);
+      return payload;
+    }
+    case "sumika_route_pending": {
+      const ids = parentIds(args, exec);
+      return {
+        parent_session_id: ids.parent_session_id,
+        ...(ids.parent_turn_id ? { parent_turn_id: ids.parent_turn_id } : {}),
+        limit: boundedInteger(args.limit, "limit", 50, 1, 100)
+      };
+    }
+    case "sumika_route_ack":
+      return { dispatch_id: isIdentifier(args.dispatch_id ?? args.dispatchId, { field: "dispatch_id" }) };
     case "sumika_consultation_start": {
       const source = args.request && typeof args.request === "object" ? { ...args.request, ...copyFields(args, ["parent_session_id", "parentSessionId", "parent_turn_id", "parentTurnId", "session_id", "sessionId"]) } : args;
       const payload = normalizeRequest(source, exec, { consultation: true });

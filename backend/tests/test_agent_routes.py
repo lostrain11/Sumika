@@ -249,6 +249,53 @@ class AgentRouteContractTests(unittest.TestCase):
         self.assertEqual(rows[0]["result_length"], len("reply-body-must-not-persist"))
         self.assertTrue(rows[0]["summary_hash"])
 
+    def test_legacy_adapter_type_error_is_not_retried(self):
+        class TypeErrorAdapter(WebChatFixture):
+            def __init__(self):
+                super().__init__([profile("web-chat-typeerror", "deepseek-web")])
+
+            def send_message(self, profile_id, text):
+                self.calls.append({"profile_id": profile_id, "text": text})
+                raise TypeError("adapter failed after accepting the request")
+
+        fixture = TypeErrorAdapter()
+        result = self.coordinator(fixture).dispatch(
+            {
+                "parent_session_id": "session-typeerror",
+                "route_id": "web-chat:web-chat-typeerror",
+                "question": "single attempt",
+            },
+            wait=True,
+        )
+        self.assertEqual(len(fixture.calls), 1)
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["result"]["error_code"], "TypeError")
+
+    def test_non_mapping_start_response_is_non_replayable(self):
+        class MalformedAdapter(WebChatFixture):
+            def __init__(self):
+                super().__init__([profile("web-chat-malformed", "deepseek-web")])
+
+            def start_message(self, profile_id, text):
+                self.calls.append({"profile_id": profile_id, "text": text})
+                return "not-an-object"
+
+            def wait_message(self, attempt_id):
+                raise AssertionError("a malformed start must not be polled")
+
+        fixture = MalformedAdapter()
+        result = self.coordinator(fixture).dispatch(
+            {
+                "parent_session_id": "session-malformed",
+                "route_id": "web-chat:web-chat-malformed",
+                "question": "malformed response",
+            },
+            wait=True,
+        )
+        self.assertEqual(len(fixture.calls), 1)
+        self.assertEqual(result["status"], "unknown")
+        self.assertTrue(result["result"]["untrusted_external"])
+
 
 if __name__ == "__main__":
     unittest.main()

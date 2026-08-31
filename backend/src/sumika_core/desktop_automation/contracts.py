@@ -36,6 +36,8 @@ _APP_STATES = frozenset(
 )
 _ACTION_STATUSES = frozenset(
     {
+        "accepted",
+        "running",
         "completed",
         "denied",
         "waiting-approval",
@@ -215,7 +217,18 @@ class DesktopApplication:
         object.__setattr__(self, "metadata", _safe_metadata(self.metadata))
         object.__setattr__(self, "config", dict(self.config) if isinstance(self.config, Mapping) else {})
 
-    def to_public(self, *, session_count: int = 0, lease_state: str = "idle") -> dict[str, Any]:
+    def to_public(
+        self,
+        *,
+        session_count: int = 0,
+        lease_state: str = "idle",
+        lease_owner: str = "none",
+    ) -> dict[str, Any]:
+        # The owner is a bounded lifecycle projection, never a lease token or
+        # any other credential-bearing value.
+        owner = str(lease_owner or "none").strip().lower()
+        if owner not in {"none", "agent", "manual", "system", "unknown"}:
+            owner = "unknown"
         return {
             "schema": DESKTOP_AUTOMATION_SCHEMA,
             "app_id": self.app_id,
@@ -232,6 +245,7 @@ class DesktopApplication:
             "metadata": dict(self.metadata),
             "session_count": max(0, int(session_count)),
             "lease_state": lease_state,
+            "lease_owner": owner,
             "configured": bool(self.config),
             "created_at": self.created_at,
             "updated_at": self.updated_at,

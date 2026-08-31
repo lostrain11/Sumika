@@ -15,6 +15,7 @@ projection through ``upsert_agent_route_run`` and
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 import threading
@@ -131,6 +132,49 @@ def _token(value: Any, field: str, *, default: str = "unknown") -> str:
     if not candidate or len(candidate) > 120 or _TOKEN_RE.fullmatch(candidate) is None:
         raise RouteValidationError(f"{field} is invalid")
     return candidate
+
+
+def _call_web_method_once(method: Callable[..., Any], profile_id: str, text: str, *, owner: str) -> Any:
+    """Invoke one web adapter method at most once.
+
+    Older adapters do not accept the keyword-only ``owner`` argument while
+    current adapters do.  Inspect and bind the signature *before* invoking so
+    an implementation ``TypeError`` is never mistaken for a signature
+    mismatch and followed by a duplicate browser send.
+    """
+
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        # An opaque callable gets the smallest legacy-compatible invocation.
+        # If it actually requires ``owner`` it fails closed; it is never
+        # retried after the call begins.
+        return method(profile_id, text)
+
+    parameters = signature.parameters
+    owner_parameter = parameters.get("owner")
+    accepts_owner = bool(
+        owner_parameter
+        and owner_parameter.kind != inspect.Parameter.POSITIONAL_ONLY
+    ) or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    if accepts_owner:
+        try:
+            signature.bind(profile_id, text, owner=owner)
+        except TypeError:
+            pass
+        else:
+            return method(profile_id, text, owner=owner)
+
+    try:
+        signature.bind(profile_id, text)
+    except TypeError as error:
+        # This is a pre-invocation contract error, so no request could have
+        # been sent and there is still no safe alternate invocation.
+        raise TypeError("web adapter method signature is unsupported") from error
+    return method(profile_id, text)
 
 
 def _safe_secret_replacement(match: re.Match[str]) -> str:
@@ -815,6 +859,55 @@ class RouteCoordinator:
             "quota_state": "unknown",
         }
 
+    def _continuation_route_refs(self, continuation_of: str) -> tuple[set[str], set[str]] | None:
+        """Resolve prior web members without reading any message content."""
+
+        identifier = _id(continuation_of, "continuation_of") or ""
+        member_rows: list[Any] = []
+        with self._lock:
+            consultation = self._consultations.get(identifier)
+            if consultation is not None:
+                member_rows = list(consultation.get("member_metadata") or ())
+            else:
+                run = self._runs.get(identifier)
+                if run is not None:
+                    member_rows = [run]
+        if not member_rows and self.storage:
+            try:
+                row = self.storage.get_agent_consultation(identifier)
+            except Exception:
+                row = None
+            if isinstance(row, Mapping):
+                member_rows = list(row.get("member_metadata") or ())
+            if not member_rows:
+                try:
+                    row = self.storage.get_agent_route_run(identifier)
+                except Exception:
+                    row = None
+                if isinstance(row, Mapping):
+                    member_rows = [row]
+        route_ids: set[str] = set()
+        profile_ids: set[str] = set()
+        for item in member_rows[:8]:
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                route_id = _id(item.get("route_id") or item.get("routeId"), "route_id", required=False)
+                profile_id = _id(
+                    item.get("provider_profile_id") or item.get("providerProfileId"),
+                    "provider_profile_id",
+                    required=False,
+                )
+            except RouteValidationError:
+                continue
+            if route_id:
+                route_ids.add(route_id)
+            if profile_id:
+                profile_ids.add(profile_id)
+        if not route_ids and not profile_ids:
+            return None
+        return route_ids, profile_ids
+
     def _routes_for_request(self, request: ConsultationRequest) -> list[RouteDescriptor]:
         raw = self.catalog(include_templates=False).get("routes", [])
         routes = [
@@ -838,6 +931,24 @@ class RouteCoordinator:
             routes = [route for route in routes if route.route_id in {str(item) for item in allowed}]
         required = set(request.required_capabilities)
         routes = [route for route in routes if required.issubset(set(route.capabilities))]
+        continuation_refs = (
+            self._continuation_route_refs(request.continuation_of)
+            if request.continuation_of
+            else None
+        )
+        if request.continuation_of and continuation_refs is None:
+            return []
+        continuation_route_ids, continuation_profiles = continuation_refs or (set(), set())
+        if request.continuation_of:
+            routes = [
+                route
+                for route in routes
+                if route.route_id in continuation_route_ids
+                or (
+                    route.provider_profile_id is not None
+                    and route.provider_profile_id in continuation_profiles
+                )
+            ]
         # One panel slot per provider/site adapter.  Preserve profile order,
         # which is already last-used order in Storage.
         selected: list[RouteDescriptor] = []
@@ -897,16 +1008,97 @@ class RouteCoordinator:
             if cancel_event.is_set():
                 return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "cancelled", error_code="cancelled", consultation_id=dispatch.consultation_id)
             try:
-                try:
-                    response = self.web_chat.send_message(profile_id, dispatch.prompt(decision_kind), owner="agent")
-                except TypeError:
-                    # Keep older adapter/test-double implementations usable;
-                    # the coordinator's profile lock still serializes them.
-                    response = self.web_chat.send_message(profile_id, dispatch.prompt(decision_kind))
+                prompt = dispatch.prompt(decision_kind)
+                starter = getattr(self.web_chat, "start_message", None)
+                waiter = getattr(self.web_chat, "wait_message", None)
+                if callable(starter) and callable(waiter):
+                    # One browser send creates one durable-in-process attempt.
+                    # A short wait is only a polling window; it must never turn
+                    # into a second fill/click/press action.
+                    response = _call_web_method_once(starter, profile_id, prompt, owner="agent")
+                    attempt_id = str(response.get("attempt_id") or "").strip() if isinstance(response, Mapping) else ""
+                    if isinstance(response, Mapping) and response.get("accepted") and attempt_id:
+                        deadline = time.monotonic() + 300.0
+                        while True:
+                            if cancel_event.is_set():
+                                cancel = getattr(self.web_chat, "cancel_message", None)
+                                if callable(cancel):
+                                    try:
+                                        cancel(attempt_id)
+                                    except Exception:
+                                        pass
+                                response = {
+                                    "ok": False,
+                                    "status": "cancelled",
+                                    "possibly_sent": True,
+                                    "error_code": "cancelled",
+                                    "reason": "网页消息已取消；不会重发",
+                                }
+                                break
+                            remaining = max(0.0, deadline - time.monotonic())
+                            if remaining <= 0:
+                                response = {
+                                    "ok": False,
+                                    "status": "possibly-sent",
+                                    "pending": True,
+                                    "possibly_sent": True,
+                                    "error_code": "response-timeout",
+                                    "reason": "网页消息已发送但在有界观察窗口内未确认回复",
+                                }
+                                break
+                            # ``wait_message`` is a read-only poll, but use
+                            # signature binding for old adapters as well.
+                            try:
+                                wait_signature = inspect.signature(waiter)
+                            except (TypeError, ValueError):
+                                response = waiter(attempt_id)
+                            else:
+                                try:
+                                    wait_signature.bind(attempt_id, timeout=min(2.0, remaining))
+                                except TypeError:
+                                    try:
+                                        wait_signature.bind(attempt_id)
+                                    except TypeError as error:
+                                        raise TypeError("web adapter wait signature is unsupported") from error
+                                    response = waiter(attempt_id)
+                                else:
+                                    response = waiter(attempt_id, timeout=min(2.0, remaining))
+                            status = str(response.get("status") or "unknown") if isinstance(response, Mapping) else "unknown"
+                            if status not in {"accepted", "running"}:
+                                break
+                    # Rejected starts are already bounded by the web runtime;
+                    # do not invoke the compatibility send path a second time.
+                else:
+                    response = _call_web_method_once(
+                        self.web_chat.send_message,
+                        profile_id,
+                        prompt,
+                        owner="agent",
+                    )
             except Exception as error:
                 self._log("info", "web route dispatch failed", error)
-                response = {"ok": False, "reason": "web-chat-send-failed", "error_code": type(error).__name__}
+                response = {
+                    "ok": False,
+                    # Once an adapter invocation has begun, the coordinator
+                    # cannot prove that a remote message was not accepted.
+                    # Keep the result non-replayable and do not offer retry.
+                    "status": "unknown",
+                    "possibly_sent": True,
+                    "reason": "web-chat-send-failed",
+                    "error_code": type(error).__name__,
+                }
             elapsed = (time.monotonic() - started) * 1000
+            if not isinstance(response, Mapping):
+                # A malformed adapter response must not crash the worker or be
+                # interpreted as a safe pre-send failure.  It follows the same
+                # non-replayable boundary as an ambiguous transport result.
+                response = {
+                    "ok": False,
+                    "status": "unknown",
+                    "possibly_sent": True,
+                    "error_code": "invalid-adapter-response",
+                    "reason": "web adapter returned a non-object response",
+                }
             if cancel_event.is_set():
                 return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "cancelled", latency_ms=elapsed, error_code="cancelled", consultation_id=dispatch.consultation_id)
             if response.get("ok") is True and isinstance(response.get("text"), str):
@@ -914,8 +1106,10 @@ class RouteCoordinator:
                 return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "completed", answer=answer, latency_ms=elapsed, confidence=None, consultation_id=dispatch.consultation_id)
             if response.get("requires_human") or response.get("error_code") == "profile-occupied":
                 return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "waiting-human", latency_ms=elapsed, error_code="requires-human", consultation_id=dispatch.consultation_id)
-            if response.get("pending"):
-                return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "unknown", latency_ms=elapsed, error_code="response-pending", consultation_id=dispatch.consultation_id)
+            if response.get("status") == "cancelled":
+                return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "cancelled", latency_ms=elapsed, error_code="cancelled", consultation_id=dispatch.consultation_id)
+            if response.get("pending") or response.get("possibly_sent") or response.get("status") in {"possibly-sent", "unknown"}:
+                return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "unknown", latency_ms=elapsed, error_code=str(response.get("error_code") or "response-pending"), consultation_id=dispatch.consultation_id)
             error_code = str(response.get("error_code") or "route-unavailable").strip().replace(" ", "-")[:100]
             return SubtaskResult(dispatch.dispatch_id, descriptor.route_id, "failed", latency_ms=elapsed, error_code=error_code or "route-unavailable", consultation_id=dispatch.consultation_id)
         finally:
@@ -925,6 +1119,53 @@ class RouteCoordinator:
                 if self._occupancy.get(profile_id) == "agent":
                     self._occupancy.pop(profile_id, None)
             lock.release()
+
+    def execute_runtime_dispatch(self, dispatch: Any, route: Any, cancel_event: threading.Event) -> SubtaskResult:
+        """Execute a modern runtime-neutral web dispatch.
+
+        ``DynamicRouteSupervisor`` owns admission and lifecycle; this method is
+        only the compatibility adapter that supplies the legacy coordinator's
+        BrowserSkill lease and the asynchronous ``start_message`` contract.
+        Keeping the conversion here avoids making the supervisor depend on the
+        legacy route dataclasses.
+        """
+
+        profile_id = str(getattr(route, "provider_profile_id", "") or "").strip()
+        if not profile_id:
+            return SubtaskResult(
+                str(getattr(dispatch, "dispatch_id", "dispatch-unknown")),
+                str(getattr(route, "route_id", "route-unknown")),
+                "failed",
+                error_code="profile-not-configured",
+            )
+        legacy = SubtaskDispatch(
+            dispatch_id=str(getattr(dispatch, "dispatch_id", "")),
+            consultation_id=getattr(dispatch, "consultation_id", None),
+            parent_session_id=str(getattr(dispatch, "parent_session_id", "")),
+            parent_turn_id=getattr(dispatch, "parent_turn_id", None),
+            route_id=f"web-chat:{profile_id}",
+            mode="consultation-panel" if getattr(dispatch, "consultation_id", None) else "web-worker",
+            question=str(getattr(dispatch, "question", "")),
+            context_refs=getattr(dispatch, "context_refs", {}) or {},
+            continuation_of=getattr(dispatch, "continuation_of", None),
+            role=str(getattr(dispatch, "role", "independent reviewer") or "independent reviewer"),
+        )
+        descriptor = RouteDescriptor(
+            route_id=f"web-chat:{profile_id}",
+            kind="web-worker",
+            label=str(getattr(route, "label", profile_id) or profile_id),
+            provider_profile_id=profile_id,
+            provider_key=str(getattr(route, "provider_key", "web-chat") or "web-chat"),
+            adapter_id=str(getattr(route, "adapter_id", "web-chat") or "web-chat"),
+            domains=tuple(getattr(route, "domains", ()) or ()),
+            capabilities=tuple(getattr(route, "capabilities", ("text",)) or ("text",)),
+            status="ready",
+            routable=True,
+            occupancy="idle",
+            quota_state=str(getattr(route, "quota_state", "unknown") or "unknown"),
+            source="web-chat",
+        )
+        return self._execute_dispatch(legacy, descriptor, cancel_event)
 
     def _submit(self, dispatch: SubtaskDispatch, descriptor: RouteDescriptor, *, decision_kind: str = "small-answer") -> dict[str, Any]:
         now = _now()
@@ -1071,6 +1312,7 @@ class RouteCoordinator:
             "created_at": now,
             "updated_at": now,
             "request": request,
+            "continuation_of": request.continuation_of,
         }
         with self._lock:
             if request.consultation_id in self._consultations:
@@ -1312,11 +1554,7 @@ class RouteCoordinator:
             self._occupancy[profile_id] = "manual"
         try:
             sender = getattr(self.web_chat, "send_message")
-            try:
-                return sender(profile_id, text, owner="manual")
-            except TypeError:
-                # Compatibility with older test doubles and adapters.
-                return sender(profile_id, text)
+            return _call_web_method_once(sender, profile_id, text, owner="manual")
         finally:
             with self._lock:
                 if previous:

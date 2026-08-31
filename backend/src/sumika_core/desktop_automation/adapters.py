@@ -429,7 +429,12 @@ class TransportDesktopAdapter(DesktopAdapter):
 
 
 class ZCodeDesktopAdapter(DesktopAdapter):
-    """Use ZCode's public app-server first, with optional CDP/UIA fallback."""
+    """Use one explicitly selected ZCode transport.
+
+    The public app-server is the default.  Electron CDP and Windows UIA are
+    opt-in transports; a failed app-server health check never silently changes
+    the permission or focus semantics of a session.
+    """
 
     adapter_id = "zcode-desktop"
     transport = "app-protocol"
@@ -468,11 +473,11 @@ class ZCodeDesktopAdapter(DesktopAdapter):
         return self._cdp_for(application) if application is not None else self.cdp
 
     def _cdp_for(self, application: DesktopApplication) -> ElectronCdpClient | None:
+        if self._selected_transport(application) != "electron-cdp":
+            return None
         if self.cdp is not None:
             return self.cdp
         config = application.config if isinstance(application.config, Mapping) else {}
-        if config.get("enable_cdp") is not True and config.get("cdp_enabled") is not True:
-            return None
         endpoint = config.get("cdp_endpoint")
         if not isinstance(endpoint, str) or not endpoint.strip():
             return None
@@ -487,6 +492,34 @@ class ZCodeDesktopAdapter(DesktopAdapter):
             return None
         self._cdp_clients[key] = client
         return client
+
+    @staticmethod
+    def _selected_transport(
+        application: DesktopApplication,
+        options: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Resolve the one transport allowed for this application/session."""
+
+        config = application.config if isinstance(application.config, Mapping) else {}
+        options = options if isinstance(options, Mapping) else {}
+        raw = options.get("transport")
+        if raw in (None, ""):
+            raw = config.get("transport")
+        if raw in (None, ""):
+            raw = application.transport
+        selected = str(raw or "app-protocol").strip().lower()
+        # Compatibility for the original explicit CDP configuration.  This is
+        # deliberately not a health-based fallback: the endpoint and flag must
+        # be present before this branch is selected.
+        if (
+            selected == "app-protocol"
+            and not options.get("transport")
+            and not config.get("transport")
+            and config.get("enable_cdp") is True
+            and config.get("cdp_endpoint")
+        ):
+            selected = "electron-cdp"
+        return selected
 
     def _ensure_runtime(self, application: DesktopApplication) -> Any:
         if self.runtime is not None:
@@ -521,30 +554,35 @@ class ZCodeDesktopAdapter(DesktopAdapter):
 
     def health(self, application: DesktopApplication) -> dict[str, Any]:
         self._remember_application(application)
-        # An unconfigured built-in entry is reported without starting a child.
-        if not application.config and self.runtime is None and self.runtime_factory is None:
-            return {"ok": False, "state": "unconfigured", "adapter_id": self.adapter_id}
-        runtime = self._ensure_runtime(application)
-        result = self._health_value(runtime)
-        if result.get("ok"):
-            return {"ok": True, "state": "ready", "transport": "app-protocol", "result": result}
-        cdp_client = self._cdp_for(application)
-        cdp_result: dict[str, Any] | None = None
-        if cdp_client is not None:
+        transport = self._selected_transport(application)
+        if transport == "electron-cdp":
+            cdp_client = self._cdp_for(application)
+            if cdp_client is None:
+                return {"ok": False, "state": "unavailable", "transport": transport, "error_code": "cdp-not-configured"}
             try:
                 cdp_result = cdp_client.health()
             except DesktopAutomationError as error:
                 cdp_result = {"ok": False, "state": "unavailable", "error_code": error.code}
             if cdp_result.get("ok"):
                 return {"ok": True, "state": "ready", "transport": "electron-cdp", "result": cdp_result}
-        if self.uia is not None:
+            return {"ok": False, "state": "unavailable", "transport": transport, "result": _safe_result(cdp_result)}
+        if transport == "windows-uia":
+            if self.uia is None:
+                return {"ok": False, "state": "unavailable", "transport": transport, "error_code": "uia-not-configured"}
             uia = self.uia.health()
             if uia.get("ok"):
                 return {"ok": True, "state": "ready", "transport": "windows-uia", "result": uia}
-        response = {"ok": False, "state": "unavailable", "transport": "app-protocol", "result": result}
-        if cdp_result is not None:
-            response["cdp"] = _safe_result(cdp_result)
-        return response
+            return {"ok": False, "state": "unavailable", "transport": transport, "result": _safe_result(uia)}
+        if transport == "foreground":
+            return {"ok": False, "state": "unavailable", "transport": transport, "error_code": "foreground-takeover-required"}
+        # An unconfigured built-in entry is reported without starting a child.
+        if not application.config and self.runtime is None and self.runtime_factory is None:
+            return {"ok": False, "state": "unconfigured", "transport": "app-protocol", "adapter_id": self.adapter_id}
+        runtime = self._ensure_runtime(application)
+        result = self._health_value(runtime)
+        if result.get("ok"):
+            return {"ok": True, "state": "ready", "transport": "app-protocol", "result": result}
+        return {"ok": False, "state": "unavailable", "transport": "app-protocol", "result": result}
 
     def _open_protocol(self, application: DesktopApplication, profile_id: str, options: Mapping[str, Any]) -> dict[str, Any]:
         runtime = self._ensure_runtime(application)
@@ -568,31 +606,29 @@ class ZCodeDesktopAdapter(DesktopAdapter):
 
     def open(self, application: DesktopApplication, profile_id: str, options: Mapping[str, Any]) -> dict[str, Any]:
         self._remember_application(application)
-        try:
-            value = self._open_protocol(application, profile_id, options)
-            return value
-        except DesktopAutomationError as protocol_error:
-            # Fallbacks are only considered when explicitly configured.  A
-            # missing app-server never silently grants foreground control.
+        transport = self._selected_transport(application, options)
+        if transport == "electron-cdp":
             cdp_client = self._cdp_for(application)
-            if cdp_client is not None:
-                try:
-                    health = cdp_client.health()
-                except DesktopAutomationError:
-                    health = {"ok": False}
-                if health.get("ok"):
-                    value = cdp_client.open(application, profile_id, options)
-                    native = _native_id(value) or f"cdp-{uuid4().hex[:12]}"
-                    return {"native_session_id": native, "transport": "electron-cdp", "state": "ready", "result": _safe_result(value)}
-            if self.uia is not None and options.get("allow_uia") is True:
-                health = self.uia.health()
-                if health.get("ok"):
-                    value = self.uia.open(application, profile_id, options)
-                    native = _native_id(value) or f"uia-{uuid4().hex[:12]}"
-                    return {"native_session_id": native, "transport": "windows-uia", "state": "ready", "result": _safe_result(value)}
-            if self.foreground_enabled and options.get("allow_foreground") is True and self.uia is not None:
-                raise DesktopAutomationError("foreground takeover requires an explicit takeover action", code="foreground-takeover-required")
-            raise protocol_error
+            if cdp_client is None:
+                raise DesktopAutomationError("Electron CDP is not configured", code="cdp-not-configured")
+            health = cdp_client.health()
+            if not health.get("ok"):
+                raise DesktopAutomationError("Electron CDP is unavailable", code="cdp-unavailable", retryable=True)
+            value = cdp_client.open(application, profile_id, options)
+            native = _native_id(value) or f"cdp-{uuid4().hex[:12]}"
+            return {"native_session_id": native, "transport": "electron-cdp", "state": "ready", "result": _safe_result(value)}
+        if transport == "windows-uia":
+            if self.uia is None:
+                raise DesktopAutomationError("Windows UI Automation is not configured", code="uia-not-configured")
+            health = self.uia.health()
+            if not health.get("ok"):
+                raise DesktopAutomationError("Windows UI Automation is unavailable", code="uia-unavailable", retryable=True)
+            value = self.uia.open(application, profile_id, options)
+            native = _native_id(value) or f"uia-{uuid4().hex[:12]}"
+            return {"native_session_id": native, "transport": "windows-uia", "state": "ready", "result": _safe_result(value)}
+        if transport == "foreground":
+            raise DesktopAutomationError("foreground takeover requires an explicit takeover action", code="foreground-takeover-required")
+        return self._open_protocol(application, profile_id, options)
 
     def _handle(self, session: DesktopSession) -> tuple[str, str]:
         try:

@@ -35,6 +35,8 @@ WEB_CHAT_SCHEMA = "web-chat/v1"
 WEB_CHAT_ADAPTER_VERSION = "web-chat-adapter/v1"
 WEB_CHAT_ACTIONS = frozenset({"chat.read", "chat.send"})
 WEB_CHAT_BUDGET_POLICIES = frozenset({"free-only", "no-paid"})
+DEFAULT_WEB_CHAT_OBSERVATION_SECONDS = 300.0
+MAX_WEB_CHAT_OBSERVATION_SECONDS = 300.0
 _PROFILE_ID_RE = re.compile(r"^web-chat-[a-f0-9]{8,32}$")
 _SAFE_INSTANCE_RE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _SECRET_KEY_RE = re.compile(
@@ -622,6 +624,9 @@ class WebChatRuntime:
         # sharing the same BrowserSkill tab concurrently.
         self._agent_occupancy: set[str] = set()
         self._occupancy_lock = threading.RLock()
+        self._attempts: dict[str, dict[str, Any]] = {}
+        self._profile_attempts: dict[str, str] = {}
+        self._closed = False
 
     def set_agent_occupancy(self, profile_id: str, occupied: bool) -> None:
         normalized = str(profile_id or "").strip()
@@ -698,6 +703,17 @@ class WebChatRuntime:
             if isinstance(timeout_value, bool) or not isinstance(timeout_value, (int, float)) or not 0.5 <= float(timeout_value) <= 15:
                 raise WebChatRuntimeError("response_timeout_seconds must be between 0.5 and 15")
             persisted_config["response_timeout_seconds"] = float(timeout_value)
+        if "observation_timeout_seconds" in raw_config:
+            observation_value = raw_config.get("observation_timeout_seconds")
+            if (
+                isinstance(observation_value, bool)
+                or not isinstance(observation_value, (int, float))
+                or not 1 <= float(observation_value) <= MAX_WEB_CHAT_OBSERVATION_SECONDS
+            ):
+                raise WebChatRuntimeError(
+                    f"observation_timeout_seconds must be between 1 and {int(MAX_WEB_CHAT_OBSERVATION_SECONDS)}"
+                )
+            persisted_config["observation_timeout_seconds"] = float(observation_value)
         if spec.custom:
             persisted_config["name"] = spec.name
         row = self.storage.create_web_chat_profile(
@@ -1056,11 +1072,345 @@ class WebChatRuntime:
             raise WebChatRuntimeError("unknown web-chat profile")
         return self._public_profile(updated)
 
+    # ------------------------------------------------------------------
+    # Message attempt lifecycle
+    # ------------------------------------------------------------------
+    def _attempt_public(self, attempt: Mapping[str, Any]) -> dict[str, Any]:
+        """Return a bounded attempt projection without the submitted text."""
+
+        status = str(attempt.get("status") or "unknown")
+        response = attempt.get("response") if isinstance(attempt.get("response"), Mapping) else {}
+        value: dict[str, Any] = {
+            "schema": WEB_CHAT_SCHEMA,
+            "attempt_id": attempt.get("attempt_id"),
+            "profile_id": attempt.get("profile_id"),
+            "owner": attempt.get("owner"),
+            "status": status,
+            "accepted": bool(attempt.get("accepted")),
+            "created_at": attempt.get("created_at"),
+            "updated_at": attempt.get("updated_at"),
+            "started_at": attempt.get("started_at"),
+            "completed_at": attempt.get("completed_at"),
+            "session_id": attempt.get("session_id"),
+            "tab_id": attempt.get("tab_id"),
+            "possibly_sent": bool(attempt.get("possibly_sent")),
+            "sent": bool(attempt.get("sent")),
+            "error_code": attempt.get("error_code"),
+            "reason": attempt.get("reason"),
+        }
+        if status == "completed" and isinstance(response.get("text"), str):
+            value["text"] = response["text"]
+            value["ok"] = True
+        else:
+            value["ok"] = False
+            if status in {"running", "accepted", "possibly-sent"} and attempt.get("possibly_sent"):
+                value["pending"] = True
+            if response.get("requires_human") or status == "waiting-human":
+                value["requires_human"] = True
+            if response.get("requires_approval") or status == "needs-confirmation":
+                value["requires_approval"] = True
+        return value
+
+    @staticmethod
+    def _attempt_terminal(status: Any) -> bool:
+        return str(status or "").lower() in {
+            "completed", "failed", "waiting-human", "possibly-sent",
+            "unknown", "interrupted", "cancelled",
+        }
+
+    def _release_attempt(self, attempt: Mapping[str, Any]) -> None:
+        done_event = attempt.get("done_event")
+        if done_event is not None and not done_event.is_set():
+            return
+        profile_id = str(attempt.get("profile_id") or "")
+        attempt_id = str(attempt.get("attempt_id") or "")
+        with self._occupancy_lock:
+            if self._profile_attempts.get(profile_id) == attempt_id:
+                self._profile_attempts.pop(profile_id, None)
+            if attempt.get("owner") == "agent":
+                self._agent_occupancy.discard(profile_id)
+
+    def _complete_attempt(self, attempt_id: str, response: Mapping[str, Any] | None, error: Exception | None = None) -> None:
+        with self._occupancy_lock:
+            attempt = self._attempts.get(attempt_id)
+            if attempt is None:
+                return
+            # Explicit cancellation/interruption wins over a late browser
+            # callback.  The callback may finish in the executor, but it must
+            # not turn an uncertain send into a replayable success.
+            if self._attempt_terminal(attempt.get("status")):
+                return
+            response = dict(response or {})
+            if error is not None:
+                response = {"ok": False, "status": "failed", "error_code": type(error).__name__.lower().replace("_", "-")[:120], "reason": "web-chat attempt failed"}
+            if response.get("ok") is True and isinstance(response.get("text"), str):
+                status = "completed"
+            elif response.get("requires_human") or response.get("status") == "waiting-human":
+                status = "waiting-human"
+            elif response.get("possibly_sent") or response.get("pending") or response.get("status") in {"possibly-sent", "unknown"}:
+                status = "possibly-sent"
+            elif response.get("status") == "cancelled":
+                status = "cancelled"
+            else:
+                status = "failed"
+            now = utc_now()
+            attempt["status"] = status
+            attempt["response"] = response
+            attempt["updated_at"] = now
+            attempt["completed_at"] = now
+            attempt["possibly_sent"] = bool(attempt.get("possibly_sent") or response.get("possibly_sent") or status == "possibly-sent")
+            attempt["error_code"] = response.get("error_code") or ("possibly-sent" if status == "possibly-sent" else None)
+            attempt["reason"] = response.get("reason")
+
+    def _run_attempt(self, attempt_id: str) -> dict[str, Any]:
+        with self._occupancy_lock:
+            attempt = self._attempts.get(attempt_id)
+            if attempt is None:
+                return {"status": "failed", "error_code": "unknown-attempt"}
+            if self._attempt_terminal(attempt.get("status")):
+                return self._attempt_public(attempt)
+            attempt["status"] = "running"
+            attempt["started_at"] = utc_now()
+            attempt["updated_at"] = attempt["started_at"]
+            profile_id = str(attempt["profile_id"])
+            message = str(attempt["message"])
+            owner = str(attempt["owner"])
+            cancel_event = attempt["cancel_event"]
+        try:
+            # A worker gets a longer bounded observation window than the
+            # compatibility wrapper's first wait.  This lets callers poll the
+            # same attempt after an early response timeout without resending.
+            response = self._send_message_once(
+                profile_id,
+                message,
+                owner=owner,
+                cancel_event=cancel_event,
+                attempt_id=attempt_id,
+                response_timeout_seconds=None,
+                observation_timeout_seconds=DEFAULT_WEB_CHAT_OBSERVATION_SECONDS,
+            )
+            self._complete_attempt(attempt_id, response)
+        except Exception as error:  # pragma: no cover - defensive executor boundary
+            self._complete_attempt(attempt_id, None, error)
+        finally:
+            # Observer threads are daemonized, but still mark their handle as
+            # finished so a profile cannot accept a second send while the
+            # previous browser action is unwinding.
+            with self._occupancy_lock:
+                current = self._attempts.get(attempt_id)
+                if current is not None:
+                    current["done_event"].set()
+                    self._release_attempt(current)
+        with self._occupancy_lock:
+            current = self._attempts.get(attempt_id)
+            return self._attempt_public(current) if current is not None else {"status": "unknown", "attempt_id": attempt_id}
+
+    def start_message(self, profile_id: str, text: str, *, owner: str = "manual") -> dict[str, Any]:
+        """Accept one web message and return an idempotent attempt handle."""
+
+        if self._closed:
+            raise WebChatRuntimeError("web-chat runtime is closed")
+        profile = self._profile(profile_id)
+        message = _text(text, 16_000)
+        if not message:
+            raise WebChatRuntimeError("web-chat message must not be empty")
+        if profile.get("archived_at"):
+            raise WebChatRuntimeError("web-chat profile is archived")
+        owner = str(owner or "manual").strip().lower()
+        if owner not in {"manual", "agent"}:
+            raise WebChatRuntimeError("web-chat message owner is invalid")
+        profile_key = str(profile["id"])
+        if owner != "agent" and self.agent_occupancy(profile_key):
+            return {
+                "schema": WEB_CHAT_SCHEMA,
+                "accepted": False,
+                "ok": False,
+                "status": "waiting-human",
+                "requires_human": True,
+                "profile_id": profile_key,
+                "error_code": "profile-occupied",
+                "reason": "该网页 Profile 当前由 Agent 占用；请等待或请求接管",
+            }
+        if not profile.get("auto_chat_enabled") or "chat.send" not in set(profile.get("allowed_actions") or []):
+            return {
+                "schema": WEB_CHAT_SCHEMA,
+                "accepted": False,
+                "ok": False,
+                "status": "needs-confirmation",
+                "requires_approval": True,
+                "profile_id": profile_key,
+                "reason": "请先启用该网页账号的一次性普通聊天授权",
+            }
+        if profile.get("auth_state") != "authorized":
+            return {
+                "schema": WEB_CHAT_SCHEMA,
+                "accepted": False,
+                "ok": False,
+                "status": "waiting-human",
+                "requires_human": True,
+                "profile_id": profile_key,
+                "reason": "网页登录状态未确认；请在隔离窗口登录后检查状态",
+            }
+        attempt_id = f"web-attempt-{uuid4().hex[:16]}"
+        now = utc_now()
+        with self._occupancy_lock:
+            active_id = self._profile_attempts.get(profile_key)
+            active = self._attempts.get(active_id) if active_id else None
+            if active is not None and (
+                not self._attempt_terminal(active.get("status"))
+                or not active.get("done_event", threading.Event()).is_set()
+            ):
+                return {
+                    "schema": WEB_CHAT_SCHEMA,
+                    "accepted": False,
+                    "ok": False,
+                    "status": "waiting-human",
+                    "requires_human": True,
+                    "profile_id": profile_key,
+                    "error_code": "profile-occupied",
+                    "reason": "该网页 Profile 当前已有消息回合；请等待其结束或请求接管",
+                }
+            attempt = {
+                "attempt_id": attempt_id,
+                "profile_id": profile_key,
+                "owner": owner,
+                "message": message,
+                "status": "accepted",
+                "accepted": True,
+                "created_at": now,
+                "updated_at": now,
+                "started_at": None,
+                "completed_at": None,
+                "session_id": None,
+                "tab_id": None,
+                "possibly_sent": False,
+                "sent": False,
+                "response": {},
+                "error_code": None,
+                "reason": None,
+                "cancel_event": threading.Event(),
+                "done_event": threading.Event(),
+                "thread": None,
+            }
+            self._attempts[attempt_id] = attempt
+            self._profile_attempts[profile_key] = attempt_id
+            if owner == "agent":
+                self._agent_occupancy.add(profile_key)
+        try:
+            observer = threading.Thread(
+                target=self._run_attempt,
+                args=(attempt_id,),
+                name=f"sumika-web-chat-{attempt_id[-8:]}",
+                daemon=True,
+            )
+            with self._occupancy_lock:
+                attempt["thread"] = observer
+            observer.start()
+        except Exception as error:
+            with self._occupancy_lock:
+                attempt["done_event"].set()
+            self._complete_attempt(attempt_id, None, error)
+            with self._occupancy_lock:
+                self._release_attempt(attempt)
+        with self._occupancy_lock:
+            return self._attempt_public(self._attempts[attempt_id])
+
+    def message_status(self, attempt_id: str) -> dict[str, Any]:
+        identifier = _text(attempt_id, 120)
+        with self._occupancy_lock:
+            attempt = self._attempts.get(identifier)
+            if attempt is not None:
+                return {**self._attempt_public(attempt), "found": True}
+        return {"schema": WEB_CHAT_SCHEMA, "attempt_id": identifier, "found": False, "status": "unknown", "ok": False}
+
+    def wait_message(self, attempt_id: str, *, timeout: float | None = None) -> dict[str, Any]:
+        identifier = _text(attempt_id, 120)
+        with self._occupancy_lock:
+            attempt = self._attempts.get(identifier)
+        if attempt is None:
+            return {"schema": WEB_CHAT_SCHEMA, "attempt_id": identifier, "found": False, "status": "unknown", "ok": False}
+        try:
+            wait_seconds = max(0.0, min(30.0, float(timeout if timeout is not None else 15.0)))
+        except (TypeError, ValueError):
+            wait_seconds = 15.0
+        attempt["done_event"].wait(wait_seconds)
+        with self._occupancy_lock:
+            return {**self._attempt_public(attempt), "found": True}
+
+    def cancel_message(self, attempt_id: str) -> dict[str, Any]:
+        identifier = _text(attempt_id, 120)
+        with self._occupancy_lock:
+            attempt = self._attempts.get(identifier)
+            if attempt is None:
+                return {"schema": WEB_CHAT_SCHEMA, "attempt_id": identifier, "found": False, "cancelled": False}
+            if self._attempt_terminal(attempt.get("status")):
+                return {**self._attempt_public(attempt), "found": True, "cancelled": False, "reason": "already-finished"}
+            attempt["cancel_event"].set()
+            attempt["status"] = "cancelled"
+            attempt["possibly_sent"] = bool(attempt.get("possibly_sent") or attempt.get("started_at"))
+            attempt["error_code"] = "cancelled"
+            attempt["reason"] = "web-chat attempt cancelled; it will not be resent"
+            attempt["completed_at"] = utc_now()
+            attempt["updated_at"] = attempt["completed_at"]
+            self._release_attempt(attempt)
+            return {**self._attempt_public(attempt), "found": True, "cancelled": True}
+
     def send_message(self, profile_id: str, text: str, *, owner: str = "manual") -> dict[str, Any]:
+        """Compatibility wrapper: start one attempt and wait for its first result."""
+
+        accepted = self.start_message(profile_id, text, owner=owner)
+        if not accepted.get("accepted"):
+            return accepted
+        profile = self._profile(profile_id)
+        config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+        try:
+            timeout_seconds = min(15.0, max(0.5, float(config.get("response_timeout_seconds", 4))))
+        except (TypeError, ValueError):
+            timeout_seconds = 4.0
+        result = self.wait_message(str(accepted["attempt_id"]), timeout=timeout_seconds)
+        if result.get("status") == "completed":
+            return result
+        # Preserve the old ``pending`` flag while exposing the stronger
+        # possibly-sent state to new callers.
+        if result.get("status") in {"running", "accepted"}:
+            result = {**result, "status": "possibly-sent", "pending": True, "possibly_sent": True, "error_code": "response-pending"}
+        return result
+
+    def _send_message_once(
+        self,
+        profile_id: str,
+        text: str,
+        *,
+        owner: str = "manual",
+        cancel_event: threading.Event | None = None,
+        attempt_id: str | None = None,
+        response_timeout_seconds: float | None = None,
+        observation_timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         """Send one ordinary chat message through a consented web account."""
 
         profile = self._profile(profile_id)
         message = _text(text, 16_000)
+        def cancelled() -> dict[str, Any] | None:
+            if cancel_event is not None and cancel_event.is_set():
+                return {
+                    "ok": False,
+                    "status": "cancelled",
+                    "profile_id": profile_id,
+                    "error_code": "cancelled",
+                    "possibly_sent": bool(attempt_id),
+                    "reason": "web-chat attempt cancelled; it will not be resent",
+                }
+            return None
+
+        def mark_attempt(**values: Any) -> None:
+            if not attempt_id:
+                return
+            with self._occupancy_lock:
+                attempt = self._attempts.get(attempt_id)
+                if attempt is not None:
+                    attempt.update(values)
+
         if not message:
             raise WebChatRuntimeError("web-chat message must not be empty")
         if profile.get("archived_at"):
@@ -1068,6 +1418,7 @@ class WebChatRuntime:
         if owner != "agent" and self.agent_occupancy(profile_id):
             return {
                 "ok": False,
+                "status": "waiting-human",
                 "requires_human": True,
                 "profile_id": profile_id,
                 "error_code": "profile-occupied",
@@ -1076,6 +1427,7 @@ class WebChatRuntime:
         if not profile.get("auto_chat_enabled") or "chat.send" not in set(profile.get("allowed_actions") or []):
             return {
                 "ok": False,
+                "status": "needs-confirmation",
                 "requires_approval": True,
                 "profile_id": profile_id,
                 "reason": "请先启用该网页账号的一次性普通聊天授权",
@@ -1083,14 +1435,19 @@ class WebChatRuntime:
         if profile.get("auth_state") != "authorized":
             return {
                 "ok": False,
+                "status": "waiting-human",
                 "requires_human": True,
                 "profile_id": profile_id,
                 "reason": "网页登录状态未确认；请在隔离窗口登录后检查状态",
             }
         spec = self._spec(profile)
+        early = cancelled()
+        if early:
+            return early
         try:
             session = self._ensure_session(profile, allow_auto=True, no_focus=owner == "agent")
             tab_id = self._ensure_chat_tab(profile, session["id"])
+            mark_attempt(session_id=session.get("id"), tab_id=tab_id)
         except Exception as error:
             if self.logger:
                 try:
@@ -1099,16 +1456,17 @@ class WebChatRuntime:
                     pass
             return {
                 "ok": False,
+                "status": "failed",
                 "profile_id": profile_id,
                 "reason": "隔离浏览器不可用；消息未发送",
             }
         if not tab_id:
-            return {"ok": False, "profile_id": profile_id, "reason": "BrowserSkill session is not connected"}
+            return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "BrowserSkill session is not connected"}
 
         try:
             before = self.browser.snapshot_session(session["id"], tab_id=tab_id)
         except Exception:
-            return {"ok": False, "profile_id": profile_id, "reason": "无法读取聊天页面；消息未发送"}
+            return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "无法读取聊天页面；消息未发送"}
         # A profile can become logged out or navigate away after the last
         # explicit check.  Re-evaluate both signals immediately before any
         # fill/click/press action.  Never treat a visible send button as proof
@@ -1120,6 +1478,7 @@ class WebChatRuntime:
             )
             return {
                 "ok": False,
+                "status": "failed",
                 "profile_id": profile_id,
                 "reason": "隔离浏览器返回了无法识别的页面快照；消息未发送",
             }
@@ -1127,7 +1486,7 @@ class WebChatRuntime:
             self.storage.update_web_chat_profile(
                 profile_id, status="unavailable", last_checked=True
             )
-            return {"ok": False, "profile_id": profile_id, "reason": "聊天页面暂不可观察；消息未发送"}
+            return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "聊天页面暂不可观察；消息未发送"}
         before_auth = _auth_state(spec, before_payload)
         before_page_ready = _page_ready(spec, before_payload, auth_state=before_auth)
         if before_auth != "authorized":
@@ -1136,6 +1495,7 @@ class WebChatRuntime:
             )
             return {
                 "ok": False,
+                "status": "waiting-human",
                 "requires_human": True,
                 "profile_id": profile_id,
                 "reason": "网页登录状态已变化；请在隔离窗口重新登录后检查状态",
@@ -1146,6 +1506,7 @@ class WebChatRuntime:
             )
             return {
                 "ok": False,
+                "status": "failed",
                 "profile_id": profile_id,
                 "reason": "聊天页面结构或就绪标记已变化；消息未发送",
             }
@@ -1158,10 +1519,13 @@ class WebChatRuntime:
                 before_payload, selectors=spec.selectors.get("response", ())
             )
         except WebChatRuntimeError as error:
-            return {"ok": False, "profile_id": profile_id, "reason": str(error)}
+            return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": str(error)}
         input_result: dict[str, Any] | None = None
         input_selector = None
         for selector in spec.selectors.get("input", ()):
+            early = cancelled()
+            if early:
+                return early
             try:
                 candidate = self.browser.execute_action(
                     session["id"],
@@ -1178,13 +1542,16 @@ class WebChatRuntime:
                 input_selector = selector
                 break
             if input_result.get("requires_human"):
-                return {"ok": False, "requires_human": True, "profile_id": profile_id, "reason": input_result.get("reason")}
+                return {"ok": False, "status": "waiting-human", "requires_human": True, "profile_id": profile_id, "reason": input_result.get("reason")}
         if not input_selector:
-            return {"ok": False, "profile_id": profile_id, "reason": "未找到安全的聊天输入框；适配器已停止"}
+            return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "未找到安全的聊天输入框；适配器已停止"}
 
         sent = False
         send_result: dict[str, Any] | None = None
         for selector in spec.selectors.get("send", ()):
+            early = cancelled()
+            if early:
+                return early
             try:
                 candidate = self.browser.execute_action(
                     session["id"], action="click", target=selector, approved=True, tab_id=tab_id
@@ -1196,6 +1563,9 @@ class WebChatRuntime:
                 sent = True
                 break
         if not sent:
+            early = cancelled()
+            if early:
+                return early
             try:
                 candidate = self.browser.execute_action(
                     session["id"],
@@ -1210,16 +1580,37 @@ class WebChatRuntime:
             send_result = candidate if isinstance(candidate, dict) else {"executed": False}
             sent = bool(send_result.get("executed"))
         if not sent:
-            return {"ok": False, "profile_id": profile_id, "reason": "发送按钮或 Enter 操作未执行"}
+            return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "发送按钮或 Enter 操作未执行"}
+
+        mark_attempt(sent=True, possibly_sent=True)
 
         response: str | None = None
         stored_config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
-        try:
-            timeout_seconds = min(15.0, max(0.5, float(stored_config.get("response_timeout_seconds", 4))))
-        except (TypeError, ValueError):
-            timeout_seconds = 4.0
-        deadline = time.monotonic() + timeout_seconds
+        if response_timeout_seconds is not None:
+            initial_timeout_seconds = min(15.0, max(0.5, float(response_timeout_seconds)))
+        else:
+            try:
+                initial_timeout_seconds = min(15.0, max(0.5, float(stored_config.get("response_timeout_seconds", 4))))
+            except (TypeError, ValueError):
+                initial_timeout_seconds = 4.0
+        if observation_timeout_seconds is not None:
+            max_observation_seconds = min(MAX_WEB_CHAT_OBSERVATION_SECONDS, max(initial_timeout_seconds, float(observation_timeout_seconds)))
+        else:
+            try:
+                max_observation_seconds = min(
+                    MAX_WEB_CHAT_OBSERVATION_SECONDS,
+                    max(initial_timeout_seconds, float(stored_config.get("observation_timeout_seconds", DEFAULT_WEB_CHAT_OBSERVATION_SECONDS))),
+                )
+            except (TypeError, ValueError):
+                max_observation_seconds = DEFAULT_WEB_CHAT_OBSERVATION_SECONDS
+        started_observing = time.monotonic()
+        initial_deadline = started_observing + initial_timeout_seconds
+        deadline = started_observing + max_observation_seconds
+        pending_marked = False
         while time.monotonic() <= deadline:
+            early = cancelled()
+            if early:
+                return early
             try:
                 observed = self.browser.snapshot_session(session["id"], tab_id=tab_id)
             except Exception:
@@ -1231,6 +1622,8 @@ class WebChatRuntime:
                 )
                 return {
                     "ok": False,
+                    "status": "possibly-sent",
+                    "possibly_sent": True,
                     "profile_id": profile_id,
                     "reason": "隔离浏览器返回了无法识别的页面快照；消息状态无法确认",
                 }
@@ -1247,6 +1640,8 @@ class WebChatRuntime:
                 )
                 return {
                     "ok": False,
+                    "status": "possibly-sent",
+                    "possibly_sent": True,
                     "requires_human": True,
                     "profile_id": profile_id,
                     "reason": "网页登录状态在等待回复期间失效；请重新登录",
@@ -1257,6 +1652,9 @@ class WebChatRuntime:
                 )
                 return {
                     "ok": False,
+                    "status": "possibly-sent",
+                    "possibly_sent": True,
+                    "error_code": "possibly-sent",
                     "profile_id": profile_id,
                     "reason": "等待回复时聊天页面已离开就绪状态",
                 }
@@ -1265,17 +1663,29 @@ class WebChatRuntime:
                     observed_payload, selectors=spec.selectors.get("response", ())
                 )
             except WebChatRuntimeError as error:
-                return {"ok": False, "profile_id": profile_id, "reason": str(error)}
+                return {"ok": False, "status": "possibly-sent", "possibly_sent": True, "error_code": "possibly-sent", "profile_id": profile_id, "reason": str(error)}
             if candidate and candidate != baseline:
                 response = candidate
                 break
-            if timeout_seconds <= 0.6:
-                break
+            if not pending_marked and time.monotonic() >= initial_deadline:
+                # Keep the attempt running after the compatibility wrapper's
+                # short wait.  The caller can poll this same id; no second
+                # fill/click/press action will ever be issued.
+                pending_marked = True
+                mark_attempt(
+                    status="running",
+                    pending=True,
+                    error_code="response-pending",
+                    reason="消息已发送，继续等待同一网页回合的 assistant 响应",
+                )
             time.sleep(0.25)
         if response is None:
             return {
                 "ok": False,
+                "status": "possibly-sent",
                 "pending": True,
+                "possibly_sent": True,
+                "error_code": "response-pending",
                 "profile_id": profile_id,
                 "reason": "消息已发送，暂未找到明确的 assistant 响应；不会生成替代文本",
             }
@@ -1285,7 +1695,7 @@ class WebChatRuntime:
                 self.logger.info("web chat completed profile=%s adapter=%s response_chars=%d", profile_id, spec.id, len(response))
             except Exception:
                 pass
-        return {"ok": True, "profile_id": profile_id, "adapter_id": spec.id, "text": response, "profile": updated}
+        return {"ok": True, "status": "completed", "profile_id": profile_id, "adapter_id": spec.id, "text": response, "profile": updated}
 
     def health(self, profile_id: str) -> dict[str, Any]:
         profile = self._profile(profile_id)
@@ -1305,6 +1715,23 @@ class WebChatRuntime:
     def close(self) -> None:
         # Close only sessions created by this runtime.  BrowserRuntime owns the
         # backend BrowserSkill ids and releases named-profile leases there.
+        with self._occupancy_lock:
+            if self._closed:
+                return
+            self._closed = True
+            active_attempts = [
+                attempt for attempt in self._attempts.values()
+                if not self._attempt_terminal(attempt.get("status"))
+            ]
+            for attempt in active_attempts:
+                attempt["cancel_event"].set()
+                attempt["status"] = "interrupted"
+                attempt["possibly_sent"] = bool(attempt.get("possibly_sent") or attempt.get("started_at"))
+                attempt["error_code"] = "core-shutdown"
+                attempt["reason"] = "Core closed before the web response was confirmed"
+                attempt["completed_at"] = utc_now()
+                attempt["updated_at"] = attempt["completed_at"]
+                self._release_attempt(attempt)
         for profile_id, session_id in list(self.sessions.items()):
             try:
                 self.browser.close_session(session_id)
@@ -1322,6 +1749,9 @@ class WebChatRuntime:
                 self.sessions.pop(profile_id, None)
         with self._occupancy_lock:
             self._agent_occupancy.clear()
+        # Attempts are observed by daemon threads.  There is no executor to
+        # shut down anymore; cancellation above marks the attempt terminal and
+        # the thread will stop at its next BrowserSkill boundary.
 
     def _profile(self, profile_id: str) -> dict[str, Any]:
         normalized = str(profile_id or "").strip()
@@ -1469,6 +1899,9 @@ class WebChatRuntime:
                 "ready_markers": list(spec.ready_markers),
                 "model_id": spec.model_id,
                 "response_timeout_seconds": stored_config.get("response_timeout_seconds", 4),
+                "observation_timeout_seconds": stored_config.get(
+                    "observation_timeout_seconds", DEFAULT_WEB_CHAT_OBSERVATION_SECONDS
+                ),
             },
         }
 

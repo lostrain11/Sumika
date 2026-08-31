@@ -30,9 +30,27 @@ function positiveInteger(value, fallback, field) {
   return number;
 }
 
+// DSH 0.1.x requires every native tool to declare a canonical output
+// renderer.  The Core already bounds and redacts the bridge response; this
+// final projection keeps the renderer total for any JSON value.
+const GENERIC_OUTPUT = Object.freeze({
+  schema: { type: "json" },
+  render: (_args, value) => {
+    let text;
+    try {
+      const encoded = typeof value === "string" ? value : JSON.stringify(value);
+      text = encoded === undefined ? String(value) : encoded;
+    } catch {
+      text = "[unrenderable route result]";
+    }
+    return [{ type: "text", text: text.slice(0, 32000) }];
+  }
+});
+
 function installTool(ctx, client, specification) {
   ctx.tools.register(defineTool({
     ...specification,
+    output: specification.output || GENERIC_OUTPUT,
     async execute(args, exec) {
       const payload = buildRoutePayload(specification.name, args || {}, exec || {});
       return client.call(specification.name, payload, exec?.signal);
@@ -42,8 +60,8 @@ function installTool(ctx, client, specification) {
 
 function routeParameters() {
   return {
-    request: { type: "object", description: "Runtime-neutral route request; parent IDs may come from the DSH execution context." },
-    dispatch: { type: "object", description: "Runtime-neutral dispatch object." },
+    request: { type: "object", additionalProperties: true, description: "Runtime-neutral route request; parent IDs may come from the DSH execution context." },
+    dispatch: { type: "object", additionalProperties: true, description: "Runtime-neutral dispatch object." },
     refresh: { type: "boolean" },
     wait: { type: "boolean" },
     includeTemplates: { type: "boolean" },
@@ -53,7 +71,8 @@ function routeParameters() {
     parentSessionId: { type: "string" },
     parentTurnId: { type: "string" },
     limit: { type: "number" },
-    dispatchSelected: { type: "boolean" }
+    dispatchSelected: { type: "boolean" },
+    replace: { type: "boolean" }
   };
 }
 
@@ -120,6 +139,24 @@ function apply(ctx, config = {}) {
     description: "Retry only a confirmed pre-send route failure.",
     parameters: { dispatchId: { type: "string", required: true }, wait: { type: "boolean" } },
     presentCall: () => ({ card: "generic", title: "Retry route", kind: "route-retry", rawInput: "retry" })
+  });
+  installTool(ctx, client, {
+    name: "sumika_route_arm",
+    description: "Arm an explicit parent turn request for a later event boundary.",
+    parameters: { ...routeParameters(), replace: { type: "boolean" } },
+    presentCall: () => ({ card: "generic", title: "Arm route turn", kind: "route-arm", rawInput: "arm" })
+  });
+  installTool(ctx, client, {
+    name: "sumika_route_pending",
+    description: "Read terminal worker results waiting for parent acknowledgement.",
+    parameters: { parentSessionId: { type: "string" }, parentTurnId: { type: "string" }, limit: { type: "number" } },
+    presentCall: () => ({ card: "generic", title: "Pending route results", kind: "route-pending", rawInput: "pending" })
+  });
+  installTool(ctx, client, {
+    name: "sumika_route_ack",
+    description: "Acknowledge one terminal worker result so it is removed from the parent mailbox.",
+    parameters: { dispatchId: { type: "string", required: true } },
+    presentCall: () => ({ card: "generic", title: "Acknowledge route result", kind: "route-ack", rawInput: "ack" })
   });
 
   // Registration is intentionally attempted during plugin load as well as

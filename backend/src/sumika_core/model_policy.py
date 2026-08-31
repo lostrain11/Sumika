@@ -13,10 +13,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Protocol
 from urllib.parse import urlparse
 
 
@@ -56,6 +56,24 @@ VALID_BUDGET_POLICIES = {"prefer-free", "free-only", "allow-paid", "no-paid"}
 
 class ModelPolicyError(ValueError):
     """Raised when a policy object is malformed or cannot be evaluated."""
+
+
+class ModelRouteSource(Protocol):
+    """Runtime-neutral source of externally managed model routes.
+
+    A source is deliberately narrower than an Agent runtime.  It publishes
+    safe model observations and may optionally expose a quota snapshot; the
+    policy layer never reads source credentials or invokes arbitrary scripts.
+    """
+
+    source_id: str
+
+    def model_entries(
+        self,
+        *,
+        refresh: bool = False,
+        session_id: str | None = None,
+    ) -> Iterable[Any]: ...
 
 
 def _utc_now() -> str:
@@ -657,16 +675,63 @@ class ModelPolicyService:
         data_dir: str | Path | None = None,
         logger: Any = None,
         web_chat: Any = None,
+        external_route_sources: Iterable[Any] | None = None,
+        route_sources: Iterable[Any] | None = None,
     ) -> None:
         self.provider_profiles = provider_profiles
         self.agent = agent
         self.logger = logger
         self.web_chat = web_chat
+        self._route_sources: dict[str, Any] = {}
         self.store = ModelCatalogStore(data_dir)
         self.router = ModelRouter()
         self._quota_lock = threading.RLock()
         self._runtime_quota_cache: dict[str, Any] | None = None
         self._runtime_quota_checked_at = 0.0
+        # ``route_sources`` is a compatibility spelling for callers that use
+        # the shorter name.  Keep one registry so a source cannot be listed
+        # twice when both aliases are supplied.
+        for source in tuple(external_route_sources or ()) + tuple(route_sources or ()):
+            self.register_route_source(source)
+
+    def register_route_source(self, source: Any, *, source_id: str | None = None) -> str:
+        """Register an external model source without probing it.
+
+        Registration is dependency injection only.  Discovery occurs at an
+        explicit ``catalog(refresh=True)`` boundary, which keeps Core startup
+        side-effect free and lets a future Harness adapter be added without
+        changing this policy service.
+        """
+
+        if source is None:
+            raise ModelPolicyError("route source is required")
+        raw_id = source_id or getattr(source, "source_id", None) or getattr(source, "runtime_id", None)
+        identifier = _safe_text(raw_id, 120).lower()
+        if not identifier:
+            identifier = f"source-{len(self._route_sources) + 1}"
+        if any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._:-" for char in identifier):
+            raise ModelPolicyError("route source id is invalid")
+        self._route_sources[identifier] = source
+        return identifier
+
+    def unregister_route_source(self, source_id: str) -> bool:
+        identifier = _safe_text(source_id, 120).lower()
+        if not identifier:
+            return False
+        return self._route_sources.pop(identifier, None) is not None
+
+    def route_sources(self) -> list[Any]:
+        return list(self._route_sources.values())
+
+    def external_entries(
+        self,
+        *,
+        refresh: bool = False,
+        session_id: str | None = None,
+    ) -> list[ModelCatalogEntry]:
+        """Return the current projection from registered external sources."""
+
+        return self._external_entries(refresh=refresh, session_id=session_id)
 
     def catalog(self, *, refresh: bool = False, session_id: str | None = None) -> dict[str, Any]:
         if refresh:
@@ -675,9 +740,11 @@ class ModelPolicyService:
         runtime_quota = self._runtime_quota_status(force=refresh)
         entries = self._profile_entries()
         entries.extend(self._runtime_entries(session_id, runtime_quota=runtime_quota))
+        entries.extend(self._external_entries(refresh=refresh, session_id=session_id))
         entries.extend(self._web_entries())
         self.store.upsert_entries(entries)
         self.store.save()
+        source_ids = list(self._route_sources)
         quotas = self.store.quotas()
         return {
             "policy_version": MODEL_POLICY_VERSION,
@@ -687,7 +754,7 @@ class ModelPolicyService:
             "refresh_requested": bool(refresh),
             "quota_refresh_performed": quota_refreshed,
             "runtime_quota": runtime_quota,
-            "sources": ["provider-profiles", "agent-runtime", "browser-web-chat"],
+            "sources": ["provider-profiles", "agent-runtime", "external-route-sources", *source_ids, "browser-web-chat"],
         }
 
     def decide(
@@ -733,6 +800,32 @@ class ModelPolicyService:
         refreshed = self._refresh_quotas_if_due(force=bool(refresh or force))
         self.store.save()
         runtime_quota = self._runtime_quota_status(force=bool(refresh or force))
+        external: list[dict[str, Any]] = []
+        for source_id, source in list(self._route_sources.items()):
+            method = getattr(source, "quota_status", None)
+            if not callable(method):
+                continue
+            try:
+                value = method({})
+            except TypeError:
+                try:
+                    value = method()
+                except Exception as error:
+                    self._log_source_error(source_id, error)
+                    continue
+            except Exception as error:
+                self._log_source_error(source_id, error)
+                continue
+            if isinstance(value, Mapping):
+                item = {"source_id": source_id}
+                for key in ("state", "source", "checked_at", "expires_at", "unit", "detail", "confidence"):
+                    if value.get(key) is not None:
+                        item[key] = _safe_text(value.get(key), 240)
+                for key in ("remaining", "remaining_min", "remaining_max", "used", "total"):
+                    number = value.get(key)
+                    if isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number) and number >= 0:
+                        item[key] = float(number)
+                external.append(item)
         return {
             "policy_version": MODEL_POLICY_VERSION,
             "checked_at": _utc_now(),
@@ -740,6 +833,7 @@ class ModelPolicyService:
             "refresh_requested": bool(refresh),
             "refresh_performed": refreshed,
             "runtime": runtime_quota,
+            "external": external,
         }
 
     def _entry_constructor(self, value: dict[str, Any]) -> dict[str, Any]:
@@ -867,6 +961,204 @@ class ModelPolicyService:
                     )
                 )
         return entries
+
+    def _external_entries(
+        self,
+        *,
+        refresh: bool = False,
+        session_id: str | None = None,
+    ) -> list[ModelCatalogEntry]:
+        """Project registered external Harness sources into the catalog.
+
+        Sources are intentionally duck-typed at this boundary.  This keeps
+        the policy package independent from DSH, ZCode, or a future Harness,
+        while still accepting a small community adapter that implements only
+        ``model_entries``.  A source may return an envelope (``entries`` or
+        ``groups``) or already-normalized ``ModelCatalogEntry`` objects.
+        """
+
+        result: list[ModelCatalogEntry] = []
+        for source_id, source in list(self._route_sources.items()):
+            method = getattr(source, "model_entries", None)
+            if not callable(method):
+                method = getattr(source, "entries", None)
+            if not callable(method):
+                continue
+            try:
+                values = method(refresh=bool(refresh), session_id=session_id)
+            except TypeError:
+                try:
+                    values = method(bool(refresh))
+                except Exception as error:
+                    self._log_source_error(source_id, error)
+                    continue
+            except Exception as error:
+                self._log_source_error(source_id, error)
+                continue
+            rows = self._source_rows(values)
+            for raw in rows[:512]:
+                try:
+                    entry = self._normalize_external_entry(raw, source_id)
+                except (ModelPolicyError, TypeError, ValueError) as error:
+                    self._log_source_error(source_id, error)
+                    continue
+                if entry is not None:
+                    result.append(entry)
+            # Optional source quota observations are persisted only as the
+            # existing bounded QuotaSnapshot projection.  A source that does
+            # not expose this method simply leaves quota state as unknown.
+            if refresh:
+                self._refresh_external_quota(source_id, source, result)
+        return result
+
+    def _log_source_error(self, source_id: str, error: Exception) -> None:
+        if self.logger:
+            self.logger.info(
+                "model policy external source failed source=%s error_type=%s",
+                source_id,
+                type(error).__name__,
+            )
+
+    @staticmethod
+    def _source_rows(value: Any) -> list[Any]:
+        if isinstance(value, ModelCatalogEntry):
+            return [value]
+        if isinstance(value, Mapping):
+            for key in ("entries", "models", "routes", "items"):
+                nested = value.get(key)
+                if isinstance(nested, (list, tuple)):
+                    return list(nested)
+            groups = value.get("groups")
+            if isinstance(groups, list):
+                rows: list[dict[str, Any]] = []
+                for group in groups[:128]:
+                    if not isinstance(group, Mapping):
+                        continue
+                    provider = group.get("id") or group.get("provider_id") or group.get("providerId")
+                    group_name = group.get("name") or provider
+                    models = group.get("models")
+                    if not isinstance(models, list):
+                        continue
+                    for model in models[:128]:
+                        if isinstance(model, Mapping):
+                            rows.append({"provider_id": provider, "provider_name": group_name, **dict(model)})
+                return rows
+            return [dict(value)]
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return []
+
+    @staticmethod
+    def _normalize_external_entry(raw: Any, source_id: str) -> ModelCatalogEntry | None:
+        if isinstance(raw, ModelCatalogEntry):
+            metadata = dict(raw.metadata)
+            metadata.setdefault("external_source_id", source_id)
+            metadata.setdefault("external_harness", True)
+            if "routable" not in metadata:
+                metadata["routable"] = raw.routable
+            if raw.source_kind in {"provider", "harness"}:
+                return replace(raw, harness_id=raw.harness_id or source_id, source_kind="external-harness", metadata=metadata)
+            return replace(raw, metadata=metadata)
+        if not isinstance(raw, Mapping):
+            return None
+        value = dict(raw)
+        provider = str(value.get("provider_id") or value.get("providerId") or value.get("provider") or source_id).strip()
+        model = str(value.get("model_id") or value.get("modelId") or value.get("id") or "").strip()
+        if not provider or not model:
+            return None
+        route_id = str(value.get("route_id") or value.get("routeId") or "").strip()
+        if not route_id:
+            route_id = f"harness:{source_id}:{provider}:{model}"
+        display = str(value.get("display_name") or value.get("displayName") or value.get("label") or value.get("name") or model).strip()
+        capabilities = value.get("capabilities")
+        if isinstance(capabilities, str):
+            capabilities = [capabilities]
+        if not isinstance(capabilities, (list, tuple, set)):
+            capabilities = ["chat", "code"]
+        metadata = dict(value.get("metadata") or {}) if isinstance(value.get("metadata"), Mapping) else {}
+        metadata.setdefault("external_source_id", source_id)
+        metadata.setdefault("external_harness", True)
+        if "routable" not in metadata:
+            metadata["routable"] = bool(value.get("routable", False))
+        if "quota_consent" not in metadata and value.get("quota_consent") is not None:
+            metadata["quota_consent"] = value.get("quota_consent")
+        return ModelCatalogEntry(
+            route_id=route_id,
+            provider_id=provider,
+            model_id=model,
+            display_name=display,
+            provider_profile_id=value.get("provider_profile_id") or value.get("providerProfileId"),
+            harness_id=str(value.get("harness_id") or value.get("harnessId") or source_id),
+            capabilities=tuple(str(item) for item in capabilities),
+            quality_tier=str(value.get("quality_tier") or value.get("qualityTier") or "unknown"),
+            cost_class=str(value.get("cost_class") or value.get("costClass") or "unknown"),
+            processing_location=str(value.get("processing_location") or value.get("processingLocation") or "cloud"),
+            auth_state=str(value.get("auth_state") or value.get("authState") or "unknown"),
+            quota_state=str(value.get("quota_state") or value.get("quotaState") or "unknown"),
+            health_state=str(value.get("health_state") or value.get("healthState") or "unknown"),
+            observed_at=str(value.get("observed_at") or value.get("observedAt") or _utc_now()),
+            version=value.get("version"),
+            source_kind="external-harness",
+            transport=str(value.get("transport") or "stdio"),
+            metadata=metadata,
+        )
+
+    def _refresh_external_quota(
+        self,
+        source_id: str,
+        source: Any,
+        entries: list[ModelCatalogEntry],
+    ) -> None:
+        method = getattr(source, "quota_status", None)
+        if not callable(method):
+            return
+        try:
+            value = method({})
+        except TypeError:
+            try:
+                value = method()
+            except Exception as error:
+                self._log_source_error(source_id, error)
+                return
+        except Exception as error:
+            self._log_source_error(source_id, error)
+            return
+        if not isinstance(value, Mapping):
+            return
+        snapshots = value.get("snapshots")
+        if isinstance(snapshots, list):
+            for item in snapshots[:128]:
+                if not isinstance(item, Mapping) or not item.get("route_id"):
+                    continue
+                try:
+                    self.store.upsert_quota(QuotaSnapshot(**{key: item[key] for key in QuotaSnapshot.__dataclass_fields__ if key in item}))
+                except (ModelPolicyError, TypeError, ValueError):
+                    continue
+            return
+        state = str(value.get("state") or "unknown").lower()
+        if state not in VALID_QUOTA_STATES:
+            state = "unknown"
+        source_name = _safe_text(value.get("source") or f"{source_id}-quota", 160)
+        for entry in entries:
+            if entry.harness_id != source_id:
+                continue
+            self.store.upsert_quota(
+                QuotaSnapshot(
+                    route_id=entry.route_id,
+                    state=state,
+                    remaining_min=value.get("remaining_min") if isinstance(value.get("remaining_min"), (int, float)) else value.get("remaining"),
+                    remaining_max=value.get("remaining_max") if isinstance(value.get("remaining_max"), (int, float)) else value.get("remaining"),
+                    used=value.get("used") if isinstance(value.get("used"), (int, float)) else None,
+                    total=value.get("total") if isinstance(value.get("total"), (int, float)) else None,
+                    unit=str(value.get("unit") or ""),
+                    source=source_name,
+                    checked_at=str(value.get("checked_at") or _utc_now()),
+                    expires_at=value.get("expires_at"),
+                    confidence=str(value.get("confidence") or "observed"),
+                    requires_auth=bool(value.get("requires_auth")),
+                    detail=str(value.get("detail") or ""),
+                )
+            )
 
     def _web_entries(self) -> list[ModelCatalogEntry]:
         # Built-in adapters are discovered from the registry when available,

@@ -117,6 +117,15 @@ cache_state` 分 cohort，输出成功率、Wilson 95% 区间、工具/质量通
 和额度单位。`routing_action` 固定为 `none`：即使报告给出诊断性候选，也不会自动修改生产路由。
 证据不足（默认每个任务至少 3 次）或置信区间重叠时，结果标记为 `insufficient`/`inconclusive`。
 
+已完成回合不会被评测器自动扫描。若维护 Agent 明确选择一个终态 Worker run，可调用
+`DynamicRouteSupervisor.capture_evaluation_sample(..., opt_in=True)`，只投影固定的状态、耗时、
+重试和布尔指标。该方法不读取日志/SQLite，不访问 prompt、answer、文件、DOM 或凭据；运行中
+回合和不完整状态直接拒绝。跨进程交接使用
+`sumika.model-evaluation-capture/v1` 的小型 JSON/JSONL handoff，由
+[`tools/capture_model_evaluations.py`](../../tools/capture_model_evaluations.py) 在显式
+`--opt-in` 后验证并生成 `sumika.model-evaluation/v1` records。捕获文件再交给
+`tools/evaluate_models.py` 离线汇总，仍不会改变生产路由。
+
 ## 运行方式
 
 ```powershell
@@ -128,6 +137,10 @@ python tools/aggregate_agent_day.py --write
 
 # 离线汇总固定评测结果（JSONL 或包含 records 数组的 JSON）
 python tools/evaluate_models.py --input <evaluation-results.jsonl>
+
+# 从已由隔离 runner 明确导出的终态元数据生成评测 records；不读日志或数据库
+python tools/capture_model_evaluations.py --input <terminal-captures.json> --opt-in \
+  --output .sumika-desktop\logs\evaluation\captured.json
 
 # 输出完整的有界 JSON；结果文件只会写入项目目录且不会覆盖旧报告
 python tools/evaluate_models.py --input <evaluation-results.jsonl> `
@@ -193,6 +206,27 @@ Core 也提供 `GET /api/agent/observability?day=YYYY-MM-DD&write=true`。这些
 
 结果由隔离 runner 产生；当前 CLI 只做离线验证和汇总，不负责启动模型、执行任务、安装
 插件或切换 Provider。被拒绝的记录只返回行号和稳定错误码，错误值和疑似敏感字段不会回显。
+
+捕获 handoff 的最小形状如下（`run` 只允许终态和标量字段；`manifest` 与评测记录相同）：
+
+```json
+{
+  "schema_version": "sumika.model-evaluation-capture/v1",
+  "task_id": "read-only-question",
+  "manifest": { "...": "同上面的固定 manifest 字段" },
+  "run": {
+    "route_id": "profile-local-qwen3-4b",
+    "status": "completed",
+    "latency_ms": 420,
+    "retry_count": 0,
+    "completed_at": "2026-08-31T00:00:00+00:00"
+  },
+  "metrics": { "tool_success": true, "quality_passed": true }
+}
+```
+
+缺少 `--opt-in`、状态为 `queued/running`、字段超出白名单或出现疑似敏感值时，捕获命令
+返回失败/需复核状态，不会部分写入或回显输入值。输出文件采用不覆盖策略。
 
 ## 相关文档
 
