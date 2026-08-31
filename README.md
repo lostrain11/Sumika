@@ -11,7 +11,7 @@
   </p>
   <p>
     <a href="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml">
-      <img src="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml/badge.svg" alt="CI status">
+      <img src="https://github.com/lostrain11/Sumika/actions/workflows/ccswitch-compatibility.yml/badge.svg" alt="Compatibility workflow status">
     </a>
     <img src="https://img.shields.io/badge/version-0.1.0-2563EB" alt="Version 0.1.0">
     <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11 or newer">
