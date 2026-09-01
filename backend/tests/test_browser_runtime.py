@@ -78,6 +78,40 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertEqual(observation["observation"]["password"], "[redacted]")
         self.assertTrue(any(args[0] == "observe" for args in calls))
 
+    def test_snapshot_marker_hits_scan_beyond_compact_projection_without_returning_text(self):
+        long_text = "head " + ("x" * 5_000) + " 退出登录 ... 发送"
+        calls = []
+
+        def runner(args):
+            calls.append(args)
+            if args == ("status",):
+                return {"browsers": [{"id": "browser-1"}], "sessions": []}
+            if args == ("session", "start"):
+                return {"id": "bsk-session-1"}
+            if args[0] == "snapshot":
+                return {
+                    "text": long_text,
+                    "credentials": {"token": "private-token"},
+                }
+            raise AssertionError(args)
+
+        runtime = BrowserRuntime(browser_skill=BrowserSkillClient("bsk", runner=runner))
+        session = runtime.create_session()
+        result = runtime.snapshot_session(
+            session["id"],
+            marker_sets={
+                "authorized": ("退出登录",),
+                "login": ("请先登录",),
+                "ready": ("发送",),
+            },
+        )
+        self.assertTrue(result["marker_hits"]["authorized"])
+        self.assertTrue(result["marker_hits"]["ready"])
+        self.assertFalse(result["marker_hits"]["login"])
+        self.assertNotIn("private-token", str(result))
+        self.assertLessEqual(len(result["snapshot"]["text"]), 800)
+        self.assertTrue(any(args[0] == "snapshot" for args in calls))
+
     def test_navigation_requires_approval_before_calling_bsk(self):
         calls = []
 

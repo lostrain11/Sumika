@@ -234,7 +234,10 @@ def _builtin_specs() -> tuple[WebChatAdapterSpec, ...]:
             domains=("chat.z.ai", "chatglm.cn"),
             chat_url="https://chat.z.ai/",
             selectors=selectors,
-            ready_markers=("新建对话", "发送", "Send"),
+            # The current z.ai shell exposes this account control instead of
+            # rendering a literal "Log out" label in the accessibility tree.
+            authorized_markers=("退出登录", "Log out", "Sign out", "注销", "Open User Menu"),
+            ready_markers=("新建对话", "发送", "Send", "有什么我能帮您的？", "我能为你创造什么？", "与 z.ai 互动", "Z.ai - Advanced AI Chatbot"),
             model_id="web-session",
         ),
         WebChatAdapterSpec(
@@ -251,8 +254,29 @@ def _builtin_specs() -> tuple[WebChatAdapterSpec, ...]:
             name="Kimi 网页聊天",
             domains=("www.kimi.com", "kimi.moonshot.cn"),
             chat_url="https://www.kimi.com/",
-            selectors=selectors,
-            ready_markers=("新建对话", "新对话", "发送", "Send"),
+            # Kimi's current home composer is the blank-chat entry point.  It
+            # uses a contenteditable editor and a div-based send control
+            # rather than the button/textarea shape used by other sites.
+            selectors={
+                **selectors,
+                "input": (".chat-input-editor", "[contenteditable='true']", "textarea"),
+                "send": (
+                    ".send-button-container:not(.disabled)",
+                    ".send-button-container",
+                    *selectors["send"],
+                ),
+            },
+            # The signed-in Kimi shell exposes the account entry as
+            # “我的 Kimi” instead of a literal logout label.
+            authorized_markers=("退出登录", "Log out", "Sign out", "注销", "我的 Kimi", "My Kimi"),
+            ready_markers=(
+                "新建会话",
+                "新建对话",
+                "新对话",
+                "输入 \"/\" 唤起插件和技能",
+                "发送",
+                "Send",
+            ),
             model_id="web-session",
         ),
         WebChatAdapterSpec(
@@ -406,7 +430,19 @@ def _contains_marker(strings: Iterable[str], markers: Iterable[str]) -> bool:
     return any(marker.casefold() in haystack for marker in markers if marker)
 
 
-def _auth_state(spec: WebChatAdapterSpec, snapshot: Any) -> str:
+def _auth_state(
+    spec: WebChatAdapterSpec,
+    snapshot: Any,
+    *,
+    marker_hits: Mapping[str, Any] | None = None,
+) -> str:
+    if isinstance(marker_hits, Mapping):
+        # BrowserRuntime may provide marker-only evidence from the raw,
+        # bounded BrowserSkill response.  The values contain no page text.
+        if marker_hits.get("authorized") is True:
+            return "authorized"
+        if marker_hits.get("login") is True:
+            return "needs-auth"
     strings = _walk_strings(_snapshot_payload(snapshot))
     # A positive account marker wins over a footer/login hint.  We deliberately
     # use only coarse markers; no account name or page content is persisted.
@@ -421,7 +457,13 @@ def _auth_state(spec: WebChatAdapterSpec, snapshot: Any) -> str:
     return "unknown"
 
 
-def _page_ready(spec: WebChatAdapterSpec, snapshot: Any, *, auth_state: str | None = None) -> bool:
+def _page_ready(
+    spec: WebChatAdapterSpec,
+    snapshot: Any,
+    *,
+    auth_state: str | None = None,
+    marker_hits: Mapping[str, Any] | None = None,
+) -> bool:
     """Return whether the chat page, rather than the account, is ready.
 
     Login and page-ready markers are intentionally separate.  A generic
@@ -434,8 +476,27 @@ def _page_ready(spec: WebChatAdapterSpec, snapshot: Any, *, auth_state: str | No
     markers = spec.ready_markers
     if not markers:
         return auth_state == "authorized"
+    if isinstance(marker_hits, Mapping) and "ready" in marker_hits:
+        return marker_hits.get("ready") is True
     strings = _walk_strings(_snapshot_payload(snapshot))
     return _contains_marker(strings, markers)
+
+
+def _marker_sets_for(spec: WebChatAdapterSpec) -> dict[str, tuple[str, ...]]:
+    """Describe the non-sensitive marker groups needed by a profile check."""
+
+    return {
+        "authorized": spec.authorized_markers,
+        "login": spec.login_markers,
+        "ready": spec.ready_markers,
+    }
+
+
+def _marker_hits_from_snapshot(value: Any) -> Mapping[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    hits = value.get("marker_hits")
+    return hits if isinstance(hits, Mapping) else None
 
 
 def _selector_alternatives(selector: str) -> tuple[str, ...]:
@@ -871,7 +932,11 @@ class WebChatRuntime:
             return {**self._public_profile(updated), "ready": False, "reason": "BrowserSkill session is not connected"}
         spec = self._spec(profile)
         try:
-            snapshot = self.browser.snapshot_session(session["id"], tab_id=tab_id)
+            snapshot = self.browser.snapshot_session(
+                session["id"],
+                tab_id=tab_id,
+                marker_sets=_marker_sets_for(spec),
+            )
         except Exception as error:
             if self.logger:
                 try:
@@ -904,8 +969,14 @@ class WebChatRuntime:
             auth = "unknown"
             page_ready = False
         else:
-            auth = _auth_state(spec, snapshot_payload)
-            page_ready = _page_ready(spec, snapshot_payload, auth_state=auth)
+            marker_hits = _marker_hits_from_snapshot(snapshot)
+            auth = _auth_state(spec, snapshot_payload, marker_hits=marker_hits)
+            page_ready = _page_ready(
+                spec,
+                snapshot_payload,
+                auth_state=auth,
+                marker_hits=marker_hits,
+            )
         # Keep authorization and DOM readiness distinct.  A page that happens
         # to show a "Send" button is not sufficient evidence of a logged-in
         # account, and a logged-in account on a stale page is not send-ready.
@@ -1491,7 +1562,11 @@ class WebChatRuntime:
             return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "BrowserSkill session is not connected"}
 
         try:
-            before = self.browser.snapshot_session(session["id"], tab_id=tab_id)
+            before = self.browser.snapshot_session(
+                session["id"],
+                tab_id=tab_id,
+                marker_sets=_marker_sets_for(spec),
+            )
         except Exception:
             return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "无法读取聊天页面；消息未发送"}
         # A profile can become logged out or navigate away after the last
@@ -1514,8 +1589,14 @@ class WebChatRuntime:
                 profile_id, status="unavailable", last_checked=True
             )
             return {"ok": False, "status": "failed", "profile_id": profile_id, "reason": "聊天页面暂不可观察；消息未发送"}
-        before_auth = _auth_state(spec, before_payload)
-        before_page_ready = _page_ready(spec, before_payload, auth_state=before_auth)
+        before_marker_hits = _marker_hits_from_snapshot(before)
+        before_auth = _auth_state(spec, before_payload, marker_hits=before_marker_hits)
+        before_page_ready = _page_ready(
+            spec,
+            before_payload,
+            auth_state=before_auth,
+            marker_hits=before_marker_hits,
+        )
         if before_auth != "authorized":
             self.storage.update_web_chat_profile(
                 profile_id, status="needs-auth", auth_state=before_auth, last_checked=True
@@ -1639,7 +1720,11 @@ class WebChatRuntime:
             if early:
                 return early
             try:
-                observed = self.browser.snapshot_session(session["id"], tab_id=tab_id)
+                observed = self.browser.snapshot_session(
+                    session["id"],
+                    tab_id=tab_id,
+                    marker_sets=_marker_sets_for(spec),
+                )
             except Exception:
                 break
             observed_state, observed_payload = _validated_snapshot(observed)
@@ -1659,8 +1744,18 @@ class WebChatRuntime:
                     profile_id, status="unavailable", last_checked=True
                 )
                 break
-            observed_auth = _auth_state(spec, observed_payload)
-            observed_page_ready = _page_ready(spec, observed_payload, auth_state=observed_auth)
+            observed_marker_hits = _marker_hits_from_snapshot(observed)
+            observed_auth = _auth_state(
+                spec,
+                observed_payload,
+                marker_hits=observed_marker_hits,
+            )
+            observed_page_ready = _page_ready(
+                spec,
+                observed_payload,
+                auth_state=observed_auth,
+                marker_hits=observed_marker_hits,
+            )
             if observed_auth != "authorized":
                 self.storage.update_web_chat_profile(
                     profile_id, status="needs-auth", auth_state=observed_auth, last_checked=True

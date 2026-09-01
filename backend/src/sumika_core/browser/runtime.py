@@ -246,6 +246,84 @@ SENSITIVE_ACTIONS = {
 _BROWSER_SECRET_RE = re.compile(
     r"(?i)(?:sk-[a-z0-9_-]{8,}|bearer\s+[a-z0-9._~+/=-]{8,}|(?:api[_ -]?key|token|password|secret|otp)\s*[:=]\s*[^\s,;]+)"
 )
+_BROWSER_MARKER_BLOCKED_KEY_RE = re.compile(
+    r"(?i)(?:password|secret|token|cookie|authorization|api[_-]?key|apikey|otp|credential)"
+)
+
+
+def _snapshot_marker_hits(
+    value: Any,
+    marker_sets: dict[str, Any],
+    *,
+    depth: int = 0,
+    budget: int = 24_000,
+) -> dict[str, bool]:
+    """Find adapter-owned markers without returning page text.
+
+    BrowserSkill snapshots can put the useful controls well past the compact
+    800-character UI projection.  Scan the bounded raw response inside Core,
+    skip credential-bearing branches, and expose only booleans to callers.
+    """
+
+    normalized: dict[str, tuple[str, ...]] = {}
+    for raw_name, raw_markers in (marker_sets or {}).items():
+        name = str(raw_name or "").strip()[:80]
+        if not name:
+            continue
+        if isinstance(raw_markers, str):
+            raw_markers = (raw_markers,)
+        if not isinstance(raw_markers, (list, tuple, set, frozenset)):
+            continue
+        markers: list[str] = []
+        for raw_marker in list(raw_markers)[:32]:
+            marker = str(raw_marker or "").strip()[:200]
+            if marker and marker.casefold() not in {item.casefold() for item in markers}:
+                markers.append(marker)
+        normalized[name] = tuple(markers)
+    found = {name: False for name in normalized}
+    if not found:
+        return found
+
+    remaining = [max(0, int(budget))]
+
+    def visit(node: Any, level: int) -> None:
+        if level > 6 or remaining[0] <= 0 or all(found.values()):
+            return
+        if isinstance(node, str):
+            text = node.strip()
+            if not text:
+                return
+            take = min(len(text), remaining[0])
+            # Preserve both ends when a single serialized snapshot string is
+            # larger than the scan budget; controls commonly occur at either
+            # the beginning or the end of an ARIA tree.
+            if take < len(text):
+                half = max(1, take // 2)
+                sample = f"{text[:half]}\n{text[-(take - half):]}"
+            else:
+                sample = text
+            remaining[0] -= take
+            folded = sample.casefold()
+            for name, markers in normalized.items():
+                if not found[name] and any(marker.casefold() in folded for marker in markers):
+                    found[name] = True
+            return
+        if isinstance(node, dict):
+            for key, item in list(node.items())[:96]:
+                if _BROWSER_MARKER_BLOCKED_KEY_RE.search(str(key)):
+                    continue
+                visit(item, level + 1)
+                if remaining[0] <= 0 or all(found.values()):
+                    break
+            return
+        if isinstance(node, (list, tuple, set, frozenset)):
+            for item in list(node)[:192]:
+                visit(item, level + 1)
+                if remaining[0] <= 0 or all(found.values()):
+                    break
+
+    visit(value, depth)
+    return found
 
 
 def _compact_browser_tab(value: dict[str, Any]) -> dict[str, Any] | None:
@@ -915,7 +993,13 @@ class BrowserRuntime:
             "observation": _compact_browser_value(value),
         }
 
-    def snapshot_session(self, session_id: str, *, tab_id: str | None = None) -> dict[str, Any]:
+    def snapshot_session(
+        self,
+        session_id: str,
+        *,
+        tab_id: str | None = None,
+        marker_sets: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         item = self._session(session_id)
         backend_session_id = item.get("backend_session_id")
         if not backend_session_id:
@@ -924,7 +1008,15 @@ class BrowserRuntime:
             value = self.browser_skill.snapshot(str(backend_session_id), tab_id=tab_id)
         except BrowserRuntimeError as error:
             raise BrowserRuntimeError(f"BrowserSkill snapshot failed: {error}") from error
-        return {"session_id": session_id, "ready": True, "tab_id": tab_id, "snapshot": _compact_browser_value(value)}
+        result = {
+            "session_id": session_id,
+            "ready": True,
+            "tab_id": tab_id,
+            "snapshot": _compact_browser_value(value),
+        }
+        if marker_sets:
+            result["marker_hits"] = _snapshot_marker_hits(value, marker_sets)
+        return result
 
     def screenshot_session(self, session_id: str, *, tab_id: str | None = None, ref: str | None = None) -> dict[str, Any]:
         item = self._session(session_id)

@@ -234,6 +234,43 @@ class WebChatRuntimeTests(unittest.TestCase):
         self.assertEqual(result["auth_state"], "unknown")
         self.assertEqual(result["status"], "needs-auth")
 
+    def test_zhipu_current_shell_markers_prove_ready_profile(self):
+        runtime, _browser = self.runtime(
+            [
+                {
+                    "ready": True,
+                    "snapshot": {
+                        "text": 'RootWebArea "Z.ai - Advanced AI Chatbot & Agent powered by GLM" Open User Menu'
+                    },
+                }
+            ]
+        )
+        profile = self.create_profile(runtime, adapter_id="zhipu-web")
+        result = runtime.check_profile(profile["id"], approved=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["auth_state"], "authorized")
+        self.assertTrue(result["page_ready"])
+
+    def test_kimi_home_composer_markers_prove_ready_profile(self):
+        runtime, _browser = self.runtime(
+            [
+                {
+                    "ready": True,
+                    "snapshot": {
+                        "text": 'RootWebArea "Kimi" 我的 Kimi 新建会话 输入 "/" 唤起插件和技能',
+                    },
+                }
+            ]
+        )
+        profile = self.create_profile(runtime, adapter_id="kimi-web")
+        result = runtime.check_profile(profile["id"], approved=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["auth_state"], "authorized")
+        self.assertTrue(result["page_ready"])
+        spec = WebChatAdapterRegistry().resolve("kimi-web")
+        self.assertIn(".chat-input-editor", spec.selectors["input"])
+        self.assertIn(".send-button-container:not(.disabled)", spec.selectors["send"])
+
     def test_consent_and_activation_require_ready_profile_and_health_reports_unknown_quota(self):
         runtime, _browser = self.runtime([page_snapshot(authorized=True, ready=True)])
         profile = self.create_profile(runtime)
