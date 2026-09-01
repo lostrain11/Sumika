@@ -20,8 +20,10 @@ The `provider_profiles` SQLite table stores:
 - the adapter and template ids;
 - processing location (`auto`, `local`, or `cloud`);
 - one current Base URL plus optional alternate URLs;
-- model, timeout, non-sensitive headers, organization/project and declarative
+- selected model, an authenticated model catalogue with per-model enablement,
+  timeout, non-sensitive headers, organization/project and declarative
   usage-query metadata;
+- optional pricing source, billing group and user-entered cash conversion;
 - lifecycle state (`draft`, `available`, `unavailable`, or `archived`);
 - source metadata and `last_used_at`.
 
@@ -54,6 +56,18 @@ send one bounded `max_tokens=1` request to `/chat/completions`. Passive page
 refreshes never perform that probe, and a failed probe never falls back to a
 fake provider.
 
+One profile owns one protected credential but may expose multiple enabled
+models. An authenticated `/v1/models` refresh merges model IDs and preserves
+the user's enablement choices; each enabled model becomes a separate Route and
+may run in parallel subject to the provider's rate limits. A `429` is handled
+as bounded backoff or partial failure and never requires copying the API key.
+
+Pricing is isolated by profile, model and billing group. Direct official,
+New API, PinAI and manual sources produce `route-pricing/v1` snapshots. The UI
+keeps provider-side credits separate from the user's cash conversion; an
+unknown group, unsupported dynamic expression or missing conversion remains
+unknown instead of inheriting an official price.
+
 Managed DSH MCP connections use the same `CredentialStore` boundary but a
 separate hashed reference namespace. Their Preset rows contain only a fixed
 `process.env` expression and non-sensitive target metadata. A new or rotated
@@ -82,7 +96,8 @@ profile is activated.
 ## RPCs
 
 The core exposes `provider.profile.templates`, `.list`, `.get`, `.save`,
-`.health`, `.activate`, `.archive`, and `.restore`. `provider.import.preview`
+`.models`, `.model.select`, `.health`, `.activate`, `.archive`, and `.restore`.
+`provider.import.preview`
 parses without persistence; `provider.import.save` writes the reviewed result
 as a draft. Activation always performs a fresh health check and updates the
 module's `profile_id`.

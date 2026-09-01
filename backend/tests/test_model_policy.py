@@ -13,6 +13,7 @@ from sumika_core.model_policy import (
     RoutingRequest,
     routing_request_from_dict,
 )
+from sumika_core.route_pricing import CostEstimate
 
 
 def entry(route_id, *, model_id="model", quality="standard", cost="local", location="local", **kwargs):
@@ -71,6 +72,20 @@ class ModelRouterTests(unittest.TestCase):
         )
         self.assertEqual(decision.selected_route, "cloud:free")
         self.assertEqual(decision.status, "selected")
+
+    def test_known_cash_estimate_breaks_tie_between_paid_routes(self):
+        expensive = entry("cloud:expensive", quality="standard", cost="paid-low", location="cloud")
+        cheaper = entry("cloud:cheaper", quality="standard", cost="paid-low", location="cloud")
+        decision = self.router.decide(
+            RoutingRequest(task_kind="chat", confirmation_mode="automatic"),
+            [expensive, cheaper],
+            cost_estimates={
+                expensive.route_id: CostEstimate(expensive.route_id, "known", cash_currency="CNY", cash_min=2, cash_max=3),
+                cheaper.route_id: CostEstimate(cheaper.route_id, "known", cash_currency="CNY", cash_min=0.5, cash_max=1),
+            },
+        )
+        self.assertEqual(decision.selected_route, cheaper.route_id)
+        self.assertEqual(decision.cost_estimate["cash_max"], 1)
 
     def test_privacy_constraint_excludes_cloud(self):
         decision = self.router.decide(
@@ -217,6 +232,200 @@ class ModelPolicyServiceTests(unittest.TestCase):
             )
             self.assertEqual(decision["decision"]["selected_route"], "profile:local:qwen3:4b")
 
+    def test_one_profile_projects_one_route_per_enabled_model(self):
+        profiles = _ProfileFixture(
+            [
+                {
+                    "id": "zhipu",
+                    "name": "智谱",
+                    "adapter_id": "openai-compatible",
+                    "template_id": "zhipu-bigmodel",
+                    "processing_location": "cloud",
+                    "status": "available",
+                    "has_secrets": True,
+                    "config": {
+                        "model": "glm-4.5-air",
+                        "models": [
+                            {"id": "glm-4.5-air", "enabled": True, "health_state": "healthy"},
+                            {"id": "glm-4.6", "enabled": True, "health_state": "healthy"},
+                            {"id": "glm-4.7", "enabled": False, "health_state": "healthy"},
+                        ],
+                    },
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as data_dir:
+            service = ModelPolicyService(profiles, agent=None, data_dir=data_dir)
+            entries = {item["route_id"]: item for item in service.catalog()["entries"]}
+        self.assertIn("profile:zhipu:glm-4.5-air", entries)
+        self.assertIn("profile:zhipu:glm-4.6", entries)
+        self.assertIn("profile:zhipu:glm-4.7", entries)
+        self.assertTrue(entries["profile:zhipu:glm-4.5-air"]["routable"])
+        self.assertTrue(entries["profile:zhipu:glm-4.6"]["routable"])
+        self.assertFalse(entries["profile:zhipu:glm-4.7"]["routable"])
+
+    def test_cloud_model_name_does_not_imply_free_pricing(self):
+        profiles = _ProfileFixture(
+            [
+                {
+                    "id": "unpriced-cloud",
+                    "name": "Unpriced cloud",
+                    "adapter_id": "openai-compatible",
+                    "template_id": "openai-compatible",
+                    "processing_location": "cloud",
+                    "status": "available",
+                    "has_secrets": True,
+                    "config": {
+                        "model": "free-model-by-name-only",
+                        "models": [
+                            {
+                                "id": "free-model-by-name-only",
+                                "enabled": True,
+                                "health_state": "healthy",
+                                "cost_class": "free-limited",
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as data_dir:
+            service = ModelPolicyService(profiles, data_dir=data_dir)
+            route = next(
+                item
+                for item in service.catalog()["entries"]
+                if item["route_id"] == "profile:unpriced-cloud:free-model-by-name-only"
+            )
+            estimate = service.pricing.estimate(route, {"task_kind": "chat"})
+        self.assertEqual(route["cost_class"], "unknown")
+        self.assertEqual(route["metadata"]["pricing_status"], "unknown")
+        self.assertEqual(estimate.status, "unknown")
+
+    def test_new_api_pricing_enables_same_origin_token_usage_quota(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                requests.append((self.path, self.headers.get("Authorization")))
+                if self.path == "/api/status":
+                    payload = {"success": True, "data": {"quota_per_unit": 500_000}}
+                elif self.path == "/api/pricing":
+                    payload = {
+                        "success": True,
+                        "pricing_version": "fixture-v1",
+                        "group_ratio": {"default": 1},
+                        "data": [
+                            {
+                                "model_name": "fixture-model",
+                                "enable_groups": ["default"],
+                                "quota_type": 0,
+                                "model_ratio": 1,
+                                "completion_ratio": 2,
+                            }
+                        ],
+                    }
+                elif self.path == "/api/usage/token/":
+                    payload = {
+                        "code": True,
+                        "data": {
+                            "total_granted": 3_000_000,
+                            "total_used": 500_000,
+                            "total_available": 2_500_000,
+                        },
+                    }
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                encoded = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            origin = f"http://127.0.0.1:{server.server_port}"
+            profile = {
+                "id": "new-api-relay",
+                "name": "New API relay",
+                "adapter_id": "openai-compatible",
+                "template_id": "openai-compatible",
+                "processing_location": "cloud",
+                "status": "available",
+                "has_secrets": True,
+                "config": {
+                    "active_base_url": f"{origin}/v1",
+                    "model": "fixture-model",
+                    "models": [{"id": "fixture-model", "enabled": True, "health_state": "healthy"}],
+                    "pricing": {"source_type": "new-api", "public_url": origin, "billing_group": "default"},
+                },
+            }
+            profiles = _ProfileFixture([profile], secrets={profile["id"]: {"api_key": "fixture-secret"}})
+            with tempfile.TemporaryDirectory() as data_dir:
+                service = ModelPolicyService(profiles, data_dir=data_dir)
+                catalog = service.catalog(refresh=True)
+            quota = next(item for item in catalog["quotas"] if item["route_id"] == "profile:new-api-relay:fixture-model")
+            self.assertEqual(quota["state"], "available")
+            self.assertEqual(quota["remaining_min"], 5)
+            self.assertEqual(quota["used"], 1)
+            self.assertEqual(quota["total"], 6)
+            self.assertEqual(quota["unit"], "CNY")
+            self.assertEqual(quota["source"], "new-api-token-usage")
+            usage_request = next(item for item in requests if item[0] == "/api/usage/token/")
+            self.assertEqual(usage_request[1], "Bearer fixture-secret")
+            self.assertTrue(all(header is None for path, header in requests if path != "/api/usage/token/"))
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_manual_pricing_projects_dual_cost_estimate(self):
+        profiles = _ProfileFixture(
+            [
+                {
+                    "id": "relay",
+                    "name": "Relay",
+                    "adapter_id": "openai-compatible",
+                    "template_id": "openai-compatible",
+                    "processing_location": "cloud",
+                    "status": "available",
+                    "has_secrets": True,
+                    "config": {
+                        "model": "fixture-model",
+                        "models": [{"id": "fixture-model", "enabled": True, "health_state": "healthy"}],
+                        "pricing": {
+                            "source_type": "manual",
+                            "billing_group": "经济组",
+                            "rates": {
+                                "currency": "USD-credit",
+                                "input_price_per_million": 1,
+                                "output_price_per_million": 4,
+                            },
+                            "cash_conversion": {"paid_amount": 50, "credited_amount": 100, "currency": "CNY"},
+                        },
+                    },
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as data_dir:
+            service = ModelPolicyService(profiles, data_dir=data_dir)
+            catalog = service.catalog()
+            route = next(item for item in catalog["entries"] if item["route_id"] == "profile:relay:fixture-model")
+            result = service.decide({"taskKind": "greeting", "confirmationMode": "automatic"})
+        self.assertEqual(route["metadata"]["pricing_status"], "known")
+        self.assertEqual(route["cost_class"], "paid-low")
+        estimate = result["decision"]["cost_estimate"]
+        self.assertEqual(estimate["status"], "known")
+        self.assertEqual(estimate["provider_currency"], "USD-credit")
+        self.assertEqual(estimate["cash_currency"], "CNY")
+        self.assertGreater(estimate["cash_max"], 0)
+
     def test_declarative_quota_query_ignores_script_and_keeps_secrets_out_of_store(self):
         received = []
 
@@ -269,6 +478,119 @@ class ModelPolicyServiceTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_declarative_quota_query_rejects_cross_origin_credentials(self):
+        received = []
+
+        class UsageHandler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                received.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"remaining": 10}')
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), UsageHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = {
+                "id": "cross-origin",
+                "name": "Cross origin fixture",
+                "adapter_id": "openai-compatible",
+                "template_id": "openai-compatible",
+                "processing_location": "cloud",
+                "status": "available",
+                "has_secrets": True,
+                "config": {
+                    "model": "fixture-model",
+                    "active_base_url": "https://provider.example.invalid/v1",
+                    "usage_query": {
+                        "enabled": True,
+                        "url": f"http://127.0.0.1:{server.server_address[1]}/usage",
+                        "method": "GET",
+                        "fields": {"remaining": "remaining"},
+                    },
+                },
+            }
+            profiles = _ProfileFixture([profile], {"cross-origin": {"api_key": "fixture-secret"}})
+            with tempfile.TemporaryDirectory() as data_dir:
+                result = ModelPolicyService(profiles, data_dir=data_dir).quota_status(refresh=True)
+            self.assertEqual(result["snapshots"][0]["state"], "unknown")
+            self.assertEqual(received, [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_declarative_quota_query_blocks_cross_origin_redirect_without_forwarding_credentials(self):
+        source_headers = []
+        target_headers = []
+
+        class TargetHandler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                target_headers.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"remaining":10}')
+
+            def log_message(self, *_args):
+                return None
+
+        target = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+        target_thread = threading.Thread(target=target.serve_forever, daemon=True)
+        target_thread.start()
+
+        class SourceHandler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                source_headers.append(self.headers.get("Authorization"))
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{target.server_address[1]}/usage")
+                self.end_headers()
+
+            def log_message(self, *_args):
+                return None
+
+        source = ThreadingHTTPServer(("127.0.0.1", 0), SourceHandler)
+        source_thread = threading.Thread(target=source.serve_forever, daemon=True)
+        source_thread.start()
+        try:
+            profile = {
+                "id": "redirect-origin",
+                "name": "Redirect origin fixture",
+                "adapter_id": "openai-compatible",
+                "template_id": "openai-compatible",
+                "processing_location": "cloud",
+                "status": "available",
+                "has_secrets": True,
+                "config": {
+                    "model": "fixture-model",
+                    "active_base_url": f"http://127.0.0.1:{source.server_address[1]}/v1",
+                    "usage_query": {
+                        "enabled": True,
+                        "url": "{{baseUrl}}/usage",
+                        "method": "GET",
+                        "fields": {"remaining": "remaining"},
+                    },
+                },
+            }
+            profiles = _ProfileFixture([profile], {"redirect-origin": {"api_key": "fixture-secret"}})
+            with tempfile.TemporaryDirectory() as data_dir:
+                result = ModelPolicyService(profiles, data_dir=data_dir).quota_status(refresh=True)
+            self.assertEqual(result["snapshots"][0]["state"], "unknown")
+            self.assertEqual(source_headers, ["Bearer fixture-secret"])
+            self.assertEqual(target_headers, [])
+        finally:
+            source.shutdown()
+            source.server_close()
+            source_thread.join(timeout=2)
+            target.shutdown()
+            target.server_close()
+            target_thread.join(timeout=2)
 
     def test_store_round_trip_does_not_include_presentation_only_flags_as_required_input(self):
         with tempfile.TemporaryDirectory() as data_dir:

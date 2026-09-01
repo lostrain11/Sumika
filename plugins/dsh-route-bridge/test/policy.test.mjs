@@ -21,13 +21,17 @@ test("endpoint resolution and route tool map stay loopback-only", () => {
 
 test("route payloads take parent ids from execution context and bound context", () => {
   const payload = buildRoutePayload("sumika_route_dispatch", {
-    routeId: "web:profile-1",
-    question: "review this small design",
-    contextRefs: { summary: "short" }
+    dispatch: {
+      routeId: "web:profile-1",
+      question: "review this small design",
+      contextRefs: { summary: "short" }
+    },
+    traceId: "trace-confirmation-1",
   }, { context: { sessionId: "session-1", turnId: "turn-1" } });
   assert.equal(payload.parent_session_id, "session-1");
   assert.equal(payload.parent_turn_id, "turn-1");
   assert.equal(payload.route_id, "web:profile-1");
+  assert.equal(payload.trace_id, "trace-confirmation-1");
   assert.deepEqual(payload.context_refs, { summary: "short" });
   assert.throws(() => buildRoutePayload("sumika_route_dispatch", { routeId: "web:p", question: "x", contextRefs: { api_key: "hidden" } }, { sessionId: "s" }), /credential|sensitive/i);
   assert.throws(() => buildRoutePayload("sumika_route_replan", { question: "x", triggerEvent: "model.streaming" }, { sessionId: "s" }), /trigger_event/i);
@@ -47,6 +51,15 @@ test("consultation and status payloads are validated without forwarding arbitrar
   const status = buildRoutePayload("sumika_consultation_status", {}, { sessionId: "parent" });
   assert.equal(status.parent_session_id, "parent");
   assert.throws(() => buildRoutePayload("sumika_route_status", { dispatchId: "bad id" }, {}), /dispatch_id/);
+  const five = buildRoutePayload("sumika_consultation_start", {
+    question: "compare five views",
+    maxMembers: 5
+  }, { sessionId: "parent" });
+  assert.equal(five.max_members, 5);
+  assert.throws(() => buildRoutePayload("sumika_consultation_start", {
+    question: "too many views",
+    maxMembers: 6
+  }, { sessionId: "parent" }), /max_members/);
 });
 
 test("pre-execute gate is fail-closed for unknown or sensitive route calls", async () => {

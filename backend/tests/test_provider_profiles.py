@@ -49,6 +49,76 @@ class ProviderProfileTests(unittest.TestCase):
             edited["config"]["credential_revision"],
         )
 
+    def test_pricing_config_keeps_provider_and_cash_units_separate(self):
+        profile = self.profiles.save({
+            "name": "Relay pricing",
+            "base_url": "https://relay.example.invalid/v1",
+            "model": "fixture-model",
+            "processing_location": "cloud",
+            "pricing": {
+                "source_type": "manual",
+                "billing_group": "经济组",
+                "rates": {
+                    "currency": "USD-credit",
+                    "input_price_per_million": 1,
+                    "output_price_per_million": 4,
+                },
+                "cash_conversion": {
+                    "paid_amount": 50,
+                    "credited_amount": 100,
+                    "currency": "CNY",
+                },
+            },
+        })
+        pricing = profile["config"]["pricing"]
+        self.assertEqual(pricing["rates"]["currency"], "USD-credit")
+        self.assertEqual(pricing["cash_conversion"]["currency"], "CNY")
+        self.assertEqual(pricing["cash_conversion"]["paid_amount"], 50)
+
+        with self.assertRaisesRegex(Exception, "cash_conversion"):
+            self.profiles.save({
+                **profile,
+                "pricing": {
+                    "source_type": "manual",
+                    "cash_conversion": {"paid_amount": 10, "credited_amount": 0, "currency": "CNY"},
+                },
+            })
+
+    def test_direct_official_pricing_cannot_be_attached_to_a_relay_endpoint(self):
+        with self.assertRaisesRegex(Exception, "matching built-in Provider endpoint"):
+            self.profiles.save({
+                "name": "Relay with official price",
+                "template_id": "openai-compatible",
+                "base_url": "https://relay.example.invalid/v1",
+                "model": "fixture-model",
+                "processing_location": "cloud",
+                "pricing": {
+                    "source_type": "direct-official",
+                    "rates": {
+                        "currency": "CNY",
+                        "input_price_per_million": 1,
+                        "output_price_per_million": 2,
+                    },
+                },
+            })
+
+        profile = self.profiles.save({
+            "name": "Official Zhipu price",
+            "template_id": "zhipu-bigmodel",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "model": "glm-4.5-air",
+            "processing_location": "cloud",
+            "pricing": {
+                "source_type": "direct-official",
+                "rates": {
+                    "currency": "CNY",
+                    "input_price_per_million": 1,
+                    "output_price_per_million": 2,
+                },
+            },
+        })
+        self.assertEqual(profile["config"]["pricing"]["source_type"], "direct-official")
+
     def test_health_marks_profile_available_and_archive_is_recoverable(self):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802
@@ -195,6 +265,101 @@ class ProviderProfileTests(unittest.TestCase):
         self.assertEqual(template["model"], "glm-4.5-air")
         self.assertEqual(template["model_options"], ["glm-4.5-air", "glm-4.7", "glm-4.6v"])
         self.assertNotIn("api_key", template)
+
+    def test_one_profile_can_discover_and_health_check_multiple_models(self):
+        class Handler(BaseHTTPRequestHandler):
+            models = ["glm-4.5-air", "glm-4.6", "glm-4.7"]
+
+            def do_GET(self):  # noqa: N802
+                if self.path.rstrip("/") != "/v1/models":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                payload = {"data": [{"id": item} for item in self.models]}
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = self.profiles.save(
+                {
+                    "id": "zhipu-multi-model",
+                    "name": "智谱多模型",
+                    "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+                    "model": "glm-4.5-air",
+                    "models": ["glm-4.5-air"],
+                    "api_key": "one-key-for-all-models",
+                }
+            )
+            discovered = self.profiles.discover_models(profile["id"])
+            self.assertEqual(
+                [item["id"] for item in discovered["models"]],
+                ["glm-4.5-air", "glm-4.6", "glm-4.7"],
+            )
+            # Directory discovery is not a chat health probe; the new rows
+            # remain unknown until each model is explicitly tested.
+            self.assertEqual(
+                {item["health_state"] for item in discovered["models"]},
+                {"unknown"},
+            )
+            first = self.profiles.health(profile["id"], model_id="glm-4.5-air")
+            self.assertTrue(first["ok"])
+            self.assertEqual(first["profile"]["status"], "available")
+            selected = self.profiles.select_model(profile["id"], "glm-4.7")
+            self.assertEqual(selected["profile"]["config"]["model"], "glm-4.7")
+            self.assertEqual(self.credentials.read(profile["id"])["api_key"], "one-key-for-all-models")
+            self.assertEqual(self.profiles.runtime(profile["id"], model_id="glm-4.6").model, "glm-4.6")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_failed_model_probe_does_not_disable_other_healthy_models(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                body = b'{"data":[{"id":"model-good"}]}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = self.profiles.save(
+                {
+                    "id": "partial-model-health",
+                    "name": "部分模型健康",
+                    "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+                    "model": "model-good",
+                    "models": ["model-good", "model-missing"],
+                }
+            )
+            self.assertTrue(self.profiles.health(profile["id"], model_id="model-good")["ok"])
+            failed = self.profiles.health(profile["id"], model_id="model-missing")
+            self.assertFalse(failed["ok"])
+            self.assertEqual(failed["profile"]["status"], "available")
+            rows = {item["id"]: item for item in failed["profile"]["config"]["models"]}
+            self.assertEqual(rows["model-good"]["health_state"], "healthy")
+            self.assertEqual(rows["model-missing"]["health_state"], "unavailable")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_explicit_chat_probe_keeps_catalog_less_profile_available(self):
         class Handler(BaseHTTPRequestHandler):

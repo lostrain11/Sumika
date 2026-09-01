@@ -70,6 +70,35 @@ class ProviderTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_openai_compatible_captures_bounded_stream_usage(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n')
+                self.wfile.write(b'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":4}}}\n\n')
+                self.wfile.write(b"data: [DONE]\n\n")
+
+            def log_message(self, *_args):
+                return None
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            provider = OpenAICompatibleProvider(f"http://127.0.0.1:{server.server_address[1]}", "test-model")
+            self.assertEqual("".join(provider.stream(self.request)), "ok")
+            self.assertEqual(
+                provider.last_usage,
+                {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15, "cache_read_tokens": 4},
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_openai_compatible_json_provider(self):
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802

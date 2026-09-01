@@ -20,7 +20,9 @@ from sumika_core.agent.supervisor import (
     SupervisorValidationError,
     WorkerRegistry,
 )
+from sumika_core.agent.runtime_workers import ProviderProfileWorker
 from sumika_core.model_evaluation import EvaluationTaskSet
+from sumika_core.route_pricing import RoutePricingService
 from sumika_core.storage import Storage
 
 
@@ -105,6 +107,101 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertEqual(item["runtime_id"], "fixture")
         self.assertIn("kind", catalog["workers"][0])
         self.assertEqual(catalog["evidence_schema"], "route-evidence/v1")
+
+    def test_provider_worker_returns_request_usage_and_dual_currency_receipt(self):
+        class Provider:
+            def __init__(self):
+                self.last_usage = {}
+
+            def stream(self, _request):
+                self.last_usage = {
+                    "input_tokens": 1_000,
+                    "output_tokens": 500,
+                    "total_tokens": 1_500,
+                }
+                yield "provider answer"
+
+        class Profiles:
+            def __init__(self):
+                self.provider = Provider()
+                self.profile = {
+                    "id": "priced-worker",
+                    "adapter_id": "openai-compatible",
+                    "status": "available",
+                    "config": {
+                        "model": "priced-model",
+                        "models": [{"id": "priced-model"}],
+                        "pricing": {
+                            "source_type": "manual",
+                            "billing_group": "default",
+                            "rates": {
+                                "currency": "USD-credit",
+                                "input_price_per_million": 1,
+                                "output_price_per_million": 2,
+                            },
+                            "cash_conversion": {
+                                "paid_amount": 50,
+                                "credited_amount": 100,
+                                "currency": "CNY",
+                            },
+                        },
+                    },
+                }
+
+            def list(self, *, include_archived=False):
+                del include_archived
+                return [self.profile]
+
+            def get(self, profile_id):
+                self.assert_profile(profile_id)
+                return self.profile
+
+            def runtime(self, profile_id, *, model_id=None):
+                self.assert_profile(profile_id)
+                if model_id != "priced-model":
+                    raise AssertionError("worker did not select the route model")
+                return self.provider
+
+            def mark_used(self, profile_id):
+                self.assert_profile(profile_id)
+                return self.profile
+
+            @staticmethod
+            def assert_profile(profile_id):
+                if profile_id != "priced-worker":
+                    raise AssertionError("unexpected profile")
+
+        profiles = Profiles()
+        pricing = RoutePricingService(profiles)
+        pricing.refresh_profiles(force=True)
+        worker = ProviderProfileWorker(profiles, "priced-worker", pricing=pricing)
+        route = _route(
+            "profile:priced-worker:priced-model",
+            provider_profile_id="priced-worker",
+            metadata={
+                "model_config": {"id": "priced-model"},
+                "billing_group": "default",
+            },
+        )
+        dispatch = DynamicSubtaskDispatch(
+            dispatch_id="dispatch-priced-worker",
+            parent_session_id="parent-session",
+            route_id=route.route_id,
+            question="answer briefly",
+        )
+
+        result = worker.execute(dispatch, route, threading.Event())
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["answer"], "provider answer")
+        impact = result["budget_impact"]
+        self.assertEqual(impact["usage"]["total_tokens"], 1_500)
+        receipt = impact["charge_receipt"]
+        self.assertEqual(receipt["evidence_level"], "request-usage-estimate")
+        self.assertAlmostEqual(receipt["provider_charge"], 0.002)
+        self.assertEqual(receipt["provider_currency"], "USD-credit")
+        self.assertAlmostEqual(receipt["cash_charge"], 0.001)
+        self.assertEqual(receipt["cash_currency"], "CNY")
 
     def test_public_boolean_contracts_reject_string_and_numeric_values(self):
         boolean_fields = (
@@ -423,7 +520,7 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertNotIn("answer-body-must-not-be-captured", serialized)
         self.assertNotIn("question-body-must-not-be-captured", serialized)
 
-    def test_three_concurrent_and_four_total_dispatch_limits_are_enforced(self):
+    def test_three_concurrent_and_six_total_dispatch_limits_are_enforced(self):
         started = [threading.Event() for _ in range(3)]
         release = threading.Event()
 
@@ -483,8 +580,28 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
                 "question": "job-5",
             }
         )
-        self.assertFalse(fifth["accepted"])
-        self.assertEqual(fifth["error_code"], "max-dispatches-per-turn")
+        self.assertTrue(fifth["accepted"])
+        self.assertEqual(supervisor.wait(fifth["dispatch_id"], timeout=2)["status"], "completed")
+        sixth = supervisor.dispatch(
+            {
+                "parent_session_id": "session-limit",
+                "parent_turn_id": "turn-limit",
+                "route_id": route.route_id,
+                "question": "job-6",
+            }
+        )
+        self.assertTrue(sixth["accepted"])
+        self.assertEqual(supervisor.wait(sixth["dispatch_id"], timeout=2)["status"], "completed")
+        seventh = supervisor.dispatch(
+            {
+                "parent_session_id": "session-limit",
+                "parent_turn_id": "turn-limit",
+                "route_id": route.route_id,
+                "question": "job-7",
+            }
+        )
+        self.assertFalse(seventh["accepted"])
+        self.assertEqual(seventh["error_code"], "max-dispatches-per-turn")
 
     def test_duplicate_dispatch_is_deduplicated_without_second_execution(self):
         calls = []
@@ -760,6 +877,95 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertEqual(total["status"], "failed")
         self.assertEqual(total["failed_count"], 1)
         self.assertIsNone(total["members"][0]["answer"])
+
+    def test_five_member_consultation_queues_in_three_plus_two_waves(self):
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+
+        def execute(dispatch, route, cancel_event):
+            nonlocal active, peak
+            del dispatch, cancel_event
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.04)
+            with lock:
+                active -= 1
+            return {"status": "completed", "answer": route.route_id}
+
+        routes = [
+            _route(
+                f"web-five-{index}",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id=f"profile-five-{index}",
+                provider_key=f"provider-five-{index}",
+                quota_consent="granted",
+                cost_class="unknown",
+            )
+            for index in range(5)
+        ]
+        supervisor = self.make_supervisor(
+            routes,
+            [
+                (route.route_id, ProviderWorker(execute, worker_id=route.route_id))
+                for route in routes
+            ],
+            max_concurrent=3,
+            max_dispatches_per_turn=6,
+        )
+
+        result = supervisor.start_consultation(
+            {
+                "consultation_id": "consultation-five",
+                "parent_session_id": "session-five",
+                "parent_turn_id": "turn-five",
+                "question": "five independent opinions",
+                "decision_kind": "plan-review",
+                "max_members": 5,
+            },
+            wait=True,
+            timeout=3,
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["successful_count"], 5)
+        self.assertEqual(len(result["members"]), 5)
+        self.assertEqual(peak, 3)
+
+    def test_parent_turn_accepts_six_dispatches_but_rejects_seventh(self):
+        route = _route("route-six")
+        supervisor = self.make_supervisor(
+            [route],
+            [(route.route_id, ProviderWorker(lambda *_: {"status": "completed", "answer": "ok"}, worker_id=route.route_id))],
+            max_dispatches_per_turn=6,
+        )
+        for index in range(6):
+            result = supervisor.dispatch(
+                {
+                    "dispatch_id": f"dispatch-six-{index}",
+                    "parent_session_id": "session-six",
+                    "parent_turn_id": "turn-six",
+                    "route_id": route.route_id,
+                    "question": f"question {index}",
+                },
+                wait=True,
+                timeout=1,
+            )
+            self.assertTrue(result["accepted"], index)
+
+        rejected = supervisor.dispatch(
+            {
+                "dispatch_id": "dispatch-six-overflow",
+                "parent_session_id": "session-six",
+                "parent_turn_id": "turn-six",
+                "route_id": route.route_id,
+                "question": "overflow",
+            }
+        )
+        self.assertFalse(rejected["accepted"])
+        self.assertEqual(rejected["error_code"], "max-dispatches-per-turn")
 
     def test_unknown_quota_requires_profile_consent_and_unavailable_filter_is_honest(self):
         calls = []

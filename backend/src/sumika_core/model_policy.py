@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 from urllib.parse import urlparse
 
+from .provider_profiles import configured_models
+from .route_pricing import CostEstimate, RoutePricingService
+
 
 MODEL_POLICY_VERSION = "model-policy/v1"
 QUOTA_TTL_SECONDS = 15 * 60
@@ -343,6 +346,7 @@ class RoutingDecision:
     quota_impact: dict[str, Any]
     confidence: float
     requires_confirmation: bool
+    cost_estimate: dict[str, Any] = field(default_factory=lambda: {"schema": "route-pricing/v1", "status": "unknown"})
     policy_version: str = MODEL_POLICY_VERSION
     valid_until: str | None = None
 
@@ -430,10 +434,12 @@ class ModelRouter:
         request: RoutingRequest,
         entries: Iterable[ModelCatalogEntry],
         quotas: Mapping[str, QuotaSnapshot] | None = None,
+        cost_estimates: Mapping[str, CostEstimate] | None = None,
     ) -> RoutingDecision:
         if not isinstance(request, RoutingRequest):
             raise ModelPolicyError("request must be RoutingRequest")
         quota_map = quotas or {}
+        estimate_map = cost_estimates or {}
         required_quality = _required_quality(request)
         quality_rank = QUALITY_RANK[required_quality]
         rejected: dict[str, int] = {}
@@ -497,10 +503,17 @@ class ModelRouter:
             preference = 0 if preferred is entry else 1
             quota_state = quota_map.get(entry.route_id).state if entry.route_id in quota_map else entry.quota_state
             quota_rank = {"available": 0, "low": 1, "not-applicable": 1, "unknown": 2}.get(quota_state, 3)
+            estimate = estimate_map.get(entry.route_id)
+            cash_known = bool(estimate and estimate.status == "known" and estimate.cash_max is not None)
+            provider_known = bool(estimate and estimate.status == "known" and estimate.provider_charge_max is not None)
+            price_rank = (
+                0 if cash_known else 1 if provider_known else 2,
+                float(estimate.cash_max) if cash_known else float(estimate.provider_charge_max) if provider_known else math.inf,
+            )
             latency = entry.metadata.get("p95_latency_ms", 10_000)
             if not isinstance(latency, (int, float)) or isinstance(latency, bool):
                 latency = 10_000
-            return (preference, COST_RANK[entry.cost_class], quota_rank, -QUALITY_RANK[entry.quality_tier], latency, entry.route_id)
+            return (preference, COST_RANK[entry.cost_class], price_rank, quota_rank, -QUALITY_RANK[entry.quality_tier], latency, entry.route_id)
 
         candidates.sort(key=sort_key)
         selected = candidates[0]
@@ -559,6 +572,7 @@ class ModelRouter:
             quota_impact=quota_impact,
             confidence=confidence,
             requires_confirmation=requires_confirmation,
+            cost_estimate=(estimate_map.get(selected.route_id) or CostEstimate(selected.route_id, "unknown", unknown_reasons=("pricing-not-observed",))).to_dict(),
             valid_until=_expiry(5),
         )
 
@@ -665,6 +679,9 @@ class ModelPolicyService:
         ("deepseek-web", "DeepSeek 网页聊天"),
         ("chatgpt-web", "ChatGPT 网页聊天"),
         ("zhipu-web", "智谱网页聊天"),
+        ("qwen-web", "Qwen 网页聊天"),
+        ("kimi-web", "Kimi 网页聊天"),
+        ("doubao-web", "豆包网页聊天"),
     )
     quota_ttl_seconds = QUOTA_TTL_SECONDS
 
@@ -684,6 +701,7 @@ class ModelPolicyService:
         self.web_chat = web_chat
         self._route_sources: dict[str, Any] = {}
         self.store = ModelCatalogStore(data_dir)
+        self.pricing = RoutePricingService(provider_profiles, data_dir, logger=logger)
         self.router = ModelRouter()
         self._quota_lock = threading.RLock()
         self._runtime_quota_cache: dict[str, Any] | None = None
@@ -736,6 +754,7 @@ class ModelPolicyService:
     def catalog(self, *, refresh: bool = False, session_id: str | None = None) -> dict[str, Any]:
         if refresh:
             self._refresh_profile_health()
+        pricing_refreshed = self.pricing.refresh_profiles(force=refresh)
         quota_refreshed = self._refresh_quotas_if_due(force=refresh)
         runtime_quota = self._runtime_quota_status(force=refresh)
         entries = self._profile_entries()
@@ -754,8 +773,29 @@ class ModelPolicyService:
             "refresh_requested": bool(refresh),
             "quota_refresh_performed": quota_refreshed,
             "runtime_quota": runtime_quota,
+            "pricing": {
+                "schema": "route-pricing/v1",
+                "snapshots": [item.to_dict() for item in self.pricing.store.list()],
+                "errors": dict(self.pricing.errors),
+                "refresh_performed": pricing_refreshed,
+            },
             "sources": ["provider-profiles", "agent-runtime", "external-route-sources", *source_ids, "browser-web-chat"],
         }
+
+    def pricing_catalog(
+        self,
+        *,
+        refresh: bool = False,
+        provider_profile_id: str | None = None,
+        model_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Expose bounded pricing evidence without Provider credentials."""
+
+        return self.pricing.catalog(
+            refresh=refresh,
+            provider_profile_id=provider_profile_id,
+            model_id=model_id,
+        )
 
     def decide(
         self,
@@ -778,7 +818,11 @@ class ModelPolicyService:
                 session_id = None
         catalog = self.catalog(refresh=refresh, session_id=session_id)
         entries = [ModelCatalogEntry(**self._entry_constructor(item)) for item in catalog["entries"]]
-        decision = self.router.decide(request, entries, self.store.quotas())
+        estimates = {
+            entry.route_id: self.pricing.estimate(entry.to_dict(), request.to_dict())
+            for entry in entries
+        }
+        decision = self.router.decide(request, entries, self.store.quotas(), estimates)
         return {"request": request.to_dict(), "decision": decision.to_dict(), "catalog_checked_at": catalog["checked_at"]}
 
     def preflight(
@@ -870,7 +914,6 @@ class ModelPolicyService:
                 continue
             profile_id = _safe_text(profile.get("id"), 120)
             config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
-            model = _safe_text(config.get("model"), 240)
             template = _safe_text(profile.get("template_id"), 80).lower()
             location = _safe_text(profile.get("resolved_processing_location") or profile.get("processing_location") or "cloud", 40).lower()
             status = _safe_text(profile.get("status"), 40).lower()
@@ -878,29 +921,73 @@ class ModelPolicyService:
             auth = "not-required" if location == "local" else ("authorized" if has_secrets else "needs-auth")
             health = {"available": "healthy", "unavailable": "unavailable", "draft": "unknown", "error": "error"}.get(status, "unknown")
             cost = "local" if location == "local" else "unknown"
-            if model.lower().startswith(("free/", "free-")):
-                cost = "free-limited"
-            quality = _quality_from_model(model)
-            route_id = f"profile:{profile_id}:{model or 'unconfigured'}"
-            entries.append(
-                ModelCatalogEntry(
-                    route_id=route_id,
-                    provider_id=_safe_text(profile.get("adapter_id") or template or "provider", 120),
-                    model_id=model or "unconfigured",
-                    display_name=f"{_safe_text(profile.get('name') or profile_id, 160)} · {model or '未配置'}",
-                    provider_profile_id=profile_id,
-                    capabilities=("chat",),
-                    quality_tier=quality,
-                    cost_class=cost,
-                    processing_location=location,
-                    auth_state=auth,
-                    quota_state="not-applicable" if location == "local" else "unknown",
-                    health_state=health,
-                    source_kind="local" if location == "local" else "provider",
-                    transport="http",
-                    metadata={"template_id": template, "routable": bool(model and status == "available")},
+            pricing_config = config.get("pricing") if isinstance(config.get("pricing"), dict) else {}
+            billing_group = _safe_text(pricing_config.get("billing_group"), 160)
+            model_rows = configured_models(config)
+            if not model_rows:
+                model_rows = [{"id": "unconfigured", "name": "未配置", "enabled": False, "capabilities": ["chat"], "quality_tier": "unknown", "cost_class": cost, "health_state": "unknown"}]
+            for model_row in model_rows:
+                model = _safe_text(model_row.get("id"), 240)
+                if not model:
+                    continue
+                quality = _quality_from_model(model)
+                model_enabled = model_row.get("enabled", True) is True
+                model_health = _safe_text(model_row.get("health_state"), 40).lower() or "unknown"
+                # A profile-level health check is authoritative for legacy
+                # rows and for models that have not yet received a per-model
+                # observation. Explicit per-model failures remain blocked.
+                effective_health = health
+                if model_health in {"unavailable", "error"}:
+                    effective_health = model_health
+                elif model_health in {"healthy", "ready", "available"} and health in {"healthy", "ready", "available"}:
+                    effective_health = model_health
+                model_quality = _safe_text(model_row.get("quality_tier"), 40).lower()
+                if not model_quality or model_quality == "unknown":
+                    model_quality = quality
+                if model_quality not in QUALITY_RANK:
+                    model_quality = quality
+                # A model name or imported row cannot prove that a cloud
+                # route is free. Only profile-scoped pricing evidence may
+                # refine the default unknown cloud cost below.
+                model_cost = "local" if location == "local" else "unknown"
+                pricing = self.pricing.projection(profile_id, model, billing_group or None)
+                if location != "local" and pricing.get("cost_class") in COST_RANK:
+                    model_cost = str(pricing["cost_class"])
+                capabilities = model_row.get("capabilities")
+                if isinstance(capabilities, str):
+                    capabilities = (capabilities,)
+                if not isinstance(capabilities, (list, tuple, set)):
+                    capabilities = ("chat",)
+                route_id = f"profile:{profile_id}:{model}"
+                entries.append(
+                    ModelCatalogEntry(
+                        route_id=route_id,
+                        provider_id=_safe_text(profile.get("adapter_id") or template or "provider", 120),
+                        model_id=model,
+                        display_name=f"{_safe_text(profile.get('name') or profile_id, 160)} · {model_row.get('name') or model}",
+                        provider_profile_id=profile_id,
+                        capabilities=tuple(str(item) for item in capabilities),
+                        quality_tier=model_quality,
+                        cost_class=model_cost,
+                        processing_location=location,
+                        auth_state=auth,
+                        quota_state="not-applicable" if location == "local" else "unknown",
+                        health_state=effective_health,
+                        source_kind="local" if location == "local" else "provider",
+                        transport="http",
+                        metadata={
+                            "template_id": template,
+                            "model_enabled": model_enabled,
+                            "model_config": model_row,
+                            "pricing_ref": pricing.get("pricing_ref"),
+                            "pricing_status": pricing.get("pricing_status", "unknown"),
+                            "billing_group": pricing.get("billing_group") or billing_group,
+                            "pricing_currency": pricing.get("pricing_currency"),
+                            "pricing_source": pricing.get("pricing_source"),
+                            "routable": bool(model_enabled and status == "available" and effective_health in {"healthy", "ready", "available"}),
+                        },
+                    )
                 )
-            )
         return entries
 
     def _runtime_entries(
@@ -1283,14 +1370,20 @@ class ModelPolicyService:
             if not isinstance(profile, dict):
                 continue
             config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
-            query = config.get("usage_query") if isinstance(config.get("usage_query"), dict) else {}
-            if query.get("enabled") is not True:
+            query = self._usage_query_for_profile(profile)
+            if query is None:
                 continue
             profile_id = str(profile.get("id") or "")
-            model = str(config.get("model") or "")
-            route_id = f"profile:{profile_id}:{model or 'unconfigured'}"
-            snapshot = self._query_usage(profile, query, route_id)
-            self.store.upsert_quota(snapshot)
+            models = configured_models(config)
+            if not models:
+                models = [{"id": "unconfigured"}]
+            for model_row in models:
+                model = str(model_row.get("id") or "")
+                if not model:
+                    continue
+                route_id = f"profile:{profile_id}:{model}"
+                snapshot = self._query_usage(profile, query, route_id)
+                self.store.upsert_quota(snapshot)
 
     def _refresh_quotas_if_due(self, *, force: bool = False) -> bool:
         """Refresh only configured usage queries whose snapshots are stale."""
@@ -1313,14 +1406,54 @@ class ModelPolicyService:
             if not isinstance(profile, dict):
                 continue
             config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
-            query = config.get("usage_query") if isinstance(config.get("usage_query"), dict) else {}
-            if query.get("enabled") is not True:
+            query = self._usage_query_for_profile(profile)
+            if query is None:
                 continue
-            route_id = f"profile:{profile.get('id')}:{config.get('model') or 'unconfigured'}"
-            snapshot = self.store.quota(route_id)
-            if snapshot is None or not _quota_is_fresh(snapshot.expires_at):
-                return True
+            models = configured_models(config) or [{"id": "unconfigured"}]
+            for model_row in models:
+                route_id = f"profile:{profile.get('id')}:{model_row.get('id') or 'unconfigured'}"
+                snapshot = self.store.quota(route_id)
+                if snapshot is None or not _quota_is_fresh(snapshot.expires_at):
+                    return True
         return False
+
+    def _usage_query_for_profile(self, profile: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Return an explicit query or the fixed New API token-usage query."""
+
+        config = profile.get("config") if isinstance(profile.get("config"), Mapping) else {}
+        explicit = config.get("usage_query") if isinstance(config.get("usage_query"), Mapping) else {}
+        if explicit.get("enabled") is True:
+            return dict(explicit)
+        pricing = config.get("pricing") if isinstance(config.get("pricing"), Mapping) else {}
+        if str(pricing.get("source_type") or "").strip().lower() != "new-api":
+            return None
+        profile_id = str(profile.get("id") or "").strip()
+        snapshots = self.pricing.store.list(provider_profile_id=profile_id)
+        quota_per_units = {
+            float(item.observations["quota_per_unit"])
+            for item in snapshots
+            if isinstance(item.observations.get("quota_per_unit"), (int, float))
+            and not isinstance(item.observations.get("quota_per_unit"), bool)
+            and float(item.observations["quota_per_unit"]) > 0
+        }
+        if len(quota_per_units) != 1:
+            return None
+        scheme, host, port = _url_origin(str(config.get("active_base_url") or ""))
+        authority = host if port == (443 if scheme == "https" else 80) else f"{host}:{port}"
+        return {
+            "enabled": True,
+            "method": "GET",
+            "url": f"{scheme}://{authority}/api/usage/token/",
+            "fields": {
+                "remaining": "data.total_available",
+                "used": "data.total_used",
+                "total": "data.total_granted",
+            },
+            "_scale_divisor": next(iter(quota_per_units)),
+            "_unit": snapshots[0].currency,
+            "_source": "new-api-token-usage",
+            "_detail": "New API 同源 Token 余额",
+        }
 
     def _runtime_quota_status(self, *, force: bool = False) -> dict[str, Any]:
         with self._quota_lock:
@@ -1359,14 +1492,17 @@ class ModelPolicyService:
     def _query_usage(self, profile: dict[str, Any], query: dict[str, Any], route_id: str) -> QuotaSnapshot:
         profile_id = str(profile.get("id") or "")
         try:
-            full = self.provider_profiles.get(profile_id, include_secrets=True)
-            config = full.get("config") if isinstance(full.get("config"), dict) else {}
-            secrets = full.get("secrets") if isinstance(full.get("secrets"), dict) else {}
+            config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
             base_url = str(config.get("active_base_url") or "").rstrip("/")
             raw_url = str(query.get("url") or "{{baseUrl}}/api/usage").replace("{{baseUrl}}", base_url)
             parsed = urlparse(raw_url)
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 raise ModelPolicyError("usage query URL must be HTTP(S)")
+            base_origin = _url_origin(base_url)
+            if _url_origin(raw_url) != base_origin:
+                raise ModelPolicyError("authenticated usage query must use the Provider origin")
+            full = self.provider_profiles.get(profile_id, include_secrets=True)
+            secrets = full.get("secrets") if isinstance(full.get("secrets"), dict) else {}
             method = str(query.get("method") or "GET").upper()
             if method not in {"GET", "POST"}:
                 raise ModelPolicyError("usage query method is unsupported")
@@ -1382,7 +1518,8 @@ class ModelPolicyService:
                 body = b"{}"
                 headers["Content-Type"] = "application/json"
             request = urllib.request.Request(raw_url, data=body, headers=headers, method=method)
-            with urllib.request.urlopen(request, timeout=8.0) as response:
+            opener = urllib.request.build_opener(_UsageRedirectHandler(base_origin))
+            with opener.open(request, timeout=8.0) as response:
                 raw = response.read(256 * 1024)
             payload = json.loads(raw.decode("utf-8"))
             fields = query.get("fields") if isinstance(query.get("fields"), dict) else {}
@@ -1391,6 +1528,16 @@ class ModelPolicyService:
             total = _number_at(payload, fields.get("total"))
             if remaining is None and total is not None and used is not None:
                 remaining = max(0.0, total - used)
+            divisor = query.get("_scale_divisor")
+            if (
+                isinstance(divisor, (int, float))
+                and not isinstance(divisor, bool)
+                and math.isfinite(float(divisor))
+                and float(divisor) > 0
+            ):
+                remaining = remaining / float(divisor) if remaining is not None else None
+                used = used / float(divisor) if used is not None else None
+                total = total / float(divisor) if total is not None else None
             state = "unknown"
             if remaining is not None:
                 state = "exhausted" if remaining <= 0 else "low" if (total and remaining / total < 0.1) else "available"
@@ -1401,17 +1548,37 @@ class ModelPolicyService:
                 remaining_max=remaining,
                 used=used,
                 total=total,
-                unit=str(fields.get("unit") or ""),
-                source="declarative-usage-query",
+                unit=str(query.get("_unit") or fields.get("unit") or ""),
+                source=str(query.get("_source") or "declarative-usage-query"),
                 expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)),
                 confidence="observed" if state != "unknown" else "low",
-                detail="官方声明式额度查询",
+                detail=str(query.get("_detail") or "官方声明式额度查询"),
             )
         except urllib.error.HTTPError as error:
-            state = "needs-auth" if error.code in {401, 403} else "unknown"
-            return QuotaSnapshot(route_id=route_id, state=state, source="declarative-usage-query", expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)), confidence="low", requires_auth=state == "needs-auth", detail=f"HTTP {error.code}")
+            code = error.code
+            error.close()
+            state = "needs-auth" if code in {401, 403} else "unknown"
+            return QuotaSnapshot(route_id=route_id, state=state, source="declarative-usage-query", expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)), confidence="low", requires_auth=state == "needs-auth", detail=f"HTTP {code}")
         except (OSError, ValueError, ModelPolicyError, json.JSONDecodeError) as error:
             return QuotaSnapshot(route_id=route_id, state="unknown", source="declarative-usage-query", expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)), confidence="low", detail=type(error).__name__)
+
+
+def _url_origin(value: str) -> tuple[str, str, int]:
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ModelPolicyError("Provider origin must be an HTTP(S) URL without credentials")
+    return parsed.scheme.lower(), parsed.hostname.lower(), parsed.port or (443 if parsed.scheme == "https" else 80)
+
+
+class _UsageRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, origin: tuple[str, str, int]) -> None:
+        self.origin = origin
+
+    def redirect_request(self, req: urllib.request.Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> urllib.request.Request | None:
+        if _url_origin(newurl) != self.origin:
+            fp.close()
+            raise urllib.error.HTTPError(newurl, code, "cross-origin usage redirect blocked", headers, None)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _number_at(payload: Any, path: Any) -> float | None:

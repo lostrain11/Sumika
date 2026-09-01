@@ -72,6 +72,8 @@ function routeParameters() {
     parentTurnId: { type: "string" },
     limit: { type: "number" },
     dispatchSelected: { type: "boolean" },
+    traceId: { type: "string" },
+    maxMembers: { type: "number" },
     replace: { type: "boolean" }
   };
 }
@@ -118,7 +120,7 @@ function apply(ctx, config = {}) {
   });
   installTool(ctx, client, {
     name: "sumika_consultation_start",
-    description: "Ask up to three independent web profiles for untrusted advice in parallel.",
+    description: "Ask up to five independent web profiles for untrusted advice in bounded three-plus-two waves.",
     parameters: routeParameters(),
     presentCall: () => ({ card: "generic", title: "Start consultation", kind: "consultation-start", rawInput: "consult" })
   });

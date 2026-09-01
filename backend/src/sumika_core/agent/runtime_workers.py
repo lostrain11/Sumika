@@ -524,10 +524,11 @@ class ExternalHarnessRouteSource:
 class ProviderProfileWorker(ProviderWorker):
     """Execute a short text request through a saved Provider profile."""
 
-    def __init__(self, provider_profiles: Any, profile_id: str, *, worker_id: str | None = None, timeout_ms: int = 120_000) -> None:
+    def __init__(self, provider_profiles: Any, profile_id: str, *, pricing: Any = None, worker_id: str | None = None, timeout_ms: int = 120_000) -> None:
         super().__init__(worker_id=worker_id or f"provider-profile-{profile_id}", timeout_ms=timeout_ms, runtime_id="provider")
         self.provider_profiles = provider_profiles
         self.profile_id = str(profile_id)
+        self.pricing = pricing
 
     def descriptor(self) -> dict[str, Any]:
         value = super().descriptor()
@@ -546,7 +547,15 @@ class ProviderProfileWorker(ProviderWorker):
                 return {"status": "failed", "error_code": "profile-not-found", "runtime_id": "provider"}
             if str(profile.get("status") or "").lower() != "available":
                 return {"status": "failed", "error_code": "profile-not-ready", "runtime_id": "provider"}
-            provider = self.provider_profiles.runtime(profile_id)
+            model_id = None
+            if isinstance(route.metadata, Mapping):
+                model_config = route.metadata.get("model_config")
+                model_entry = route.metadata.get("model_entry")
+                if isinstance(model_config, Mapping):
+                    model_id = str(model_config.get("id") or "").strip() or None
+                if not model_id and isinstance(model_entry, Mapping):
+                    model_id = str(model_entry.get("model_id") or model_entry.get("modelId") or "").strip() or None
+            provider = self.provider_profiles.runtime(profile_id, model_id=model_id)
             content = dispatch.question
             context = _context_text(dispatch.context_refs)
             if context:
@@ -574,7 +583,31 @@ class ProviderProfileWorker(ProviderWorker):
                 # Usage metadata must not turn a successful provider answer
                 # into a false failure.
                 pass
-            return {"status": "completed", "answer": answer, "runtime_id": "provider", "untrusted_external": False}
+            usage = dict(getattr(provider, "last_usage", {}) or {})
+            budget_impact: dict[str, Any] = {"usage": usage} if usage else {}
+            if usage and self.pricing is not None and callable(getattr(self.pricing, "receipt", None)):
+                try:
+                    receipt = self.pricing.receipt(
+                        {
+                            "route_id": route.route_id,
+                            "provider_profile_id": profile_id,
+                            "model_id": model_id or str(profile.get("config", {}).get("model") or ""),
+                            "metadata": dict(route.metadata or {}),
+                        },
+                        usage,
+                    )
+                    budget_impact["charge_receipt"] = receipt.to_dict() if hasattr(receipt, "to_dict") else receipt
+                except Exception:
+                    # A pricing adapter cannot invalidate a successful model
+                    # response. The bounded usage receipt remains available.
+                    pass
+            return {
+                "status": "completed",
+                "answer": answer,
+                "runtime_id": "provider",
+                "untrusted_external": False,
+                "budget_impact": budget_impact,
+            }
         except Exception as error:
             return {
                 "status": "failed",

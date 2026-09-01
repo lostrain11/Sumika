@@ -13,6 +13,9 @@ const state = {
   providerDrawerProfileId: null,
   providerBusy: null,
   providerNotice: "",
+  routePricingCatalog: { schema: "route-pricing/v1", snapshots: [], errors: {}, checked_at: null },
+  routePricingBusy: false,
+  routePricingNotice: "",
   // Browser DOM chat accounts are a separate connection kind. Their
   // authentication state is owned by BrowserSkill named Profiles; Sumika
   // keeps only these safe projections and editable selector metadata.
@@ -972,9 +975,87 @@ function renderModules() {
   const modules = state.modules;
   const notices = [state.moduleNotice, state.providerNotice, state.webChatNotice].filter(Boolean).map((notice) => `<div class="module-notice" role="status">${escapeHtml(notice)}</div>`).join("");
   const body = modules.length
-    ? `${renderCapabilityCatalogPanel()}${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${modules.map(renderModuleCard).join("")}</div>`
+    ? `${renderCapabilityCatalogPanel()}${renderRoutePricingPanel()}${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${modules.map(renderModuleCard).join("")}</div>`
     : `<div class="empty-panel">核心未连接，模块目录暂不可用。启动核心后刷新此页。</div>`;
   return renderPageFrame("模块", "每个模块都有可替换实现。连接档案可保存、测试并随时切换。", `${notices}${body}${renderProviderDrawer()}${renderWebChatDrawer()}`);
+}
+
+function pricingSourceLabel(value) {
+  return ({
+    "direct-official": "官方定价",
+    "new-api": "New API",
+    pinai: "PinAI",
+    manual: "手动录入",
+  })[String(value || "").toLowerCase()] || "来源未知";
+}
+
+function pricingConfidenceLabel(value) {
+  return ({
+    official: "官方",
+    published: "公开发布",
+    manual: "人工录入",
+    observed: "运行观测",
+    low: "低可信",
+    unknown: "未知",
+  })[String(value || "").toLowerCase()] || "未知";
+}
+
+function formatPricingNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "未知";
+  return number.toLocaleString("zh-CN", { maximumFractionDigits: 8 });
+}
+
+function routePricingSnapshotsForProfile(profileId, modelId = "") {
+  const snapshots = Array.isArray(state.routePricingCatalog?.snapshots) ? state.routePricingCatalog.snapshots : [];
+  return snapshots.filter((item) => item?.provider_profile_id === profileId && (!modelId || item?.model_id === modelId));
+}
+
+function pricingProviderChargeLabel(snapshot) {
+  const currency = snapshot?.currency || "单位未知";
+  if (snapshot?.request_price != null) return `${currency} ${formatPricingNumber(snapshot.request_price)} / 请求`;
+  if (snapshot?.billing_expression) return `${currency} 动态计费`;
+  const input = snapshot?.input_price_per_million;
+  const output = snapshot?.output_price_per_million;
+  if (input == null && output == null) return `${currency} 单价未知`;
+  const parts = [];
+  if (input != null) parts.push(`输入 ${formatPricingNumber(input)}`);
+  if (output != null) parts.push(`输出 ${formatPricingNumber(output)}`);
+  if (snapshot?.cache_read_price_per_million != null) parts.push(`缓存读 ${formatPricingNumber(snapshot.cache_read_price_per_million)}`);
+  return `${currency} · ${parts.join(" · ")} / 百万 token`;
+}
+
+function pricingCashLabel(snapshot) {
+  if (!snapshot?.cash_currency || snapshot?.cash_rate == null) return "现金折算未知";
+  return `1 ${snapshot.currency || "站内单位"} ≈ ${formatPricingNumber(snapshot.cash_rate)} ${snapshot.cash_currency}`;
+}
+
+function pricingEvidenceLabel(snapshot) {
+  const confidence = pricingConfidenceLabel(snapshot?.confidence);
+  return snapshot?.fresh === false ? `已过期 · ${confidence}` : confidence;
+}
+
+function renderRoutePricingPanel() {
+  const snapshots = Array.isArray(state.routePricingCatalog?.snapshots) ? state.routePricingCatalog.snapshots : [];
+  const errors = state.routePricingCatalog?.errors && typeof state.routePricingCatalog.errors === "object"
+    ? Object.keys(state.routePricingCatalog.errors)
+    : [];
+  const notice = state.routePricingNotice
+    ? `<div class="route-pricing-notice" role="status">${escapeHtml(state.routePricingNotice)}</div>`
+    : "";
+  const rows = snapshots.slice(0, 80).map((snapshot) => {
+    const profile = state.providerProfiles.find((item) => item.id === snapshot.provider_profile_id);
+    const sourceVersion = snapshot.source_version ? ` · v${snapshot.source_version}` : "";
+    return `<div class="route-pricing-row" data-route-pricing-model="${escapeHtml(snapshot.model_id || "unknown")}">
+      <div><strong>${escapeHtml(snapshot.model_id || "未知模型")}</strong><small>${escapeHtml(profile?.name || snapshot.provider_profile_id || "未知档案")} · ${escapeHtml(snapshot.billing_group || "默认分组")}</small></div>
+      <div><strong>${escapeHtml(pricingProviderChargeLabel(snapshot))}</strong><small>${escapeHtml(pricingCashLabel(snapshot))}</small></div>
+      <div><strong>${escapeHtml(pricingSourceLabel(snapshot.source_type))}${escapeHtml(sourceVersion)}</strong><small>${escapeHtml(pricingEvidenceLabel(snapshot))} · ${escapeHtml(formatTime(snapshot.observed_at))}</small></div>
+    </div>`;
+  }).join("");
+  const status = state.routePricingBusy
+    ? "读取中"
+    : `${snapshots.length} 条模型/分组证据${errors.length ? ` · ${errors.length} 个来源失败` : ""}`;
+  return `<section class="dev-panel route-pricing-panel" data-route-pricing-panel><div class="panel-heading"><div><strong>Route 定价证据</strong><small>站内扣费与实际现金折算分开记录；未知价格不会被当作免费。</small></div><button class="small-button" id="refresh-route-pricing" type="button" ${state.routePricingBusy ? "disabled" : ""}>${state.routePricingBusy ? "刷新中" : "刷新价格"}</button></div><div class="route-pricing-summary"><span>${escapeHtml(status)}</span><span>最近检查：${escapeHtml(formatTime(state.routePricingCatalog?.checked_at))}</span></div>${notice}<div class="route-pricing-list">${rows || `<div class="empty-column">尚无定价证据。可在 Provider 高级设置中选择来源并配置计费分组。</div>`}</div></section>`;
 }
 
 function capabilityStatusLabel(status) {
@@ -1188,7 +1269,42 @@ function renderLlmModuleCard(module) {
 function renderProviderProfileRow(profile) {
   const active = activeProviderProfile()?.id === profile.id;
   const status = providerProfileStatusLabel(profile.status);
-  return `<div class="provider-profile-row ${active ? "active" : ""}"><button type="button" data-provider-select="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(profile.config?.model || "未填写模型")} · ${escapeHtml(status)}</small></span>${active ? `<span class="provider-active-mark">当前</span>` : ""}</button><button class="icon-button provider-row-edit" type="button" data-provider-edit="${escapeHtml(profile.id)}" title="编辑连接" aria-label="编辑 ${escapeHtml(profile.name)}">⋯</button></div>`;
+  return `<div class="provider-profile-row ${active ? "active" : ""}"><button type="button" data-provider-select="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}><span><strong>${escapeHtml(profile.name)}</strong><small>${escapeHtml(providerModelSummary(profile))} · ${escapeHtml(status)}</small></span>${active ? `<span class="provider-active-mark">当前</span>` : ""}</button><button class="icon-button provider-row-edit" type="button" data-provider-edit="${escapeHtml(profile.id)}" title="编辑连接" aria-label="编辑 ${escapeHtml(profile.name)}">⋯</button></div>`;
+}
+
+function providerModelEntries(profile) {
+  const rows = profile?.config?.models;
+  if (Array.isArray(rows) && rows.length) return rows;
+  const fallback = String(profile?.config?.model || "").trim();
+  return fallback ? [{ id: fallback, name: fallback, enabled: true, health_state: "unknown" }] : [];
+}
+
+function providerModelSummary(profile) {
+  const rows = providerModelEntries(profile);
+  const enabled = rows.filter((row) => row?.enabled !== false).map((row) => String(row?.id || "").trim()).filter(Boolean);
+  if (!enabled.length) return "未填写模型";
+  const shown = enabled.slice(0, 2).join("、");
+  return enabled.length > 2 ? `${shown} 等 ${enabled.length} 个模型` : shown;
+}
+
+function renderProviderModelRows(profile) {
+  const rows = providerModelEntries(profile);
+  if (!rows.length) return `<div class="provider-model-empty">尚未登记模型；可从端点获取，或手动填写。</div>`;
+  const defaultModel = String(profile?.config?.model || "").trim();
+  return `<ul class="provider-model-list">${rows.map((row) => {
+    const modelId = String(row?.id || "").trim();
+    const label = String(row?.name || modelId).trim() || modelId;
+    const health = String(row?.health_state || "unknown");
+    return `<li><span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(modelId)} · ${escapeHtml(health)}${modelId === defaultModel ? " · 默认" : ""}</small></span><span class="provider-model-actions"><button class="small-button" type="button" data-provider-model-health-profile="${escapeHtml(profile.id)}" data-provider-model-health-id="${escapeHtml(modelId)}" ${state.providerBusy ? "disabled" : ""}>测试</button>${modelId !== defaultModel && row?.enabled !== false ? `<button class="ghost-button" type="button" data-provider-model-select-profile="${escapeHtml(profile.id)}" data-provider-model-select-id="${escapeHtml(modelId)}" ${state.providerBusy ? "disabled" : ""}>设为默认</button>` : ""}</span></li>`;
+  }).join("")}</ul>`;
+}
+
+function renderProviderPricingEvidence(profile) {
+  if (!profile?.id) return "";
+  const snapshots = routePricingSnapshotsForProfile(profile.id);
+  const error = state.routePricingCatalog?.errors?.[profile.id];
+  const rows = snapshots.slice(0, 24).map((snapshot) => `<li><span><strong>${escapeHtml(snapshot.model_id || "未知模型")} · ${escapeHtml(snapshot.billing_group || "默认分组")}</strong><small>${escapeHtml(pricingProviderChargeLabel(snapshot))} · ${escapeHtml(pricingCashLabel(snapshot))}</small></span><span><strong>${escapeHtml(pricingSourceLabel(snapshot.source_type))}</strong><small>${escapeHtml(pricingEvidenceLabel(snapshot))} · ${escapeHtml(formatTime(snapshot.observed_at))}</small></span></li>`).join("");
+  return `<section class="provider-pricing-evidence" data-provider-pricing-evidence><div class="provider-model-section-heading"><strong>当前定价证据</strong><button class="small-button" type="button" data-provider-pricing-refresh="${escapeHtml(profile.id)}" ${state.routePricingBusy ? "disabled" : ""}>${state.routePricingBusy ? "读取中" : "刷新"}</button></div>${error ? `<div class="provider-pricing-error">来源读取失败：${escapeHtml(error)}</div>` : ""}<ul>${rows || `<li class="provider-model-empty">保存定价配置并刷新后显示；未知不会被当作免费。</li>`}</ul></section>`;
 }
 
 function renderWebChatProfileRow(profile) {
@@ -1214,14 +1330,30 @@ function renderProviderDrawer() {
   const templates = state.providerTemplates.map((template) => `<option value="${escapeHtml(template.id)}" ${template.id === (profile?.template_id || "openai-compatible") ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("");
   const modelOptions = Array.isArray(selectedTemplate.model_options) ? selectedTemplate.model_options : [];
   const modelDatalist = modelOptions.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
+  const modelEntries = providerModelEntries(profile);
+  const modelLines = modelEntries.map((item) => String(item?.id || "").trim()).filter(Boolean).join("\n");
+  const pricing = config.pricing && typeof config.pricing === "object" ? config.pricing : {};
+  const pricingRates = pricing.rates && typeof pricing.rates === "object" ? pricing.rates : {};
+  const cashConversion = pricing.cash_conversion && typeof pricing.cash_conversion === "object" ? pricing.cash_conversion : {};
+  const pricingSource = String(pricing.source_type || "");
   const manual = `<form id="provider-profile-form" class="provider-drawer-form" data-profile-id="${escapeHtml(profile?.id || "")}">
     <div class="provider-form-grid"><label><span>连接名称</span><input name="name" value="${escapeHtml(profile?.name || "")}" maxlength="80" required autofocus /></label><label><span>连接模板</span><select name="template_id" id="provider-template-select">${templates}</select></label></div>
     <label><span>当前 Base URL</span><input name="active_base_url" type="url" value="${escapeHtml(config.active_base_url || "")}" placeholder="https://api.example.com/v1" required /></label>
     <label><span>备用端点（每行一个）</span><textarea name="alternate_urls" rows="3" placeholder="只保存，不自动故障转移">${escapeHtml((config.base_urls || []).filter((value) => value !== config.active_base_url).join("\n"))}</textarea></label>
-    <div class="provider-form-grid"><label><span>模型</span><input name="model" list="provider-model-options" value="${escapeHtml(config.model || "")}" placeholder="模型 ID" required /><datalist id="provider-model-options">${modelDatalist}</datalist></label><label><span>处理位置</span><select name="processing_location"><option value="auto" ${profile?.processing_location === "auto" ? "selected" : ""}>自动判断</option><option value="local" ${profile?.processing_location === "local" ? "selected" : ""}>本地处理</option><option value="cloud" ${profile?.processing_location === "cloud" ? "selected" : ""}>云端处理</option></select></label></div>
+    <div class="provider-form-grid"><label><span>默认模型</span><input name="model" list="provider-model-options" value="${escapeHtml(config.model || "")}" placeholder="模型 ID" required /><datalist id="provider-model-options">${modelDatalist}</datalist></label><label><span>处理位置</span><select name="processing_location"><option value="auto" ${profile?.processing_location === "auto" ? "selected" : ""}>自动判断</option><option value="local" ${profile?.processing_location === "local" ? "selected" : ""}>本地处理</option><option value="cloud" ${profile?.processing_location === "cloud" ? "selected" : ""}>云端处理</option></select></label></div>
+    <label><span>档案模型列表（每行一个）</span><textarea name="models" rows="4" placeholder="同一把 Key 可挂多个模型，例如：\nglm-4.5-air\nglm-4.6\nglm-4.7">${escapeHtml(modelLines)}</textarea><small class="provider-field-hint">请求时每个模型使用独立 route，共用此档案的凭据；“发现模型”只读取 GET /models，不发送聊天请求。</small></label>
+    ${profile ? `<section class="provider-model-section"><div class="provider-model-section-heading"><strong>已登记模型</strong><button class="small-button" type="button" data-provider-model-discover="${escapeHtml(profile.id)}" ${state.providerBusy ? "disabled" : ""}>${state.providerBusy === `models:${profile.id}` ? "获取中" : "从端点获取"}</button></div>${renderProviderModelRows(profile)}</section>` : ""}
     <label><span>API Key</span><input name="api_key" type="password" value="" autocomplete="new-password" placeholder="${profile?.has_secrets ? "已安全保存，留空保持不变" : "本地免鉴权服务可以留空"}" /></label>
     ${profile?.has_secrets ? `<label class="provider-clear-secret"><input name="clear_api_key" type="checkbox" /><span>清除已保存的 API Key</span></label>` : ""}
-    <details class="provider-advanced"><summary>高级设置</summary><div><div class="provider-form-grid"><label><span>超时（秒）</span><input name="timeout" type="number" min="1" max="300" value="${escapeHtml(config.timeout || 60)}" /></label><label><span>Organization</span><input name="organization" value="${escapeHtml(config.organization || "")}" /></label></div><label><span>Project</span><input name="project" value="${escapeHtml(config.project || "")}" /></label><label><span>额外请求头（JSON）</span><textarea name="headers" rows="4">${escapeHtml(JSON.stringify(config.headers || {}, null, 2))}</textarea></label><label><span>声明式用量查询（JSON，可留空）</span><textarea name="usage_query" rows="4" placeholder='{"enabled":false,"method":"GET","url":"{{baseUrl}}/usage","fields":{}}'>${escapeHtml(config.usage_query ? JSON.stringify(config.usage_query, null, 2) : "")}</textarea></label></div></details>
+    <details class="provider-advanced"><summary>高级设置</summary><div><div class="provider-form-grid"><label><span>超时（秒）</span><input name="timeout" type="number" min="1" max="300" value="${escapeHtml(config.timeout || 60)}" /></label><label><span>Organization</span><input name="organization" value="${escapeHtml(config.organization || "")}" /></label></div><label><span>Project</span><input name="project" value="${escapeHtml(config.project || "")}" /></label><label><span>额外请求头（JSON）</span><textarea name="headers" rows="4">${escapeHtml(JSON.stringify(config.headers || {}, null, 2))}</textarea></label><label><span>声明式用量查询（JSON，可留空）</span><textarea name="usage_query" rows="4" placeholder='{"enabled":false,"method":"GET","url":"{{baseUrl}}/usage","fields":{}}'>${escapeHtml(config.usage_query ? JSON.stringify(config.usage_query, null, 2) : "")}</textarea></label>
+      <section class="provider-pricing-config"><div class="provider-pricing-heading"><strong>Route 定价</strong><small>单价按档案、模型和计费分组隔离</small></div>
+        <div class="provider-form-grid"><label><span>定价来源</span><select name="pricing_source_type"><option value="" ${!pricingSource ? "selected" : ""}>未配置</option><option value="direct-official" ${pricingSource === "direct-official" ? "selected" : ""}>官方定价（手动）</option><option value="new-api" ${pricingSource === "new-api" ? "selected" : ""}>New API 公开接口</option><option value="pinai" ${pricingSource === "pinai" ? "selected" : ""}>PinAI 公开接口</option><option value="manual" ${pricingSource === "manual" ? "selected" : ""}>中转站 / 人工录入</option></select></label><label><span>计费分组</span><input name="pricing_billing_group" value="${escapeHtml(pricing.billing_group || "")}" placeholder="留空显示全部分组" /></label></div>
+        <div class="provider-form-grid"><label><span>公开价格地址</span><input name="pricing_public_url" type="url" value="${escapeHtml(pricing.public_url || "")}" placeholder="PinAI 可留空；New API 默认使用 Base URL" /></label><label><span>来源页面</span><input name="pricing_source_url" type="url" value="${escapeHtml(pricing.source_url || "")}" placeholder="官方文档或定价页" /></label></div>
+        <div class="provider-pricing-rate-grid"><label><span>站内币种</span><input name="pricing_currency" value="${escapeHtml(pricingRates.currency || "")}" placeholder="CNY / USD-credit" /></label><label><span>输入 / 百万 token</span><input name="pricing_input_rate" type="number" min="0" step="any" value="${escapeHtml(pricingRates.input_price_per_million ?? "")}" /></label><label><span>输出 / 百万 token</span><input name="pricing_output_rate" type="number" min="0" step="any" value="${escapeHtml(pricingRates.output_price_per_million ?? "")}" /></label><label><span>缓存读 / 百万 token</span><input name="pricing_cache_read_rate" type="number" min="0" step="any" value="${escapeHtml(pricingRates.cache_read_price_per_million ?? "")}" /></label><label><span>缓存写 / 百万 token</span><input name="pricing_cache_write_rate" type="number" min="0" step="any" value="${escapeHtml(pricingRates.cache_write_price_per_million ?? "")}" /></label><label><span>每请求固定价</span><input name="pricing_request_rate" type="number" min="0" step="any" value="${escapeHtml(pricingRates.request_price ?? "")}" /></label></div>
+        <div class="provider-pricing-rate-grid"><label><span>实际支付金额</span><input name="pricing_paid_amount" type="number" min="0" step="any" value="${escapeHtml(cashConversion.paid_amount ?? "")}" /></label><label><span>到账站内余额</span><input name="pricing_credited_amount" type="number" min="0" step="any" value="${escapeHtml(cashConversion.credited_amount ?? "")}" /></label><label><span>现金币种</span><input name="pricing_cash_currency" value="${escapeHtml(cashConversion.currency || "CNY")}" maxlength="16" /></label></div>
+        <label><span>价格版本（可选）</span><input name="pricing_source_version" value="${escapeHtml(pricing.source_version || "")}" maxlength="160" /></label>
+      </section>${renderProviderPricingEvidence(profile)}
+    </div></details>
     <div class="provider-drawer-actions">${profile && !profile.active ? `<button class="ghost-button danger-text" type="button" data-provider-archive="${escapeHtml(profile.id)}">归档</button>` : ""}<span></span><button class="ghost-button" type="submit" data-provider-action="save" ${state.providerBusy ? "disabled" : ""}>保存草稿</button><button class="outline-button" type="submit" data-provider-action="test" ${state.providerBusy ? "disabled" : ""}>测试连接</button><button class="primary-button" type="submit" data-provider-action="activate" ${state.providerBusy ? "disabled" : ""}>保存并启用</button></div>
   </form>`;
   const importer = `<section class="provider-import-pane"><label><span>粘贴配置</span><textarea id="provider-import-raw" rows="9" placeholder="ccswitch://v1/import?... 或 Sumika JSON / OpenAI JSON / Codex TOML">${escapeHtml(state.providerImportRaw)}</textarea></label><div class="provider-import-tools"><input id="provider-import-file" type="file" accept=".json,.toml,.txt" /><button class="outline-button" type="button" id="provider-import-preview" ${state.providerBusy ? "disabled" : ""}>预览导入</button></div><p>导入只生成 Sumika 草稿档案，不注册系统协议，也不会执行 JavaScript。</p>${renderProviderImportPreview()}</section>`;
@@ -2093,6 +2225,27 @@ function modelPolicyCostLabel(value) {
   })[String(value || "").toLowerCase()] || "成本未知";
 }
 
+function formatCostRange(minimum, maximum, currency) {
+  if (minimum == null && maximum == null) return "未知";
+  const low = minimum == null ? maximum : minimum;
+  const high = maximum == null ? minimum : maximum;
+  const unit = currency || "单位未知";
+  if (Number(low) === Number(high)) return `${unit} ${formatPricingNumber(low)}`;
+  return `${unit} ${formatPricingNumber(low)}–${formatPricingNumber(high)}`;
+}
+
+function renderModelPolicyCostEstimate(estimate) {
+  if (!estimate || typeof estimate !== "object") return `<div class="agent-routing-cost-estimate unknown"><span>预计站内扣费</span><strong>未知</strong><span>预计现金成本</span><strong>未知</strong></div>`;
+  const provider = estimate.status === "known"
+    ? formatCostRange(estimate.provider_charge_min, estimate.provider_charge_max, estimate.provider_currency)
+    : "未知";
+  const cash = estimate.status === "known" && (estimate.cash_min != null || estimate.cash_max != null)
+    ? formatCostRange(estimate.cash_min, estimate.cash_max, estimate.cash_currency)
+    : "未知";
+  const reasons = Array.isArray(estimate.unknown_reasons) ? estimate.unknown_reasons.join("、") : "";
+  return `<div class="agent-routing-cost-estimate ${estimate.status === "known" ? "known" : "unknown"}" data-agent-cost-estimate><span>预计站内扣费</span><strong>${escapeHtml(provider)}</strong><span>预计现金成本</span><strong>${escapeHtml(cash)}</strong>${reasons ? `<small>${escapeHtml(reasons)}</small>` : ""}</div>`;
+}
+
 function modelPolicyLocationLabel(value) {
   return ({ local: "本地处理", cloud: "云端处理", mixed: "混合处理" })[String(value || "").toLowerCase()] || "位置未知";
 }
@@ -2150,7 +2303,13 @@ function modelPolicyDecisionSummary(decision) {
   if (!selected) return `策略无法继续：${(decision.reason_codes || []).slice(0, 3).join("、") || "没有满足门槛的模型"}。`;
   const route = selected.display_name || `${selected.provider_id || "Provider"} · ${selected.model_id || "模型"}`;
   const reasons = Array.isArray(decision.reason_codes) ? decision.reason_codes.slice(0, 3).join("、") : "";
-  return `${route} · ${modelPolicyLocationLabel(selected.processing_location)} · ${modelPolicyCostLabel(decision.estimated_cost)}${reasons ? ` · ${reasons}` : ""}`;
+  const estimate = decision.cost_estimate;
+  const cost = estimate?.status === "known"
+    ? (estimate.cash_min != null || estimate.cash_max != null
+      ? formatCostRange(estimate.cash_min, estimate.cash_max, estimate.cash_currency)
+      : formatCostRange(estimate.provider_charge_min, estimate.provider_charge_max, estimate.provider_currency))
+    : modelPolicyCostLabel(decision.estimated_cost);
+  return `${route} · ${modelPolicyLocationLabel(selected.processing_location)} · ${cost}${reasons ? ` · ${reasons}` : ""}`;
 }
 
 function renderAgentRoutingPanel(status) {
@@ -2177,7 +2336,7 @@ function renderAgentRoutingPanel(status) {
     ? `<div class="agent-routing-confirm" role="group" aria-label="模型策略确认"><button class="small-button" id="agent-routing-confirm" type="button" ${state.agentBusy ? "disabled" : ""}>确认并继续</button><button class="ghost-button" id="agent-routing-cancel" type="button" ${state.agentBusy ? "disabled" : ""}>取消</button></div>`
     : "";
   const decisionBlock = decision
-    ? `<div class="agent-routing-decision ${pending ? "pending" : ""}" data-agent-routing-decision="${escapeHtml(decision.status || "unknown")}"><div class="agent-routing-decision-heading"><strong>${escapeHtml(modelPolicyDecisionLabel(decision))}</strong><span>${escapeHtml(decision.requires_confirmation ? "需要确认" : "可自动继续")}</span></div><p>${escapeHtml(modelPolicyDecisionSummary(decision))}</p><small>质量门槛：${escapeHtml(decision.quality_gate?.required || "未知")} · 置信度 ${(Number(decision.confidence || 0) * 100).toFixed(0)}% · ${escapeHtml(decision.quota_impact?.state || "额度未知")}</small>${decision.alternatives?.length ? `<details><summary>其他候选（${decision.alternatives.length}）</summary><ul>${decision.alternatives.slice(0, 4).map((item) => `<li>${escapeHtml(item.display_name || `${item.provider_id} · ${item.model_id}`)} · ${escapeHtml(modelPolicyCostLabel(item.cost_class))}</li>`).join("")}</ul></details>` : ""}${decisionActions}</div>`
+    ? `<div class="agent-routing-decision ${pending ? "pending" : ""}" data-agent-routing-decision="${escapeHtml(decision.status || "unknown")}"><div class="agent-routing-decision-heading"><strong>${escapeHtml(modelPolicyDecisionLabel(decision))}</strong><span>${escapeHtml(decision.requires_confirmation ? "需要确认" : "可自动继续")}</span></div><p>${escapeHtml(modelPolicyDecisionSummary(decision))}</p>${renderModelPolicyCostEstimate(decision.cost_estimate)}<small>质量门槛：${escapeHtml(decision.quality_gate?.required || "未知")} · 置信度 ${(Number(decision.confidence || 0) * 100).toFixed(0)}% · ${escapeHtml(decision.quota_impact?.state || "额度未知")}</small>${decision.alternatives?.length ? `<details><summary>其他候选（${decision.alternatives.length}）</summary><ul>${decision.alternatives.slice(0, 4).map((item) => `<li>${escapeHtml(item.display_name || `${item.provider_id} · ${item.model_id}`)} · ${escapeHtml(modelPolicyCostLabel(item.cost_class))}</li>`).join("")}</ul></details>` : ""}${decisionActions}</div>`
     : "";
   const notice = state.agentRoutingNotice ? `<div class="agent-routing-notice" role="status">${escapeHtml(state.agentRoutingNotice)}</div>` : "";
   return `<section class="agent-panel agent-routing-panel" data-agent-routing-panel><div class="panel-heading"><div><strong>模型策略</strong><small>发送前按安全、隐私、能力、质量、额度和成本排序；手动模式沿用模块页当前连接。</small></div><span class="agent-chip ${routable ? "" : "pending"}" data-agent-routing-catalog-status>${escapeHtml(catalogStatus)}</span></div><div class="agent-routing-controls"><label><span>选择策略</span><select id="agent-routing-mode"><option value="manual" ${mode === "manual" ? "selected" : ""}>手动</option><option value="recommendation-then-confirmation" ${mode === "recommendation-then-confirmation" ? "selected" : ""}>推荐后确认</option><option value="automatic" ${mode === "automatic" ? "selected" : ""}>自动（遵守硬门槛）</option></select></label><label><span>预算偏好</span><select id="agent-routing-budget"><option value="prefer-free" ${budget === "prefer-free" ? "selected" : ""}>优先免费 / 本地</option><option value="free-only" ${budget === "free-only" ? "selected" : ""}>仅免费 / 本地</option><option value="allow-paid" ${budget === "allow-paid" ? "selected" : ""}>允许付费（仍需确认）</option><option value="no-paid" ${budget === "no-paid" ? "selected" : ""}>禁止付费</option></select></label><div class="agent-routing-actions"><button class="ghost-button" id="agent-routing-refresh" type="button" ${state.agentModelPolicyBusy ? "disabled" : ""}>刷新目录</button><button class="ghost-button" id="agent-routing-quota" type="button" ${state.agentModelPolicyBusy ? "disabled" : ""}>刷新额度</button></div></div><div class="agent-routing-meta"><span>当前：${escapeHtml(routingModeLabel(mode))}</span><span>${escapeHtml(routingBudgetLabel(budget))}</span><span>最近检查：${escapeHtml(formatTime(catalog.checked_at || state.agentModelPolicyQuota?.checked_at))}</span></div>${notice}${decisionBlock}${entries.length ? `<details class="agent-routing-catalog"><summary>候选目录（${entries.length}）</summary><ul>${entryRows}</ul></details>` : `<div class="empty-column">暂无候选。请先在模块页配置并启用真实 Provider，或连接受管 Agent Runtime。</div>`}</section>`;
@@ -2464,6 +2623,23 @@ function renderWebWorkbenchManualResult(profileId, result) {
   return `<article class="web-workbench-manual-result" data-web-workbench-manual-result="${escapeHtml(profileId)}"><strong>${escapeHtml(state.webChatProfiles.find((item) => item.id === profileId)?.name || profileId)}</strong><span class="web-workbench-member-status ${escapeHtml(status)}">${escapeHtml(webAttemptStatusLabel(status))}</span>${body}<div>${controls}</div></article>`;
 }
 
+function renderRouteBudgetImpact(result) {
+  const impact = result?.budget_impact && typeof result.budget_impact === "object" ? result.budget_impact : null;
+  if (!impact) return "";
+  const usage = impact.usage && typeof impact.usage === "object" ? impact.usage : {};
+  const receipt = impact.charge_receipt && typeof impact.charge_receipt === "object" ? impact.charge_receipt : null;
+  const usageText = usage.total_tokens != null
+    ? `${formatPricingNumber(usage.total_tokens)} token`
+    : "usage 未返回";
+  const providerCharge = receipt?.provider_charge != null
+    ? `${receipt.provider_currency || "单位未知"} ${formatPricingNumber(receipt.provider_charge)}`
+    : "站内扣费未知";
+  const cashCharge = receipt?.cash_charge != null
+    ? `${receipt.cash_currency || "单位未知"} ${formatPricingNumber(receipt.cash_charge)}`
+    : "现金折算未知";
+  return `<div class="route-budget-impact" data-route-budget-impact><span>${escapeHtml(usageText)}</span><strong>${escapeHtml(providerCharge)}</strong><strong>${escapeHtml(cashCharge)}</strong>${receipt?.evidence_level ? `<small>${escapeHtml(receipt.evidence_level)}</small>` : ""}</div>`;
+}
+
 function renderWebWorkbenchPendingResult(item) {
   const result = item?.result || {};
   const status = String(item?.status || result.status || "unknown");
@@ -2473,7 +2649,7 @@ function renderWebWorkbenchPendingResult(item) {
   const retry = retryable && dispatchId
     ? `<button class="ghost-button" type="button" data-web-workbench-retry="${escapeHtml(dispatchId)}">重试</button>`
     : "";
-  return `<article class="web-workbench-manual-result web-workbench-pending-result" data-web-workbench-pending="${escapeHtml(dispatchId)}"><div><strong>${escapeHtml(item?.route_id || "Worker 结果")}</strong><span class="web-workbench-member-status ${escapeHtml(status)}">${escapeHtml(webAttemptStatusLabel(status))}</span></div><small class="web-workbench-trust-label">${item?.worker_kind === "web" ? "UNTRUSTED_WEB_RESULT" : "待主 Agent 接收"}</small>${answer ? `<p>${escapeHtml(safeWebWorkbenchText(answer)).replaceAll("\n", "<br>")}</p>` : `<p class="plugin-error">${escapeHtml(result.error_code || "没有可显示的结果正文")}</p>`}<div>${retry}${dispatchId ? `<button class="ghost-button" type="button" data-web-workbench-ack="${escapeHtml(dispatchId)}">标记已接收</button>` : ""}</div></article>`;
+  return `<article class="web-workbench-manual-result web-workbench-pending-result" data-web-workbench-pending="${escapeHtml(dispatchId)}"><div><strong>${escapeHtml(item?.route_id || "Worker 结果")}</strong><span class="web-workbench-member-status ${escapeHtml(status)}">${escapeHtml(webAttemptStatusLabel(status))}</span></div><small class="web-workbench-trust-label">${item?.worker_kind === "web" ? "UNTRUSTED_WEB_RESULT" : "待主 Agent 接收"}</small>${answer ? `<p>${escapeHtml(safeWebWorkbenchText(answer)).replaceAll("\n", "<br>")}</p>` : `<p class="plugin-error">${escapeHtml(result.error_code || "没有可显示的结果正文")}</p>`}${renderRouteBudgetImpact(result)}<div>${retry}${dispatchId ? `<button class="ghost-button" type="button" data-web-workbench-ack="${escapeHtml(dispatchId)}">标记已接收</button>` : ""}</div></article>`;
 }
 
 function webWorkbenchProfiles() {
@@ -2523,7 +2699,7 @@ function renderWebWorkbench() {
   const consultationRows = (state.webWorkbenchConsultations || []).map(renderWebWorkbenchConsultation).join("") || `<div class="empty-column">还没有咨询记录；主 Agent 或你可以在需要时动态发起。</div>`;
   const pendingRows = (state.webWorkbenchPendingResults || []).map(renderWebWorkbenchPendingResult).join("") || `<div class="empty-column">没有等待主 Agent 接收的 Worker 结果。</div>`;
   const notice = state.webWorkbenchNotice ? `<div class="agent-notice" role="status">${escapeHtml(state.webWorkbenchNotice)}</div>` : "";
-  return renderPageFrame("网页工作台", "管理隔离 BrowserSkill 网页 Profile，执行单次网页子任务或并行咨询；网页回答始终是不可信外部结果。", `${notice}<section class="web-workbench-safety"><strong>隔离与额度边界</strong><p>网页运行在 Sumika 管理的 Agent Window，不复用你的 Edge 标签页。额度固定显示 <code>unknown</code>；不会因为“通常免费”而保证免费，也不会静默切换到付费 API。</p></section><section class="web-workbench-panel" data-web-workbench-catalog><div class="panel-heading"><div><strong>网页 Profiles</strong><small>${escapeHtml(String(catalog.routable_count ?? 0))} 个可咨询 · ${escapeHtml(String(routes.length))} 个目录项 · 最近刷新只读取元数据</small></div><button class="small-button" id="web-workbench-refresh" type="button" ${state.webWorkbenchCatalogBusy ? "disabled" : ""}>${state.webWorkbenchCatalogBusy ? "刷新中" : "刷新目录"}</button></div><div class="web-workbench-profile-list">${profiles.map(({ route, profile }) => renderWebWorkbenchProfile(route, profile)).join("") || `<div class="empty-column">尚未配置网页 Profile。可在模块页创建并完成隔离登录。</div>`}</div>${templates.length ? `<details class="web-workbench-templates"><summary>可配置网页模板（不会直接路由）</summary><div>${templates.map((route) => renderWebWorkbenchProfile(route, null)).join("")}</div></details>` : ""}</section><section class="web-workbench-two-column"><section class="web-workbench-panel"><div class="panel-heading"><div><strong>手动网页查询</strong><small>不经过主 Agent；仍使用同一命名 Profile 的独占写租约。</small></div></div><form id="web-workbench-manual-form" class="web-workbench-form"><label><span>网页 Profile</span><select name="profile_id" ${manualOptions ? "" : "disabled"} required><option value="">选择已授权 Profile</option>${manualOptions}</select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="输入一个独立的小问题" required>${escapeHtml(state.webWorkbenchManualDrafts[state.webWorkbenchSelectedProfileId] || "")}</textarea></label><button class="outline-button" type="submit" ${manualOptions && !state.webWorkbenchBusy ? "" : "disabled"}>发送网页问题</button></form><div class="web-workbench-manual-results">${Object.entries(state.webWorkbenchManualResults || {}).map(([profileId, result]) => renderWebWorkbenchManualResult(profileId, result)).join("") || `<div class="empty-column">尚无手动回答</div>`}</div></section><section class="web-workbench-panel"><div class="panel-heading"><div><strong>Web Worker</strong><small>一次明确网页子任务；由你选择路由，结果不会直接修改文件。</small></div></div><form id="web-workbench-worker-form" class="web-workbench-form"><label><span>路由</span><select name="route_id" ${workerOptions ? "" : "disabled"} required><option value="">选择可咨询 Profile</option>${workerOptions}</select></label><label class="web-workbench-wide"><span>子任务</span><textarea name="question" rows="3" maxlength="16000" placeholder="例如：只检查这个 API 设计的一个风险点" required>${escapeHtml(workerDraft.question || "")}</textarea></label><button class="outline-button" type="submit" ${workerOptions && !state.webWorkbenchBusy ? "" : "disabled"}>交给 Web Worker</button></form><div class="web-workbench-worker-result">${state.webWorkbenchWorkerResult ? `<article class="web-workbench-manual-result"><strong>${escapeHtml(state.webWorkbenchWorkerResult.status || "结果")}</strong><small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(state.webWorkbenchWorkerResult.result?.answer || state.webWorkbenchWorkerResult.reason || "暂无回答")).replaceAll("\n", "<br>")}</p></article>` : `<div class="empty-column">尚无 Web Worker 回合</div>`}</div></section></section><section class="web-workbench-panel web-workbench-pending-panel"><div class="panel-heading"><div><strong>待接收 Worker 结果</strong><small>主 Agent 通过下一次 route.status/pending 调用读取；不会自动修改文件。</small></div></div><div class="web-workbench-pending-results">${pendingRows}</div></section><section class="web-workbench-panel web-workbench-consultation-panel"><div class="panel-heading"><div><strong>多模型咨询面板</strong><small>每次在当前 turn 动态创建 1–3 个不同网页 Provider；成员互相看不到答案。</small></div><div class="web-workbench-panel-actions"><button class="ghost-button" type="button" data-web-workbench-pause-all ${state.webWorkbenchBusy ? "disabled" : ""}>暂停 Agent 咨询</button><button class="ghost-button" type="button" data-web-workbench-continue-latest ${state.webWorkbenchBusy ? "disabled" : ""}>继续最近咨询</button></div></div><form id="web-workbench-consultation-form" class="web-workbench-form"><label><span>决策类型</span><select name="decision_kind"><option value="brainstorm" ${consultationDraft.decision_kind === "brainstorm" ? "selected" : ""}>brainstorm · 头脑风暴</option><option value="plan-review" ${consultationDraft.decision_kind === "plan-review" ? "selected" : ""}>plan-review · 计划复核</option><option value="fact-check" ${consultationDraft.decision_kind === "fact-check" ? "selected" : ""}>fact-check · 事实核查</option><option value="counterexample" ${consultationDraft.decision_kind === "counterexample" ? "selected" : ""}>counterexample · 反例</option><option value="small-answer" ${consultationDraft.decision_kind === "small-answer" ? "selected" : ""}>small-answer · 小问题</option></select></label><label><span>成员数</span><select name="max_members"><option value="1" ${Number(consultationDraft.max_members) === 1 ? "selected" : ""}>1 · single-opinion</option><option value="2" ${Number(consultationDraft.max_members) === 2 ? "selected" : ""}>2</option><option value="3" ${Number(consultationDraft.max_members) !== 1 && Number(consultationDraft.max_members) !== 2 ? "selected" : ""}>3</option></select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="让多个网页模型独立评审同一个问题" required>${escapeHtml(consultationDraft.question || "")}</textarea></label><label class="web-workbench-wide"><span>必要上下文（可选，禁止粘贴凭据文件）</span><textarea name="context" rows="2" maxlength="24000" placeholder="目标、短 diff 或脱敏工具结果">${escapeHtml(consultationDraft.context || "")}</textarea></label><button class="outline-button" type="submit" ${readyRoutes.length && !state.webWorkbenchBusy ? "" : "disabled"}>启动咨询面板</button></form><div class="web-workbench-consultations">${consultationRows}</div></section>`);
+  return renderPageFrame("网页工作台", "管理隔离 BrowserSkill 网页 Profile，执行单次网页子任务或并行咨询；网页回答始终是不可信外部结果。", `${notice}<section class="web-workbench-safety"><strong>隔离与额度边界</strong><p>网页运行在 Sumika 管理的 Agent Window，不复用你的 Edge 标签页。额度固定显示 <code>unknown</code>；不会因为“通常免费”而保证免费，也不会静默切换到付费 API。</p></section><section class="web-workbench-panel" data-web-workbench-catalog><div class="panel-heading"><div><strong>网页 Profiles</strong><small>${escapeHtml(String(catalog.routable_count ?? 0))} 个可咨询 · ${escapeHtml(String(routes.length))} 个目录项 · 最近刷新只读取元数据</small></div><button class="small-button" id="web-workbench-refresh" type="button" ${state.webWorkbenchCatalogBusy ? "disabled" : ""}>${state.webWorkbenchCatalogBusy ? "刷新中" : "刷新目录"}</button></div><div class="web-workbench-profile-list">${profiles.map(({ route, profile }) => renderWebWorkbenchProfile(route, profile)).join("") || `<div class="empty-column">尚未配置网页 Profile。可在模块页创建并完成隔离登录。</div>`}</div>${templates.length ? `<details class="web-workbench-templates"><summary>可配置网页模板（不会直接路由）</summary><div>${templates.map((route) => renderWebWorkbenchProfile(route, null)).join("")}</div></details>` : ""}</section><section class="web-workbench-two-column"><section class="web-workbench-panel"><div class="panel-heading"><div><strong>手动网页查询</strong><small>不经过主 Agent；仍使用同一命名 Profile 的独占写租约。</small></div></div><form id="web-workbench-manual-form" class="web-workbench-form"><label><span>网页 Profile</span><select name="profile_id" ${manualOptions ? "" : "disabled"} required><option value="">选择已授权 Profile</option>${manualOptions}</select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="输入一个独立的小问题" required>${escapeHtml(state.webWorkbenchManualDrafts[state.webWorkbenchSelectedProfileId] || "")}</textarea></label><button class="outline-button" type="submit" ${manualOptions && !state.webWorkbenchBusy ? "" : "disabled"}>发送网页问题</button></form><div class="web-workbench-manual-results">${Object.entries(state.webWorkbenchManualResults || {}).map(([profileId, result]) => renderWebWorkbenchManualResult(profileId, result)).join("") || `<div class="empty-column">尚无手动回答</div>`}</div></section><section class="web-workbench-panel"><div class="panel-heading"><div><strong>Web Worker</strong><small>一次明确网页子任务；由你选择路由，结果不会直接修改文件。</small></div></div><form id="web-workbench-worker-form" class="web-workbench-form"><label><span>路由</span><select name="route_id" ${workerOptions ? "" : "disabled"} required><option value="">选择可咨询 Profile</option>${workerOptions}</select></label><label class="web-workbench-wide"><span>子任务</span><textarea name="question" rows="3" maxlength="16000" placeholder="例如：只检查这个 API 设计的一个风险点" required>${escapeHtml(workerDraft.question || "")}</textarea></label><button class="outline-button" type="submit" ${workerOptions && !state.webWorkbenchBusy ? "" : "disabled"}>交给 Web Worker</button></form><div class="web-workbench-worker-result">${state.webWorkbenchWorkerResult ? `<article class="web-workbench-manual-result"><strong>${escapeHtml(state.webWorkbenchWorkerResult.status || "结果")}</strong><small class="web-workbench-trust-label">UNTRUSTED_WEB_RESULT</small><p>${escapeHtml(safeWebWorkbenchText(state.webWorkbenchWorkerResult.result?.answer || state.webWorkbenchWorkerResult.reason || "暂无回答")).replaceAll("\n", "<br>")}</p></article>` : `<div class="empty-column">尚无 Web Worker 回合</div>`}</div></section></section><section class="web-workbench-panel web-workbench-pending-panel"><div class="panel-heading"><div><strong>待接收 Worker 结果</strong><small>主 Agent 通过下一次 route.status/pending 调用读取；不会自动修改文件。</small></div></div><div class="web-workbench-pending-results">${pendingRows}</div></section><section class="web-workbench-panel web-workbench-consultation-panel"><div class="panel-heading"><div><strong>多模型咨询面板</strong><small>每次在当前 turn 动态创建 1–5 个不同网页 Provider；最多 3 个并发，5 个成员按 3 + 2 两批执行。</small></div><div class="web-workbench-panel-actions"><button class="ghost-button" type="button" data-web-workbench-pause-all ${state.webWorkbenchBusy ? "disabled" : ""}>暂停 Agent 咨询</button><button class="ghost-button" type="button" data-web-workbench-continue-latest ${state.webWorkbenchBusy ? "disabled" : ""}>继续最近咨询</button></div></div><form id="web-workbench-consultation-form" class="web-workbench-form"><label><span>决策类型</span><select name="decision_kind"><option value="brainstorm" ${consultationDraft.decision_kind === "brainstorm" ? "selected" : ""}>brainstorm · 头脑风暴</option><option value="plan-review" ${consultationDraft.decision_kind === "plan-review" ? "selected" : ""}>plan-review · 计划复核</option><option value="fact-check" ${consultationDraft.decision_kind === "fact-check" ? "selected" : ""}>fact-check · 事实核查</option><option value="counterexample" ${consultationDraft.decision_kind === "counterexample" ? "selected" : ""}>counterexample · 反例</option><option value="small-answer" ${consultationDraft.decision_kind === "small-answer" ? "selected" : ""}>small-answer · 小问题</option></select></label><label><span>成员数</span><select name="max_members"><option value="1" ${Number(consultationDraft.max_members) === 1 ? "selected" : ""}>1 · single-opinion</option><option value="2" ${Number(consultationDraft.max_members) === 2 ? "selected" : ""}>2</option><option value="3" ${Number(consultationDraft.max_members) === 3 || !Number(consultationDraft.max_members) ? "selected" : ""}>3</option><option value="4" ${Number(consultationDraft.max_members) === 4 ? "selected" : ""}>4 · 3 + 1</option><option value="5" ${Number(consultationDraft.max_members) === 5 ? "selected" : ""}>5 · 3 + 2</option></select></label><label class="web-workbench-wide"><span>问题</span><textarea name="question" rows="3" maxlength="16000" placeholder="让多个网页模型独立评审同一个问题" required>${escapeHtml(consultationDraft.question || "")}</textarea></label><label class="web-workbench-wide"><span>必要上下文（可选，禁止粘贴凭据文件）</span><textarea name="context" rows="2" maxlength="24000" placeholder="目标、短 diff 或脱敏工具结果">${escapeHtml(consultationDraft.context || "")}</textarea></label><button class="outline-button" type="submit" ${readyRoutes.length && !state.webWorkbenchBusy ? "" : "disabled"}>启动咨询面板</button></form><div class="web-workbench-consultations">${consultationRows}</div></section>`);
 }
 
 function webWorkbenchParentSessionId() {
@@ -2920,7 +3096,7 @@ async function startWebWorkbenchConsultation(event) {
   updateWebWorkbenchDraftFromForm(form);
   const draft = state.webWorkbenchConsultationDraft;
   const question = String(draft.question || "").trim();
-  const maxMembers = Math.max(1, Math.min(3, Number(draft.max_members) || 3));
+  const maxMembers = Math.max(1, Math.min(5, Number(draft.max_members) || 3));
   if (!question) {
     state.webWorkbenchNotice = "请填写咨询问题。";
     render();
@@ -2993,7 +3169,7 @@ async function continueWebWorkbenchConsultation(consultationId) {
       decision_kind: previous.decision_kind || "fact-check",
       required_capabilities: ["text"],
       context_refs: webWorkbenchContextFromText(previous.context),
-      max_members: Math.max(1, Math.min(3, Number(previous.max_members) || 3)),
+      max_members: Math.max(1, Math.min(5, Number(previous.max_members) || 3)),
       continuation_of: consultationId,
     };
     const result = await rpc("sumika.consultation.start", request);
@@ -3293,6 +3469,7 @@ function bindEvents() {
   document.querySelectorAll("[data-page]").forEach((element) => element.addEventListener("click", () => {
     state.activePage = element.dataset.page;
     if (state.activePage === "Modules" || state.activePage === "Developer") void loadCapabilityCatalog(true, false);
+    if (state.activePage === "Modules" || state.activePage === "Developer") void loadRoutePricing(true, false);
     if (state.activePage === "Modules" || state.activePage === "Developer") void loadWebChatData(true, state.activePage === "Developer");
     if (state.activePage === "Developer") void loadProviderProfiles(true, true);
     if (state.activePage === "Developer") void loadEvolutionRegistry(true);
@@ -3700,6 +3877,11 @@ function bindEvents() {
   document.querySelectorAll("[data-provider-edit]").forEach((element) => element.addEventListener("click", () => openProviderDrawer(element.dataset.providerEdit)));
   document.querySelectorAll("[data-provider-select]").forEach((element) => element.addEventListener("click", () => selectProviderProfile(element.dataset.providerSelect)));
   document.querySelectorAll("[data-provider-health]").forEach((element) => element.addEventListener("click", () => testProviderProfile(element.dataset.providerHealth)));
+  document.querySelectorAll("[data-provider-model-discover]").forEach((element) => element.addEventListener("click", () => discoverProviderModels(element.dataset.providerModelDiscover)));
+  document.querySelectorAll("[data-provider-model-select-profile]").forEach((element) => element.addEventListener("click", () => selectProviderModel(element.dataset.providerModelSelectProfile, element.dataset.providerModelSelectId)));
+  document.querySelectorAll("[data-provider-model-health-profile]").forEach((element) => element.addEventListener("click", () => testProviderModel(element.dataset.providerModelHealthProfile, element.dataset.providerModelHealthId)));
+  document.querySelector("#refresh-route-pricing")?.addEventListener("click", () => loadRoutePricing(true, true));
+  document.querySelectorAll("[data-provider-pricing-refresh]").forEach((element) => element.addEventListener("click", () => loadRoutePricing(true, true)));
   document.querySelectorAll("[data-provider-restore]").forEach((element) => element.addEventListener("click", () => restoreProviderProfile(element.dataset.providerRestore)));
   document.querySelectorAll("[data-provider-drawer-close]").forEach((element) => element.addEventListener("click", closeProviderDrawer));
   document.querySelectorAll("[data-provider-drawer-mode]").forEach((element) => element.addEventListener("click", () => {
@@ -6589,6 +6771,25 @@ async function loadProviderProfiles(shouldRender = true, includeArchived = false
   if (shouldRender) render();
 }
 
+async function loadRoutePricing(shouldRender = true, refresh = false) {
+  if (state.routePricingBusy) return;
+  state.routePricingBusy = true;
+  if (shouldRender) render();
+  try {
+    const result = await api(`/api/model-policy/pricing?refresh=${refresh ? "true" : "false"}`);
+    state.routePricingCatalog = result && typeof result === "object"
+      ? result
+      : { schema: "route-pricing/v1", snapshots: [], errors: {}, checked_at: null };
+    const failures = Object.keys(state.routePricingCatalog?.errors || {}).length;
+    state.routePricingNotice = failures ? `${failures} 个定价来源暂不可用；已有证据不会伪装成最新价格。` : "";
+  } catch (error) {
+    state.routePricingNotice = `定价证据读取失败：${error.message}`;
+  } finally {
+    state.routePricingBusy = false;
+    if (shouldRender) render();
+  }
+}
+
 async function loadPrivacy(shouldRender = true) {
   try {
     const privacy = await api("/api/privacy");
@@ -6603,6 +6804,7 @@ async function refreshProviderHealth() {
   await Promise.all([
     loadProviders(false),
     loadProviderProfiles(false, state.activePage === "Developer"),
+    loadRoutePricing(false, false),
     loadWebChatData(false, state.activePage === "Developer"),
     loadPrivacy(false),
   ]);
@@ -6943,6 +7145,11 @@ function applyProviderTemplate(event) {
   if (!form.elements.name.value.trim()) form.elements.name.value = template.name;
   form.elements.active_base_url.value = template.base_url || "";
   if (!form.elements.model.value.trim()) form.elements.model.value = template.model || "";
+  if (form.elements.models && !form.elements.models.value.trim()) {
+    form.elements.models.value = (Array.isArray(template.model_options) && template.model_options.length
+      ? template.model_options
+      : (template.model ? [template.model] : [])).join("\n");
+  }
   form.elements.processing_location.value = template.processing_location || "auto";
   const datalist = document.querySelector("#provider-model-options");
   if (datalist) {
@@ -6963,6 +7170,50 @@ function readProviderProfileForm(form) {
   }
   const activeBaseUrl = form.elements.active_base_url.value.trim();
   const alternateUrls = form.elements.alternate_urls.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  const modelLines = (form.elements.models?.value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  const defaultModel = form.elements.model.value.trim();
+  if (defaultModel && !modelLines.includes(defaultModel)) modelLines.unshift(defaultModel);
+  const readOptionalNumber = (name, label) => {
+    const raw = String(form.elements[name]?.value ?? "").trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) throw new Error(`${label}必须是非负数字`);
+    return value;
+  };
+  const pricingSource = String(form.elements.pricing_source_type?.value || "").trim();
+  let pricing = null;
+  if (pricingSource) {
+    const rates = {};
+    const currency = String(form.elements.pricing_currency?.value || "").trim();
+    if (currency) rates.currency = currency;
+    for (const [field, key, label] of [
+      ["pricing_input_rate", "input_price_per_million", "输入单价"],
+      ["pricing_output_rate", "output_price_per_million", "输出单价"],
+      ["pricing_cache_read_rate", "cache_read_price_per_million", "缓存读取单价"],
+      ["pricing_cache_write_rate", "cache_write_price_per_million", "缓存写入单价"],
+      ["pricing_request_rate", "request_price", "每请求单价"],
+    ]) {
+      const value = readOptionalNumber(field, label);
+      if (value != null) rates[key] = value;
+    }
+    const paidAmount = readOptionalNumber("pricing_paid_amount", "实际支付金额");
+    const creditedAmount = readOptionalNumber("pricing_credited_amount", "到账站内余额");
+    if ((paidAmount == null) !== (creditedAmount == null)) throw new Error("实际支付金额和到账站内余额必须同时填写");
+    if (creditedAmount === 0) throw new Error("到账站内余额必须大于 0");
+    pricing = {
+      source_type: pricingSource,
+      billing_group: String(form.elements.pricing_billing_group?.value || "").trim(),
+      public_url: String(form.elements.pricing_public_url?.value || "").trim(),
+      source_url: String(form.elements.pricing_source_url?.value || "").trim(),
+      source_version: String(form.elements.pricing_source_version?.value || "").trim(),
+      rates,
+      cash_conversion: paidAmount == null ? null : {
+        paid_amount: paidAmount,
+        credited_amount: creditedAmount,
+        currency: String(form.elements.pricing_cash_currency?.value || "CNY").trim().toUpperCase(),
+      },
+    };
+  }
   const payload = {
     id: form.dataset.profileId || undefined,
     name: form.elements.name.value.trim(),
@@ -6971,17 +7222,75 @@ function readProviderProfileForm(form) {
     processing_location: form.elements.processing_location.value,
     active_base_url: activeBaseUrl,
     base_urls: [activeBaseUrl, ...alternateUrls],
-    model: form.elements.model.value.trim(),
+    model: defaultModel,
+    models: [...new Set(modelLines)],
     timeout: Number(form.elements.timeout.value || 60),
     organization: form.elements.organization.value.trim(),
     project: form.elements.project.value.trim(),
     headers,
     usage_query: usageQuery,
+    pricing,
   };
   const apiKey = form.elements.api_key.value;
   if (apiKey) payload.api_key = apiKey;
   if (form.elements.clear_api_key?.checked) payload.clear_secrets = ["api_key"];
   return payload;
+}
+
+async function discoverProviderModels(profileId) {
+  if (!profileId || state.providerBusy) return;
+  state.providerBusy = `models:${profileId}`;
+  state.providerNotice = "";
+  render();
+  try {
+    const result = await rpc("provider.profile.models", { profile_id: profileId, discover: true });
+    if (result.profile) replaceProviderProfile(result.profile);
+    state.providerDrawerProfileId = profileId;
+    if (!result.ok) throw new Error(result.error || "端点未返回模型列表");
+    const count = Array.isArray(result.models) ? result.models.length : 0;
+    state.providerNotice = `${result.profile?.name || profileId} 已获取 ${count} 个模型；逐个测试后才会进入可用路由`;
+  } catch (error) {
+    state.providerNotice = `获取模型列表失败：${error.message}`;
+  } finally {
+    state.providerBusy = null;
+    await loadProviderProfiles(false);
+    await loadRoutePricing(false, true);
+    render();
+  }
+}
+
+async function selectProviderModel(profileId, modelId) {
+  if (!profileId || !modelId || state.providerBusy) return;
+  state.providerBusy = `select-model:${profileId}:${modelId}`;
+  render();
+  try {
+    const result = await rpc("provider.profile.model.select", { profile_id: profileId, model_id: modelId });
+    if (result.profile) replaceProviderProfile(result.profile);
+    state.providerNotice = `${modelId} 已设为默认模型；请重新测试连接后再启用`;
+  } catch (error) {
+    state.providerNotice = `选择模型失败：${error.message}`;
+  } finally {
+    state.providerBusy = null;
+    await loadProviderProfiles(false);
+    render();
+  }
+}
+
+async function testProviderModel(profileId, modelId) {
+  if (!profileId || !modelId || state.providerBusy) return;
+  state.providerBusy = `health-model:${profileId}:${modelId}`;
+  render();
+  try {
+    const result = await rpc("provider.profile.health", { profile_id: profileId, model_id: modelId });
+    if (result.profile) replaceProviderProfile(result.profile);
+    state.providerNotice = result.ok ? `${modelId} 连接测试通过` : `${modelId}：${result.error || "未就绪"}`;
+  } catch (error) {
+    state.providerNotice = `模型测试失败：${error.message}`;
+  } finally {
+    state.providerBusy = null;
+    await loadProviderProfiles(false);
+    render();
+  }
 }
 
 async function saveProviderProfileFromForm(event) {
@@ -7022,6 +7331,7 @@ async function saveProviderProfileFromForm(event) {
   } finally {
     state.providerBusy = null;
     await loadProviderProfiles(false);
+    await loadRoutePricing(false, true);
     await loadPrivacy(false);
     render();
   }
@@ -7077,6 +7387,7 @@ async function testProviderProfile(profileId) {
     state.providerNotice = `连接测试失败：${error.message}`;
   } finally {
     state.providerBusy = null;
+    await loadRoutePricing(false, true);
     render();
   }
 }
@@ -7094,6 +7405,7 @@ async function archiveProviderProfile(profileId) {
     state.providerNotice = `归档失败：${error.message}`;
   } finally {
     state.providerBusy = null;
+    await loadRoutePricing(false, true);
     render();
   }
 }
@@ -7110,6 +7422,7 @@ async function restoreProviderProfile(profileId) {
     state.providerNotice = `恢复失败：${error.message}`;
   } finally {
     state.providerBusy = null;
+    await loadRoutePricing(false, true);
     render();
   }
 }
@@ -7576,6 +7889,7 @@ async function loadInitialData() {
     const [providers, providerProfiles, providerTemplates, privacy, ccsManifest, modules, plugins, audioStatus, visionStatus, tasks, sessions, characters, events, avatarModels, avatarIgnored, snapshots] = await Promise.all([api("/api/providers"), api("/api/provider-profiles"), api("/api/provider-templates"), api("/api/privacy"), api("/api/integrations/ccswitch"), api("/api/modules"), api("/api/plugins"), api("/api/audio/status"), api("/api/vision/status"), api("/api/tasks"), api("/api/sessions"), api("/api/characters"), api("/api/events"), api("/api/avatar/models"), api("/api/avatar/ignored"), rpc("snapshot.list")]);
     state.providers = providers;
     state.providerProfiles = providerProfiles;
+    await loadRoutePricing(false, false);
     await loadWebChatData(false, false);
     state.providerTemplates = providerTemplates;
     state.privacy = privacy.label || "本地处理";
@@ -7612,6 +7926,9 @@ async function loadInitialData() {
   } catch {
     state.providers = [];
     state.providerProfiles = [];
+    state.routePricingCatalog = { schema: "route-pricing/v1", snapshots: [], errors: {}, checked_at: null };
+    state.routePricingNotice = "";
+    state.routePricingBusy = false;
     state.webChatAdapters = [];
     state.webChatProfiles = [];
     state.providerTemplates = [];

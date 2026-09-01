@@ -174,6 +174,157 @@ class ServerTests(unittest.TestCase):
         self.assertIn("OPTIONS", headers["Access-Control-Allow-Methods"])
         self.assertIn("Content-Type", headers["Access-Control-Allow-Headers"])
 
+    def test_provider_profile_multi_model_rpcs_share_one_profile(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                body = b'{"data":[{"id":"model-a"},{"id":"model-b"}]}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return None
+
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
+        provider_thread.start()
+        try:
+            status, saved = self.request(
+                "POST",
+                "/rpc",
+                {
+                    "jsonrpc": "2.0",
+                    "id": 201,
+                    "method": "provider.profile.save",
+                    "params": {
+                        "profile": {
+                            "id": "multi-model-rpc",
+                            "name": "Multi model",
+                            "base_url": f"http://127.0.0.1:{provider.server_address[1]}/v1",
+                            "model": "model-a",
+                            "models": ["model-a"],
+                        }
+                    },
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(saved["result"]["config"]["models"][0]["id"], "model-a")
+
+            _, discovered = self.request(
+                "POST",
+                "/rpc",
+                {
+                    "jsonrpc": "2.0",
+                    "id": 202,
+                    "method": "provider.profile.models",
+                    "params": {"profile_id": "multi-model-rpc", "discover": True},
+                },
+            )
+            self.assertEqual(
+                [row["id"] for row in discovered["result"]["models"]],
+                ["model-a", "model-b"],
+            )
+
+            _, selected = self.request(
+                "POST",
+                "/rpc",
+                {
+                    "jsonrpc": "2.0",
+                    "id": 203,
+                    "method": "provider.profile.model.select",
+                    "params": {"profile_id": "multi-model-rpc", "model_id": "model-b"},
+                },
+            )
+            self.assertEqual(selected["result"]["profile"]["config"]["model"], "model-b")
+
+            _, health = self.request(
+                "POST",
+                "/rpc",
+                {
+                    "jsonrpc": "2.0",
+                    "id": 204,
+                    "method": "provider.profile.health",
+                    "params": {"profile_id": "multi-model-rpc", "model_id": "model-b"},
+                },
+            )
+            self.assertTrue(health["result"]["ok"])
+            route_ids = {
+                row["route_id"]
+                for row in self.application.rpc("sumika.route.catalog", {})["routes"]
+            }
+            self.assertIn("profile:multi-model-rpc:model-a", route_ids)
+            self.assertIn("profile:multi-model-rpc:model-b", route_ids)
+        finally:
+            provider.shutdown()
+            provider.server_close()
+            provider_thread.join(timeout=2)
+
+    def test_model_policy_pricing_rpc_and_http_filter_public_evidence(self):
+        status, saved = self.request(
+            "POST",
+            "/rpc",
+            {
+                "jsonrpc": "2.0",
+                "id": 211,
+                "method": "provider.profile.save",
+                "params": {
+                    "profile": {
+                        "id": "priced-rpc",
+                        "name": "Priced RPC fixture",
+                        "base_url": "https://pricing.example.invalid/v1",
+                        "model": "priced-model",
+                        "models": ["priced-model", "other-model"],
+                        "pricing": {
+                            "source_type": "manual",
+                            "billing_group": "standard",
+                            "rates": {
+                                "currency": "USD-credit",
+                                "input_price_per_million": 1.5,
+                                "output_price_per_million": 4.5,
+                            },
+                            "cash_conversion": {
+                                "paid_amount": 20,
+                                "credited_amount": 100,
+                                "currency": "CNY",
+                            },
+                        },
+                    }
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["result"]["config"]["pricing"]["rates"]["currency"], "USD-credit")
+
+        status, catalog = self.request(
+            "GET",
+            "/api/model-policy/pricing?refresh=true&provider_profile_id=priced-rpc&model_id=priced-model",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(catalog["schema"], "route-pricing/v1")
+        self.assertEqual(len(catalog["snapshots"]), 1)
+        snapshot = catalog["snapshots"][0]
+        self.assertEqual(snapshot["provider_profile_id"], "priced-rpc")
+        self.assertEqual(snapshot["model_id"], "priced-model")
+        self.assertEqual(snapshot["billing_group"], "standard")
+        self.assertEqual(snapshot["currency"], "USD-credit")
+        self.assertEqual(snapshot["cash_currency"], "CNY")
+        self.assertNotIn("credential_ref", json.dumps(catalog))
+
+        status, invalid = self.request(
+            "POST",
+            "/rpc",
+            {
+                "jsonrpc": "2.0",
+                "id": 212,
+                "method": "model.policy.pricing",
+                "params": {"refresh": "true"},
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], -32602)
+
     def test_json_body_limits_are_scoped_to_rpc_for_image_prompts(self):
         # Ordinary JSON endpoints keep the small default limit, while the RPC
         # boundary has enough room for one validated image prompt (base64 adds

@@ -451,8 +451,8 @@ class ConsultationRequest:
         capabilities = tuple(_token(item, "required_capability") for item in self.required_capabilities[:16])
         object.__setattr__(self, "required_capabilities", capabilities or ("text",))
         object.__setattr__(self, "context_refs", sanitize_context(self.context_refs))
-        if isinstance(self.max_members, bool) or not isinstance(self.max_members, int) or not 1 <= self.max_members <= 3:
-            raise RouteValidationError("max_members must be between 1 and 3")
+        if isinstance(self.max_members, bool) or not isinstance(self.max_members, int) or not 1 <= self.max_members <= 5:
+            raise RouteValidationError("max_members must be between 1 and 5")
         object.__setattr__(self, "route_constraints", sanitize_context(self.route_constraints) if isinstance(self.route_constraints, Mapping) else {})
         object.__setattr__(self, "continuation_of", _id(self.continuation_of, "continuation_of", required=False))
 
@@ -676,7 +676,7 @@ class ConsultationResult:
         object.__setattr__(self, "consultation_id", _id(self.consultation_id, "consultation_id") or "")
         if self.status not in RUN_STATES:
             raise RouteValidationError("consultation status is invalid")
-        object.__setattr__(self, "members", tuple(self.members[:3]))
+        object.__setattr__(self, "members", tuple(self.members[:5]))
         object.__setattr__(self, "successful_count", max(0, int(self.successful_count)))
         object.__setattr__(self, "failed_count", max(0, int(self.failed_count)))
         object.__setattr__(self, "decision_kind", _token(self.decision_kind, "decision_kind", default="") if self.decision_kind else None)
@@ -713,12 +713,12 @@ def _hash_summary(value: str | None) -> str | None:
 class RouteCoordinator:
     """Coordinate isolated web workers without becoming a second Agent loop."""
 
-    def __init__(self, web_chat: Any, storage: Any = None, *, logger: Any = None, event_sink: Callable[[dict[str, Any]], None] | None = None, max_workers: int = 4) -> None:
+    def __init__(self, web_chat: Any, storage: Any = None, *, logger: Any = None, event_sink: Callable[[dict[str, Any]], None] | None = None, max_workers: int = 3) -> None:
         self.web_chat = web_chat
         self.storage = storage
         self.logger = logger
         self.event_sink = event_sink
-        self._executor = ThreadPoolExecutor(max_workers=max(1, min(int(max_workers), 8)), thread_name_prefix="sumika-route")
+        self._executor = ThreadPoolExecutor(max_workers=max(1, min(int(max_workers), 3)), thread_name_prefix="sumika-route")
         self._lock = threading.RLock()
         self._profile_locks: dict[str, threading.Lock] = {}
         self._occupancy: dict[str, str] = {}

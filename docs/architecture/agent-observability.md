@@ -41,12 +41,15 @@ ID 只用于同一安装内关联，不编码角色名、仓库路径或用户�
    `backend/src/sumika_core/observability.py` 写入
    `.sumika/logs/agent-observability/YYYY-MM-DD.jsonl`（桌面端对应
    `.sumika-desktop`）；文件按大小分片且只保留受限字段；
-2. `run manifest`：固定 Runtime、插件、模型、硬件档位、配置哈希和测试数据版本；
-3. `daily aggregate`：按 capability/adapter/outcome 聚合 count、p50、p95、错误率和成本。
+2. `route decision trace`：`backend/src/sumika_core/agent/route_trace.py` 写入
+   `logs/route-decision-trace/YYYY-MM-DD*.jsonl`，逐条关联事件边界、候选过滤、证据、排序、
+   选择、确认、派发、去重、重试、取消和终态；每个候选独占一条有界记录；
+3. `run manifest`：固定 Runtime、插件、模型、硬件档位、配置哈希和测试数据版本；
+4. `daily aggregate`：按 capability/adapter/outcome 聚合 count、p50、p95、错误率和成本。
    可通过 `agent.observability.daily` RPC 或
    `python tools/aggregate_agent_day.py --write` 生成 `*.summary.json`；
-4. `evaluation result`：隔离评测的任务级输入摘要、判定器版本、指标和置信区间；
-5. `recommendation`：只读候选结论、证据引用和风险，不包含自动启用动作。
+5. `evaluation result`：隔离评测的任务级输入摘要、判定器版本、指标和置信区间；
+6. `recommendation`：只读候选结论、证据引用和风险，不包含自动启用动作。
 
 原始事件可轮转；聚合结果必须保留其 schema、样本窗口和 manifest 哈希，否则不得参与
 长期趋势。恢复仍使用 Workspace checkpoint 和 SQLite snapshot，不从遥测反推状态。
@@ -56,6 +59,11 @@ ID 只用于同一安装内关联，不编码角色名、仓库路径或用户�
 默认禁止写入 API Key、Cookie、环境变量值、聊天正文、系统提示词、工具参数/结果、
 文件内容、diff 正文、截图、音频和浏览器 DOM。路径只记录 workspace 内相对路径的
 不可逆哈希与文件类型；模型、Provider 和插件使用公开 ID 或本地稳定哈希。
+
+路由 trace 还会把父 Session、turn、dispatch 和 Provider profile 通过每次 Core 启动随机
+salt 转成不可逆哈希。证据只保留引用哈希、类型、可信度、新鲜度和时间；异常只保留错误类或
+稳定错误码。usage 与费用只接受固定数值字段。Writer 不接受 `prompt`、`answer`、`context`、
+`path`、DOM 或任意扩展 payload，因此不能靠调用者“记得脱敏”维持安全。
 
 只有 Developer Mode 下显式创建的诊断包可包含额外结构化元数据，并在生成前列出字段、
 时间范围和大小。诊断包不自动上传，命名 Profile 的认证数据永不进入包内。
@@ -166,9 +174,12 @@ python tools/agent_daily_acceptance.py --browser-smoke --browser-write-smoke `
 观察到 DSH 审批请求。日用脚本不会自动启动或修改 DSH profile，真实人工接管仍需用户在
 隔离 Agent Window 中明确操作。
 
-Core 也提供 `GET /api/agent/observability?day=YYYY-MM-DD&write=true`。这些接口只
-返回聚合计数、耗时和稳定分类；原始 JSONL 是一次性诊断数据，不是 Session、Workspace
-或备份恢复来源。
+Core 也提供 `GET /api/agent/observability?day=YYYY-MM-DD&write=true`，其结果包含路由 trace
+日聚合；`GET /api/agent/route-trace` 和 `agent.route.trace.daily` 可单独读取该聚合。
+该聚合按 Route 汇总候选/选择/终态次数、过滤原因、结果、p50/p95、usage 和按币种分开的费用；
+这些接口不返回原始关联记录。原始 JSONL 是一次性诊断数据，不是 Session、Workspace
+或备份恢复来源。维护 Agent 可以读取本地 trace 分析选择依据，但任何策略修改仍需代码、
+固定评测和用户授权，不能把日志本身当成自动调参命令。
 
 评测记录的最小形状如下（示例只展示元数据和布尔/数值结果，不放请求或响应正文）：
 

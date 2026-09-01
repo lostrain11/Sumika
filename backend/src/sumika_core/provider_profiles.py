@@ -5,7 +5,9 @@ from __future__ import annotations
 import ipaddress
 import hashlib
 import json
+import math
 import re
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -19,6 +21,19 @@ PROFILE_FORMAT = "sumika-provider-profile/v1"
 CREDENTIAL_REVISION_KEY = "credential_revision"
 LEGACY_OLLAMA_PROFILE_ID = "local-ollama"
 LEGACY_OPENAI_PROFILE_ID = "legacy-openai-compatible"
+MODEL_ENTRY_LIMIT = 128
+MODEL_ID_LIMIT = 240
+MODEL_QUALITY_STATES = {"unknown", "basic", "standard", "strong", "premium"}
+MODEL_COST_STATES = {"unknown", "local", "free-limited", "paid-low", "paid-high"}
+MODEL_HEALTH_STATES = {"unknown", "healthy", "ready", "available", "unavailable", "error"}
+PRICING_SOURCE_TYPES = {"direct-official", "new-api", "pinai", "manual"}
+DIRECT_OFFICIAL_TEMPLATE_IDS = {
+    "openai",
+    "openrouter",
+    "deepseek",
+    "siliconflow",
+    "zhipu-bigmodel",
+}
 SENSITIVE_HEADER_NAMES = {
     "authorization",
     "proxy-authorization",
@@ -177,15 +192,44 @@ class ProviderProfileManager:
         )
         return self.public(profile)
 
-    def health(self, profile_id: str, *, allow_chat_probe: bool = False) -> dict[str, Any]:
+    def health(
+        self,
+        profile_id: str,
+        *,
+        allow_chat_probe: bool = False,
+        model_id: str | None = None,
+    ) -> dict[str, Any]:
         profile = self.storage.get_provider_profile(profile_id)
         if profile is None or profile.get("archived_at"):
             raise ProviderProfileError(f"Unknown active provider profile: {profile_id}")
-        if not profile["config"].get("active_base_url") or not profile["config"].get("model"):
+        config = profile["config"] if isinstance(profile.get("config"), dict) else {}
+        selected_model = str(model_id or config.get("model") or "").strip()
+        if not config.get("active_base_url") or not selected_model:
             updated = self.storage.update_provider_profile_state(profile_id, status="draft")
             return {"ok": False, "profile": self.public(updated or profile), "error": "Profile is incomplete"}
-        provider = self.runtime(profile_id)
+        provider = self.runtime(profile_id, model_id=selected_model if model_id is not None else None)
         result = provider.health_check(allow_chat_probe=allow_chat_probe)
+        available_models = result.get("available_models")
+        if isinstance(available_models, list):
+            updated_config = _merge_model_observations(
+                config,
+                [str(item) for item in available_models if isinstance(item, str)],
+                tested_model=selected_model,
+                ok=bool(result.get("ok")),
+            )
+            if updated_config != config:
+                self.storage.update_provider_profile_config(profile_id, updated_config)
+                profile = self.storage.get_provider_profile(profile_id) or profile
+        elif result.get("ok"):
+            updated_config = _merge_model_observations(
+                config,
+                [selected_model],
+                tested_model=selected_model,
+                ok=True,
+            )
+            if updated_config != config:
+                self.storage.update_provider_profile_config(profile_id, updated_config)
+                profile = self.storage.get_provider_profile(profile_id) or profile
         # Passive catalog refreshes must not invalidate a profile that passed
         # an explicit chat probe merely because its gateway omits GET /models.
         # Network/authentication failures still update the profile normally.
@@ -201,16 +245,109 @@ class ProviderProfileManager:
                 "model_catalog": "not-exposed",
                 "profile_id": profile_id,
                 "profile": self.public(profile),
+                "model": selected_model,
             }
         status = "available" if result.get("ok") else "unavailable"
+        # A model-specific probe must not make the whole profile unavailable
+        # when the same endpoint still exposes another healthy model. The
+        # profile status remains the endpoint-level gate; individual routes
+        # use each model row's health_state in the policy layer.
+        if model_id is not None and not result.get("ok") and isinstance(available_models, list):
+            latest = self.storage.get_provider_profile(profile_id) or profile
+            latest_config = latest.get("config") if isinstance(latest.get("config"), dict) else {}
+            has_healthy_model = any(
+                item.get("enabled", True)
+                and str(item.get("health_state") or "").lower() in {"healthy", "ready", "available"}
+                for item in configured_models(latest_config)
+            )
+            if has_healthy_model:
+                status = "available"
         updated = self.storage.update_provider_profile_state(profile_id, status=status)
-        return {**result, "profile_id": profile_id, "profile": self.public(updated or profile)}
+        return {
+            **result,
+            "profile_id": profile_id,
+            "model": selected_model,
+            "profile": self.public(updated or profile),
+        }
 
-    def runtime(self, profile_id: str) -> OpenAICompatibleProvider:
+    def discover_models(self, profile_id: str) -> dict[str, Any]:
+        """Read the provider model directory without sending a chat request."""
+
+        profile = self.storage.get_provider_profile(profile_id)
+        if profile is None or profile.get("archived_at"):
+            raise ProviderProfileError(f"Unknown active provider profile: {profile_id}")
+        config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+        if not str(config.get("active_base_url") or "").strip():
+            raise ProviderProfileError("Profile is incomplete")
+        provider = self.runtime(profile_id)
+        result = provider.list_models()
+        if not result.get("ok"):
+            return {**result, "profile_id": profile_id, "profile": self.public(profile)}
+        discovered = [
+            item for item in result.get("models", [])
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()
+        ]
+        updated_config = _merge_model_observations(
+            config,
+            [str(item["id"]) for item in discovered],
+            tested_model=None,
+            ok=False,
+            mark_observed_healthy=False,
+            metadata_by_id={str(item["id"]): item for item in discovered},
+        )
+        if updated_config != config:
+            self.storage.update_provider_profile_config(profile_id, updated_config)
+            profile = self.storage.get_provider_profile(profile_id) or profile
+        return {
+            **result,
+            "profile_id": profile_id,
+            "profile": self.public(profile),
+            "models": configured_models(profile.get("config") or {}),
+        }
+
+    # Short spelling used by generic capability callers.
+    models = discover_models
+
+    def select_model(self, profile_id: str, model_id: str) -> dict[str, Any]:
+        """Make one discovered model the profile's default for regular chat."""
+
+        profile = self.storage.get_provider_profile(profile_id)
+        if profile is None or profile.get("archived_at"):
+            raise ProviderProfileError(f"Unknown active provider profile: {profile_id}")
+        config = profile.get("config") if isinstance(profile.get("config"), dict) else {}
+        model = str(model_id or "").strip()
+        models = configured_models(config)
+        selected = next((item for item in models if item["id"] == model and item.get("enabled", True)), None)
+        if selected is None:
+            raise ProviderProfileError(f"Unknown or disabled model: {model}")
+        if config.get("model") != model:
+            updated_config = dict(config)
+            updated_config["model"] = model
+            self.storage.update_provider_profile_config(profile_id, updated_config)
+            # A changed default must be explicitly checked again before the
+            # profile can become the active LLM connection.
+            self.storage.update_provider_profile_state(profile_id, status="unavailable")
+        updated = self.storage.get_provider_profile(profile_id) or profile
+        return {"profile_id": profile_id, "model": model, "profile": self.public(updated)}
+
+    def runtime(self, profile_id: str, *, model_id: str | None = None) -> OpenAICompatibleProvider:
         profile = self.storage.get_provider_profile(profile_id)
         if profile is None or profile.get("archived_at"):
             raise ProviderProfileError(f"Unknown active provider profile: {profile_id}")
         config = profile["config"]
+        configured_model = str(config.get("model") or "").strip()
+        model = configured_model
+        if model_id is not None:
+            model = str(model_id).strip()
+            if not model:
+                raise ProviderProfileError("model_id must not be empty")
+            allowed = {
+                item["id"]
+                for item in configured_models(config)
+                if item.get("enabled", True)
+            }
+            if model not in allowed:
+                raise ProviderProfileError(f"Unknown or disabled model: {model}")
         secrets = self._read_secrets(profile)
         headers = dict(config.get("headers") or {})
         headers.update(secrets.get("headers") if isinstance(secrets.get("headers"), dict) else {})
@@ -220,7 +357,7 @@ class ProviderProfileManager:
                 headers[key.removeprefix("header:")] = value
         return OpenAICompatibleProvider(
             base_url=str(config.get("active_base_url") or ""),
-            model=str(config.get("model") or ""),
+            model=model,
             api_key=secrets.get("api_key"),
             timeout=float(config.get("timeout") or 60),
             headers=headers,
@@ -276,6 +413,12 @@ class ProviderProfileManager:
 
     def public(self, profile: dict[str, Any]) -> dict[str, Any]:
         result = {key: value for key, value in profile.items() if key != "credential_ref"}
+        # Expose a normalized model list for legacy rows that predate the
+        # multi-model profile format, without mutating the stored profile.
+        config = result.get("config") if isinstance(result.get("config"), dict) else {}
+        config = dict(config)
+        config.setdefault("models", configured_models(config))
+        result["config"] = config
         result["has_secrets"] = bool(profile.get("secret_fields"))
         result["resolved_processing_location"] = resolve_processing_location(
             str(profile.get("processing_location") or "auto"),
@@ -368,6 +511,12 @@ def _normalize_config(
         if active not in base_urls:
             base_urls.insert(0, active)
     model = str(values.get("model") if "model" in values else existing.get("model", template.get("model", ""))).strip()
+    raw_models = values.get("models")
+    if raw_models is None:
+        raw_models = existing.get("models")
+    models = _normalize_model_entries(raw_models, fallback_model=model)
+    if not model:
+        model = next((item["id"] for item in models if item.get("enabled", True)), "")
     timeout_value = values.get("timeout", existing.get("timeout", 60))
     if isinstance(timeout_value, bool) or not isinstance(timeout_value, (int, float)) or not 1 <= float(timeout_value) <= 300:
         raise ProviderProfileError("timeout must be between 1 and 300 seconds")
@@ -388,16 +537,33 @@ def _normalize_config(
     usage_query = values.get("usage_query", existing.get("usage_query"))
     if usage_query is not None:
         usage_query = _validate_usage_query(usage_query)
+    pricing = values.get("pricing", existing.get("pricing"))
+    if pricing is not None:
+        pricing = _validate_pricing_config(pricing)
+    if pricing and pricing.get("source_type") == "direct-official":
+        template_id = str(template.get("id") or "")
+        template_base_url = str(template.get("base_url") or "")
+        if (
+            template_id not in DIRECT_OFFICIAL_TEMPLATE_IDS
+            or not active
+            or not template_base_url
+            or _url_origin(active) != _url_origin(template_base_url)
+        ):
+            raise ProviderProfileError(
+                "direct-official pricing requires a matching built-in Provider endpoint"
+            )
     return {
         "format": PROFILE_FORMAT,
         "base_urls": base_urls,
         "active_base_url": active,
         "model": model,
+        "models": models,
         "timeout": float(timeout_value),
         "headers": headers,
         "organization": str(values.get("organization", existing.get("organization", ""))).strip(),
         "project": str(values.get("project", existing.get("project", ""))).strip(),
         "usage_query": usage_query,
+        "pricing": pricing,
     }, secrets
 
 
@@ -407,6 +573,15 @@ def _validate_url(value: str) -> None:
         raise ProviderProfileError(f"Invalid HTTP(S) provider URL: {value}")
     if parsed.username or parsed.password:
         raise ProviderProfileError("Provider URLs must not embed credentials")
+
+
+def _url_origin(value: str) -> tuple[str, str, int]:
+    parsed = urlparse(value)
+    return (
+        parsed.scheme.lower(),
+        str(parsed.hostname or "").lower(),
+        parsed.port or (443 if parsed.scheme.lower() == "https" else 80),
+    )
 
 
 def _is_sensitive_header(name: str) -> bool:
@@ -429,6 +604,218 @@ def _validate_usage_query(value: Any) -> dict[str, Any]:
     if not isinstance(fields, dict) or not all(isinstance(key, str) and isinstance(item, str) for key, item in fields.items()):
         raise ProviderProfileError("usage_query fields must map labels to JSON paths")
     return {"enabled": bool(value.get("enabled", False)), "method": method, "url": url, "fields": fields}
+
+
+def _validate_pricing_config(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ProviderProfileError("pricing must be an object")
+    source_type = str(value.get("source_type") or value.get("sourceType") or "").strip().lower()
+    if not source_type:
+        return {}
+    if source_type not in PRICING_SOURCE_TYPES:
+        raise ProviderProfileError("pricing source_type is invalid")
+    billing_group = str(value.get("billing_group") or value.get("billingGroup") or "").strip()
+    if len(billing_group) > 160 or any(character in billing_group for character in "\r\n"):
+        raise ProviderProfileError("pricing billing_group is invalid")
+    public_url = str(value.get("public_url") or value.get("publicUrl") or "").strip()
+    source_url = str(value.get("source_url") or value.get("sourceUrl") or "").strip()
+    for url in (public_url, source_url):
+        if url:
+            _validate_url(url)
+    rates = value.get("rates") if isinstance(value.get("rates"), dict) else {}
+    normalized_rates: dict[str, Any] = {}
+    currency = str(rates.get("currency") or value.get("currency") or "").strip()
+    if currency:
+        if len(currency) > 24 or not all(character.isalnum() or character in "-_" for character in currency):
+            raise ProviderProfileError("pricing currency is invalid")
+        normalized_rates["currency"] = "USD-credit" if currency.casefold() == "usd-credit" else currency.upper()
+    for key in (
+        "input_price_per_million",
+        "output_price_per_million",
+        "cache_read_price_per_million",
+        "cache_write_price_per_million",
+        "request_price",
+    ):
+        raw = rates.get(key, value.get(key))
+        if raw is None or raw == "":
+            continue
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)) or float(raw) < 0:
+            raise ProviderProfileError(f"pricing {key} must be a finite non-negative number")
+        normalized_rates[key] = float(raw)
+    conversion = value.get("cash_conversion") or value.get("cashConversion")
+    normalized_conversion = None
+    if conversion is not None:
+        if not isinstance(conversion, dict):
+            raise ProviderProfileError("pricing cash_conversion must be an object")
+        paid = conversion.get("paid_amount")
+        credited = conversion.get("credited_amount")
+        cash_currency = str(conversion.get("currency") or "").strip().upper()
+        if (
+            isinstance(paid, bool)
+            or not isinstance(paid, (int, float))
+            or not math.isfinite(float(paid))
+            or float(paid) < 0
+            or isinstance(credited, bool)
+            or not isinstance(credited, (int, float))
+            or not math.isfinite(float(credited))
+            or float(credited) <= 0
+            or not cash_currency
+            or len(cash_currency) > 16
+        ):
+            raise ProviderProfileError("pricing cash_conversion is invalid")
+        normalized_conversion = {
+            "paid_amount": float(paid),
+            "credited_amount": float(credited),
+            "currency": cash_currency,
+        }
+    source_version = str(value.get("source_version") or value.get("sourceVersion") or "").strip()
+    if len(source_version) > 160 or any(character in source_version for character in "\r\n"):
+        raise ProviderProfileError("pricing source_version is invalid")
+    return {
+        "source_type": source_type,
+        "billing_group": billing_group,
+        "public_url": public_url,
+        "source_url": source_url,
+        "source_version": source_version,
+        "rates": normalized_rates,
+        "cash_conversion": normalized_conversion,
+    }
+
+
+def configured_models(config: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return a bounded, backward-compatible model list from profile config."""
+
+    value = config if isinstance(config, dict) else {}
+    raw = value.get("models")
+    fallback = str(value.get("model") or "").strip()
+    try:
+        return _normalize_model_entries(raw, fallback_model=fallback)
+    except ProviderProfileError:
+        # Corrupt imported data must not make the catalog endpoint fail.  The
+        # legacy active model remains visible as an unannotated entry.
+        return [{"id": fallback, "name": fallback, "enabled": True}] if fallback else []
+
+
+def _normalize_model_entries(raw: Any, *, fallback_model: str = "") -> list[dict[str, Any]]:
+    """Normalize user/discovery model rows while keeping only safe metadata."""
+
+    values: list[Any]
+    if raw is None:
+        values = []
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)[:MODEL_ENTRY_LIMIT]
+    else:
+        raise ProviderProfileError("models must be an array")
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in values:
+        if isinstance(item, str):
+            model_id = item.strip()
+            row: dict[str, Any] = {}
+        elif isinstance(item, dict):
+            model_id = str(item.get("id") or item.get("model_id") or item.get("modelId") or "").strip()
+            row = item
+        else:
+            raise ProviderProfileError("each model must be a string or object")
+        if not model_id:
+            continue
+        if len(model_id) > MODEL_ID_LIMIT or any(character in model_id for character in "\r\n"):
+            raise ProviderProfileError("model id must be a single line of at most 240 characters")
+        if model_id in seen:
+            continue
+        enabled = row.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ProviderProfileError("model enabled must be boolean")
+        name = str(row.get("name") or model_id).strip()
+        if len(name) > 240 or any(character in name for character in "\r\n"):
+            raise ProviderProfileError("model name is invalid")
+        capabilities = row.get("capabilities", ["chat"])
+        if isinstance(capabilities, str):
+            capabilities = [capabilities]
+        if not isinstance(capabilities, (list, tuple, set)):
+            raise ProviderProfileError("model capabilities must be an array")
+        normalized_capabilities = []
+        for capability in list(capabilities)[:24]:
+            text = str(capability).strip()
+            if text and len(text) <= 80 and all(character not in text for character in "\r\n") and text not in normalized_capabilities:
+                normalized_capabilities.append(text)
+        if not normalized_capabilities:
+            normalized_capabilities = ["chat"]
+        quality = str(row.get("quality_tier") or row.get("qualityTier") or "unknown").strip().lower()
+        if quality not in MODEL_QUALITY_STATES:
+            raise ProviderProfileError("model quality_tier is invalid")
+        cost = str(row.get("cost_class") or row.get("costClass") or "unknown").strip().lower()
+        if cost not in MODEL_COST_STATES:
+            raise ProviderProfileError("model cost_class is invalid")
+        health = str(row.get("health_state") or row.get("healthState") or "unknown").strip().lower()
+        if health not in MODEL_HEALTH_STATES:
+            raise ProviderProfileError("model health_state is invalid")
+        normalized: dict[str, Any] = {
+            "id": model_id,
+            "name": name,
+            "enabled": enabled,
+            "capabilities": normalized_capabilities,
+            "quality_tier": quality,
+            "cost_class": cost,
+            "health_state": health,
+        }
+        for key in ("version", "discovered_at", "last_tested_at", "quota_ref"):
+            value = row.get(key)
+            if isinstance(value, str) and value.strip() and len(value) <= 240 and all(character not in value for character in "\r\n"):
+                normalized[key] = value.strip()
+        seen.add(model_id)
+        result.append(normalized)
+    fallback = str(fallback_model or "").strip()
+    if fallback and fallback not in seen:
+        result.insert(0, {"id": fallback, "name": fallback, "enabled": True, "capabilities": ["chat"], "quality_tier": "unknown", "cost_class": "unknown", "health_state": "unknown"})
+    return result[:MODEL_ENTRY_LIMIT]
+
+
+def _merge_model_observations(
+    config: dict[str, Any],
+    model_ids: list[str],
+    *,
+    tested_model: str | None,
+    ok: bool,
+    mark_observed_healthy: bool = True,
+    metadata_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Merge a provider directory observation without changing user choices."""
+
+    current = configured_models(config)
+    by_id = {item["id"]: dict(item) for item in current}
+    observed = [str(item).strip() for item in model_ids if str(item).strip()][:MODEL_ENTRY_LIMIT]
+    now = datetime.now(timezone.utc).isoformat()
+    for model_id in observed:
+        row = by_id.get(model_id) or {
+            "id": model_id,
+            "name": model_id,
+            "enabled": True,
+            "capabilities": ["chat"],
+            "quality_tier": "unknown",
+            "cost_class": "unknown",
+            "health_state": "unknown",
+        }
+        info = (metadata_by_id or {}).get(model_id) or {}
+        if isinstance(info.get("name"), str) and info["name"].strip():
+            row["name"] = info["name"].strip()[:240]
+        row["discovered_at"] = now
+        if tested_model == model_id:
+            row["last_tested_at"] = now
+            row["health_state"] = "healthy" if ok else "unavailable"
+        elif observed and mark_observed_healthy:
+            row["health_state"] = "healthy"
+        by_id[model_id] = row
+    if tested_model and tested_model in by_id and tested_model not in observed:
+        row = by_id[tested_model]
+        row["last_tested_at"] = now
+        row["health_state"] = "healthy" if ok else "unavailable"
+    merged = [by_id[item["id"]] for item in current if item["id"] in by_id]
+    existing_ids = {row["id"] for row in current}
+    merged.extend(by_id[item] for item in observed if item not in existing_ids)
+    result = dict(config)
+    result["models"] = _normalize_model_entries(merged, fallback_model=str(config.get("model") or ""))
+    return result
 
 
 def _redact_source(value: Any) -> dict[str, Any]:

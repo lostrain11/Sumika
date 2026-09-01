@@ -247,6 +247,10 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
 .agent-routing-decision-heading strong { color: var(--accent-strong); font-size: 10px; }
 .agent-routing-decision-heading span { color: var(--warn); font-size: 9px; }
 .agent-routing-decision p { margin: 6px 0; color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.agent-routing-cost-estimate { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); align-items: baseline; gap: 5px 9px; margin: 8px 0; padding: 7px 8px; border-left: 2px solid var(--accent); background: rgba(9, 15, 17, .36); }
+.agent-routing-cost-estimate span { color: var(--faint); font-size: 8px; }
+.agent-routing-cost-estimate strong { color: var(--text); font-size: 9px; overflow-wrap: anywhere; }
+.agent-routing-cost-estimate small { grid-column: 1 / -1; color: var(--warn); font-size: 8px; }
 .agent-routing-decision > small { display: block; color: var(--faint); font-size: 8px; line-height: 1.4; }
 .agent-routing-decision details { margin-top: 7px; color: var(--faint); font-size: 9px; }
 .agent-routing-decision details ul { margin: 5px 0 0; padding-left: 18px; line-height: 1.5; }
@@ -834,6 +838,41 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
 .provider-drawer-form input, .provider-drawer-form textarea, .provider-import-pane textarea { width: 100%; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); color: var(--text); padding: 9px 10px; font-size: 11px; }
 .provider-drawer-form textarea, .provider-import-pane textarea { resize: vertical; font-family: ui-monospace, monospace; line-height: 1.45; }
 .provider-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.provider-field-hint { color: var(--faint); font-size: 9px; line-height: 1.45; }
+.provider-model-section { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: rgba(255, 255, 255, .02); }
+.provider-model-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
+.provider-model-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.provider-model-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
+.provider-model-list li:first-child { border-top: 0; }
+.provider-model-list strong, .provider-model-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-model-list strong { color: var(--text); font-size: 10px; }
+.provider-model-list small { margin-top: 2px; color: var(--faint); font-size: 9px; }
+.provider-model-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.provider-model-empty { color: var(--faint); font-size: 9px; }
+.route-pricing-panel { background: #171d1f; }
+.route-pricing-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 9px 0; color: var(--faint); font-size: 9px; }
+.route-pricing-notice, .provider-pricing-error { border-left: 2px solid var(--warn); padding: 5px 8px; color: var(--warn); font-size: 9px; }
+.route-pricing-list { display: grid; }
+.route-pricing-row { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(150px, .7fr); gap: 12px; min-width: 0; padding: 9px 0; border-top: 1px solid var(--line); }
+.route-pricing-row > div { min-width: 0; }
+.route-pricing-row strong, .route-pricing-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-pricing-row strong { color: var(--text); font-size: 9px; }
+.route-pricing-row small { margin-top: 3px; color: var(--faint); font-size: 8px; }
+.provider-pricing-config { display: grid; gap: 10px; margin-top: 5px; padding-top: 12px; border-top: 1px solid var(--line); }
+.provider-pricing-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.provider-pricing-heading strong { color: var(--text); font-size: 11px; }
+.provider-pricing-heading small { color: var(--faint); font-size: 8px; }
+.provider-pricing-rate-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.provider-pricing-evidence { display: grid; gap: 8px; margin-top: 10px; padding-top: 11px; border-top: 1px solid var(--line); }
+.provider-pricing-evidence ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.provider-pricing-evidence li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
+.provider-pricing-evidence li:first-child { border-top: 0; }
+.provider-pricing-evidence strong, .provider-pricing-evidence small { display: block; }
+.provider-pricing-evidence strong { color: var(--text); font-size: 9px; }
+.provider-pricing-evidence small { margin-top: 2px; color: var(--faint); font-size: 8px; }
+.provider-pricing-evidence li > span:last-child { text-align: right; }
+.route-budget-impact { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; margin: 7px 0; padding: 6px 8px; border-left: 2px solid var(--accent); color: var(--muted); background: rgba(9, 15, 17, .32); font-size: 8px; }
+.route-budget-impact small { color: var(--faint); }
 .provider-clear-secret { grid-template-columns: auto minmax(0, 1fr); align-items: center; }
 .provider-clear-secret input { width: auto; accent-color: var(--accent); }
 .provider-advanced { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
@@ -878,6 +917,9 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
   .llm-module-card { grid-column: 1 / -1; }
   .provider-drawer { width: min(520px, 100vw); }
   .provider-form-grid { grid-template-columns: 1fr; }
+  .provider-pricing-rate-grid, .route-pricing-row, .agent-routing-cost-estimate { grid-template-columns: 1fr; }
+  .route-pricing-summary { align-items: flex-start; flex-direction: column; }
+  .agent-routing-cost-estimate small { grid-column: 1; }
   .provider-drawer-actions { grid-template-columns: 1fr 1fr; }
   .provider-drawer-actions > span { display: none; }
   .web-chat-actions { grid-template-columns: 1fr 1fr; }

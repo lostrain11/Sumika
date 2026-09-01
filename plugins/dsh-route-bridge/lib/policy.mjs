@@ -157,7 +157,7 @@ const REQUEST_FIELDS = Object.freeze([
   "auto_dispatch", "autoDispatch", "quota_consent", "quotaConsent", "confirmed", "approved", "metadata",
   "question", "task_text", "taskText", "context_refs", "contextRefs", "decision_kind", "decisionKind",
   "max_members", "maxMembers", "route_constraints", "routeConstraints", "continuation_of", "continuationOf",
-  "consultation_id", "consultationId"
+  "consultation_id", "consultationId", "trace_id", "traceId"
 ]);
 
 function copyFields(source, fields = REQUEST_FIELDS) {
@@ -199,13 +199,17 @@ function normalizeRequest(raw, exec, { consultation = false } = {}) {
     result.trigger_event = event;
     delete result.triggerEvent;
   }
+  if (result.trace_id !== undefined || result.traceId !== undefined) {
+    result.trace_id = isIdentifier(result.trace_id ?? result.traceId, { field: "trace_id" });
+    delete result.traceId;
+  }
   if (consultation) {
     result.question = String(result.question ?? result.task_text ?? result.taskText ?? "").trim();
     if (!result.question || result.question.length > 16_000) throw new Error("question must contain 1-16000 characters");
     if (looksLikeSecret(result.question)) throw new Error("sensitive-context");
     result.decision_kind = String(result.decision_kind ?? result.decisionKind ?? "small-answer").trim().toLowerCase();
     if (!["brainstorm", "plan-review", "fact-check", "counterexample", "small-answer"].includes(result.decision_kind)) throw new Error("decision_kind is invalid");
-    result.max_members = boundedInteger(result.max_members ?? result.maxMembers, "max_members", 3, 1, 3);
+    result.max_members = boundedInteger(result.max_members ?? result.maxMembers, "max_members", 3, 1, 5);
     if (result.route_constraints !== undefined || result.routeConstraints !== undefined) {
       result.route_constraints = validateContext(result.route_constraints ?? result.routeConstraints, "route_constraints");
       delete result.routeConstraints;
@@ -230,14 +234,14 @@ export function buildRoutePayload(toolName, args = {}, exec = {}) {
         refresh: boolean(args.refresh, "refresh", false)
       };
     case "sumika_route_replan": {
-      const source = args.request && typeof args.request === "object" ? { ...args.request, ...copyFields(args, ["parent_session_id", "parentSessionId", "parent_turn_id", "parentTurnId", "session_id", "sessionId"]) } : args;
+      const source = args.request && typeof args.request === "object" ? { ...args.request, ...copyFields(args, ["parent_session_id", "parentSessionId", "parent_turn_id", "parentTurnId", "session_id", "sessionId", "trace_id", "traceId"]) } : args;
       const payload = normalizeRequest(source, exec);
       if (args.dispatch_selected !== undefined || args.dispatchSelected !== undefined) payload.dispatch_selected = boolean(args.dispatch_selected ?? args.dispatchSelected, "dispatch_selected");
       if (args.refresh !== undefined) payload.refresh = boolean(args.refresh, "refresh");
       return payload;
     }
     case "sumika_route_dispatch": {
-      const source = args.dispatch && typeof args.dispatch === "object" ? { ...args.dispatch, ...copyFields(args, ["parent_session_id", "parentSessionId", "parent_turn_id", "parentTurnId", "session_id", "sessionId"]) } : args;
+      const source = args.dispatch && typeof args.dispatch === "object" ? { ...args.dispatch, ...copyFields(args, ["parent_session_id", "parentSessionId", "parent_turn_id", "parentTurnId", "session_id", "sessionId", "trace_id", "traceId"]) } : args;
       const payload = normalizeRequest(source, exec);
       payload.dispatch_id = isIdentifier(source.dispatch_id ?? source.dispatchId, { field: "dispatch_id", required: false }) || undefined;
       payload.route_id = isIdentifier(source.route_id ?? source.routeId, { field: "route_id" });

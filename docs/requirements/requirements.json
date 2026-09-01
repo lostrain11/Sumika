@@ -195,6 +195,19 @@
       "status_ref": "status-matrix:provider-profiles"
     },
     {
+      "id": "PROVIDER-006",
+      "category": "provider",
+      "statement": "One protected Provider profile may discover and enable multiple models, with each model exposed as an independent Route that shares the credential and can run in parallel within provider limits.",
+      "acceptance": ["Authenticated model discovery merges changes without overwriting user enablement", "Parallel model Routes record health and usage independently and do not require duplicate API keys"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-MODEL-005"],
+      "implementation_refs": ["../../backend/src/sumika_core/provider_profiles.py", "../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/agent/runtime_workers.py", "../../frontend/main.js"],
+      "test_refs": ["../../backend/tests/test_provider_profiles.py", "../../backend/tests/test_model_policy.py", "../../backend/tests/test_dynamic_route_supervisor.py"],
+      "status_ref": "status-matrix:provider-profiles"
+    },
+    {
       "id": "AGENT-001",
       "category": "runtime",
       "statement": "DSH is the default Harness adapter, while Core, UI, Tauri, Avatar, Browser, and Workspace remain runtime-neutral capability boundaries.",
@@ -369,6 +382,19 @@
       "status_ref": "status-matrix:browser-runtime"
     },
     {
+      "id": "BROWSER-002",
+      "category": "browser",
+      "statement": "Authorized named web-chat profiles can act as independent WebWorker consultation members, with up to five distinct providers executed in bounded 3 plus 2 waves and all results treated as untrusted advice.",
+      "acceptance": ["Profiles are unroutable until login, page health, text permission, and unknown-quota consent are complete", "Partial and total failure, lease conflicts, and human takeover remain explicit without reading personal browser tabs or credentials"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-BROWSER-002"],
+      "implementation_refs": ["../../backend/src/sumika_core/browser/web_chat.py", "../../backend/src/sumika_core/agent/supervisor.py", "../../frontend/main.js", "../../docs/integrations/browser-runtime.md"],
+      "test_refs": ["../../backend/tests/test_web_chat.py", "../../backend/tests/test_dynamic_route_supervisor.py", "../../frontend/tests/smoke.spec.js"],
+      "status_ref": "status-matrix:web-chat-runtime"
+    },
+    {
       "id": "SEC-001",
       "category": "security",
       "statement": "Existing data and archives are preserved; destructive deletion, force overwrite, global runtime changes, and unapproved external writes are prohibited.",
@@ -405,6 +431,19 @@
       "excerpt_refs": ["EX-SEC-001"],
       "implementation_refs": ["../../backend/src/sumika_core/observability.py", "../../backend/src/sumika_core/model_evaluation.py", "../../tools/fixtures/model-evaluation-v1.json", "../../docs/architecture/agent-observability.md"],
       "test_refs": ["../../backend/tests/test_agent_observability.py", "../../backend/tests/test_model_evaluation.py", "../../tools/test_agent_daily_acceptance.py"],
+      "status_ref": "status-matrix:agent-observability"
+    },
+    {
+      "id": "OBS-002",
+      "category": "observability",
+      "statement": "Every dynamic route decision records a bounded content-free trace of boundaries, candidate gates, evidence freshness, ordering, selection, confirmation, dispatch, retry, cancellation, usage, cost, and final outcome for later policy analysis.",
+      "acceptance": ["Candidate and lifecycle records can be correlated with run-salted hashes without storing prompts, answers, code, DOM, paths, tool payloads, or credentials", "Trace analysis can propose a tested policy change but cannot alter routing, quality, budgets, or authorization automatically"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-OBS-003"],
+      "implementation_refs": ["../../backend/src/sumika_core/agent/route_trace.py", "../../backend/src/sumika_core/agent/supervisor.py", "../../backend/src/sumika_core/server.py", "../../docs/architecture/agent-observability.md"],
+      "test_refs": ["../../backend/tests/test_route_decision_trace.py", "../../backend/tests/test_observability_server.py"],
       "status_ref": "status-matrix:agent-observability"
     },
     {
@@ -562,6 +601,19 @@
       "implementation_refs": ["../../backend/src/sumika_core/observability.py", "../../docs/architecture/agent-observability.md"],
       "test_refs": ["../../backend/tests/test_agent_observability.py"],
       "status_ref": "status-matrix:agent-observability"
+    },
+    {
+      "id": "MODEL-011",
+      "category": "model-policy",
+      "statement": "Pricing evidence is isolated by provider profile, model, and billing group, and separately reports provider-side charges and user-entered cash conversion without applying official prices to relay routes.",
+      "acceptance": ["Direct Official, New API, PinAI, and Manual sources produce versioned snapshots or explicit unknown results", "Unsupported expressions, unknown groups, and missing conversion rates never produce false precision or execute remote code"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-MODEL-006"],
+      "implementation_refs": ["../../backend/src/sumika_core/route_pricing.py", "../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/provider_profiles.py", "../../frontend/main.js", "../../docs/requirements/model-policy.md"],
+      "test_refs": ["../../backend/tests/test_route_pricing.py", "../../backend/tests/test_model_policy.py", "../../backend/tests/test_provider_profiles.py"],
+      "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MULTI-001",

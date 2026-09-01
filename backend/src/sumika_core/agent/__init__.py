@@ -42,6 +42,7 @@ from .runtime_workers import (
     ProviderProfileWorker,
     ZCodeExternalHarnessWorker,
 )
+from .route_trace import ROUTE_TRACE_SCHEMA, RouteDecisionTrace
 
 if TYPE_CHECKING:
     from .adapters.dsh.config import DSHRuntimeConfig
@@ -114,4 +115,6 @@ __all__ = [
     "LegacyWebWorker",
     "NativeRuntimeWorker",
     "ZCodeExternalHarnessWorker",
+    "ROUTE_TRACE_SCHEMA",
+    "RouteDecisionTrace",
 ]

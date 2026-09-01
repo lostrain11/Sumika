@@ -67,7 +67,8 @@ OTP、验证码和疑似凭据字段即使收到批准，也只返回 `requires_
 
 网页聊天是建立在 `BrowserRuntime` 上的通用 Provider 投影，不是另一个 API
 客户端，也不会把浏览器 Cookie 转成 API Key。当前协议标识为 `web-chat/v1`，内置
-三个可编辑模板：`deepseek-web`、`chatgpt-web` 和 `zhipu-web`；`custom` 模板允许
+六个可编辑模板：`deepseek-web`、`chatgpt-web`、`zhipu-web`、`qwen-web`、
+`kimi-web` 和 `doubao-web`；`custom` 模板允许
 用户为其他网页聊天站点填写域名、聊天 URL、输入/发送/回复 CSS 选择器和有限的文本
 标记。选择器只接受声明式 CSS 子集，拒绝 `javascript:`、`data:`、换行和任意脚本。
 
@@ -100,6 +101,13 @@ Sumika 猜测新页面结构。
 真实账号登录、人工接管和长期网页端额度来源不由自动化测试代替。适配器只复用
 BrowserSkill 的公开 DOM/快照边界；未来替换 BrowserSkill 或 Harness 时，保留档案
 协议和策略层即可重写传输适配器。
+
+网页档案也可作为 `consultation-panel` 成员。一次咨询最多选择五个不同 Provider，同一
+Provider 不重复占位；Supervisor 最多并发三个 Worker，因此五成员按 `3 + 2` 两批执行。
+成员彼此看不到其他回答，部分失败会保留成功结果，全部失败返回明确错误。所有结果标记为
+`UNTRUSTED_WEB_RESULT`，只能由主 Agent 综合，不能直接触发代码或外部操作。网页额度保持
+`unknown`；只有完成 Profile 级普通文本咨询授权后才不逐次确认，登录、验证码、付费提示和
+人工接管仍会暂停。
 
 ## 命名 Profile 与租约
 

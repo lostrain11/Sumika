@@ -118,7 +118,15 @@ class WebChatRuntimeTests(unittest.TestCase):
         registry = WebChatAdapterRegistry()
         self.assertEqual(
             {item["id"] for item in registry.list()},
-            {"deepseek-web", "chatgpt-web", "zhipu-web", "custom"},
+            {
+                "deepseek-web",
+                "chatgpt-web",
+                "zhipu-web",
+                "qwen-web",
+                "kimi-web",
+                "doubao-web",
+                "custom",
+            },
         )
         spec = registry.resolve(
             "custom",

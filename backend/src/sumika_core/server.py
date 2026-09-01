@@ -48,6 +48,7 @@ from .agent.supervisor import (
     SupervisorValidationError,
     WorkerRegistry,
 )
+from .agent.route_trace import RouteDecisionTrace
 from .avatar import AvatarError, AvatarManager
 from .capabilities import CapabilityCatalog, CapabilityCatalogError
 from .browser import (
@@ -317,6 +318,7 @@ class CoreApplication:
         # product audit events.  It stores only bounded, content-independent
         # receipts for offline maintenance analysis.
         self.observability = AgentObservability(self.configured_data_dir, logger=self.logger)
+        self.route_trace = RouteDecisionTrace(self.configured_data_dir, logger=self.logger)
         self._closed = False
         self.started_at = time.monotonic()
         self.logger.info("core initializing data_dir=%s", configured_dir)
@@ -1030,6 +1032,7 @@ class CoreApplication:
             model_router=getattr(self.model_policy, "router", None),
             storage=self.storage,
             event_sink=self._on_supervisor_event,
+            trace_sink=self.route_trace,
             logger=self.logger,
         )
         # Build profile/web projections only.  This deliberately avoids the
@@ -1467,6 +1470,7 @@ class CoreApplication:
                 worker = ProviderProfileWorker(
                     self.provider_profiles,
                     route.provider_profile_id,
+                    pricing=self.model_policy.pricing,
                     worker_id=worker_id,
                 )
                 self.route_supervisor.register_worker(worker_id, worker)
@@ -2307,6 +2311,23 @@ class CoreApplication:
                 )
             except ModelPolicyError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "model.policy.pricing":
+            raw_refresh = params.get("refresh", False)
+            if not isinstance(raw_refresh, bool):
+                raise JsonRpcError(-32602, "refresh must be a boolean")
+            profile_id = params.get("providerProfileId", params.get("provider_profile_id"))
+            model_id = params.get("modelId", params.get("model_id"))
+            for name, value in (("provider_profile_id", profile_id), ("model_id", model_id)):
+                if value is not None and (not isinstance(value, str) or not value.strip()):
+                    raise JsonRpcError(-32602, f"{name} must be non-empty text")
+            try:
+                return self.model_policy.pricing_catalog(
+                    refresh=raw_refresh,
+                    provider_profile_id=profile_id.strip() if isinstance(profile_id, str) else None,
+                    model_id=model_id.strip() if isinstance(model_id, str) else None,
+                )
+            except (ModelPolicyError, ValueError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
         if method == "capability.catalog":
             raw_refresh = params.get("refresh", False)
             if not isinstance(raw_refresh, bool):
@@ -2609,7 +2630,18 @@ class CoreApplication:
             day = params.get("day") if isinstance(params, dict) else None
             write = bool(params.get("write")) if isinstance(params, dict) else False
             try:
-                return self.observability.write_daily_summary(day) if write else self.observability.aggregate(day)
+                report = self.observability.write_daily_summary(day) if write else self.observability.aggregate(day)
+                report["route_decision_trace"] = self.route_trace.write_daily_summary(day) if write else self.route_trace.aggregate(day)
+                return report
+            except ValueError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+        if method == "agent.route.trace.status":
+            return self.route_trace.status()
+        if method == "agent.route.trace.daily":
+            day = params.get("day") if isinstance(params, dict) else None
+            write = bool(params.get("write")) if isinstance(params, dict) else False
+            try:
+                return self.route_trace.write_daily_summary(day) if write else self.route_trace.aggregate(day)
             except ValueError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
         if method == "agent.acceptance.evidence":
@@ -4063,6 +4095,7 @@ class CoreApplication:
                     params,
                     trigger_event=params.get("trigger_event") or params.get("triggerEvent"),
                     dispatch_selected=params.get("dispatch_selected") if isinstance(params.get("dispatch_selected"), bool) else params.get("dispatchSelected") if isinstance(params.get("dispatchSelected"), bool) else None,
+                    trace_id=params.get("trace_id") or params.get("traceId"),
                 )
             except (RouteValidationError, SupervisorError, ValueError, TypeError) as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
@@ -4103,6 +4136,7 @@ class CoreApplication:
                         raw,
                         route_id=route_id or None,
                         wait=bool(params.get("wait")),
+                        trace_id=params.get("trace_id") or params.get("traceId"),
                     )
                 except (RouteValidationError, SupervisorError, ValueError, TypeError) as exc:
                     raise JsonRpcError(-32602, str(exc)) from exc
@@ -4988,11 +5022,84 @@ class CoreApplication:
                     {"profile_id": profile["id"], "adapter_id": profile["adapter_id"], "status": profile["status"]},
                 )
             )
+            try:
+                self._refresh_route_supervisor_catalog(refresh=False)
+            except Exception as exc:
+                self.logger.info(
+                    "route catalog refresh after provider save failed error_type=%s",
+                    type(exc).__name__,
+                )
             return profile
+        if method == "provider.profile.models":
+            profile_id = str(params.get("profile_id") or params.get("id") or "")
+            discover = params.get("discover", True)
+            if type(discover) is not bool:
+                raise JsonRpcError(-32602, "discover must be boolean")
+            try:
+                if discover:
+                    result = self.provider_profiles.discover_models(profile_id)
+                else:
+                    profile = self.provider_profiles.get(profile_id)
+                    result = {
+                        "ok": True,
+                        "status": "available",
+                        "profile_id": profile_id,
+                        "profile": profile,
+                        "models": (profile.get("config") or {}).get("models", []),
+                    }
+            except ProviderProfileError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            try:
+                self._refresh_route_supervisor_catalog(refresh=False)
+            except Exception as exc:
+                self.logger.info(
+                    "route catalog refresh after model discovery failed error_type=%s",
+                    type(exc).__name__,
+                )
+            self.events.publish(
+                EventEnvelope(
+                    "provider.profile.models",
+                    {
+                        "profile_id": profile_id,
+                        "ok": bool(result.get("ok")),
+                        "model_count": len(result.get("models", [])) if isinstance(result.get("models"), list) else 0,
+                        "discovered": discover,
+                    },
+                )
+            )
+            return result
+        if method == "provider.profile.model.select":
+            profile_id = str(params.get("profile_id") or params.get("id") or "")
+            model_id = str(params.get("model_id") or params.get("modelId") or "")
+            try:
+                result = self.provider_profiles.select_model(profile_id, model_id)
+            except ProviderProfileError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            try:
+                self._refresh_route_supervisor_catalog(refresh=False)
+            except Exception as exc:
+                self.logger.info(
+                    "route catalog refresh after model selection failed error_type=%s",
+                    type(exc).__name__,
+                )
+            self.events.publish(
+                EventEnvelope(
+                    "provider.profile.model.selected",
+                    {"profile_id": profile_id, "model_id": model_id},
+                )
+            )
+            return result
         if method == "provider.profile.health":
             profile_id = str(params.get("profile_id") or params.get("id") or "")
+            model_id = params.get("model_id") or params.get("modelId")
+            if model_id is not None and not isinstance(model_id, str):
+                raise JsonRpcError(-32602, "model_id must be text")
             try:
-                result = self.provider_profiles.health(profile_id, allow_chat_probe=True)
+                result = self.provider_profiles.health(
+                    profile_id,
+                    allow_chat_probe=True,
+                    model_id=model_id,
+                )
             except ProviderProfileError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
             self.events.publish(
@@ -5001,6 +5108,13 @@ class CoreApplication:
                     {"profile_id": profile_id, "ok": bool(result.get("ok")), "status": result.get("profile", {}).get("status")},
                 )
             )
+            try:
+                self._refresh_route_supervisor_catalog(refresh=False)
+            except Exception as exc:
+                self.logger.info(
+                    "route catalog refresh after provider health failed error_type=%s",
+                    type(exc).__name__,
+                )
             return result
         if method == "provider.profile.activate":
             profile_id = str(params.get("profile_id") or params.get("id") or "")
@@ -6472,6 +6586,11 @@ class CoreApplication:
                 self.observability.write_daily_summary()
             except Exception as error:
                 self.logger.warning("agent observability close summary failed error_type=%s", type(error).__name__)
+            try:
+                self.route_trace.write_daily_summary()
+            except Exception as error:
+                self.logger.warning("route decision trace close summary failed error_type=%s", type(error).__name__)
+            self.route_trace.close()
             self.observability.close()
             self.logger.info("core shutdown complete")
         finally:
@@ -6502,6 +6621,7 @@ class CoreApplication:
             "workspace_checkpoint_count": len(self.workspace.list_checkpoints()["checkpoints"]),
             "evolution_registry": self.evolution_registry.check(),
             "agent_observability": self.observability.status(),
+            "route_decision_trace": self.route_trace.status(),
             "model_policy": self._model_policy_diagnostics(),
             "capabilities": self.capabilities.summary(),
         }
@@ -6568,6 +6688,22 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
                 request["sessionId"] = session_id
             self._send_json(self.application.rpc("model.policy.catalog", request))
             return
+        if parsed.path == "/api/model-policy/pricing":
+            query = parse_qs(parsed.query)
+            request = {
+                "refresh": (query.get("refresh") or ["false"])[0].lower() == "true",
+            }
+            profile_id = (query.get("provider_profile_id") or [None])[0]
+            model_id = (query.get("model_id") or [None])[0]
+            if profile_id:
+                request["providerProfileId"] = profile_id
+            if model_id:
+                request["modelId"] = model_id
+            try:
+                self._send_json(self.application.rpc("model.policy.pricing", request))
+            except JsonRpcError as exc:
+                self._send_json({"error": exc.message, "code": exc.code}, HTTPStatus.BAD_REQUEST)
+            return
         if parsed.path == "/api/capabilities":
             query = parse_qs(parsed.query)
             refresh = (query.get("refresh") or ["false"])[0].lower() == "true"
@@ -6607,6 +6743,12 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             day = (query.get("day") or [None])[0]
             write = (query.get("write") or ["false"])[0].lower() == "true"
             self._send_json(self.application.rpc("agent.observability.daily", {"day": day, "write": write}))
+            return
+        if parsed.path == "/api/agent/route-trace":
+            query = parse_qs(parsed.query)
+            day = (query.get("day") or [None])[0]
+            write = (query.get("write") or ["false"])[0].lower() == "true"
+            self._send_json(self.application.rpc("agent.route.trace.daily", {"day": day, "write": write}))
             return
         if parsed.path == "/api/agent/provider":
             self._send_json(self.application.rpc("agent.provider.status", {}))

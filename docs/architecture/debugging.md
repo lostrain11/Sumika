@@ -110,6 +110,11 @@ contains bounded lifecycle dimensions, opaque correlation hashes, timings,
 outcomes, and optional numeric usage counters. It deliberately excludes
 prompts, model output, tool arguments/results, file contents, DOM, cookies,
 credentials, and raw exception messages. Files are disposable and size-rotated.
+Dynamic routing additionally writes `route-decision-trace/v1` under
+`logs/route-decision-trace/`. It records one bounded row per candidate plus
+decision/confirmation/dispatch/retry/cancel/terminal rows, including evidence
+freshness, reason codes, usage and cost receipts. Session, turn, dispatch and
+profile identities are run-salted hashes; task and result content are not accepted.
 Generate a UTC-day summary with:
 
 ```powershell
@@ -117,7 +122,8 @@ python tools/aggregate_agent_day.py --write
 ```
 
 The same report is available from `agent.observability.daily` or
-`GET /api/agent/observability`. Missing or malformed lines are counted as
+`GET /api/agent/observability`; route-only aggregates also use
+`agent.route.trace.daily` or `GET /api/agent/route-trace`. Missing or malformed lines are counted as
 invalid instead of stopping the rest of the day's aggregation. This stream is
 intended for the maintenance Agent to compare bounded cohorts; it must not be
 used to auto-enable a plugin or alter a Provider without the existing approval

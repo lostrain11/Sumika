@@ -1,0 +1,69 @@
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "enabled": true,
+    "items": [
+      {
+        "provider": "fixture",
+        "canonical_model": "fixture-model",
+        "display_name": "Fixture Model",
+        "pricing": {
+          "source": "fixture",
+          "pricing_unit": "1M Token",
+          "input_price_per_million": 1.0,
+          "output_price_per_million": 4.0,
+          "cache_write_price_per_million": 1.25,
+          "cache_read_price_per_million": 0.1,
+          "segments": [
+            {
+              "key": "standard:0:0-128000",
+              "context_label": "0-128K",
+              "min_tokens": 0,
+              "max_tokens": 128000,
+              "input_price_per_million": 1.0,
+              "output_price_per_million": 4.0,
+              "cache_write_price_per_million": 1.25,
+              "cache_read_price_per_million": 0.1
+            }
+          ]
+        },
+        "groups": [
+          {
+            "group_key": "fixture|fixture-model|id:7",
+            "group_id": 7,
+            "group_name": "低价池",
+            "rate_multiplier": 0.5,
+            "actual_price_per_million_1h": 0.42,
+            "avg_first_token_ms_3m": 680,
+            "output_speed_tokens_per_second_3m": 52.5,
+            "configured_pricing": {
+              "source": "channel",
+              "pricing_unit": "1M Token",
+              "input_price_per_million": 0.5,
+              "output_price_per_million": 2.0,
+              "cache_write_price_per_million": 0.625,
+              "cache_read_price_per_million": 0.05
+            }
+          },
+          {
+            "group_key": "fixture|fixture-model|id:9",
+            "group_id": 9,
+            "group_name": "稳定池",
+            "rate_multiplier": 1.0,
+            "actual_price_per_million_1h": 0.91,
+            "configured_pricing": {
+              "source": "channel",
+              "pricing_unit": "1M Token",
+              "input_price_per_million": 1.0,
+              "output_price_per_million": 4.0,
+              "cache_write_price_per_million": 1.25,
+              "cache_read_price_per_million": 0.1
+            }
+          }
+        ],
+        "last_seen_at": "2026-09-01T00:00:00+00:00"
+      }
+    ]
+  }
+}

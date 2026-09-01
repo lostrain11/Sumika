@@ -1379,6 +1379,23 @@ class Storage:
             )
         return self.get_provider_profile(profile_id)
 
+    def update_provider_profile_config(
+        self,
+        profile_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Persist bounded non-secret provider configuration observations."""
+
+        if not isinstance(config, dict):
+            raise TypeError("provider profile config must be an object")
+        now = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE provider_profiles SET config_json=?, updated_at=? WHERE id=?",
+                (json.dumps(config, ensure_ascii=False, sort_keys=True), now, profile_id),
+            )
+        return self.get_provider_profile(profile_id)
+
     @staticmethod
     def _provider_profile_row(row: sqlite3.Row) -> dict[str, Any]:
         value = dict(row)

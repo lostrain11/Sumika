@@ -1,0 +1,32 @@
+{
+  "success": true,
+  "pricing_version": "fixture-pricing-v1",
+  "group_ratio": {
+    "auto": 1.0,
+    "经济组": 0.5,
+    "稳定组": 1.0
+  },
+  "data": [
+    {
+      "model_name": "ratio-model",
+      "quota_type": 0,
+      "model_ratio": 1.0,
+      "completion_ratio": 2.0,
+      "cache_ratio": 0.1,
+      "create_cache_ratio": 1.25,
+      "enable_groups": ["经济组", "稳定组"],
+      "supported_endpoint_types": ["openai"]
+    },
+    {
+      "model_name": "dynamic-model",
+      "quota_type": 0,
+      "model_ratio": 1.0,
+      "completion_ratio": 1.0,
+      "cache_ratio": 0.1,
+      "enable_groups": ["经济组"],
+      "supported_endpoint_types": ["openai"],
+      "billing_mode": "tiered_expr",
+      "billing_expr": "len <= 32000 ? tier(\"short\", p * 0.2 + c * 0.8 + cr * 0.04) : tier(\"long\", p * 0.6 + c * 2.4 + cr * 0.12)"
+    }
+  ]
+}

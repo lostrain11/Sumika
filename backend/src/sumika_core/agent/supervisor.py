@@ -171,6 +171,107 @@ def _safe_context(value: Any, *, budget: int = 28_000) -> Any:
         raise SupervisorValidationError(str(exc)) from exc
 
 
+_USAGE_METRICS = frozenset(
+    {
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "cache_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "input_units",
+        "output_units",
+        "cache_units",
+        "request_count",
+    }
+)
+
+
+def _safe_metric_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not (0 <= number <= 10**15):
+        return None
+    return int(number) if number.is_integer() else round(number, 9)
+
+
+def _safe_usage_metrics(value: Any) -> dict[str, int | float]:
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, int | float] = {}
+    for key in _USAGE_METRICS:
+        number = _safe_metric_number(value.get(key))
+        if number is not None:
+            result[key] = number
+    return result
+
+
+def _safe_budget_impact(value: Any) -> dict[str, Any]:
+    """Keep only numeric usage and bounded pricing receipt metadata."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    usage = _safe_usage_metrics(value.get("usage"))
+    if usage:
+        result["usage"] = usage
+    receipt_value = value.get("charge_receipt")
+    if isinstance(receipt_value, Mapping):
+        receipt_usage = _safe_usage_metrics(receipt_value.get("usage"))
+        receipt_source = {
+            key: receipt_value.get(key)
+            for key in (
+                "schema",
+                "receipt_id",
+                "route_id",
+                "pricing_ref",
+                "billing_group",
+                "provider_charge",
+                "provider_currency",
+                "cash_charge",
+                "cash_currency",
+                "evidence_level",
+                "attribution",
+                "observed_at",
+            )
+            if receipt_value.get(key) is not None
+        }
+        receipt = _safe_context(receipt_source, budget=1_000)
+        if isinstance(receipt, dict):
+            if receipt_usage:
+                receipt["usage"] = receipt_usage
+            result["charge_receipt"] = receipt
+    estimate = value.get("cost_estimate")
+    if isinstance(estimate, Mapping):
+        estimate_source = {
+            key: estimate.get(key)
+            for key in (
+                "schema",
+                "route_id",
+                "status",
+                "pricing_refs",
+                "billing_groups",
+                "provider_currency",
+                "provider_charge_min",
+                "provider_charge_max",
+                "cash_currency",
+                "cash_min",
+                "cash_max",
+                "unknown_reasons",
+            )
+            if estimate.get(key) is not None
+        }
+        safe_estimate = _safe_context(estimate_source, budget=1_000)
+        if isinstance(safe_estimate, dict):
+            result["cost_estimate"] = safe_estimate
+    for key in ("estimated_cost", "quota_units"):
+        number = _safe_metric_number(value.get(key))
+        if number is not None:
+            result[key] = number
+    return result
+
+
 def _safe_question(value: Any, *, limit: int = 16_000) -> str:
     if not isinstance(value, str):
         raise SupervisorValidationError("question must be text")
@@ -1191,7 +1292,7 @@ class DynamicSubtaskResult:
         object.__setattr__(self, "possibly_sent", possibly_sent)
         object.__setattr__(self, "retryable", retryable and not possibly_sent)
         object.__setattr__(self, "untrusted_external", _strict_bool(self.untrusted_external, "untrusted_external"))
-        object.__setattr__(self, "budget_impact", _safe_context(self.budget_impact, budget=1_000) if isinstance(self.budget_impact, Mapping) else {})
+        object.__setattr__(self, "budget_impact", _safe_budget_impact(self.budget_impact))
 
     @classmethod
     def from_value(cls, value: Any, dispatch: DynamicSubtaskDispatch, *, latency_ms: float | None = None) -> "DynamicSubtaskResult":
@@ -1441,6 +1542,7 @@ class _Run:
     dispatch: DynamicSubtaskDispatch
     route: RuntimeRouteDescriptor
     worker: Any | None
+    trace_id: str = ""
     status: str = "queued"
     created_at: str = field(default_factory=_now)
     started_at: str | None = None
@@ -1457,6 +1559,7 @@ class _Run:
     mailbox_acknowledged: bool = False
     finalized: bool = False
     terminal_event_emitted: bool = False
+    completion_event: threading.Event = field(default_factory=threading.Event)
 
 
 class DynamicRouteSupervisor:
@@ -1476,9 +1579,10 @@ class DynamicRouteSupervisor:
         storage: Any = None,
         metadata_sink: Callable[[dict[str, Any]], Any] | None = None,
         event_sink: Callable[[dict[str, Any]], Any] | None = None,
+        trace_sink: Any = None,
         logger: Any = None,
         max_concurrent: int = 3,
-        max_dispatches_per_turn: int = 4,
+        max_dispatches_per_turn: int = 6,
         max_depth: int = 1,
         max_workers: int | None = None,
     ) -> None:
@@ -1492,9 +1596,10 @@ class DynamicRouteSupervisor:
         self.storage = storage
         self.metadata_sink = metadata_sink
         self.event_sink = event_sink
+        self.trace_sink = trace_sink
         self.logger = logger
         self.max_concurrent = max(1, min(int(max_workers if max_workers is not None else max_concurrent), 3))
-        self.max_dispatches_per_turn = max(1, min(int(max_dispatches_per_turn), 4))
+        self.max_dispatches_per_turn = max(1, min(int(max_dispatches_per_turn), 6))
         self.max_depth = max(0, min(int(max_depth), 1))
         self._executor = ThreadPoolExecutor(max_workers=self.max_concurrent, thread_name_prefix="sumika-route-supervisor")
         self._lock = threading.RLock()
@@ -1522,6 +1627,138 @@ class DynamicRouteSupervisor:
         initial_routes = routes if routes is not None else route_catalog
         if initial_routes:
             self.register_routes(initial_routes)
+
+    # ---- content-safe decision trace ------------------------------------------
+    def _new_trace_id(self) -> str:
+        factory = getattr(self.trace_sink, "new_trace_id", None)
+        if callable(factory):
+            try:
+                return str(factory())
+            except Exception as exc:
+                self._log("debug", "route trace id unavailable", exc)
+        return f"trace-{uuid4().hex[:20]}"
+
+    def _trace(self, event: str, *, trace_id: str, **fields: Any) -> None:
+        recorder = getattr(self.trace_sink, "record", None)
+        if not callable(recorder):
+            return
+        try:
+            recorder(event, trace_id=trace_id, **fields)
+        except Exception as exc:
+            self._log("debug", "route decision trace unavailable", exc)
+
+    @staticmethod
+    def _trace_request_fields(request: DynamicRoutingRequest) -> dict[str, Any]:
+        budget_class = "unspecified" if request.budget_remaining is None else "exhausted" if request.budget_remaining == 0 else "bounded"
+        return {
+            "session_id": request.parent_session_id,
+            "turn_id": request.parent_turn_id,
+            "task_kind": request.task_kind,
+            "task_stage": request.phase,
+            "trigger_event": request.trigger_event,
+            "difficulty": request.difficulty,
+            "risk": request.risk,
+            "budget_policy": request.budget_policy,
+            "budget_unit": request.budget_unit,
+            "budget_class": budget_class,
+            "budget_remaining": request.budget_remaining,
+            "confirmation_mode": request.confirmation_mode,
+            "required_capabilities": request.required_capabilities,
+            "privacy_constraints": request.privacy_constraints,
+            "required_quality": DynamicRouteSupervisor._required_quality(
+                difficulty=request.difficulty,
+                risk=request.risk,
+                min_quality_tier=request.min_quality_tier,
+            ),
+            "depth": request.depth,
+            "confirmed": request.confirmed,
+            "quota_consent": request.quota_consent,
+            "auto_dispatch": request.auto_dispatch,
+        }
+
+    def _trace_evidence(self, route: RuntimeRouteDescriptor) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in self.evidence.for_route(route.route_id, refs=route.evidence_refs)[:16]:
+            effective = self.evidence._effective(item)
+            rows.append(
+                {
+                    "evidence_hash": _hash(item.to_dict()),
+                    "source_hash": _hash(item.source),
+                    "evidence_type": item.evidence_type,
+                    "effective_type": effective.evidence_type,
+                    "confidence": effective.confidence,
+                    "fresh": self.evidence._fresh(item),
+                    "observed_at": item.observed_at,
+                    "expires_at": item.expires_at,
+                }
+            )
+        return rows
+
+    def _trace_route_fields(
+        self,
+        route: RuntimeRouteDescriptor,
+        *,
+        request: DynamicRoutingRequest | None = None,
+    ) -> dict[str, Any]:
+        preferred = bool(
+            request
+            and request.preferred_route
+            and request.preferred_route == route.route_id
+        )
+        metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+        return {
+            "route_id": route.route_id,
+            "provider_profile_id": route.provider_profile_id,
+            "runtime_id": route.runtime_id,
+            "worker_kind": self._worker_kind(route),
+            "executor": route.executor,
+            "transport": route.transport,
+            "side_effect": route.side_effect,
+            "processing_location": route.processing_location,
+            "source_kind": route.source_kind,
+            "status": route.status,
+            "available": route.available,
+            "routable": route.routable,
+            "route_requires_confirmation": route.requires_confirmation,
+            "preferred": preferred,
+            "quality_tier": route.quality_tier,
+            "cost_class": route.cost_class,
+            "quota_state": route.quota_state,
+            "health_state": route.health_state,
+            "auth_state": route.auth_state,
+            "preferred_rank": 0 if preferred else 1,
+            "cost_rank": COST_ORDER.get(route.cost_class, 4),
+            "quota_rank": 0 if route.quota_state in {"available", "not-applicable"} else 1,
+            "quality_rank": QUALITY_ORDER.get(route.quality_tier, 0),
+            "evidence": self._trace_evidence(route),
+            "charge": metadata.get("cost_estimate") if isinstance(metadata.get("cost_estimate"), Mapping) else None,
+            "estimated_cost": metadata.get("estimated_cost"),
+        }
+
+    def _trace_run(self, event: str, record: _Run, **fields: Any) -> None:
+        budget_class = "unspecified" if record.dispatch.budget_remaining is None else "exhausted" if record.dispatch.budget_remaining == 0 else "bounded"
+        payload = {
+            "session_id": record.dispatch.parent_session_id,
+            "turn_id": record.dispatch.parent_turn_id,
+            "dispatch_id": record.dispatch.dispatch_id,
+            "continuation_of": record.dispatch.continuation_of,
+            "task_stage": record.dispatch.metadata.get("task_stage") if isinstance(record.dispatch.metadata, Mapping) else None,
+            "trigger_event": record.dispatch.trigger_event,
+            "difficulty": record.dispatch.difficulty,
+            "risk": record.dispatch.risk,
+            "budget_policy": record.dispatch.budget_policy,
+            "budget_remaining": record.dispatch.budget_remaining,
+            "budget_unit": "unknown",
+            "budget_class": budget_class,
+            "required_capabilities": record.dispatch.requested_capabilities,
+            "privacy_constraints": record.dispatch.privacy_constraints,
+            "depth": record.dispatch.depth,
+            "confirmed": record.dispatch.confirmed,
+            "quota_consent": record.dispatch.quota_consent,
+            **self._trace_route_fields(record.route),
+        }
+        payload.update(fields)
+        self._trace(event, trace_id=record.trace_id, **payload)
 
     # ---- route/evidence catalog -------------------------------------------------
     def register_route(self, route: Any, *, evidence: Iterable[Any] | None = None, worker: Any = None) -> RuntimeRouteDescriptor:
@@ -1874,9 +2111,28 @@ class DynamicRouteSupervisor:
             event_id = self._event_id(payload)
         if event_type not in EVENT_BOUNDARIES:
             return {"schema": SUPERVISOR_SCHEMA, "accepted": False, "replanned": False, "reason": "not-event-boundary", "event_type": event_type or None}
+        trace_id = self._new_trace_id()
+        boundary_key = self._event_parent_key(payload)
+        self._trace(
+            "boundary.received",
+            trace_id=trace_id,
+            session_id=boundary_key[0] if boundary_key else None,
+            turn_id=boundary_key[1] if boundary_key and boundary_key[1] != "__session__" else None,
+            trigger_event=event_type,
+            outcome="accepted",
+        )
         if event_id:
             with self._lock:
                 if event_id in self._seen_events:
+                    self._trace(
+                        "boundary.skipped",
+                        trace_id=trace_id,
+                        session_id=boundary_key[0] if boundary_key else None,
+                        turn_id=boundary_key[1] if boundary_key and boundary_key[1] != "__session__" else None,
+                        trigger_event=event_type,
+                        rejection_code="duplicate-event",
+                        outcome="rejected",
+                    )
                     return {"schema": SUPERVISOR_SCHEMA, "accepted": True, "replanned": False, "duplicate": True, "event_type": event_type}
                 self._seen_events.append(event_id)
                 if len(self._seen_events) > 512:
@@ -1894,12 +2150,30 @@ class DynamicRouteSupervisor:
                 request_supplied = request is not None
         if request is None:
             self._emit("route.replan.boundary", {"event_type": event_type})
+            self._trace(
+                "boundary.skipped",
+                trace_id=trace_id,
+                session_id=boundary_key[0] if boundary_key else None,
+                turn_id=boundary_key[1] if boundary_key and boundary_key[1] != "__session__" else None,
+                trigger_event=event_type,
+                rejection_code="no-routing-request",
+                outcome="rejected",
+            )
             return {"schema": SUPERVISOR_SCHEMA, "accepted": True, "replanned": False, "reason": "no-routing-request", "event_type": event_type}
         try:
             requested_event = DynamicRoutingRequest.from_value(request).trigger_event
         except SupervisorValidationError:
             requested_event = None
         if requested_event and requested_event != event_type:
+            self._trace(
+                "boundary.skipped",
+                trace_id=trace_id,
+                session_id=boundary_key[0] if boundary_key else None,
+                turn_id=boundary_key[1] if boundary_key and boundary_key[1] != "__session__" else None,
+                trigger_event=event_type,
+                rejection_code="waiting-for-trigger-event",
+                outcome="rejected",
+            )
             return {
                 "schema": SUPERVISOR_SCHEMA,
                 "accepted": True,
@@ -1908,7 +2182,7 @@ class DynamicRouteSupervisor:
                 "event_type": event_type,
                 "trigger_event": requested_event,
             }
-        result = self.replan(request, trigger_event=event_type, dispatch_selected=dispatch_selected)
+        result = self.replan(request, trigger_event=event_type, dispatch_selected=dispatch_selected, trace_id=trace_id)
         # Event-driven requests are one-shot.  ``replan`` stores a request so
         # callers can use it directly as a future arm, but ``handle_event``
         # has already consumed the current boundary and must not replay the
@@ -1935,6 +2209,7 @@ class DynamicRouteSupervisor:
         event: Mapping[str, Any] | Any | None = None,
         routing_request: Any = None,
         dispatch_selected: bool | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         # Accept both ``replan(request, trigger_event=...)`` and the natural
         # event-first form ``replan(event, request)`` used by some bridges.
@@ -1956,6 +2231,7 @@ class DynamicRouteSupervisor:
         if request is None:
             raise SupervisorValidationError("routing request is required")
         routing = DynamicRoutingRequest.from_value(request)
+        trace_id = _identifier(trace_id, "trace_id", required=False) if trace_id else self._new_trace_id()
         event = trigger_event or routing.trigger_event
         if event and event not in EVENT_BOUNDARIES:
             raise SupervisorValidationError("replan requires an event boundary")
@@ -1965,10 +2241,20 @@ class DynamicRouteSupervisor:
         # the same turn for a subsequent boundary without consulting logs.
         with self._lock:
             self._turn_requests[self._turn_key(routing.parent_session_id, routing.parent_turn_id)] = routing
-        candidates, rejected = self._eligible_routes(routing)
+        with self._lock:
+            candidate_count = len(self._routes)
+        self._trace(
+            "replan.requested",
+            trace_id=trace_id,
+            candidate_count=candidate_count,
+            outcome="accepted",
+            **self._trace_request_fields(routing),
+        )
+        candidates, rejected = self._eligible_routes(routing, trace_id=trace_id)
         if not candidates:
             result = {
                 "schema": SUPERVISOR_SCHEMA,
+                "trace_id": trace_id,
                 "accepted": True,
                 "replanned": True,
                 "status": "no-compatible-route",
@@ -1982,21 +2268,35 @@ class DynamicRouteSupervisor:
                 "replan_reason": "no-compatible-route",
                 "dispatch": None,
             }
+            self._trace(
+                "decision.made",
+                trace_id=trace_id,
+                outcome="no-compatible-route",
+                rejection_code="no-compatible-route",
+                candidate_count=candidate_count,
+                eligible_count=0,
+                filter_counts=rejected,
+                reason_codes=result["reason_codes"],
+                requires_confirmation=True,
+                **self._trace_request_fields(routing),
+            )
             self._emit("route.replanned", {"status": result["status"], "trigger_event": event, "reason_codes": result["reason_codes"]})
             return result
         ordered = self._sort_candidates(candidates, routing)
-        ordered = self._apply_selector(routing, ordered)
+        ordered, selection_source = self._apply_selector(routing, ordered)
         selected = ordered[0]
         alternatives = [item.to_dict() for item in ordered[1:8]]
         needs_confirmation, reasons = self._confirmation_needed(selected, routing)
         result: dict[str, Any] = {
             "schema": SUPERVISOR_SCHEMA,
+            "trace_id": trace_id,
             "accepted": True,
             "replanned": True,
             "status": "needs-confirmation" if needs_confirmation else "recommended",
             "trigger_event": event,
             "selected_route": selected.route_id,
             "selected_worker": self._worker_kind(selected),
+            "selection_source": selection_source,
             "selected_entry": selected.to_dict(evidence=self.evidence.references(selected.route_id, refs=selected.evidence_refs)),
             "alternatives": alternatives,
             "reason_codes": reasons,
@@ -2006,6 +2306,39 @@ class DynamicRouteSupervisor:
             "replan_reason": "event-boundary" if event else "explicit-request",
             "dispatch": None,
         }
+        self._trace(
+            "decision.made",
+            trace_id=trace_id,
+            outcome=result["status"],
+            candidate_count=candidate_count,
+            eligible_count=len(ordered),
+            alternative_count=len(alternatives),
+            alternative_routes=[item.route_id for item in ordered[1:8]],
+            filter_counts=rejected,
+            reason_codes=reasons,
+            selection_source=selection_source,
+            requires_confirmation=needs_confirmation,
+            **self._trace_request_fields(routing),
+            **self._trace_route_fields(selected, request=routing),
+        )
+        if needs_confirmation:
+            self._trace(
+                "confirmation.required",
+                trace_id=trace_id,
+                outcome="pending",
+                reason_codes=reasons,
+                requires_confirmation=True,
+                **self._trace_request_fields(routing),
+                **self._trace_route_fields(selected, request=routing),
+            )
+        elif routing.confirmed:
+            self._trace(
+                "confirmation.resolved",
+                trace_id=trace_id,
+                outcome="approved",
+                **self._trace_request_fields(routing),
+                **self._trace_route_fields(selected, request=routing),
+            )
         should_dispatch = routing.auto_dispatch if dispatch_selected is None else bool(dispatch_selected)
         if should_dispatch and not needs_confirmation:
             dispatch = DynamicSubtaskDispatch(
@@ -2035,12 +2368,16 @@ class DynamicRouteSupervisor:
                 transport=selected.transport,
                 metadata=routing.metadata,
             )
-            result["dispatch"] = self.dispatch(dispatch, wait=False)
+            result["dispatch"] = self.dispatch(dispatch, wait=False, trace_id=trace_id)
             result["status"] = "dispatched" if result["dispatch"].get("accepted") else result["dispatch"].get("status", "failed")
         self._emit("route.replanned", {"status": result["status"], "trigger_event": event, "selected_route": selected.route_id, "requires_confirmation": needs_confirmation})
         return result
 
-    def _apply_selector(self, request: DynamicRoutingRequest, candidates: list[RuntimeRouteDescriptor]) -> list[RuntimeRouteDescriptor]:
+    def _apply_selector(
+        self,
+        request: DynamicRoutingRequest,
+        candidates: list[RuntimeRouteDescriptor],
+    ) -> tuple[list[RuntimeRouteDescriptor], str]:
         """Apply an optional policy selector without making semantic choices."""
 
         selector = self.route_selector
@@ -2048,17 +2385,17 @@ class DynamicRouteSupervisor:
             try:
                 selected = selector(request, list(candidates))
                 if isinstance(selected, RuntimeRouteDescriptor):
-                    return [selected, *[item for item in candidates if item.route_id != selected.route_id]]
+                    return [selected, *[item for item in candidates if item.route_id != selected.route_id]], "route-selector"
                 if isinstance(selected, str):
                     match = next((item for item in candidates if item.route_id == selected), None)
                     if match:
-                        return [match, *[item for item in candidates if item.route_id != match.route_id]]
+                        return [match, *[item for item in candidates if item.route_id != match.route_id]], "route-selector"
                 if isinstance(selected, (list, tuple)):
                     by_id = {item.route_id: item for item in candidates}
                     ordered = [by_id[item.route_id] if isinstance(item, RuntimeRouteDescriptor) else by_id[str(item)] for item in selected if (isinstance(item, RuntimeRouteDescriptor) and item.route_id in by_id) or str(item) in by_id]
                     ordered.extend(item for item in candidates if item not in ordered)
                     if ordered:
-                        return ordered
+                        return ordered, "route-selector"
             except Exception as exc:
                 self._log("debug", "route selector unavailable", exc)
         router = self.model_router
@@ -2087,14 +2424,19 @@ class DynamicRouteSupervisor:
                     selected_route = getattr(decision, "selected_route", None) or (decision.get("selected_route") if isinstance(decision, Mapping) else None)
                     if selected_route in by_route:
                         selected = by_route[selected_route]
-                        return [selected, *[item for item in candidates if item.route_id != selected.route_id]]
+                        return [selected, *[item for item in candidates if item.route_id != selected.route_id]], "model-router"
             except Exception as exc:
                 self._log("debug", "model router unavailable", exc)
-        return candidates
+        return candidates, "deterministic-order"
 
     replan_at_boundary = replan
 
-    def _eligible_routes(self, request: DynamicRoutingRequest) -> tuple[list[RuntimeRouteDescriptor], dict[str, int]]:
+    def _eligible_routes(
+        self,
+        request: DynamicRoutingRequest,
+        *,
+        trace_id: str | None = None,
+    ) -> tuple[list[RuntimeRouteDescriptor], dict[str, int]]:
         with self._lock:
             values = list(self._routes.values())
         rejected: dict[str, int] = {}
@@ -2103,52 +2445,66 @@ class DynamicRouteSupervisor:
             rejected[code] = rejected.get(code, 0) + 1
 
         selected: list[RuntimeRouteDescriptor] = []
-        for route in values:
+        for index, route in enumerate(values, start=1):
+            rejection_code: str | None = None
             if request.route_id and route.route_id != request.route_id:
-                reject("route_preference")
-                continue
-            # Desktop routes represent an application control surface, not a
-            # general-purpose model.  They may only enter an automatic
-            # recommendation when the Agent explicitly asks for desktop
-            # capability or names the route.  This prevents an ordinary chat
-            # request from being sorted onto a local UI adapter merely because
-            # it is cheap and healthy.
-            is_desktop = (
-                route.kind in {"desktop-app", "desktop-automation"}
-                or route.source_kind == "desktop-automation"
-                or route.executor == "desktop-automation"
-                or route.runtime_id == "desktop"
-            )
-            if is_desktop and not (
-                request.route_id == route.route_id
-                or request.preferred_route == route.route_id
-                or "desktop" in {item.lower() for item in request.required_capabilities}
-            ):
-                reject("desktop_route_requires_explicit_request")
-                continue
-            if not route.available:
-                reject("route_not_ready")
-                continue
-            compatibility_error = self._route_compatibility(
-                route,
-                required_capabilities=request.required_capabilities,
-                privacy_constraints=request.privacy_constraints,
-                difficulty=request.difficulty,
-                risk=request.risk,
-                min_quality_tier=request.min_quality_tier,
-                explicit_route=request.route_id == route.route_id or request.preferred_route == route.route_id,
-            )
-            if compatibility_error:
-                reject(compatibility_error)
-                continue
-            if request.budget_policy in {"free-only", "no-paid"} and route.cost_class not in {"free-limited", "local"}:
-                reject("paid_disallowed")
-                continue
-            estimate = route.metadata.get("estimated_cost") if isinstance(route.metadata, Mapping) else None
-            if request.budget_remaining is not None and isinstance(estimate, (int, float)) and not isinstance(estimate, bool) and float(estimate) > request.budget_remaining:
-                reject("budget_exceeded")
-                continue
-            selected.append(route)
+                rejection_code = "route_preference"
+            else:
+                # Desktop routes represent an application control surface, not a
+                # general-purpose model.  They may only enter an automatic
+                # recommendation when the Agent explicitly asks for desktop
+                # capability or names the route.
+                is_desktop = (
+                    route.kind in {"desktop-app", "desktop-automation"}
+                    or route.source_kind == "desktop-automation"
+                    or route.executor == "desktop-automation"
+                    or route.runtime_id == "desktop"
+                )
+                if is_desktop and not (
+                    request.route_id == route.route_id
+                    or request.preferred_route == route.route_id
+                    or "desktop" in {item.lower() for item in request.required_capabilities}
+                ):
+                    rejection_code = "desktop_route_requires_explicit_request"
+                elif not route.available:
+                    rejection_code = "route_not_ready"
+                else:
+                    rejection_code = self._route_compatibility(
+                        route,
+                        required_capabilities=request.required_capabilities,
+                        privacy_constraints=request.privacy_constraints,
+                        difficulty=request.difficulty,
+                        risk=request.risk,
+                        min_quality_tier=request.min_quality_tier,
+                        explicit_route=request.route_id == route.route_id or request.preferred_route == route.route_id,
+                    )
+                    if rejection_code is None and request.budget_policy in {"free-only", "no-paid"} and route.cost_class not in {"free-limited", "local"}:
+                        rejection_code = "paid_disallowed"
+                    estimate = route.metadata.get("estimated_cost") if isinstance(route.metadata, Mapping) else None
+                    if (
+                        rejection_code is None
+                        and request.budget_remaining is not None
+                        and isinstance(estimate, (int, float))
+                        and not isinstance(estimate, bool)
+                        and float(estimate) > request.budget_remaining
+                    ):
+                        rejection_code = "budget_exceeded"
+            if rejection_code:
+                reject(rejection_code)
+            else:
+                selected.append(route)
+            if trace_id:
+                self._trace(
+                    "candidate.evaluated",
+                    trace_id=trace_id,
+                    candidate_index=index,
+                    candidate_count=len(values),
+                    eligible=rejection_code is None,
+                    rejection_code=rejection_code,
+                    outcome="accepted" if rejection_code is None else "rejected",
+                    **self._trace_request_fields(request),
+                    **self._trace_route_fields(route, request=request),
+                )
         return selected, rejected
 
     @staticmethod
@@ -2315,23 +2671,74 @@ class DynamicRouteSupervisor:
             return None, "route-metadata-mismatch"
         return replace(dispatch, **updates) if updates else dispatch, None
 
-    def dispatch(self, value: Any, *, route_id: str | None = None, wait: bool = False, timeout: float | None = None) -> dict[str, Any]:
+    def dispatch(
+        self,
+        value: Any,
+        *,
+        route_id: str | None = None,
+        wait: bool = False,
+        timeout: float | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
         if self._closed:
             raise SupervisorError("route supervisor is closed")
         dispatch = DynamicSubtaskDispatch.from_value(value, route_id=route_id)
+        trace_id = _identifier(trace_id, "trace_id", required=False) if trace_id else self._new_trace_id()
         with self._lock:
             route = self._routes.get(dispatch.route_id)
         if route is None:
-            return self._rejected_dispatch(dispatch, "route-not-found")
+            self._trace(
+                "dispatch.requested",
+                trace_id=trace_id,
+                session_id=dispatch.parent_session_id,
+                turn_id=dispatch.parent_turn_id,
+                dispatch_id=dispatch.dispatch_id,
+                continuation_of=dispatch.continuation_of,
+                route_id=dispatch.route_id,
+                worker_kind=dispatch.worker_kind,
+                outcome="accepted",
+            )
+            return self._rejected_dispatch(dispatch, "route-not-found", trace_id=trace_id)
         if dispatch.worker_kind == "provider" and route.kind.lower() not in {"provider", "model", "api"}:
             dispatch = replace(dispatch, worker_kind=self._worker_kind(route))
+        self._trace(
+            "dispatch.requested",
+            trace_id=trace_id,
+            session_id=dispatch.parent_session_id,
+            turn_id=dispatch.parent_turn_id,
+            dispatch_id=dispatch.dispatch_id,
+            continuation_of=dispatch.continuation_of,
+            trigger_event=dispatch.trigger_event,
+            difficulty=dispatch.difficulty,
+            risk=dispatch.risk,
+            budget_policy=dispatch.budget_policy,
+            budget_remaining=dispatch.budget_remaining,
+            required_capabilities=dispatch.requested_capabilities,
+            privacy_constraints=dispatch.privacy_constraints,
+            depth=dispatch.depth,
+            confirmed=dispatch.confirmed,
+            quota_consent=dispatch.quota_consent,
+            outcome="accepted",
+            **self._trace_route_fields(route),
+        )
+        if dispatch.confirmed:
+            self._trace(
+                "confirmation.resolved",
+                trace_id=trace_id,
+                session_id=dispatch.parent_session_id,
+                turn_id=dispatch.parent_turn_id,
+                dispatch_id=dispatch.dispatch_id,
+                confirmed=True,
+                outcome="approved",
+                **self._trace_route_fields(route),
+            )
         dispatch, metadata_error = self._hydrate_dispatch_metadata(dispatch, route)
         if metadata_error:
             # Keep the caller's original projection in the rejection so an
             # integration can see which supplied metadata was inconsistent.
-            return self._rejected_dispatch(dispatch or DynamicSubtaskDispatch.from_value(value, route_id=route.route_id), metadata_error)
+            return self._rejected_dispatch(dispatch or DynamicSubtaskDispatch.from_value(value, route_id=route.route_id), metadata_error, trace_id=trace_id)
         if dispatch.depth > self.max_depth:
-            return self._rejected_dispatch(dispatch, "max-depth")
+            return self._rejected_dispatch(dispatch, "max-depth", trace_id=trace_id)
         compatibility_error = self._route_compatibility(
             route,
             required_capabilities=dispatch.required_capabilities,
@@ -2342,31 +2749,31 @@ class DynamicRouteSupervisor:
             explicit_route=True,
         )
         if compatibility_error:
-            return self._rejected_dispatch(dispatch, compatibility_error.replace("_", "-"))
+            return self._rejected_dispatch(dispatch, compatibility_error.replace("_", "-"), trace_id=trace_id)
         if route.occupancy in {"manual", "waiting"}:
-            return self._rejected_dispatch(dispatch, "route-occupied", status="waiting-human")
+            return self._rejected_dispatch(dispatch, "route-occupied", status="waiting-human", trace_id=trace_id)
         # Dispatch is also a public boundary (not only ``replan``), so apply
         # the same hard cost/consent gates when a Harness submits a hand-built
         # request.  A caller can proceed only after carrying an explicit
         # confirmation or profile-level quota consent.
         if dispatch.budget_policy in {"free-only", "no-paid"} and route.cost_class not in {"free-limited", "local"}:
-            return self._rejected_dispatch(dispatch, "paid-disallowed")
+            return self._rejected_dispatch(dispatch, "paid-disallowed", trace_id=trace_id)
         estimate = route.metadata.get("estimated_cost") if isinstance(route.metadata, Mapping) else None
         if dispatch.budget_remaining is not None and isinstance(estimate, (int, float)) and not isinstance(estimate, bool) and float(estimate) > dispatch.budget_remaining:
-            return self._rejected_dispatch(dispatch, "budget-exceeded")
+            return self._rejected_dispatch(dispatch, "budget-exceeded", trace_id=trace_id)
         # Unknown cost is safe to run only after the route/profile has an
         # explicit quota/usage consent.  This preserves the no-silent-paid
         # rule while allowing a user-approved web or client subscription
         # route to run without a confirmation dialog on every turn.
         cost_consent = route.quota_consent in {"granted", "authorized", "approved"} or dispatch.quota_consent
         if route.cost_class in {"paid-low", "paid-high"} and not dispatch.confirmed:
-            return self._rejected_dispatch(dispatch, "confirmation-required", status="needs-confirmation")
+            return self._rejected_dispatch(dispatch, "confirmation-required", status="needs-confirmation", trace_id=trace_id)
         if route.cost_class == "unknown" and not cost_consent and not dispatch.confirmed:
-            return self._rejected_dispatch(dispatch, "confirmation-required", status="needs-confirmation")
+            return self._rejected_dispatch(dispatch, "confirmation-required", status="needs-confirmation", trace_id=trace_id)
         if route.quota_state == "unknown" and not cost_consent and not dispatch.confirmed:
-            return self._rejected_dispatch(dispatch, "unknown-quota-consent-required", status="needs-confirmation")
+            return self._rejected_dispatch(dispatch, "unknown-quota-consent-required", status="needs-confirmation", trace_id=trace_id)
         if (route.requires_confirmation or route.side_effect in {"write", "external"}) and not dispatch.confirmed:
-            return self._rejected_dispatch(dispatch, "confirmation-required", status="needs-confirmation")
+            return self._rejected_dispatch(dispatch, "confirmation-required", status="needs-confirmation", trace_id=trace_id)
         turn_key = self._turn_key(dispatch.parent_session_id, dispatch.parent_turn_id)
         with self._lock:
             parent_run = self._runs.get(dispatch.continuation_of or "")
@@ -2374,32 +2781,51 @@ class DynamicRouteSupervisor:
                 # A nested continuation must move one level deeper; a plain
                 # retry keeps the original depth and is handled below.
                 if dispatch.continuation_of and dispatch.continuation_of != parent_run.dispatch.dispatch_id:
-                    return self._rejected_dispatch(dispatch, "invalid-depth")
+                    return self._rejected_dispatch(dispatch, "invalid-depth", trace_id=trace_id)
             fingerprint = self._fingerprint(dispatch)
             existing_id = self._dedupe.get(fingerprint)
             if existing_id:
+                self._trace(
+                    "dispatch.deduplicated",
+                    trace_id=trace_id,
+                    session_id=dispatch.parent_session_id,
+                    turn_id=dispatch.parent_turn_id,
+                    dispatch_id=dispatch.dispatch_id,
+                    continuation_of=existing_id,
+                    route_id=route.route_id,
+                    worker_kind=dispatch.worker_kind,
+                    deduplicated=True,
+                    outcome="completed",
+                )
                 return {**self.status(existing_id), "accepted": True, "deduplicated": True}
             count = self._turn_dispatch_counts.get(turn_key, 0)
             active = self._turn_active_counts.get(turn_key, 0)
             if count >= self.max_dispatches_per_turn:
-                return self._rejected_dispatch(dispatch, "max-dispatches-per-turn")
-            if active >= self.max_concurrent:
-                return self._rejected_dispatch(dispatch, "max-concurrent-workers")
+                return self._rejected_dispatch(dispatch, "max-dispatches-per-turn", trace_id=trace_id)
+            if active >= self.max_concurrent and not dispatch.consultation_id:
+                return self._rejected_dispatch(dispatch, "max-concurrent-workers", trace_id=trace_id)
             if dispatch.workspace_access != "none" and dispatch.side_effect in {"write", "external"} and dispatch.workspace_access != "isolated-worktree":
-                return self._rejected_dispatch(dispatch, "workspace-access-required")
+                return self._rejected_dispatch(dispatch, "workspace-access-required", trace_id=trace_id)
         worker = self.worker_registry.resolve(route, worker_kind=dispatch.worker_kind)
         if worker is None:
-            return self._rejected_dispatch(dispatch, "worker-not-registered")
+            return self._rejected_dispatch(dispatch, "worker-not-registered", trace_id=trace_id)
         if not route.available:
-            return self._rejected_dispatch(dispatch, "route-not-ready")
+            return self._rejected_dispatch(dispatch, "route-not-ready", trace_id=trace_id)
         fingerprint = self._fingerprint(dispatch)
-        record = _Run(dispatch=dispatch, route=route, worker=worker, fingerprint=fingerprint, evidence_hashes=tuple(self.evidence.hashes(route.route_id, refs=route.evidence_refs)))
+        record = _Run(dispatch=dispatch, route=route, worker=worker, trace_id=trace_id, fingerprint=fingerprint, evidence_hashes=tuple(self.evidence.hashes(route.route_id, refs=route.evidence_refs)))
         with self._lock:
             self._runs[dispatch.dispatch_id] = record
             self._dedupe[fingerprint] = dispatch.dispatch_id
             self._turn_dispatch_counts[turn_key] = self._turn_dispatch_counts.get(turn_key, 0) + 1
             self._turn_active_counts[turn_key] = self._turn_active_counts.get(turn_key, 0) + 1
         self._persist(record)
+        self._trace_run(
+            "dispatch.queued",
+            record,
+            outcome="queued",
+            dispatch_count=self._turn_dispatch_counts.get(turn_key, 0),
+            active_count=self._turn_active_counts.get(turn_key, 0),
+        )
         self._emit("route.dispatch.queued", self._event_metadata(record))
         try:
             future = self._executor.submit(self._execute, record)
@@ -2425,6 +2851,7 @@ class DynamicRouteSupervisor:
             record.status = "running"
             record.started_at = _now()
         self._persist(record)
+        self._trace_run("dispatch.started", record, outcome="running")
         self._emit("route.dispatch.started", self._event_metadata(record))
         started = time.monotonic()
         try:
@@ -2520,11 +2947,37 @@ class DynamicRouteSupervisor:
             emit = not record.terminal_event_emitted
             record.terminal_event_emitted = True
         self._persist(record)
-        if emit:
-            self._emit(f"route.dispatch.{result.status}", self._event_metadata(record))
-        self._update_consultation(record.dispatch.consultation_id)
+        budget = result.budget_impact if isinstance(result.budget_impact, Mapping) else {}
+        usage = budget.get("usage") if isinstance(budget.get("usage"), Mapping) else None
+        charge = budget.get("charge_receipt") if isinstance(budget.get("charge_receipt"), Mapping) else None
+        self._trace_run(
+            "dispatch.finished",
+            record,
+            status=result.status,
+            outcome=result.status,
+            latency_ms=result.latency_ms,
+            error_code=result.error_code,
+            retryable=record.retryable,
+            possibly_sent=result.possibly_sent,
+            usage=usage,
+            charge=charge,
+        )
+        try:
+            if emit:
+                self._emit(f"route.dispatch.{result.status}", self._event_metadata(record))
+            self._update_consultation(record.dispatch.consultation_id)
+        finally:
+            record.completion_event.set()
 
-    def _rejected_dispatch(self, dispatch: DynamicSubtaskDispatch, error_code: str, *, status: str = "failed") -> dict[str, Any]:
+    def _rejected_dispatch(
+        self,
+        dispatch: DynamicSubtaskDispatch,
+        error_code: str,
+        *,
+        status: str = "failed",
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        trace_id = trace_id or self._new_trace_id()
         result = DynamicSubtaskResult(dispatch.dispatch_id, dispatch.route_id, dispatch.worker_kind, status=status, error_code=_token(error_code, "error_code", default="route-rejected"), retryable=False)
         with self._lock:
             known_route = self._routes.get(dispatch.route_id)
@@ -2533,6 +2986,7 @@ class DynamicRouteSupervisor:
             dispatch=dispatch,
             route=rejection_route,
             worker=None,
+            trace_id=trace_id,
             status=status,
             result=result,
             completed_at=_now(),
@@ -2550,6 +3004,26 @@ class DynamicRouteSupervisor:
             self._runs[dispatch.dispatch_id] = record
             self._queue_mailbox_result(record)
         self._persist(record)
+        if status == "needs-confirmation":
+            self._trace_run(
+                "confirmation.required",
+                record,
+                status=status,
+                outcome="pending",
+                rejection_code=error_code,
+                requires_confirmation=True,
+            )
+        self._trace_run(
+            "dispatch.rejected",
+            record,
+            status=status,
+            outcome="rejected",
+            error_code=error_code,
+            rejection_code=error_code,
+            retryable=False,
+            possibly_sent=False,
+        )
+        record.completion_event.set()
         self._emit("route.dispatch.rejected", self._event_metadata(record))
         return {"schema": SUPERVISOR_SCHEMA, "accepted": False, "deduplicated": False, "status": status, "error_code": error_code, "dispatch": dispatch.to_dict()}
 
@@ -2587,6 +3061,8 @@ class DynamicRouteSupervisor:
                     )
             except Exception:
                 pass
+        if record.finalized and not record.completion_event.is_set():
+            record.completion_event.wait(timeout=1.0)
         return self.status(identifier)
 
     def _timeout_seconds(self, record: _Run) -> float:
@@ -3142,7 +3618,7 @@ class DynamicRouteSupervisor:
             self._persist_consultation(consultation)
             self._emit("consultation.failed", {"consultation_id": request.consultation_id, "parent_session_id": request.parent_session_id, "status": "failed", "error_code": "no-routable-profile"})
             return self.consultation_status(request.consultation_id)
-        roles = ("方案设计顾问", "反例审查顾问", "风险检查顾问")
+        roles = ("方案设计顾问", "反例审查顾问", "风险检查顾问", "事实核验顾问", "简化方案顾问")
         for index, route in enumerate(routes):
             dispatch = DynamicSubtaskDispatch(
                 dispatch_id=f"dispatch-{uuid4().hex[:16]}",
@@ -3271,6 +3747,13 @@ class DynamicRouteSupervisor:
                 return {"schema": SUPERVISOR_SCHEMA, "dispatch_id": identifier, "cancelled": False, "reason": "unknown-dispatch"}
             if record.finalized or record.status in {"completed", "failed", "cancelled", "interrupted", "unknown"}:
                 return {**self._public(record), "cancelled": False, "reason": "already-finished"}
+            self._trace_run(
+                "dispatch.cancel.requested",
+                record,
+                status=record.status,
+                outcome="accepted",
+                possibly_sent=bool(record.started_at),
+            )
             record.cancel_event.set()
             record.status = "cancelled"
             record.error_code = "cancelled"
@@ -3303,8 +3786,17 @@ class DynamicRouteSupervisor:
             raise SupervisorError("unknown dispatch")
         if record.status != "failed" or not record.retryable:
             raise SupervisorError("only a confirmed pre-send failure can be retried")
+        self._trace_run(
+            "dispatch.retry.requested",
+            record,
+            retry_of=record.dispatch.dispatch_id,
+            status=record.status,
+            outcome="accepted",
+            retryable=True,
+            possibly_sent=False,
+        )
         dispatch = replace(record.dispatch, dispatch_id=f"dispatch-{uuid4().hex[:16]}", continuation_of=record.dispatch.dispatch_id)
-        return self.dispatch(dispatch, wait=wait)
+        return self.dispatch(dispatch, wait=wait, trace_id=record.trace_id)
 
     def _fingerprint(self, dispatch: DynamicSubtaskDispatch) -> str:
         context = _safe_context(dispatch.context_refs)
@@ -3318,6 +3810,7 @@ class DynamicRouteSupervisor:
                 "context_refs": context,
                 "decision_key": dispatch.decision_key,
                 "consultation_id": dispatch.consultation_id,
+                "continuation_of": dispatch.continuation_of,
             }
         )
 
@@ -3374,6 +3867,7 @@ class DynamicRouteSupervisor:
                 "accepted": True,
                 "dispatch": dispatch,
                 "dispatch_id": record.dispatch.dispatch_id,
+                "trace_id": record.trace_id,
                 "status": status,
                 "result": result,
                 "runtime_id": record.route.runtime_id,

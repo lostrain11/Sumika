@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "data": {
+    "display_in_currency": true,
+    "custom_currency_symbol": "CNY",
+    "quota_per_unit": 500000,
+    "system_name": "Fixture New API"
+  }
+}

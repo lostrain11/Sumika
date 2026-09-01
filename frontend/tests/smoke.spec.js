@@ -2447,6 +2447,241 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("#provider-profile-form")).toContainText("保存并启用");
   });
 
+  test("Provider Route 定价分开展示站内扣费与现金折算并保存配置", async ({ page }) => {
+    const savedProfiles = [];
+    const profile = {
+      id: "pricing-profile",
+      name: "PinAI 测试档案",
+      adapter_id: "openai-compatible",
+      template_id: "openai-compatible",
+      status: "available",
+      active: true,
+      processing_location: "cloud",
+      resolved_processing_location: "cloud",
+      has_secrets: true,
+      config: {
+        active_base_url: "https://api.example.invalid/v1",
+        base_urls: ["https://api.example.invalid/v1"],
+        model: "model-a",
+        models: [
+          { id: "model-a", name: "Model A", enabled: true, health_state: "healthy" },
+          { id: "model-b", name: "Model B", enabled: true, health_state: "unknown" },
+        ],
+        timeout: 60,
+        headers: {},
+        pricing: {
+          source_type: "pinai",
+          billing_group: "vip",
+          public_url: "https://app.pinaic.com/api/v1/model-display/models",
+          source_url: "https://app.pinaic.com/models",
+          source_version: "catalog-7",
+          rates: {},
+          cash_conversion: { paid_amount: 50, credited_amount: 100, currency: "CNY" },
+        },
+      },
+    };
+    const pricing = {
+      schema: "route-pricing/v1",
+      checked_at: "2026-09-01T08:00:00Z",
+      errors: {},
+      snapshots: [{
+        provider_profile_id: profile.id,
+        model_id: "model-a",
+        billing_group: "vip",
+        currency: "USD-credit",
+        input_price_per_million: 0.35,
+        output_price_per_million: 1.4,
+        cache_read_price_per_million: 0.08,
+        source_type: "pinai",
+        source_version: "catalog-7",
+        confidence: "published",
+        observed_at: "2026-09-01T08:00:00Z",
+        cash_rate: 0.5,
+        cash_currency: "CNY",
+      }],
+    };
+    await page.route("**/api/provider-profiles*", async (route) => {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify([profile]) });
+    });
+    await page.route("**/api/model-policy/pricing*", async (route) => {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(pricing) });
+    });
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body?.method === "provider.profile.save") {
+        savedProfiles.push(body.params.profile);
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { ...profile, config: body.params.profile } }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="Modules"]').click();
+    const pricingPanel = page.locator("[data-route-pricing-panel]");
+    await expect(pricingPanel).toContainText("model-a");
+    await expect(pricingPanel).toContainText("vip");
+    await expect(pricingPanel).toContainText("USD-credit");
+    await expect(pricingPanel).toContainText("现金折算");
+    await expect(pricingPanel).toContainText("PinAI");
+    await expect(pricingPanel).toContainText("公开发布");
+
+    await page.locator(".provider-picker summary").click();
+    await page.locator('.provider-picker [data-provider-edit="pricing-profile"]').click();
+    const drawer = page.locator("#provider-profile-form");
+    await expect(drawer.locator('textarea[name="models"]')).toHaveValue("model-a\nmodel-b");
+    await drawer.locator("details.provider-advanced summary").click();
+    await expect(drawer.locator("[data-provider-pricing-evidence]")).toContainText("model-a · vip");
+    await drawer.locator('select[name="pricing_source_type"]').selectOption("manual");
+    await drawer.locator('input[name="pricing_billing_group"]').fill("standard");
+    await drawer.locator('input[name="pricing_currency"]').fill("CNY");
+    await drawer.locator('input[name="pricing_input_rate"]').fill("0.5");
+    await drawer.locator('input[name="pricing_output_rate"]').fill("2");
+    await drawer.locator('input[name="pricing_paid_amount"]').fill("30");
+    await drawer.locator('input[name="pricing_credited_amount"]').fill("60");
+    await drawer.locator('input[name="pricing_cash_currency"]').fill("cny");
+    await drawer.locator('[data-provider-action="save"]').click();
+    await expect.poll(() => savedProfiles.length).toBe(1);
+    expect(savedProfiles[0].models).toEqual(["model-a", "model-b"]);
+    expect(savedProfiles[0].pricing).toEqual(expect.objectContaining({
+      source_type: "manual",
+      billing_group: "standard",
+      rates: expect.objectContaining({
+        currency: "CNY",
+        input_price_per_million: 0.5,
+        output_price_per_million: 2,
+      }),
+      cash_conversion: { paid_amount: 30, credited_amount: 60, currency: "CNY" },
+    }));
+  });
+
+  test("网页工作台支持五 Route 的 3 + 2 咨询并展示 Worker 费用回执", async ({ page }) => {
+    const adapters = [
+      ["deepseek-web", "DeepSeek", "chat.deepseek.com"],
+      ["zhipu-web", "智谱", "chat.z.ai"],
+      ["qwen-web", "Qwen", "chat.qwen.ai"],
+      ["kimi-web", "Kimi", "www.kimi.com"],
+      ["doubao-web", "豆包", "www.doubao.com"],
+    ];
+    const profiles = adapters.map(([adapterId, name, domain], index) => ({
+      id: `web-chat-route-${index + 1}`,
+      name: `${name} 网页账号`,
+      adapter_id: adapterId,
+      adapter_name: `${name} 网页聊天`,
+      browser_profile_id: `browser-profile-route-${index + 1}`,
+      chat_url: `https://${domain}/`,
+      status: "ready",
+      auth_state: "authorized",
+      auto_chat_enabled: true,
+      archived_at: null,
+      active_session: null,
+      config: { domains: [domain], model_id: "web-session" },
+    }));
+    const routes = profiles.map((profile) => ({
+      route_id: `web:${profile.id}`,
+      worker_kind: "web",
+      provider_profile_id: profile.id,
+      provider_key: profile.adapter_id,
+      adapter_id: profile.adapter_id,
+      label: profile.name,
+      domains: profile.config.domains,
+      status: "ready",
+      quota_state: "unknown",
+      occupancy: "idle",
+      routable: true,
+    }));
+    const pending = {
+      dispatch_id: "dispatch-priced-worker",
+      route_id: routes[0].route_id,
+      worker_kind: "provider",
+      status: "completed",
+      result: {
+        answer: "已完成低风险短任务",
+        budget_impact: {
+          usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+          charge_receipt: {
+            provider_charge: 0.024,
+            provider_currency: "CNY",
+            cash_charge: 0.012,
+            cash_currency: "CNY",
+            evidence_level: "request-usage+pricing",
+          },
+        },
+      },
+    };
+    let consultation = null;
+    const consultationRequests = [];
+    await page.route("**/api/browser/web-chat/adapters", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ schema: "web-chat/v1", adapters: adapters.map(([id, name, domain]) => ({ id, name: `${name} 网页聊天`, domains: [domain], chat_url: `https://${domain}/`, model_id: "web-session", selectors: { input: ["textarea"], send: ["button[type='submit']"], response: ["[data-message-author-role='assistant']"] } })) }),
+      });
+    });
+    await page.route("**/api/browser/web-chat/profiles*", async (route) => {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ schema: "web-chat/v1", profiles }) });
+    });
+    await page.route("**/rpc", async (route) => {
+      const body = route.request().postDataJSON();
+      let result;
+      if (body?.method === "sumika.route.catalog") {
+        result = { schema: "agent-route/v1", routes, count: routes.length, routable_count: routes.length, quota_state: "unknown" };
+      } else if (body?.method === "sumika.route.pending") {
+        result = { results: [pending] };
+      } else if (body?.method === "sumika.consultation.status") {
+        result = { consultations: consultation ? [consultation] : [] };
+      } else if (body?.method === "sumika.consultation.start") {
+        consultationRequests.push(body.params);
+        consultation = {
+          consultation_id: "consultation-five-routes",
+          status: "completed",
+          decision_kind: body.params.decision_kind,
+          successful_count: 5,
+          failed_count: 0,
+          disagreement_detected: true,
+          untrusted_external: true,
+          members: routes.map((item, index) => ({
+            dispatch_id: `consultation-member-${index + 1}`,
+            route_id: item.route_id,
+            provider_profile_id: item.provider_profile_id,
+            status: "completed",
+            answer: `独立意见 ${index + 1}`,
+            latency_ms: 1000 + index,
+          })),
+        };
+        result = consultation;
+      } else {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('.nav-item[data-page="WebWorkbench"]').click();
+    await expect(page.locator("[data-web-workbench-profile]")).toHaveCount(5);
+    await expect(page.locator("[data-web-workbench-catalog]")).toContainText("5 个可咨询");
+    await expect(page.locator(".web-workbench-consultation-panel")).toContainText("5 个成员按 3 + 2 两批执行");
+    const receipt = page.locator("[data-route-budget-impact]");
+    await expect(receipt).toContainText("120 token");
+    await expect(receipt).toContainText("CNY 0.024");
+    await expect(receipt).toContainText("CNY 0.012");
+
+    const form = page.locator("#web-workbench-consultation-form");
+    await form.locator('select[name="max_members"]').selectOption("5");
+    await form.locator('textarea[name="question"]').fill("请独立审查这个计划的风险");
+    await form.locator('textarea[name="context"]').fill("只包含脱敏后的短上下文");
+    await form.locator('button[type="submit"]').click();
+    await expect.poll(() => consultationRequests.length).toBe(1);
+    expect(consultationRequests[0].max_members).toBe(5);
+    expect(consultationRequests[0].question).toBe("请独立审查这个计划的风险");
+    await expect(page.locator("[data-web-workbench-consultation='consultation-five-routes'] [data-web-workbench-member]")).toHaveCount(5);
+    await expect(page.locator("[data-web-workbench-consultation='consultation-five-routes']")).toContainText("检测到意见分歧");
+    await expect(page.locator("[data-web-workbench-consultation='consultation-five-routes']")).toContainText("UNTRUSTED_WEB_RESULT");
+  });
+
   test("网页聊天模板切换填充真实字段并保留 BrowserSkill 边界", async ({ page }) => {
     const namedBrowserProfile = {
       id: "browser-profile-web-smoke",
@@ -2744,6 +2979,17 @@ test.describe("Sumika UI shell", () => {
               quality_gate: { required: "standard", selected: "standard", passed: true },
               reason_codes: ["privacy_and_permissions_passed", "quality_gate_passed"],
               estimated_cost: "local",
+              cost_estimate: {
+                schema: "route-pricing/v1",
+                status: "known",
+                provider_charge_min: 0.01,
+                provider_charge_max: 0.03,
+                provider_currency: "USD-credit",
+                cash_min: 0.005,
+                cash_max: 0.015,
+                cash_currency: "CNY",
+                unknown_reasons: [],
+              },
               quota_impact: { state: "not-applicable" },
               confidence: 0.9,
               requires_confirmation: true,
@@ -2769,6 +3015,8 @@ test.describe("Sumika UI shell", () => {
     await page.locator("#agent-prompt").fill("检查当前仓库并给出计划");
     await page.locator("#agent-send").click();
     await expect(page.locator("[data-agent-routing-decision='needs-confirmation']")).toBeVisible();
+    await expect(page.locator("[data-agent-cost-estimate]")).toContainText("USD-credit 0.01–0.03");
+    await expect(page.locator("[data-agent-cost-estimate]")).toContainText("CNY 0.005–0.015");
     expect(calls.filter((item) => item?.method === "model.policy.preflight")).toHaveLength(1);
     expect(calls.filter((item) => item?.method === "agent.session.create")).toHaveLength(0);
     await page.locator("#agent-routing-confirm").click();

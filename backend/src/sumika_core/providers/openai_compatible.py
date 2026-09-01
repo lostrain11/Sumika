@@ -31,6 +31,7 @@ class OpenAICompatibleProvider(LLMProvider):
         self.api_key = api_key
         self.timeout = timeout
         self.headers = dict(headers or {})
+        self.last_usage: dict[str, int] = {}
         # A non-default Ollama port is common when the user's tray service is
         # already occupied.  Provider profiles therefore pass an explicit
         # template hint instead of making the protocol decision from port
@@ -120,13 +121,15 @@ class OpenAICompatibleProvider(LLMProvider):
             with self._open(request, timeout=min(self.timeout, 5.0)) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
+            code = exc.code
+            exc.close()
             # A number of legitimate OpenAI-compatible gateways intentionally
             # omit GET /models.  A user-triggered health check may perform one
             # bounded, content-free chat probe in that case.  Authentication
             # and other HTTP failures remain errors and never fall back.
-            if allow_chat_probe and exc.code in {404, 405}:
+            if allow_chat_probe and code in {404, 405}:
                 return self._health_chat_probe(headers)
-            if exc.code in {404, 405}:
+            if code in {404, 405}:
                 self.info.status = "unconfigured"
                 return {
                     "ok": False,
@@ -140,7 +143,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 "ok": False,
                 "provider_id": self.info.id,
                 "status": "error",
-                "error": f"HTTP {exc.code}",
+                "error": f"HTTP {code}",
             }
         except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             self.info.status = "error"
@@ -176,6 +179,56 @@ class OpenAICompatibleProvider(LLMProvider):
             "base_url": self.base_url,
         }
 
+    def list_models(self) -> dict[str, object]:
+        """Read the OpenAI-compatible model directory without a chat request."""
+
+        if not self.base_url:
+            return {"ok": False, "status": "unconfigured", "error": "provider is not configured", "models": []}
+        request = Request(
+            f"{self.base_url}/models",
+            headers=self._request_headers(accept="application/json"),
+            method="GET",
+        )
+        try:
+            with self._open(request, timeout=min(self.timeout, 8.0)) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            code = exc.code
+            exc.close()
+            return {
+                "ok": False,
+                "status": "error" if code not in {404, 405} else "not-exposed",
+                "error": f"HTTP {code}",
+                "models": [],
+            }
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            return {
+                "ok": False,
+                "status": "error",
+                "error": "connection failed",
+                "detail": str(getattr(exc, "reason", exc))[:200],
+                "models": [],
+            }
+        raw_models = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(raw_models, list):
+            raw_models = payload.get("models") if isinstance(payload, dict) else None
+        models: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for item in raw_models or []:
+            if isinstance(item, str):
+                model_id = item.strip()
+                row: dict[str, object] = {"id": model_id, "name": model_id}
+            elif isinstance(item, dict):
+                model_id = str(item.get("id") or item.get("name") or "").strip()
+                row = {"id": model_id, "name": str(item.get("name") or model_id).strip()}
+            else:
+                continue
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            models.append(row)
+        return {"ok": True, "status": "available", "models": models, "available_models": sorted(seen)}
+
     def _health_chat_probe(self, headers: dict[str, str]) -> dict[str, object]:
         """Validate a provider whose API does not expose a model catalogue."""
 
@@ -203,12 +256,14 @@ class OpenAICompatibleProvider(LLMProvider):
                     if "json" in content_type:
                         json.loads(body.decode("utf-8"))
         except HTTPError as exc:
+            code = exc.code
+            exc.close()
             self.info.status = "error"
             return {
                 "ok": False,
                 "provider_id": self.info.id,
                 "status": "error",
-                "error": f"HTTP {exc.code}",
+                "error": f"HTTP {code}",
             }
         except (URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
             self.info.status = "error"
@@ -231,6 +286,7 @@ class OpenAICompatibleProvider(LLMProvider):
         }
 
     def stream(self, request: ChatRequest) -> Iterable[str]:
+        self.last_usage = {}
         if self._is_ollama():
             yield from self._stream_ollama(request)
             return
@@ -253,6 +309,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 content_type = response.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     body = json.loads(response.read().decode("utf-8"))
+                    self._capture_usage(body)
                     text = _extract_content(body)
                     if text:
                         yield text
@@ -264,12 +321,18 @@ class OpenAICompatibleProvider(LLMProvider):
                     if line == "data: [DONE]":
                         break
                     if line.startswith("data:"):
-                        text = _extract_content(json.loads(line[5:].strip()))
+                        value = json.loads(line[5:].strip())
+                        self._capture_usage(value)
+                        text = _extract_content(value)
                         if text:
                             yield text
         except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"OpenAI-compatible HTTP {exc.code}: {detail[:500]}") from exc
+            code = exc.code
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            finally:
+                exc.close()
+            raise RuntimeError(f"OpenAI-compatible HTTP {code}: {detail[:500]}") from exc
         except URLError as exc:
             raise RuntimeError(f"OpenAI-compatible connection failed: {exc.reason}") from exc
 
@@ -299,6 +362,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 content_type = response.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     body = json.loads(response.read().decode("utf-8"))
+                    self._capture_usage(body)
                     content = _extract_content(body)
                     if content:
                         yield from visible.feed(content)
@@ -312,15 +376,44 @@ class OpenAICompatibleProvider(LLMProvider):
                         break
                     if line.startswith("data:"):
                         value = json.loads(line[5:].strip())
+                        self._capture_usage(value)
                         content = _extract_content(value)
                         if content:
                             yield from visible.feed(content)
                 yield from visible.finish()
         except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Ollama HTTP {exc.code}: {detail[:500]}") from exc
+            code = exc.code
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            finally:
+                exc.close()
+            raise RuntimeError(f"Ollama HTTP {code}: {detail[:500]}") from exc
         except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Ollama connection failed: {getattr(exc, 'reason', exc)}") from exc
+
+    def _capture_usage(self, payload: object) -> None:
+        if not isinstance(payload, dict) or not isinstance(payload.get("usage"), dict):
+            return
+        usage = payload["usage"]
+        details = usage.get("prompt_tokens_details") if isinstance(usage.get("prompt_tokens_details"), dict) else {}
+        aliases = {
+            "input_tokens": ("input_tokens", "prompt_tokens"),
+            "output_tokens": ("output_tokens", "completion_tokens"),
+            "total_tokens": ("total_tokens",),
+            "cache_read_tokens": ("cache_read_tokens", "cached_tokens"),
+            "cache_write_tokens": ("cache_write_tokens",),
+        }
+        result: dict[str, int] = {}
+        for target, names in aliases.items():
+            raw = next((usage.get(name) for name in names if usage.get(name) is not None), None)
+            if target == "cache_read_tokens" and raw is None:
+                raw = details.get("cached_tokens")
+            if isinstance(raw, int) and not isinstance(raw, bool) and 0 <= raw <= 10_000_000_000:
+                result[target] = raw
+        if "total_tokens" not in result and ("input_tokens" in result or "output_tokens" in result):
+            result["total_tokens"] = result.get("input_tokens", 0) + result.get("output_tokens", 0)
+        if result:
+            self.last_usage = result
 
 
 def _extract_content(payload: dict) -> str:
