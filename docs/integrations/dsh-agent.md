@@ -12,14 +12,44 @@ Sumika 当前采用 DSH-first，但 DSH 只是 [Agent Runtime](../architecture/a
 `http://127.0.0.1:3080`。`SUMIKA_AGENT_RUNTIME=dsh` 是默认选择。可以用
 `SUMIKA_AGENT_ENDPOINT`（兼容 `SUMIKA_DSH_ENDPOINT`）指向受管实例，用
 `SUMIKA_AGENT_PROFILE_DIR`（兼容 `SUMIKA_DSH_PROFILE_DIR`）指定隔离 profile；
-Tauri 仍只在 `SUMIKA_AGENT_AUTOSTART=1` 且存在
-`SUMIKA_AGENT_EXECUTABLE` 时启动子进程；Windows 的 `run-desktop.ps1` 会先复用
-已通过健康检查的外部端点，否则自动发现固定安装目录中已经存在且版本匹配的
-DSH，再为本次启动设置这两个变量。现有 `SUMIKA_DSH_AUTOSTART` /
-`SUMIKA_DSH_EXECUTABLE` 继续兼容。launcher 会把
+Windows 的 `tools/run-desktop.ps1` 是完整客户端的唯一推荐入口。它在启动 Tauri
+之前先验证固定路径
+`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd` 的
+`--version`，或验证显式 `SUMIKA_AGENT_EXECUTABLE` /
+`SUMIKA_DSH_EXECUTABLE`；输出必须逐字等于 `0.1.1-rc.2`，否则立即 fail closed。
+全局 `PATH` 中的 `dsh` 永远不会被隐式选用。显式配置的外部 endpoint 可以复用，
+但 `host.describe` 只证明协议健康，不证明发行包版本；没有显式 endpoint 时，若默认
+`3080` 已有无法核验版本的服务，launcher 会拒绝启动并提示停止该服务或显式选择外部
+端点。Tauri 在生成 `AgentLaunchConfig` 和每次 spawn 前再次执行同一版本检查，并向
+受管进程注入 `SUMIKA_DSH_VERSION_VERIFIED=1`。
+
+现有 `SUMIKA_DSH_AUTOSTART` / `SUMIKA_DSH_EXECUTABLE` 继续兼容。launcher 会把
 `.sumika-desktop/dsh-profile` 作为子进程 `DSH_HOME`。Sumika 不会写入用户全局
 `DSH_HOME`，启动流程也不会安装、升级或下载 DSH。`SUMIKA_DSH_ENABLED=0` 可关闭
-适配器。
+适配器。启动失败只记录可审计的路径名、期望/实际版本和错误类别，不记录凭据。
+
+## 固定 DSH 启动闭环
+
+正常启动顺序是：PowerShell launcher 解析并核验 DSH → Tauri 再核验并启动 DSH →
+Tauri 启动 Python Core → Core 通过 `host.describe`、`/api/health` 和 Agent 状态完成
+就绪检查。`tools/run_core.ps1` 保持 Core-only 语义，不会从 PATH 找全局 DSH；不要同时
+运行两条启动链覆盖同一端口。
+
+可用的安全检查：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/test_dsh_launch.ps1
+python tools/agent_daily_acceptance.py `
+  --core-url http://127.0.0.1:8771 `
+  --endpoint http://127.0.0.1:3080 `
+  --profile-dir .sumika-desktop\dsh-profile `
+  --runtime-smoke --timeout 120 --json
+```
+
+`runtime-smoke` 使用临时 Git workspace 和测试 Provider，覆盖 Plan Review、批准、
+Execute、工具、checkpoint、diff 和精确恢复；报告中的 `provider=needs-action` 只表示
+没有授权真实 Provider，不影响该隔离协议回合的结果。关闭客户端后应确认 `3080`、`8771`
+没有监听，且没有本次 Tauri 子进程残留。详见[启动故障手册](../troubleshooting/dsh-startup.md)。
 
 ## 可选 ZCode runtime
 

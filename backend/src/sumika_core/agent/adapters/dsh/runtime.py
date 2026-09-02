@@ -13,7 +13,6 @@ import math
 import os
 import re
 import secrets
-import shutil
 import socket
 import ssl
 import struct
@@ -185,12 +184,22 @@ class DSHAgentRuntime(AgentRuntime):
         endpoint = str(env.get("SUMIKA_AGENT_ENDPOINT") or env.get("SUMIKA_DSH_ENDPOINT") or "http://127.0.0.1:3080").rstrip("/")
         configured_profile = env.get("SUMIKA_AGENT_PROFILE_DIR") or env.get("SUMIKA_DSH_PROFILE_DIR") or env.get("SUMIKA_DSH_HOME")
         profile_dir = configured_profile or default_profile_dir(data_dir)
-        executable = env.get("SUMIKA_AGENT_EXECUTABLE") or env.get("SUMIKA_DSH_EXECUTABLE") or shutil.which("dsh")
+        # A Core-only process must not discover the user's global DSH.  The
+        # desktop launcher injects an explicitly validated executable; an
+        # external runtime may still be addressed through its endpoint without
+        # pretending that its package version was verified here.
+        executable = env.get("SUMIKA_AGENT_EXECUTABLE") or env.get("SUMIKA_DSH_EXECUTABLE")
+        version_verified = str(env.get("SUMIKA_DSH_VERSION_VERIFIED") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
         enabled = str(env.get("SUMIKA_AGENT_ENABLED") or env.get("SUMIKA_DSH_ENABLED") or "1")
         self.config = DSHRuntimeConfig(
             endpoint=endpoint,
             profile_dir=profile_dir,
             executable=executable,
+            version_verified=version_verified,
             managed=str(env.get("SUMIKA_AGENT_AUTOSTART") or env.get("SUMIKA_DSH_AUTOSTART") or "0").lower()
             in {"1", "true", "yes"},
             enabled=enabled.lower() not in {"0", "false", "no"},
@@ -227,6 +236,7 @@ class DSHAgentRuntime(AgentRuntime):
             **self.config.to_dict(),
             "state": state,
             "ready": state == "ready",
+            "version_source": "executable --version" if self.config.version_verified else "unverified external/Core-only",
             "launch_policy": "managed-profile-only",
             "global_install_untouched": True,
             "event_bridge": "running" if self._event_bridge is not None else "stopped",
@@ -269,6 +279,8 @@ class DSHAgentRuntime(AgentRuntime):
                 "ready": False,
                 "endpoint": self.config.endpoint,
                 "version": self.config.version,
+                "version_verified": self.config.version_verified,
+                "version_source": "executable --version" if self.config.version_verified else "unverified external/Core-only",
                 "commit": self.config.commit,
                 "profile": "web",
                 "profile_dir_configured": bool(self.config.profile_dir),

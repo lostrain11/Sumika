@@ -27,6 +27,19 @@ class AgentDailyAcceptanceTests(unittest.TestCase):
             smoke_dsh_round._tool_status_error(tool_script, [{"name": "read", "status": "failed"}])
         )
 
+    def test_tool_status_projection_ignores_observed_plan_exit_lifecycle_item(self):
+        from tools import smoke_dsh_round
+
+        self.assertIsNone(
+            smoke_dsh_round._tool_status_error(
+                [{"name": "exit_plan_mode"}, {"name": "read"}],
+                [
+                    {"name": "exit_plan_mode", "status": "completed"},
+                    {"name": "read", "status": "completed"},
+                ],
+            )
+        )
+
     def test_smoke_projection_keeps_only_bounded_evidence(self):
         report = acceptance._project_smoke(
             '{"ok":true,"session_id":"private-session","plan_prompt_accepted":true,'

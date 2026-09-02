@@ -774,6 +774,11 @@ class RouteCoordinator:
         self._emit("agent.route.occupancy", profile_id=profile_id, occupancy=owner)
         return {"profile_id": profile_id, "occupancy": owner}
 
+    def clear_stale_occupancy(self, profile_id: str) -> dict[str, Any]:
+        """Release a legacy marker after WebChat proves its backend is gone."""
+
+        return self.set_occupancy(profile_id, "idle")
+
     def request_takeover(self, profile_id: str) -> dict[str, Any]:
         profile_id = _id(profile_id, "profile_id") or ""
         cancelled: list[str] = []

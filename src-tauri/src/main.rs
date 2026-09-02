@@ -17,6 +17,9 @@ use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 const DSH_CREDENTIAL_PROTOCOL_MAGIC: &[u8] = b"SUMIKA_DSH_CREDENTIAL_V2";
 const LOCAL_DSH_CREDENTIAL_REF: &str = "SUMIKA_LOCAL_PROVIDER_API_KEY";
 const LOCAL_DSH_CREDENTIAL_VALUE: &str = "sumika-local";
+const PINNED_DSH_VERSION: &str = "0.1.1-rc.2";
+const PINNED_DSH_EXECUTABLE: &str =
+    r"D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd";
 
 #[derive(Clone)]
 struct CoreProcess {
@@ -42,6 +45,7 @@ struct AgentProcess {
 struct AgentLaunchConfig {
     runtime_id: String,
     executable: String,
+    verified_version: String,
     endpoint: String,
     profile_dir: PathBuf,
     log_path: PathBuf,
@@ -320,10 +324,98 @@ fn agent_port(endpoint: &str, default_port: u16) -> Option<u16> {
         .or(Some(default_port))
 }
 
+fn dsh_display_name(executable: &str) -> String {
+    PathBuf::from(executable)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("<invalid-path>")
+        .to_string()
+}
+
+fn first_nonempty_version_line(bytes: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(128).collect())
+}
+
+fn dsh_version_command(executable: &str) -> Command {
+    let extension = PathBuf::from(executable)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    if matches!(extension.as_deref(), Some("cmd" | "bat")) {
+        let mut command = Command::new("cmd.exe");
+        // `call` is required for batch files; quoting keeps spaces and shell
+        // metacharacters in an explicitly configured path inert.
+        // Keep the command and path as separate arguments. This lets Rust
+        // apply Windows argument quoting without putting backslash-escaped
+        // quotes into cmd.exe's `/c` command string.
+        command.args(["/d", "/c", "call"]);
+        command.arg(executable);
+        command.arg("--version");
+        command
+    } else {
+        let mut command = Command::new(executable);
+        command.arg("--version");
+        command
+    }
+}
+
+fn validate_dsh_executable(executable: &str) -> Result<String, String> {
+    let display_name = dsh_display_name(executable);
+    let path = PathBuf::from(executable);
+    if !path.is_absolute() {
+        return Err(format!(
+            "DSH executable '{display_name}' rejected [path-not-absolute]"
+        ));
+    }
+    if !path.is_file() {
+        return Err(format!(
+            "DSH executable '{display_name}' rejected [path-not-found]"
+        ));
+    }
+    if executable.chars().any(|value| value.is_control() || value == '\n' || value == '\r') {
+        return Err(format!(
+            "DSH executable '{display_name}' rejected [path-invalid]"
+        ));
+    }
+
+    let output = dsh_version_command(executable)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|_| {
+            format!(
+                "DSH executable '{display_name}' rejected [version-command-failed]"
+            )
+        })?;
+    if !output.status.success() {
+        return Err(format!(
+            "DSH executable '{display_name}' rejected [version-command-failed]"
+        ));
+    }
+    let actual = first_nonempty_version_line(&output.stdout)
+        .or_else(|| first_nonempty_version_line(&output.stderr))
+        .ok_or_else(|| {
+            format!(
+                "DSH executable '{display_name}' rejected [version-output-empty]"
+            )
+        })?;
+    if actual != PINNED_DSH_VERSION {
+        return Err(format!(
+            "DSH executable '{display_name}' rejected [version-mismatch]: expected '{PINNED_DSH_VERSION}', actual '{actual}'"
+        ));
+    }
+    Ok(actual)
+}
+
 fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchConfig, String> {
     let endpoint = configured_agent_endpoint("dsh");
     let executable = first_nonempty_env(&["SUMIKA_AGENT_EXECUTABLE", "SUMIKA_DSH_EXECUTABLE"])
-        .ok_or_else(|| "SUMIKA_AGENT_EXECUTABLE or SUMIKA_DSH_EXECUTABLE is required when DSH autostart is enabled".to_string())?;
+        .unwrap_or_else(|| PINNED_DSH_EXECUTABLE.to_string());
+    let verified_version = validate_dsh_executable(&executable)?;
     let profile_dir = first_nonempty_env(&[
         "SUMIKA_AGENT_PROFILE_DIR",
         "SUMIKA_DSH_PROFILE_DIR",
@@ -344,6 +436,7 @@ fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchCon
     let mut environment = vec![
         ("DSH_HOME".to_string(), profile_text.clone()),
         ("SUMIKA_DSH_HOME".to_string(), profile_text),
+        ("SUMIKA_DSH_VERSION_VERIFIED".to_string(), "1".to_string()),
         ("BSK_AUTO_UPDATE".to_string(), "off".to_string()),
         ("SUMIKA_CORE_HOST".to_string(), core_host),
         ("SUMIKA_CORE_PORT".to_string(), core_port.to_string()),
@@ -368,6 +461,7 @@ fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchCon
     Ok(AgentLaunchConfig {
         runtime_id: "dsh".to_string(),
         executable,
+        verified_version,
         endpoint,
         profile_dir,
         log_path: log_dir.join("dsh.log"),
@@ -518,11 +612,28 @@ fn agent_health_request(config: &AgentLaunchConfig) -> bool {
         return false;
     }
     let mut response = String::new();
-    stream.read_to_string(&mut response).is_ok()
-        && response.lines().next().map(|line| line.contains(" 200 ")).unwrap_or(false)
+    if stream.read_to_string(&mut response).is_err()
+        || !response
+            .lines()
+            .next()
+            .map(|line| line.contains(" 200 "))
+            .unwrap_or(false)
+    {
+        return false;
+    }
+    // host.describe is the protocol health evidence. A bare HTTP 200 from a
+    // proxy or unrelated service must not make the launcher claim readiness.
+    response.contains("\"ok\": true") || response.contains("\"ok\":true")
 }
 
 fn spawn_agent(config: &AgentLaunchConfig) -> Result<Child, String> {
+    let verified_version = validate_dsh_executable(&config.executable)?;
+    if verified_version != config.verified_version {
+        return Err(format!(
+            "DSH executable '{}' changed after configuration [version-mismatch]",
+            dsh_display_name(&config.executable)
+        ));
+    }
     std::fs::create_dir_all(&config.profile_dir)
         .map_err(|error| format!("创建 {} profile 失败: {error}", config.runtime_id))?;
     let log_file = OpenOptions::new()
@@ -914,9 +1025,23 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         &log_path,
         &format!("desktop setup started; data_dir=.sumika-desktop; core={host}:{port}"),
     );
-    let (agent_runtime_id, agent_log_path, agent_launcher) =
-        agent_launch_config(&root, &log_dir).map_err(std::io::Error::other)?;
+    let (agent_runtime_id, agent_log_path, agent_launcher) = match agent_launch_config(&root, &log_dir) {
+        Ok(value) => value,
+        Err(error) => {
+            append_log(&log_dir.join("dsh.log"), &format!("managed DSH launch rejected: {error}"));
+            return Err(std::io::Error::other(error).into());
+        }
+    };
     let managed_agent = if let Some(config) = &agent_launcher {
+        append_log(
+            &agent_log_path,
+            &format!(
+                "DSH executable validated; name={}; expected={}; actual={}",
+                dsh_display_name(&config.executable),
+                PINNED_DSH_VERSION,
+                config.verified_version,
+            ),
+        );
         append_log(
             &agent_log_path,
             &format!(
@@ -933,7 +1058,13 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 "one or more protected Agent credentials were not loaded; affected Provider or MCP connections will fail closed",
             );
         }
-        let mut child = spawn_agent(config).map_err(std::io::Error::other)?;
+        let mut child = match spawn_agent(config) {
+            Ok(child) => child,
+            Err(error) => {
+                append_log(&agent_log_path, &format!("managed DSH spawn rejected: {error}"));
+                return Err(std::io::Error::other(error).into());
+            }
+        };
         append_log(
             &agent_log_path,
             &format!("managed {} spawned; pid={}", config.runtime_id, child.id()),
@@ -1046,7 +1177,49 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_dsh_credential_bindings, DSH_CREDENTIAL_PROTOCOL_MAGIC};
+    use std::path::PathBuf;
+
+    use super::{
+        first_nonempty_version_line, parse_dsh_credential_bindings,
+        validate_dsh_executable, DSH_CREDENTIAL_PROTOCOL_MAGIC,
+        PINNED_DSH_EXECUTABLE, PINNED_DSH_VERSION,
+    };
+
+    #[test]
+    fn parses_only_an_exact_dsh_version_line() {
+        assert_eq!(
+            first_nonempty_version_line(b"\n0.1.1-rc.2\n"),
+            Some(PINNED_DSH_VERSION.to_string())
+        );
+        assert_ne!(
+            first_nonempty_version_line(b"0.1.0-rc.6\n").as_deref(),
+            Some(PINNED_DSH_VERSION)
+        );
+        assert_eq!(first_nonempty_version_line(b"\n\t"), None);
+    }
+
+    #[test]
+    fn rejects_missing_or_path_based_dsh_candidates() {
+        assert!(validate_dsh_executable("dsh.cmd")
+            .unwrap_err()
+            .contains("path-not-absolute"));
+        let missing = PathBuf::from(PINNED_DSH_EXECUTABLE)
+            .with_file_name("sumika-missing-dsh.cmd");
+        assert!(validate_dsh_executable(&missing.to_string_lossy())
+            .unwrap_err()
+            .contains("path-not-found"));
+    }
+
+    #[test]
+    fn validates_the_installed_pinned_cmd_launcher_when_available() {
+        if !PathBuf::from(PINNED_DSH_EXECUTABLE).is_file() {
+            return;
+        }
+        assert_eq!(
+            validate_dsh_executable(PINNED_DSH_EXECUTABLE).unwrap(),
+            PINNED_DSH_VERSION
+        );
+    }
 
     #[test]
     fn parses_empty_and_multiple_credential_protocol() {

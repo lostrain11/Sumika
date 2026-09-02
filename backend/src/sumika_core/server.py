@@ -394,6 +394,11 @@ class CoreApplication:
             logger=self.logger,
             event_sink=self._on_route_event,
         )
+        # A BrowserSkill session may be stopped outside Core.  WebChat only
+        # invokes this metadata-only callback after an explicit missing-session
+        # signal, so a transient network error cannot clear a live route's
+        # legacy occupancy marker.
+        self.web_chat.set_session_invalidated_callback(self.routes.clear_stale_occupancy)
         self.evolution_registry = EvolutionRegistry(ROOT_DIR / "docs" / "integrations" / "evolution-knowledge-registry.json")
         self.tasks = TaskManager(self.storage, self.events)
         self.task_runner = TaskRunner(self.tasks, self.events)
@@ -1337,6 +1342,11 @@ class CoreApplication:
         web_profile_id = str(metadata.get("web_profile_id") or "").strip()
         if source_kind == "web-chat" and profile_id and not web_profile_id:
             web_profile_id = profile_id
+        # Web entries identify the named BrowserSkill profile in metadata,
+        # while API routes use provider_profile_id. Promote it at this
+        # adapter boundary so execution resolves the correct profile.
+        if source_kind == "web-chat" and not profile_id and web_profile_id:
+            profile_id = web_profile_id
         reason = raw.get("reason")
         if source_kind == "web-chat":
             web_route_key = web_profile_id or str(raw.get("provider_id") or raw.get("route_id") or "web")
@@ -1715,8 +1725,17 @@ class CoreApplication:
             self.events.publish(EventEnvelope(event_type, payload, session_id=session_id))
         except Exception as exc:
             self.logger.info("route event projection failed error_type=%s", type(exc).__name__)
+        status = str(event.get("status") or "").lower()
+        if (
+            str(event.get("worker_kind") or "").lower() in {"web", "web-worker"}
+            and status in {"completed", "failed", "unknown", "waiting-human", "cancelled", "interrupted"}
+        ):
+            try:
+                self._sync_web_chat_providers()
+                self._refresh_route_supervisor_catalog(refresh=False)
+            except Exception as exc:
+                self.logger.info("web route terminal refresh failed error_type=%s", type(exc).__name__)
         try:
-            status = str(event.get("status") or "").lower()
             outcome = "success" if status in {"completed", "recommended", "dispatched"} else "failed" if status in {"failed", "unknown", "interrupted"} else "pending"
             self.observability.record(
                 component="route-supervisor",
@@ -4347,6 +4366,7 @@ class CoreApplication:
             except WebChatRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
             self._sync_web_chat_providers()
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(
                 EventEnvelope(
                     "browser.web_chat.profile.created",
@@ -4376,6 +4396,7 @@ class CoreApplication:
             except WebChatRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
             self._sync_web_chat_providers()
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(
                 EventEnvelope(
                     "browser.web_chat.profile.updated",
@@ -4395,6 +4416,7 @@ class CoreApplication:
             self._sync_web_chat_providers()
             if result.get("id"):
                 self.routes.set_occupancy(str(result["id"]), "manual")
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(
                 EventEnvelope(
                     "browser.web_chat.login.requested",
@@ -4448,6 +4470,10 @@ class CoreApplication:
             except WebChatRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
             self._sync_web_chat_providers()
+            if result.get("ready") and result.get("id"):
+                # Checking is the explicit hand-back after manual login.
+                self.routes.set_occupancy(str(result["id"]), "idle")
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(
                 EventEnvelope(
                     "browser.web_chat.login.checked",
@@ -4469,6 +4495,7 @@ class CoreApplication:
             except WebChatRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
             self._sync_web_chat_providers()
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(
                 EventEnvelope(
                     "browser.web_chat.consent.changed",
@@ -4519,6 +4546,7 @@ class CoreApplication:
             except WebChatRuntimeError as exc:
                 raise JsonRpcError(-32031, str(exc)) from exc
             self._sync_web_chat_providers()
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(EventEnvelope(event_type, {"profile": _redact_web_chat_payload(result)}))
             return result
         if method == "browser.web_chat.message.start":
@@ -4552,7 +4580,11 @@ class CoreApplication:
             attempt_id = params.get("attempt_id") or params.get("attemptId")
             if not attempt_id:
                 raise JsonRpcError(-32602, "attempt_id is required")
-            return self.web_chat.message_status(str(attempt_id))
+            result = self.web_chat.message_status(str(attempt_id))
+            if result.get("status") not in {"accepted", "running"}:
+                self._sync_web_chat_providers()
+                self._refresh_route_supervisor_catalog(refresh=False)
+            return result
         if method == "browser.web_chat.message.wait":
             attempt_id = params.get("attempt_id") or params.get("attemptId")
             if not attempt_id:
@@ -4562,7 +4594,11 @@ class CoreApplication:
                 timeout = max(0.0, min(30.0, float(raw_timeout)))
             except (TypeError, ValueError):
                 raise JsonRpcError(-32602, "timeout is invalid")
-            return self.web_chat.wait_message(str(attempt_id), timeout=timeout)
+            result = self.web_chat.wait_message(str(attempt_id), timeout=timeout)
+            if result.get("status") not in {"accepted", "running"}:
+                self._sync_web_chat_providers()
+                self._refresh_route_supervisor_catalog(refresh=False)
+            return result
         if method == "browser.web_chat.message.cancel":
             attempt_id = params.get("attempt_id") or params.get("attemptId")
             if not attempt_id:
@@ -4579,6 +4615,7 @@ class CoreApplication:
             except WebChatRuntimeError as exc:
                 raise JsonRpcError(-32000, str(exc)) from exc
             self._sync_web_chat_providers()
+            self._refresh_route_supervisor_catalog(refresh=False)
             self.events.publish(
                 EventEnvelope(
                     "browser.web_chat.message.completed" if result.get("ok") else "browser.web_chat.message.pending",

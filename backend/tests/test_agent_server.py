@@ -26,6 +26,27 @@ class AgentServerTests(unittest.TestCase):
         browser = self.application.rpc("browser.status", {})
         self.assertFalse(browser["ready"])
 
+    def test_web_model_entry_promotes_named_profile_for_runtime_dispatch(self):
+        route = self.application._model_entry_to_route(
+            {
+                "source_kind": "web-chat",
+                "provider_id": "web-chat:profile-deepseek",
+                "model_id": "web-session",
+                "display_name": "DeepSeek 网页 Route",
+                "auth_state": "authorized",
+                "health_state": "healthy",
+                "quota_state": "unknown",
+                "metadata": {
+                    "web_profile_id": "web-chat-5b6999f9d67f",
+                    "adapter_id": "deepseek-web",
+                    "routable": True,
+                    "quota_consent": "granted",
+                },
+            }
+        )
+        self.assertEqual(route.provider_profile_id, "web-chat-5b6999f9d67f")
+        self.assertTrue(route.routable)
+
     def test_agent_diagnostics_returns_a_safe_runtime_report(self):
         with patch.object(
             self.application.agent,

@@ -8,6 +8,7 @@ from .policy import (
     normalize_domain,
 )
 from .runtime import BrowserRuntime, BrowserRuntimeError, BrowserSkillClient
+from .visual import RapidOcrJsonProbe, VisualEvidenceProbe
 from .web_chat import (
     WEB_CHAT_ACTIONS,
     WEB_CHAT_ADAPTER_VERSION,
@@ -26,6 +27,8 @@ __all__ = [
     "BrowserRuntime",
     "BrowserRuntimeError",
     "BrowserSkillClient",
+    "RapidOcrJsonProbe",
+    "VisualEvidenceProbe",
     "WEB_CHAT_ACTIONS",
     "WEB_CHAT_ADAPTER_VERSION",
     "WEB_CHAT_SCHEMA",

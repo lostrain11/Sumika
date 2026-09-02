@@ -20,6 +20,7 @@ class DSHRuntimeConfig:
     endpoint: str = DSH_DEFAULT_ENDPOINT
     profile_dir: str = ""
     executable: str | None = None
+    version_verified: bool = False
     managed: bool = True
     enabled: bool = True
 

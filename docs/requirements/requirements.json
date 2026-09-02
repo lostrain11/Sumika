@@ -642,6 +642,58 @@
       "status_ref": "status-matrix:memory"
     },
     {
+      "id": "PROCESS-001",
+      "category": "process",
+      "statement": "Long-running Sumika work must preserve reconstructable requirements, sanitized source excerpts, decisions, acceptance criteria, and supersession links instead of depending on chat history.",
+      "acceptance": ["A future Agent can recover product intent from repository evidence", "Secrets and raw chat transcripts are absent from the durable record"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-PROCESS-001"],
+      "implementation_refs": ["../../docs/requirements/README.md", "../../docs/current-execution.md"],
+      "test_refs": ["../../tools/test_check_docs.py"],
+      "status_ref": "status-matrix:dsh-agent-runtime"
+    },
+    {
+      "id": "PROCESS-002",
+      "category": "process",
+      "statement": "Recurring or non-obvious failures must be distilled into a maintained project troubleshooting note with evidence, confirmed cause, failed approaches, fix, and verification commands.",
+      "acceptance": ["A repeated failure has one discoverable runbook", "Hypotheses are not recorded as confirmed causes"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-PROCESS-001"],
+      "implementation_refs": ["../../docs/troubleshooting/browser-web-chat.md"],
+      "test_refs": ["../../tools/test_check_docs.py"],
+      "status_ref": "status-matrix:web-chat-runtime"
+    },
+    {
+      "id": "TOOLING-001",
+      "category": "tooling",
+      "statement": "Task-required low-risk portable tools may be reused from a registered shared cache, while tools needing elevation, services, extensions, login, payment, or system changes still require separate approval.",
+      "acceptance": ["Reusable tooling records version, source, hash, license, install location, and verification state", "Unknown provenance or license remains explicit and does not become a trusted claim"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-TOOLING-001"],
+      "implementation_refs": ["../../docs/troubleshooting/browser-web-chat.md"],
+      "test_refs": ["../../backend/tests/test_visual_evidence.py"],
+      "status_ref": "status-matrix:browser-runtime"
+    },
+    {
+      "id": "OBS-003",
+      "category": "observability",
+      "statement": "Non-trivial runtime conclusions use independent evidence when available; web-chat submission and response uncertainty combines DOM or ARIA evidence with local OCR while exporting neither screenshots nor OCR text.",
+      "acceptance": ["Conflicting evidence cannot trigger a duplicate send", "Only bounded booleans, confidence, counts, and error codes cross the visual probe boundary"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-OBS-004"],
+      "implementation_refs": ["../../backend/src/sumika_core/browser/visual.py", "../../backend/src/sumika_core/browser/runtime.py", "../../backend/src/sumika_core/browser/web_chat.py", "../../docs/troubleshooting/browser-web-chat.md"],
+      "test_refs": ["../../backend/tests/test_visual_evidence.py", "../../backend/tests/test_browser_runtime.py", "../../backend/tests/test_web_chat.py"],
+      "status_ref": "status-matrix:web-chat-runtime"
+    },
+    {
       "id": "DEFERRED-001",
       "category": "future",
       "statement": "Audio, vision, Live2D, external animation libraries, VirtualWorld, LifeAgent, RemoteRunner, Android, and formal multi-platform packaging remain deferred until real modules and safety boundaries exist.",

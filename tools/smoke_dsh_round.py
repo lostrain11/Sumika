@@ -48,12 +48,20 @@ def _tool_status_error(tool_script: list[dict[str, object]], tool_statuses: list
     once and finish successfully.
     """
 
+    # Depending on the pinned DSH snapshot, ``exit_plan_mode`` can appear in
+    # the compact tool projection even though it is a plan lifecycle event.
+    # Ignore it symmetrically on both sides; every ordinary scripted tool must
+    # still appear exactly once and complete successfully.
     expected = [
         str(item.get("name") or "")
         for item in tool_script
         if str(item.get("name") or "") != "exit_plan_mode"
     ]
-    observed = [str(item.get("name") or "") for item in tool_statuses]
+    observed = [
+        str(item.get("name") or "")
+        for item in tool_statuses
+        if str(item.get("name") or "") != "exit_plan_mode"
+    ]
     if Counter(expected) != Counter(observed):
         return f"DSH smoke round observed unexpected tools: {tool_statuses}"
     incomplete = [item for item in tool_statuses if item.get("status") != "completed"]

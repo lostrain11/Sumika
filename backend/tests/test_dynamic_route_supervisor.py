@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from sumika_core.agent.supervisor import (
     EVENT_BOUNDARIES,
@@ -18,6 +19,7 @@ from sumika_core.agent.supervisor import (
     ProviderWorker,
     RuntimeRouteDescriptor,
     SupervisorValidationError,
+    WebWorker,
     WorkerRegistry,
 )
 from sumika_core.agent.runtime_workers import ProviderProfileWorker
@@ -244,6 +246,106 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
                     from sumika_core.agent.supervisor import DynamicSubtaskResult
 
                     DynamicSubtaskResult.from_value({field: value}, dispatch)
+
+    def test_worker_result_cannot_rename_the_accepted_dispatch_or_route(self):
+        route = _route("web:modern-route", kind="web-worker")
+        worker = ProviderWorker(
+            lambda *_: {
+                "dispatch_id": "legacy-dispatch",
+                "route_id": "web-chat:legacy-route",
+                "status": "completed",
+                "answer": "ok",
+            },
+            worker_id=route.route_id,
+        )
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+
+        result = supervisor.dispatch(
+            {
+                "dispatch_id": "modern-dispatch",
+                "parent_session_id": "modern-session",
+                "route_id": route.route_id,
+                "worker_kind": "web",
+                "question": "keep modern identity",
+            },
+            wait=True,
+            timeout=1,
+        )
+
+        self.assertEqual(result["result"]["dispatch_id"], "modern-dispatch")
+        self.assertEqual(result["result"]["route_id"], "web:modern-route")
+
+    def test_web_worker_accepts_a_response_just_after_nominal_deadline(self):
+        route = _route("web-grace", kind="web-worker")
+
+        def execute(_dispatch, _route, _cancel_event):
+            time.sleep(0.04)
+            return {"status": "completed", "answer": "arrived during transport grace"}
+
+        worker = WebWorker(execute, worker_id=route.route_id, timeout_ms=20)
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+        with patch("sumika_core.agent.supervisor.WORKER_TIMEOUT_GRACE_SECONDS", 0.05):
+            result = supervisor.dispatch(
+                {
+                    "parent_session_id": "grace-session",
+                    "parent_turn_id": "grace-turn",
+                    "route_id": route.route_id,
+                    "worker_kind": "web-worker",
+                    "question": "grace boundary",
+                },
+                wait=True,
+            )
+
+        self.assertEqual(result["status"], "completed", result)
+        self.assertGreaterEqual(result["latency_ms"], 20)
+
+    def test_web_worker_that_misses_grace_is_deadline_exceeded(self):
+        route = _route("web-grace-expired", kind="web-worker")
+
+        def execute(_dispatch, _route, _cancel_event):
+            time.sleep(0.08)
+            return {"status": "completed", "answer": "late"}
+
+        worker = WebWorker(execute, worker_id=route.route_id, timeout_ms=10)
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+        with patch("sumika_core.agent.supervisor.WORKER_TIMEOUT_GRACE_SECONDS", 0.01):
+            result = supervisor.dispatch(
+                {
+                    "parent_session_id": "grace-expired-session",
+                    "parent_turn_id": "grace-expired-turn",
+                    "route_id": route.route_id,
+                    "worker_kind": "web-worker",
+                    "question": "past grace",
+                },
+                wait=True,
+            )
+
+        self.assertEqual(result["status"], "unknown", result)
+        self.assertEqual(result["error_code"], "deadline-exceeded")
+        self.assertTrue(result["possibly_sent"])
+
+    def test_provider_worker_does_not_receive_web_transport_grace(self):
+        route = _route("provider-no-grace")
+
+        def execute(_dispatch, _route, _cancel_event):
+            time.sleep(0.04)
+            return {"status": "completed", "answer": "too late for provider"}
+
+        worker = ProviderWorker(execute, worker_id=route.route_id, timeout_ms=20)
+        supervisor = self.make_supervisor([route], [(route.route_id, worker)])
+        with patch("sumika_core.agent.supervisor.WORKER_TIMEOUT_GRACE_SECONDS", 0.05):
+            result = supervisor.dispatch(
+                {
+                    "parent_session_id": "provider-timeout-session",
+                    "parent_turn_id": "provider-timeout-turn",
+                    "route_id": route.route_id,
+                    "question": "no grace",
+                },
+                wait=True,
+            )
+
+        self.assertEqual(result["status"], "unknown", result)
+        self.assertEqual(result["error_code"], "deadline-exceeded")
 
     def test_dispatch_applies_capability_privacy_quality_and_evidence_gates(self):
         calls = []
@@ -933,6 +1035,66 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         self.assertEqual(result["successful_count"], 5)
         self.assertEqual(len(result["members"]), 5)
         self.assertEqual(peak, 3)
+
+    def test_consultation_projects_a_started_second_wave_as_running(self):
+        first_three_started = [threading.Event() for _ in range(3)]
+        release_first = threading.Event()
+        release_rest = threading.Event()
+        fourth_started = threading.Event()
+
+        def execute(dispatch, route, cancel_event):
+            del dispatch, cancel_event
+            index = int(route.route_id.rsplit("-", 1)[1])
+            if index < 3:
+                first_three_started[index].set()
+                if index == 0:
+                    release_first.wait(timeout=2)
+                else:
+                    release_rest.wait(timeout=2)
+            else:
+                fourth_started.set()
+                release_rest.wait(timeout=2)
+            return {"status": "completed", "answer": route.route_id}
+
+        routes = [
+            _route(
+                f"web-wave-{index}",
+                kind="web-worker",
+                source_kind="web-chat",
+                provider_profile_id=f"profile-wave-{index}",
+                provider_key=f"provider-wave-{index}",
+                quota_consent="granted",
+                cost_class="unknown",
+            )
+            for index in range(4)
+        ]
+        supervisor = self.make_supervisor(
+            routes,
+            [
+                (route.route_id, ProviderWorker(execute, worker_id=route.route_id))
+                for route in routes
+            ],
+            max_concurrent=3,
+        )
+
+        try:
+            supervisor.start_consultation(
+                {
+                    "consultation_id": "consultation-wave-status",
+                    "parent_session_id": "session-wave-status",
+                    "question": "show the second wave state",
+                    "max_members": 4,
+                }
+            )
+            self.assertTrue(all(event.wait(timeout=1) for event in first_three_started))
+            release_first.set()
+            self.assertTrue(fourth_started.wait(timeout=1))
+            status = supervisor.consultation_status("consultation-wave-status")
+            fourth = next(item for item in status["members"] if item["route_id"] == "web-wave-3")
+            self.assertEqual(fourth["status"], "running")
+        finally:
+            release_first.set()
+            release_rest.set()
 
     def test_parent_turn_accepts_six_dispatches_but_rejects_seventh(self):
         route = _route("route-six")

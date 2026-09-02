@@ -20,8 +20,8 @@
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `b005c3f41cf712a2183bb0c9d711f1638f63d2f0`
-- Last verified commit: `2fb421e`; the runtime-neutral desktop automation contracts/DSH bridge, standard-library Electron CDP runner, dynamic route supervisor, explicit model-evaluation capture contract, turn-boundary regression tests, and associated tests are committed and locally verified on 2026-09-01. A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
+- Baseline commit: `17bb9e4` (当前 `HEAD`；本轮固定启动改动仍在工作树，未提交)
+- Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
 - Runtime design: [Agent Runtime](architecture/agent-runtime.md)
@@ -32,9 +32,9 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 ## 当前里程碑
 
-**Phase 3 后续 - 模型策略、额度边界与桌面自动化（评测捕获与边界回归已验证，2026-09-01）**
+**固定 DSH 主 Agent 启动闭环（实现与实机验收完成，2026-09-03）**
 
-Phase 0、1、2 和 3 均已完成；本次恢复补充模型策略的基础路由、公开模型目录、保守额度观测和 CDP transport 加固，Phase 4 仍不开始。
+Phase 0、1、2 和 3 均已完成；本轮完成固定 DSH 启动链的 fail-closed 校验和真实 Windows 进程闭环，Phase 4 仍不开始。
 
 Phase 0 已完成：执行契约、固定恢复顺序和文档检查边界；WorkspaceRuntime 的检查、checkpoint、diff、恢复、worktree、patch 审阅和本地 commit 已接入 Agent 页。Phase 1 已完成：固定 DSH `0.1.1-rc.2` 的启动、健康检查、Provider route 桥接和安全凭据注入；隔离 OpenAI-compatible SSE stub 已通过 Session、模型选择、prompt、事件和最终 snapshot 协议闭环。
 
@@ -44,11 +44,14 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 固定版 DSH 没有独立 live `mcp.list`、Readonly policy、composition 写入、artifact 或 rollback RPC。Sumika 对这些边界明确返回 `not-exposed` 或由自身 WorkspaceRuntime 补足，不伪造能力，也不进入 Phase 4。
 
+本轮启动闭环已验证：`tools/run-desktop.ps1 -NoBuild` 只接受固定或显式精确版本的 DSH，Tauri 在配置生成和 spawn 前再次核验；Core `8771`、DSH `3080`、`/api/health`、`/api/agent/status`、`/api/agent/diagnostics`、`host.describe` 和 `session/list` 均可用。
+隔离 `Plan→Execute`、审批、工具、checkpoint、diff 和精确恢复通过；真实 Provider 预检仍可能为 `needs-action`，本轮没有发送真实高价请求。
+
 ## 接下来的三个动作
 
-1. 在获得明确的隔离 handoff 后，用 `tools/fixtures/model-evaluation-v1.json` 收集首批样本；捕获必须由维护 Agent 显式选择并带 `--opt-in`。
-2. 复核固定版本 cohort 和证据门槛；不足 3 次重复或含敏感内容时不参与推荐。
-3. 保持推荐后确认和禁止静默付费切换；真实 ZCode CDP 的 click/fill/send 仍须另行明确动作和审批边界。
+1. 后续启动统一使用 `tools/run-desktop.ps1 -NoBuild`；若预检显示 `provider=needs-action`，由用户单独授权并重新健康检查。
+2. 继续逐站用 DOM/ARIA、HTML projection 与 OCR 修通真实网页发送和回复提取，优先解决 ChatGPT 的回复定位。
+3. 在同一新命名 BrowserSkill Profile 完成人工登录后，验收五站一窗五标签和 `3 + 2` 聚合；不同现有 Profile 不静默合并。
 
 ## 固定决策
 
@@ -61,6 +64,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 - 模型策略使用 `model-policy/v1`；`difficulty=auto` 目前是保守规则，ZCode 额度只有在公开 app-server capability 存在时才读取，未知额度不得标为免费。ZCode adapter 默认 `SUMIKA_ZCODE_PROTOCOL=auto`，可用 `SUMIKA_ZCODE_NODE` + `SUMIKA_ZCODE_SCRIPT` 配置 Node 打包入口，或显式开启 `SUMIKA_ZCODE_AUTODISCOVER=1` 解析公开 bundle；不读取 ZCode 私有配置。
 - 路由默认推荐后确认；无候选、未确认、额度耗尽或健康失败时，Session、Provider 绑定和 Execute checkpoint 均不得先行创建。
 - 正式文件修改只发生在独立 worktree、分支或等价的可恢复 Workspace 中。
+- 完整客户端只能通过已验证的固定 DSH 启动链；Core-only 调试不继承 PATH 中的全局 DSH。
 
 ## 明确暂缓
 
@@ -75,7 +79,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 - 隔离 Ollama（`127.0.0.1:11435`）现在可见 `qwen3:1.7b`（约 1.36 GB）和 `qwen3:4b`（约 2.50 GB）；1.7B 仅用于快速协议/UI 冒烟，4B 保持 DSH 默认。用户原有 `127.0.0.1:11434` 服务未停止，也没有被改写。
 - 1.7B 的直接 OpenAI-compatible 请求已通过，但在标准 DSH 工具目录下工具选择和长推理质量不足；不能把“能响应”当作 Codex 日用 Agent 验收通过。
 - 真实 Provider 若缺少凭据必须请用户重新输入，不得从 SQLite、日志或聊天恢复；安全启动注入已实现，模型质量仍待持续对照评估。
-- 上一次隔离验收中，BrowserSkill CLI `0.1.11`、受管 Edge Agent profile 和 `ext-v0.1.7` 的 protocol 1.1 检查均通过，自动读写 smoke 已通过；人工接管请求因本轮没有用户操作而超时。当前 Core `8771` 已重新连接 BrowserSkill；智谱与 Kimi 网页 Route 于 2026-09-02 完成人工登录、页面检查、`chat.read`/`chat.send` 长期普通文本授权并验证为可路由，其他网页站点和敏感写操作仍需用户在明确任务中授权。网页额度仍为 `unknown`。
+- 上一次隔离验收中，BrowserSkill CLI `0.1.11`、受管 Edge Agent profile 和 `ext-v0.1.7` 的 protocol 1.1 检查均通过，自动读写 smoke 已通过；人工接管请求因本轮没有用户操作而超时。DeepSeek、ChatGPT、智谱、Qwen 与 Kimi 网页 Route 于 2026-09-02 完成人工登录、页面检查、`chat.read`/`chat.send` 长期普通文本授权，并在 Core 目录中验证为 `routable=true`。Kimi 单站真实咨询已完成；ChatGPT 已有页面提交证据，但回复 DOM 提取在 300 秒后以 `deadline-exceeded` 结束且未重发，因此五站整体验收仍未通过。测试后 Core `8771` 已停止且 BrowserSkill 活动 session 为 0；豆包和敏感写操作仍需用户在明确任务中授权。网页额度仍为 `unknown`。
 - 隔离 SSE stub 已验证 DSH 协议，但不会替代真实模型；真实模型复杂任务质量仍需用户主动配置 Provider 后单独评估，Sumika 不读取历史密钥或自动安装模型。
 - 真实 ZCode CDP 只读 smoke 已于 2026-08-31 通过：`http://127.0.0.1:9222` 返回 Electron 版本信息，发现 1 个 page target（标题 `ZCode`），页面 `readyState=complete`；观察请求关闭正文读取，仅保留标题、URL scheme 和控件计数。端口和用户实例在 smoke 后仍保持运行。尚未验证发送、填写、登录或任何敏感动作。
 
@@ -83,23 +87,17 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 当前工作树已通过：
 
-- Python unittest: 456 tests（含上述基线，以及动态路由 turn 边界、显式评测捕获、标准库 CDP transport 的 loopback、目标发现、固定 DOM 动作、路径、Unicode 转义和 contenteditable 边界）；Tools unittest: 57 tests（含文档、日用验收、评测器和显式评测捕获 CLI）；
-- Playwright: 47 tests（47 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
+- Python unittest: 546 tests；Tools unittest: 58 tests（含 DSH 启动夹具和观测投影）；Playwright: 49 tests（49 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
-- `cargo check --manifest-path src-tauri/Cargo.toml`;
+- `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml` (6 passed);
 - `python tools/check_docs.py`;
-- all `tools/*.ps1` PowerShell parser checks；DSH route bridge、desktop automation 和 browser policy 插件分别通过 6、5、8 项 Node 测试，Python `compileall` 通过；
+- `tools/dsh-launch.ps1` and `tools/run-desktop.ps1` PowerShell parse checks；`tools/test_dsh_launch.ps1` passed；DSH route bridge、desktop automation 和 browser policy plugins passed 19 Node tests；Python `compileall` passed；
 - `git diff --check`；
+- 隔离 `python tools/agent_daily_acceptance.py --runtime-smoke`：Plan Review、批准、Execute、工具、checkpoint/diff/精确恢复均通过；整体预检为 `needs-action` 仅因真实 Provider 未授权。
 - `backend/tests/test_cdp_transport.py`: 4 项专项测试通过；
 - 真实 ZCode CDP smoke（2026-08-31）：`health`、已有 `ZCode` page `open`、`observe(include_text=false)` 和 runner 断开通过；端口仍监听且 page target 数量未增加。
-- BrowserSkill 实机：CLI `0.1.11` 与官方 `ext-v0.1.7` 发布包 SHA-256 校验通过；
-  daemon、扩展和 browser protocol 检查均通过。Sumika policy companion 已以内容指纹化 tarball
-  安装到受管 DSH profile；新启动的固定 DSH `0.1.1-rc.2` 已完成
-  `browser-skill` 加载、隔离 session、`example.com` 只读导航、一次导航审批、ARIA snapshot
-  和 session stop；另完成本地非敏感表单写入、提交和 3 次审批。`tools/agent_daily_acceptance.py`
-  的 `--browser-smoke --browser-write-smoke` 已将两项纳入统一安全报告；测试后无活动 BrowserSkill
-  session，隔离 DSH 端口已释放。智谱与 Kimi 网页 Route 的人工登录和普通文本授权已于 2026-09-02 在真实隔离 Profile 完成；人工接管、其他站点登录和真实账号写操作仍待用户授权。
+- BrowserSkill 实机：CLI `0.1.11` 与官方 `ext-v0.1.7` 的 SHA-256、daemon、扩展和 browser protocol 检查均通过；Sumika policy companion 已安装到受管 DSH profile，并完成 `browser-skill` 加载、隔离 session、只读导航、导航审批、ARIA snapshot、本地非敏感表单写入和 session stop；测试后无活动 BrowserSkill session，隔离 DSH 端口已释放。DeepSeek、ChatGPT、智谱、Qwen 与 Kimi 网页 Route 的人工登录、页面检查和普通文本授权已于 2026-09-02 验证为可路由；Kimi 单站真实咨询完成，ChatGPT 回复提取超时且未重发，五站聚合仍待完整通过。
 - `tools/agent_daily_acceptance.py` 与 `--plan-execute` smoke 已完成语法检查；新的隔离 DSH `127.0.0.1:3100` profile 在 2026-08-29 通过 `--runtime-smoke --mcp --skills-subagents` 组合验收，包含 Plan→Execute、MCP、审批、diff、恢复、Skills 和 Subagents；BrowserSkill 读写组合回合也已通过。真实 Provider 的既有 Session 可用 `--real-session` 只读纳入报告，复杂任务质量仍待对照。
 - WorkspaceRuntime 专项：checkpoint/恢复、状态截断、冲突/rename、worktree、patch 和精确 commit；独立 worktree 已由 DSH 完成受控文档自修改并通过 diff、恢复和本地 commit（`10ff976`）；Workspace UI：创建预览、双重确认、文本 patch、本地提交和归档路径脱敏。
 Windows launcher 另以真实进程验证三条分支：复用或监督固定版 DSH，以及 DSH 缺失时 Agent fail closed；各次退出后 `3080`、`3081`、`8770`、`8771` 均释放，用户的 Ollama `11434` 未被停止。
@@ -124,12 +122,7 @@ ZCode app-server 适配器已通过隔离现代 wire fixture：工作区 session
 
 Agent observability 已接入 Core RPC/DSH event 边界：`.sumika*/logs/agent-observability/` 只写 bounded JSONL receipt，按 UTC 日输出 p50/p95 与结果/资源汇总；不写提示词、模型输出、工具参数/结果、文件内容、凭据或 Cookie。`python tools/aggregate_agent_day.py --write` 可离线生成摘要；`agent.acceptance.evidence` 与 `--real-session` 可把既有真实闭环投影为布尔值、计数、枚举和耗时。模型策略基础 catalog、确定性难度推断、额度 TTL、固定评测任务集和推荐前确认已通过 2026-08-30 回归；长期样本质量判定、学习型分类器和自动路由仍未实现。
 
-Skills/Subagents 专项：隔离工作区中的 `.agents/skills` fixture 已被 `skill.list` 发现，
-`/sumika-smoke` 的正文注入已在 OpenAI-compatible stub 请求中确认；DSH `subagent`
-工具已创建 one-shot 子 Agent，`subagent.list` 返回其直接子级及模式，
-`subagent.history` 可读取子会话摘要。该专项只使用隔离 Profile 和测试 Provider，
-不改变生产会话；可由 `tools/agent_daily_acceptance.py --runtime-smoke --skills-subagents`
-重复执行，报告仅保留布尔值和计数。
+Skills/Subagents 专项：隔离 `.agents/skills` fixture 已被 `skill.list` 发现，`/sumika-smoke` 正文注入已确认；DSH `subagent` 已创建 one-shot 子 Agent，`subagent.list/history` 可读其摘要。该专项只使用隔离 Profile 和测试 Provider，不改变生产会话；可由 `tools/agent_daily_acceptance.py --runtime-smoke --skills-subagents` 重复执行，报告仅保留布尔值和计数。
 未执行：`cargo fmt --check`，因为当前工具链没有 `rustfmt`；不得为此静默安装组件。
 
 ## 恢复顺序

@@ -34,9 +34,22 @@ class AgentRuntimeTests(unittest.TestCase):
         status = runtime.status()
         self.assertEqual(status["version"], DSH_VERSION)
         self.assertEqual(status["commit"], DSH_COMMIT)
+        self.assertIsNone(status["executable"])
+        self.assertFalse(status["version_verified"])
+        self.assertEqual(status["version_source"], "unverified external/Core-only")
         self.assertTrue(status["global_install_untouched"])
         self.assertTrue(status["profile_dir"].endswith("dsh-profile"))
         self.assertNotIn("readonly", runtime.runtime_capabilities())
+
+    def test_core_only_dsh_does_not_discover_global_path_executable(self):
+        runtime = DSHAgentRuntime(
+            ":memory:",
+            env={
+                "SUMIKA_DSH_ENDPOINT": "http://127.0.0.1:1",
+                "PATH": r"D:\DevTools\npm-global",
+            },
+        )
+        self.assertIsNone(runtime.status()["executable"])
 
     def test_dsh_adapter_accepts_generic_runtime_environment_aliases(self):
         runtime = DSHAgentRuntime(
@@ -54,6 +67,20 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(status["profile_dir"], "D:\\portable-profile")
         self.assertEqual(status["executable"], "D:\\portable-dsh.cmd")
         self.assertEqual(status["state"], "disabled")
+
+    def test_managed_launcher_can_mark_executable_version_as_verified(self):
+        runtime = DSHAgentRuntime(
+            ":memory:",
+            env={
+                "SUMIKA_DSH_ENDPOINT": "http://127.0.0.1:1",
+                "SUMIKA_DSH_EXECUTABLE": r"D:\portable-dsh.cmd",
+                "SUMIKA_DSH_VERSION_VERIFIED": "1",
+                "SUMIKA_DSH_ENABLED": "0",
+            },
+        )
+        status = runtime.status()
+        self.assertTrue(status["version_verified"])
+        self.assertEqual(status["version_source"], "executable --version")
 
     def test_diagnostics_distinguishes_missing_mcp_rpc_from_transport_failure(self):
         runtime = DSHAgentRuntime(":memory:", env={"SUMIKA_DSH_ENDPOINT": "http://127.0.0.1:1"})

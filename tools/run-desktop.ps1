@@ -5,8 +5,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$pinnedDshVersion = '0.1.1-rc.2'
-$pinnedDshExecutable = "D:\Tools\DeepSeekHarness\$pinnedDshVersion\node_modules\.bin\dsh.cmd"
+. (Join-Path $PSScriptRoot 'dsh-launch.ps1')
+$pinnedDshVersion = $SumikaPinnedDshVersion
+$pinnedDshExecutable = $SumikaPinnedDshExecutable
 
 function Test-DshEndpoint {
     param([string]$Endpoint)
@@ -29,21 +30,6 @@ function Test-DshEndpoint {
         $response = Invoke-WebRequest @requestParameters
         $payload = $response.Content | ConvertFrom-Json
         return $response.StatusCode -eq 200 -and $payload.result.ok -eq $true
-    }
-    catch {
-        return $false
-    }
-}
-
-function Test-PinnedDshExecutable {
-    param([string]$Executable)
-
-    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
-        return $false
-    }
-    try {
-        $reportedVersion = (& $Executable --version 2>$null | Select-Object -First 1).Trim()
-        return $reportedVersion -eq $pinnedDshVersion
     }
     catch {
         return $false
@@ -109,38 +95,73 @@ if ([string]::IsNullOrWhiteSpace($agentRuntime)) {
     $agentRuntime = 'dsh'
 }
 if ($agentRuntime.Trim().ToLowerInvariant() -eq 'dsh') {
-    $agentEndpoint = [string]$env:SUMIKA_AGENT_ENDPOINT
+    $configuredAgentEndpoint = [string]$env:SUMIKA_AGENT_ENDPOINT
+    $configuredDshEndpoint = [string]$env:SUMIKA_DSH_ENDPOINT
+    $endpointWasExplicit = -not [string]::IsNullOrWhiteSpace($configuredAgentEndpoint) -or
+        -not [string]::IsNullOrWhiteSpace($configuredDshEndpoint)
+    $agentEndpoint = $configuredAgentEndpoint
     if ([string]::IsNullOrWhiteSpace($agentEndpoint)) {
-        $agentEndpoint = [string]$env:SUMIKA_DSH_ENDPOINT
+        $agentEndpoint = $configuredDshEndpoint
     }
     if ([string]::IsNullOrWhiteSpace($agentEndpoint)) {
         $agentEndpoint = 'http://127.0.0.1:3080'
     }
 
+    $configuredDshExecutable = [string]$env:SUMIKA_AGENT_EXECUTABLE
+    if ([string]::IsNullOrWhiteSpace($configuredDshExecutable)) {
+        $configuredDshExecutable = [string]$env:SUMIKA_DSH_EXECUTABLE
+    }
+    $autostartConfigured = -not [string]::IsNullOrWhiteSpace([string]$env:SUMIKA_AGENT_AUTOSTART) -or
+        -not [string]::IsNullOrWhiteSpace([string]$env:SUMIKA_DSH_AUTOSTART)
+    $autostartValue = [string]$env:SUMIKA_AGENT_AUTOSTART
+    if ([string]::IsNullOrWhiteSpace($autostartValue)) {
+        $autostartValue = [string]$env:SUMIKA_DSH_AUTOSTART
+    }
+    if ($autostartConfigured -and $autostartValue.Trim().ToLowerInvariant() -notin @('0', '1', 'true', 'false', 'yes', 'no')) {
+        throw "DSH autostart setting '$autostartValue' is invalid; use 0/1 or true/false."
+    }
+    $autostartDisabled = $autostartConfigured -and $autostartValue.Trim().ToLowerInvariant() -in @('0', 'false', 'no')
+    $validated = $null
+    if (-not [string]::IsNullOrWhiteSpace($configuredDshExecutable)) {
+        # An explicit path is always checked, even when an external endpoint
+        # happens to be healthy, so a wrong version cannot hide in the env.
+        $validated = Assert-SumikaDshExecutable -Executable $configuredDshExecutable -ExpectedVersion $pinnedDshVersion
+        $configuredDshExecutable = $validated.path
+        $env:SUMIKA_AGENT_EXECUTABLE = $configuredDshExecutable
+        Write-Host "Validated DSH executable $($validated.display_name) version $($validated.actual_version)."
+    }
+
     if (Test-DshEndpoint -Endpoint $agentEndpoint) {
-        # Never start a duplicate runtime on an endpoint that already passed
-        # the pinned DSH health contract. The existing process stays external.
+        if (-not $endpointWasExplicit -and -not $autostartDisabled) {
+            throw "Default DSH endpoint $agentEndpoint is healthy, but its package version cannot be verified from host.describe. Set SUMIKA_AGENT_ENDPOINT explicitly to opt into external protocol-only reuse, or stop that endpoint so Sumika can start the pinned DSH $pinnedDshVersion."
+        }
+        # host.describe proves only that an external protocol endpoint is alive;
+        # it does not prove the npm/CLI release. Explicit configuration is the
+        # opt-in required to reuse such a process.
         $env:SUMIKA_AGENT_AUTOSTART = '0'
-        Write-Host "Using existing DSH runtime at $agentEndpoint."
+        $env:SUMIKA_DSH_VERSION_VERIFIED = '0'
+        Write-Host "Using explicitly allowed external DSH endpoint at $agentEndpoint (protocol health only; package version unknown)."
     }
     else {
-        $configuredDshExecutable = [string]$env:SUMIKA_AGENT_EXECUTABLE
-        if ([string]::IsNullOrWhiteSpace($configuredDshExecutable)) {
-            $configuredDshExecutable = [string]$env:SUMIKA_DSH_EXECUTABLE
-        }
-        if ([string]::IsNullOrWhiteSpace($configuredDshExecutable) -and (Test-PinnedDshExecutable -Executable $pinnedDshExecutable)) {
-            $configuredDshExecutable = $pinnedDshExecutable
+        if ($null -eq $validated -and -not $autostartDisabled) {
+            $validated = Assert-SumikaDshExecutable -Executable $pinnedDshExecutable -ExpectedVersion $pinnedDshVersion
+            $configuredDshExecutable = $validated.path
             $env:SUMIKA_AGENT_EXECUTABLE = $configuredDshExecutable
+            Write-Host "Validated pinned DSH executable $($validated.display_name) version $($validated.actual_version)."
         }
 
-        $autostartConfigured = -not [string]::IsNullOrWhiteSpace([string]$env:SUMIKA_AGENT_AUTOSTART) -or
-            -not [string]::IsNullOrWhiteSpace([string]$env:SUMIKA_DSH_AUTOSTART)
         if (-not $autostartConfigured -and -not [string]::IsNullOrWhiteSpace($configuredDshExecutable)) {
             $env:SUMIKA_AGENT_AUTOSTART = '1'
-            Write-Host "Starting managed DSH $pinnedDshVersion from $configuredDshExecutable."
+            $env:SUMIKA_DSH_VERSION_VERIFIED = '1'
+            Write-Host "Starting managed DSH $pinnedDshVersion from $($validated.display_name)."
         }
-        elseif (-not $autostartConfigured) {
-            Write-Warning "Pinned DSH $pinnedDshVersion is not installed at $pinnedDshExecutable. The desktop will start, but Agent remains unavailable until DSH is installed or an endpoint is configured."
+        elseif ($autostartConfigured -and -not $autostartDisabled -and -not [string]::IsNullOrWhiteSpace($configuredDshExecutable)) {
+            $env:SUMIKA_DSH_VERSION_VERIFIED = '1'
+            Write-Host "Starting configured managed DSH $pinnedDshVersion from $($validated.display_name)."
+        }
+        elseif ($autostartDisabled) {
+            $env:SUMIKA_DSH_VERSION_VERIFIED = '0'
+            Write-Host 'Managed DSH autostart is explicitly disabled; Core will report an external/unavailable runtime.'
         }
     }
 }

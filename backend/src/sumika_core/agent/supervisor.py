@@ -99,6 +99,12 @@ EVIDENCE_ORDER = {
 }
 QUALITY_ORDER = {"unknown": 0, "basic": 1, "standard": 2, "strong": 3, "premium": 4}
 COST_ORDER = {"free-limited": 0, "local": 1, "paid-low": 2, "paid-high": 3, "unknown": 4}
+# Browser and external-harness transports have a small boundary window for
+# process/stdio delivery.  The grace is part of the supervisor's effective
+# deadline (rather than a retry) so a late response is accepted once, while a
+# response that misses the complete window remains non-replayable.
+WORKER_TIMEOUT_GRACE_SECONDS = 15.0
+WORKER_TIMEOUT_GRACE_KINDS = frozenset({"web", "web-worker", "external-harness", "zcode"})
 
 
 class SupervisorError(RouteError):
@@ -1317,8 +1323,12 @@ class DynamicSubtaskResult:
             possibly_sent_value = isinstance(sent_state, str) and sent_state in {"possibly-sent", "unknown"}
         untrusted_default = dispatch.worker_kind in {"web", "web-worker", "external-harness", "zcode"}
         return cls(
-            dispatch_id=str(raw.get("dispatch_id") or dispatch.dispatch_id),
-            route_id=str(raw.get("route_id") or dispatch.route_id),
+            # The accepted dispatch is authoritative.  A compatibility
+            # worker may use a legacy route spelling internally, but its
+            # result must not rename or impersonate the route selected by the
+            # runtime-neutral supervisor.
+            dispatch_id=dispatch.dispatch_id,
+            route_id=dispatch.route_id,
             worker_kind=str(raw.get("worker_kind") or dispatch.worker_kind),
             status=str(raw.get("status") or "unknown"),
             answer=raw.get("answer") or raw.get("text"),
@@ -2858,7 +2868,7 @@ class DynamicRouteSupervisor:
             value = record.worker.execute(record.dispatch, record.route, record.cancel_event) if hasattr(record.worker, "execute") else _call_with_supported_signature(record.worker, record.dispatch, record.route, record.cancel_event)
             elapsed = (time.monotonic() - started) * 1000
             result = DynamicSubtaskResult.from_value(value, record.dispatch, latency_ms=elapsed)
-            deadline = record.dispatch.deadline_ms or getattr(record.worker, "timeout_ms", None)
+            deadline = self._effective_timeout_ms(record)
             if deadline and elapsed > float(deadline):
                 result = DynamicSubtaskResult(
                     record.dispatch.dispatch_id,
@@ -3035,7 +3045,11 @@ class DynamicRouteSupervisor:
         if record is None:
             return {"schema": SUPERVISOR_SCHEMA, "found": False, "dispatch_id": identifier}
         if future is not None and record.status in {"queued", "running"}:
-            limit = timeout if timeout is not None else self._timeout_seconds(record)
+            # An explicit polling timeout still gets the transport grace for
+            # browser/external workers.  This avoids turning a caller's
+            # nominal 300-second wait into a false deadline exactly while the
+            # remote process is delivering its terminal event.
+            limit = self._timeout_seconds(record, requested=timeout)
             try:
                 future.result(timeout=max(0.0, float(limit)))
             except FutureTimeout:
@@ -3065,9 +3079,51 @@ class DynamicRouteSupervisor:
             record.completion_event.wait(timeout=1.0)
         return self.status(identifier)
 
-    def _timeout_seconds(self, record: _Run) -> float:
-        value = record.dispatch.deadline_ms or getattr(record.worker, "timeout_ms", None) or (300_000 if record.dispatch.worker_kind in {"web", "web-worker", "external-harness", "zcode"} else 120_000)
-        return max(0.001, min(float(value) / 1000.0, 3_600.0))
+    @staticmethod
+    def _base_timeout_ms(record: _Run) -> float:
+        value = (
+            record.dispatch.deadline_ms
+            or getattr(record.worker, "timeout_ms", None)
+            or (300_000 if record.dispatch.worker_kind in WORKER_TIMEOUT_GRACE_KINDS else 120_000)
+        )
+        try:
+            return max(1.0, min(float(value), 3_600_000.0))
+        except (TypeError, ValueError):
+            return 300_000.0 if record.dispatch.worker_kind in WORKER_TIMEOUT_GRACE_KINDS else 120_000.0
+
+    @staticmethod
+    def _uses_timeout_grace(record: _Run) -> bool:
+        return str(record.dispatch.worker_kind or "").strip().lower() in WORKER_TIMEOUT_GRACE_KINDS
+
+    def _effective_timeout_ms(self, record: _Run) -> float:
+        base = self._base_timeout_ms(record)
+        if self._uses_timeout_grace(record):
+            try:
+                grace = max(0.0, min(float(WORKER_TIMEOUT_GRACE_SECONDS), 300.0)) * 1000.0
+            except (TypeError, ValueError):
+                grace = 15_000.0
+            base = min(base + grace, 3_600_000.0 + 300_000.0)
+        return base
+
+    def _timeout_seconds(self, record: _Run, *, requested: float | None = None) -> float:
+        if requested is not None:
+            requested_seconds = 0.0
+            try:
+                requested_seconds = max(0.0, min(float(requested), 3_600.0))
+                value = requested_seconds * 1000.0
+            except (TypeError, ValueError):
+                value = 0.0
+            # Very short explicit waits are commonly used as non-blocking
+            # polling by callers and tests; do not unexpectedly turn those
+            # into a 15-second sleep.  Long/implicit waits are execution
+            # deadlines and receive the transport grace.
+            if self._uses_timeout_grace(record) and requested_seconds >= 30.0:
+                try:
+                    value += max(0.0, min(float(WORKER_TIMEOUT_GRACE_SECONDS), 300.0)) * 1000.0
+                except (TypeError, ValueError):
+                    value += 15_000.0
+            return max(0.001, min(value / 1000.0, 3_600.0 + 300.0))
+        return max(0.001, min(self._effective_timeout_ms(record) / 1000.0, 3_600.0 + 300.0))
 
     def status(self, dispatch_id: str) -> dict[str, Any]:
         identifier = _identifier(dispatch_id, "dispatch_id") or ""
@@ -3496,7 +3552,9 @@ class DynamicRouteSupervisor:
                         retryable=result.retryable,
                     )
                 else:
-                    member_status = str(item.get("status") or "queued")
+                    member_status = str(
+                        run.status if run is not None else item.get("status") or "queued"
+                    )
                     if member_status == "needs-confirmation":
                         member_status = "waiting-human"
                     member = ConsultationMemberResult(
@@ -3655,7 +3713,13 @@ class DynamicRouteSupervisor:
         self._update_consultation(request.consultation_id)
         self._emit("consultation.started", {"consultation_id": request.consultation_id, "parent_session_id": request.parent_session_id, "status": "running", "member_count": len(routes)})
         if wait:
-            deadline = time.monotonic() + (float(timeout) if timeout is not None else 300.0)
+            wait_seconds = float(timeout) if timeout is not None else 300.0
+            if any(item.kind in {"web", "web-worker"} or item.source_kind == "web-chat" for item in routes) and (timeout is None or wait_seconds >= 30.0):
+                try:
+                    wait_seconds += max(0.0, min(float(WORKER_TIMEOUT_GRACE_SECONDS), 300.0))
+                except (TypeError, ValueError):
+                    wait_seconds += 15.0
+            deadline = time.monotonic() + max(0.0, wait_seconds)
             while time.monotonic() < deadline:
                 current = self.consultation_status(request.consultation_id)
                 if current.get("status") not in {"queued", "running"}:

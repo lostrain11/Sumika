@@ -62,6 +62,14 @@ class WebChatServerTests(unittest.TestCase):
             {"profile_id": profile_id, "approved": True},
         )
         self.assertTrue(checked["ready"])
+        checked_route = next(
+            item
+            for item in self.application.route_supervisor.catalog(include_unavailable=True)["routes"]
+            if item["route_id"] == f"web:{profile_id}"
+        )
+        self.assertEqual(checked_route["auth_state"], "authorized")
+        self.assertEqual(checked_route["health_state"], "healthy")
+        self.assertFalse(checked_route["routable"])
         consented = self.application.rpc(
             "browser.web_chat.profile.consent",
             {
@@ -72,6 +80,39 @@ class WebChatServerTests(unittest.TestCase):
             },
         )
         self.assertTrue(consented["auto_chat_enabled"])
+        consented_route = next(
+            item
+            for item in self.application.route_supervisor.catalog(include_unavailable=True)["routes"]
+            if item["route_id"] == f"web:{profile_id}"
+        )
+        self.assertTrue(consented_route["routable"])
+        self.assertEqual(consented_route["quota_consent"], "granted")
+
+        self.application.rpc(
+            "browser.web_chat.profile.authorize",
+            {"profile_id": profile_id, "approved": True},
+        )
+        relogin_route = next(
+            item
+            for item in self.application.route_supervisor.catalog(include_unavailable=True)["routes"]
+            if item["route_id"] == f"web:{profile_id}"
+        )
+        self.assertEqual(relogin_route["auth_state"], "needs-auth")
+        self.assertFalse(relogin_route["routable"])
+        self.browser_stub.snapshots.append(page_snapshot(authorized=True, ready=True))
+        self.application.rpc(
+            "browser.web_chat.profile.check",
+            {"profile_id": profile_id, "approved": True},
+        )
+        self.application.rpc(
+            "browser.web_chat.profile.consent",
+            {
+                "profile_id": profile_id,
+                "enabled": True,
+                "allowed_actions": ["chat.read", "chat.send"],
+                "approved": True,
+            },
+        )
         activated = self.application.rpc(
             "browser.web_chat.profile.activate",
             {"profile_id": profile_id, "approved": True},
@@ -91,6 +132,13 @@ class WebChatServerTests(unittest.TestCase):
             {"profile_id": profile_id, "approved": True},
         )
         self.assertEqual(archived["status"], "archived")
+        self.assertNotIn(
+            f"web:{profile_id}",
+            {
+                item["route_id"]
+                for item in self.application.route_supervisor.catalog(include_unavailable=True)["routes"]
+            },
+        )
         restored = self.application.rpc(
             "browser.web_chat.profile.restore",
             {"profile_id": profile_id, "approved": True},
@@ -98,6 +146,12 @@ class WebChatServerTests(unittest.TestCase):
         self.assertEqual(restored["status"], "needs-auth")
         self.assertEqual(restored["auth_state"], "unknown")
         self.assertFalse(restored["auto_chat_enabled"])
+        restored_route = next(
+            item
+            for item in self.application.route_supervisor.catalog(include_unavailable=True)["routes"]
+            if item["route_id"] == f"web:{profile_id}"
+        )
+        self.assertFalse(restored_route["routable"])
         listed = self.application.rpc(
             "browser.web_chat.profiles", {"include_archived": True}
         )

@@ -48,6 +48,8 @@ API、协议、类名和代码标识保留 English identifier。
 - [安全边界](architecture/security.md)
 - [调试与恢复](architecture/debugging.md)
 - [Agent 日用遥测与评估](architecture/agent-observability.md)
+- [网页聊天故障手册](troubleshooting/browser-web-chat.md)
+- [固定 DSH 启动故障手册](troubleshooting/dsh-startup.md)
 
 ## 开发接口与决策
 

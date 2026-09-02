@@ -86,6 +86,11 @@ JavaScript 或页面原始快照。公开 RPC/HTTP 只返回脱敏的档案元�
 
 发送前和等待回复期间都会重新检查登录状态、页面就绪状态和当前域名。输入框、发送
 按钮或 Enter 操作任一失败都会停止，不会重试到未声明的选择器，也不会生成替代文本。
+提交状态不明、DOM/ARIA 冲突、回复超时或疑似遮罩时，Core 内部的
+`VisualEvidenceProbe` 会调用本地 RapidOCR 交叉验证；只返回布尔值、置信度、计数和错误码，
+截图路径、像素、OCR 正文与提示词不进入 RPC、日志、数据库或 Agent 上下文。OCR 不确定时
+禁止重发；视觉可见回复若无法由 DOM 安全提取则返回
+`response-visible-extraction-failed`，不把 OCR 文本伪装成正式回答。
 如果页面没有出现新的、明确标记为 assistant/model/bot 的回复，结果为 `pending`；
 敏感样式的回复会被丢弃并返回受限错误。网页端额度固定为 `unknown`，不能仅凭网页
 登录状态宣称免费；模型策略只有在上述人工授权、健康检查和显式同意完成后才会把该
@@ -98,8 +103,9 @@ JavaScript 或页面原始快照。公开 RPC/HTTP 只返回脱敏的档案元�
 Sumika 猜测新页面结构。
 
 当前网页聊天仍属于“部分实现”：需要用户先准备 BrowserSkill 扩展和命名 Profile。
-截至 2026-09-02，智谱与 Kimi 网页 Route 已在真实隔离 Profile 完成人工登录、页面检查和
-`chat.read`/`chat.send` 长期普通文本授权，并进入可路由目录；其他站点的真实账号登录、
+截至 2026-09-02，DeepSeek、ChatGPT、智谱、Qwen 与 Kimi 网页 Route 已在真实隔离 Profile
+完成人工登录、页面检查和 `chat.read`/`chat.send` 长期普通文本授权，并进入可路由目录；
+Kimi 单站已返回真实结果，ChatGPT 提交成功但 DOM 回复提取仍待修复，完整五站聚合尚未通过。
 人工接管和长期网页端额度来源不由自动化测试代替。适配器只复用
 BrowserSkill 的公开 DOM/快照边界；未来替换 BrowserSkill 或 Harness 时，保留档案
 协议和策略层即可重写传输适配器。
@@ -110,6 +116,12 @@ Provider 不重复占位；Supervisor 最多并发三个 Worker，因此五成�
 `UNTRUSTED_WEB_RESULT`，只能由主 Agent 综合，不能直接触发代码或外部操作。网页额度保持
 `unknown`；只有完成 Profile 级普通文本咨询授权后才不逐次确认，登录、验证码、付费提示和
 人工接管仍会暂停。
+
+同一个命名 BrowserSkill Profile 下的网页档案复用一个 Agent Window，每个档案使用独立
+标签页；Agent Worker 全部释放后 60 秒关闭该窗口。用户手动打开的登录窗口不会被 Worker
+空闲定时器关闭。不同命名 Profile 代表不同持久登录边界，Chromium 无法在一个窗口混用，
+Sumika 不会为追求单窗口而静默迁移 Cookie；现有五个独立 Profile 仍会打开独立窗口，只有
+用户把五站登录到同一个新命名 Profile 后才能完成真正的一窗五标签验收。
 
 ## 命名 Profile 与租约
 

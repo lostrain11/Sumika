@@ -204,11 +204,14 @@ or raw visual/audio data.
 The desktop core listens on `127.0.0.1:8771` by default, while the browser
 preview uses `127.0.0.1:8770`.
 
-The Windows launcher first checks `SUMIKA_AGENT_ENDPOINT` /
-`SUMIKA_DSH_ENDPOINT` (default `http://127.0.0.1:3080`). If an existing DSH
-passes its health check, Sumika reuses it without taking over its lifecycle.
-Otherwise the launcher discovers the already installed pinned runtime at the
-fixed path below and lets Tauri supervise it:
+The Windows launcher first validates the pinned DSH executable at
+`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd` (or an explicitly
+configured absolute executable) and requires an exact `0.1.1-rc.2` `--version` result.
+It never discovers a global `PATH` DSH. An explicitly configured
+`SUMIKA_AGENT_ENDPOINT` / `SUMIKA_DSH_ENDPOINT` may opt into protocol-only external
+reuse; `host.describe` does not prove the package version. A healthy default `3080`
+endpoint with no explicit opt-in fails closed so the wrong Runtime cannot be hidden.
+Tauri repeats the version check immediately before spawning the managed child:
 
 ```powershell
 .\tools\run-desktop.ps1
@@ -221,16 +224,17 @@ If the pinned runtime is not installed yet, explicitly run:
 ```
 
 The setup helper writes only to `D:\Tools\DeepSeekHarness\0.1.1-rc.2`; it does
-not change `PATH` or the global DSH installation. `run-desktop.ps1` only
-discovers that existing, version-matched executable and never installs,
+not change `PATH` or the global DSH installation. `run-desktop.ps1` never installs,
 updates, or downloads DSH. The desktop shell uses `.sumika-desktop\dsh-profile`
 as the isolated `DSH_HOME`. A custom install can still set
-`SUMIKA_AGENT_EXECUTABLE` and `SUMIKA_AGENT_AUTOSTART=1` explicitly.
+`SUMIKA_AGENT_EXECUTABLE` and `SUMIKA_AGENT_AUTOSTART=1` explicitly, but the
+executable must pass the same exact version check.
 
 The shell writes DSH lifecycle output to `.sumika-desktop/logs/dsh.log` and
-uses `.sumika-desktop/dsh-profile` as `DSH_HOME`. If the pinned runtime is not
-installed and no external endpoint is healthy, the desktop still starts and
-the Agent page reports the unavailable runtime explicitly.
+uses `.sumika-desktop/dsh-profile` as `DSH_HOME`. If the pinned runtime is
+missing, invalid, or cannot be verified, the complete launcher stops before
+starting Tauri and reports the repair path. Use `tools/run_core.ps1` only when
+you intentionally want a Core-only process without an Agent Runtime.
 
 ## Core capabilities
 
