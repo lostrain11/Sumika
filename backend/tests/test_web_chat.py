@@ -13,9 +13,11 @@ from sumika_core.browser.web_chat import (
     _input_message_state,
     _ResponseStabilityTracker,
     WebChatAdapterRegistry,
+    WebChatProvider,
     WebChatRuntime,
     WebChatRuntimeError,
 )
+from sumika_core.protocol.models import ChatRequest, Message
 from sumika_core.storage import Storage
 
 
@@ -1446,6 +1448,40 @@ class WebChatRuntimeTests(unittest.TestCase):
         self.assertNotIn("text", result)
         self.assertEqual(browser.visual_calls[-1][1]["baseline_id"], "visual-page-baseline")
         self.assertEqual(browser.visual_calls[-1][1]["scope"], "page")
+
+    def test_provider_stream_polls_a_pending_attempt_until_completion(self):
+        message = "等回复再返回"
+        transient = {
+            "ready": True,
+            "snapshot": {"text": '@e1 button "退出登录"\n@e2 button "发送"\nStaticText "等待回复"'},
+        }
+        snapshots = [
+            page_snapshot(authorized=True, ready=True),
+            transient,
+            transient,
+            page_snapshot(authorized=True, ready=True, response="迟到的回复"),
+        ]
+        runtime, browser = self.runtime(snapshots)
+        browser.visual_results = [
+            {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-before"},
+            {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-page-baseline"},
+        ]
+        profile = self.create_profile(runtime, config={"response_timeout_seconds": 0.5})
+        self.storage.update_web_chat_profile(
+            profile["id"], status="ready", auth_state="authorized", auto_chat_enabled=True
+        )
+        provider = WebChatProvider(runtime, profile["id"])
+        request = ChatRequest(
+            session_id="stub-session",
+            messages=[Message(role="user", content=message)],
+            provider_id=profile["id"],
+        )
+
+        pieces = list(provider.stream(request))
+
+        self.assertEqual(pieces, ["迟到的回复"])
+        clicks = [item["target"] for item in browser.actions if item["action"] == "click"]
+        self.assertEqual(len(clicks), 1, "provider must never resend while polling the same attempt")
 
     def test_profiles_bound_to_one_named_browser_profile_share_session_but_not_tab(self):
         runtime, browser = self.runtime()

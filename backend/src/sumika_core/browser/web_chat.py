@@ -3398,6 +3398,18 @@ class WebChatProvider(LLMProvider):
             "",
         )
         result = self.runtime.send_message(self.profile_id, latest)
+        attempt_id = str(result.get("attempt_id") or "")
+        # The compatibility wrapper returns early after its short first wait
+        # while the attempt keeps observing in the background.  A pending but
+        # possibly-sent state means the message may already be on the page, so
+        # keep polling the SAME attempt until it settles; never resend.
+        if (
+            not result.get("ok")
+            and result.get("pending")
+            and result.get("possibly_sent")
+            and attempt_id
+        ):
+            result = self.runtime.wait_message(attempt_id, timeout=DEFAULT_WEB_CHAT_OBSERVATION_SECONDS)
         if not result.get("ok"):
             reason = str(result.get("reason") or "web-chat provider did not return a response")
             if result.get("requires_human"):
