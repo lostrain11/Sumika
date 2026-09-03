@@ -1090,3 +1090,19 @@ input:focus, textarea:focus, select:focus { border-color: color-mix(in srgb, var
 .module-add-card p { color: var(--muted); font-size: 11px; line-height: 1.5; min-height: 30px; margin: 0; }
 .module-add-card strong { font-size: 12.5px; }
 .module-add-card .small-button { justify-self: start; padding: 6px 14px; }
+
+/* Settings (made real): appearance controls + real snapshot tools. */
+.settings-stack { display: grid; gap: 16px; max-width: 860px; }
+.settings-stack .settings-section { padding: 16px 18px; display: grid; gap: 13px; }
+.appearance-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.appearance-swatches { display: flex; gap: 9px; }
+.appearance-swatch { width: 34px; height: 34px; border-radius: 10px; border: 2px solid rgba(255,255,255,.14); padding: 0; }
+.appearance-swatch:hover { border-color: rgba(255,255,255,.4); }
+.appearance-swatch.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.appearance-image-actions { display: flex; gap: 9px; align-items: center; }
+
+/* First-run welcome card: non-blocking, dismisses to the scene. */
+.welcome-card { width: 100%; max-width: none; display: grid; gap: 8px; border: 1px solid rgba(255,255,255,.09); background: var(--glass-strong); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-radius: 14px; padding: 15px 16px; }
+.welcome-card strong { font-size: 13.5px; color: var(--accent-strong); }
+.welcome-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.welcome-actions { display: flex; gap: 9px; margin-top: 3px; }

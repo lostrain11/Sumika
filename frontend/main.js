@@ -531,6 +531,7 @@ function render() {
     state.voiceRecording = false;
   }
   applyCharacterTheme();
+  applyAppearance();
   const avatarSurfaceSelector = state.overlayMode
     ? ".desktop-overlay-avatar"
     : ".avatar-stage";
@@ -648,38 +649,9 @@ function queueVrmViewerMount() {
     });
 }
 
-function renderTopbar() {
-  const llm = currentLlmModule();
-  const llmClass = !state.connected || !llm?.enabled ? "offline" : llmReady() ? "online" : "warning";
-  const llmStatus = llmStatusLabel().replace(/^LLM\s*/, "");
-  return `
-    <header class="topbar">
-      <div class="breadcrumb"><span class="eyebrow">WORKSPACE</span><strong>${escapeHtml(pageTitle())}</strong></div>
-      <div class="topbar-controls">
-        <label class="compact-field">角色
-          <select id="character-select">${state.characters.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === state.selectedCharacter ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select>
-        </label>
-        <div class="topbar-status-group" aria-label="运行状态">
-         <button class="provider-summary topbar-status-item" type="button" data-page="Modules" title="在模块页管理大语言模型：${escapeHtml(llmStatusLabel())}" aria-label="LLM：${escapeHtml(providerName())}，${escapeHtml(llmStatusLabel())}">
-           <i class="status-dot ${llmClass}" aria-hidden="true"></i><span class="provider-summary-label">LLM</span><span class="provider-summary-separator" aria-hidden="true">·</span><strong class="provider-summary-name">${escapeHtml(providerName())}</strong><span class="provider-summary-separator" aria-hidden="true">·</span><small class="provider-summary-state">${escapeHtml(llmStatus)}</small>
-         </button>
-        <span class="status-chip topbar-status-item"><i class="status-dot ${state.connected ? "online" : "offline"}"></i>${state.connected ? "核心已连接" : "核心未连接"}</span>
-        <span class="privacy-chip topbar-status-item"><span class="privacy-icon">◉</span>${state.privacy}</span>
-        </div>
-        <button class="icon-button" type="button" data-avatar-toggle title="${state.avatarVisible ? "隐藏 Avatar 预览" : "显示 Avatar 预览"}" aria-label="${state.avatarVisible ? "隐藏 Avatar 预览" : "显示 Avatar 预览"}" aria-pressed="${state.avatarVisible}">${state.avatarVisible ? "◉" : "○"}</button>
-        ${isDesktopShell ? '<button class="outline-button desktop-overlay-open" type="button" data-overlay-open title="打开可拖动的桌宠浮窗">桌宠模式</button>' : ""}
-      </div>
-    </header>`;
-}
-
-function pageTitle() {
-  return navItems.find(([id]) => id === state.activePage)?.[1] || "聊天";
-}
-
 function renderPage() {
   switch (state.activePage) {
     case "Guide": return renderGuide();
-    case "Chat": return renderChat();
     case "Characters": return renderCharacters();
     case "Modules": return renderModules();
     case "Tasks": return renderTasks();
@@ -689,7 +661,7 @@ function renderPage() {
     case "Developer": return renderDeveloper();
     case "Agent": return renderAgent();
     case "WebWorkbench": return renderWebWorkbench();
-    default: return renderChat();
+    default: return "";
   }
 }
 
@@ -716,13 +688,13 @@ function renderGuide() {
         escapeHtml(id) + '">打开</button></article>';
     }).join("");
   const flow = [
-    ["01", "启动并确认核心和隐私状态", "Windows 桌面端每次启动运行 .\\tools\\run-desktop.ps1。桌面核心默认使用 8771，浏览器预览使用 8770，日志在 .sumika-desktop\\logs\\；macOS 和 Linux 当前使用文档中的 Python 核心命令。打开后先看左下角“核心服务”和顶部状态；摄像头、屏幕、麦克风不会因为打开页面自动启动。", "Chat", "启动脚本 / 顶部状态 / 左侧底部"],
-    ["02", "选择角色与 Avatar", "顶部“角色”下拉框用于快速切换。进入“角色”页后点击“使用”切换角色；身份、人格和模型表现默认折叠，按需展开并统一保存。Avatar 模型库仍单独负责导入、刷新、绑定或解除绑定。", "Characters", "顶部角色下拉框 / 角色页"],
-     ["03", "选择模型 Provider", "顶部 LLM 状态入口只负责查看和跳转。到“模块”页展开“实现方式”可选择最近用过的健康连接；点击“＋自定义连接”打开配置抽屉，填写 Ollama 或兼容 API，也可以粘贴经过预览的配置。保存后先测试，确认模型可用再启用。", "Modules", "顶部 LLM 状态 / 连接档案 / 配置抽屉"],
-    ["04", "只启用需要的模块", "在“模块”页逐张处理：右上角开关是唯一启停入口，连接或实现控件只负责替换后端。语音、视觉、长期记忆默认关闭；涉及设备或数据的能力还要在同页明确授予权限。顶部隐私状态会按所有启用模块显示本地、云端或混合处理。", "Modules", "模块开关 / 实现选择 / 权限按钮"],
-    ["05", "创建会话并发送第一条消息", "回到“聊天”，点击“新会话”获得独立记录，在输入框写下问题并点击“发送”。右侧“当前状态”显示生成状态、任务、隐私采集和最近事件；Avatar 右上角圆形按钮可以隐藏或显示。桌面端点击“桌宠模式”后，按住模型即可移动透明浮窗，悬停可显示打开主窗口和隐藏按钮，底部小聊天栏可直接发送。", "Chat", "新会话 / 输入框 / 发送 / Avatar 开关 / 桌宠模式"],
-    ["06", "审计任务与结果", "需要长任务或外部工具时进入“任务”：点击任务卡展开详情，查看自治等级、预算、权限、日志和产物，并在“等待批准”时明确批准。重要提醒会进入“通知”，历史会话和记忆在“历史”查看。", "Tasks", "任务卡 / 通知筛选 / 历史会话"],
-    ["07", "试用后创建恢复点", "进入“设置”的数据与备份区域，选择系统、模块、角色或记忆范围，创建命名快照。点击快照先看差异，再导出或恢复；恢复前核心会自动创建恢复前快照。", "Settings", "快照范围 / 创建 / 差异 / 恢复"],
+    ["01", "启动并确认核心和隐私状态", "Windows 桌面端每次启动运行 .\\tools\\run-desktop.ps1。桌面核心默认使用 8771，浏览器预览使用 8770，日志在 .sumika-desktop\\logs\\；macOS 和 Linux 当前使用文档中的 Python 核心命令。打开后先看顶部状态胶囊：核心连接与隐私采集不会因为打开页面自动启动。", "Chat", "启动脚本 / 顶部状态胶囊"],
+    ["02", "选择角色与 Avatar", "顶部“角色”胶囊切换当前角色。左侧竖排图标打开“角色”抽屉后点击“使用”切换；身份、人格和模型表现默认折叠，按需展开并统一保存。Avatar 模型库仍单独负责导入、刷新、绑定或解除绑定。", "Characters", "顶部角色胶囊 / 角色抽屉"],
+     ["03", "选择模型 Provider", "顶部状态胶囊显示当前 LLM 与连接状态，点击进入“模块”抽屉可选择最近用过的健康连接；点击“＋自定义连接”打开配置抽屉，填写 Ollama 或兼容 API，也可以粘贴经过预览的配置。保存后先测试，确认模型可用再启用。", "Modules", "顶部状态胶囊 / 配置抽屉"],
+    ["04", "只启用需要的模块", "“模块”抽屉中已启用的能力平铺为卡片；未启用的收进“＋ 添加模块”，点击“添加”才会启用并展开配置。语音、视觉、长期记忆默认关闭；涉及设备或数据的能力还要在同页明确授予权限。顶部隐私状态会按所有启用模块显示本地、云端或混合处理。", "Modules", "模块卡片 / ＋ 添加模块 / 权限按钮"],
+    ["05", "创建会话并发送第一条消息", "场景左侧就是聊天：点击“新会话”获得独立记录，在对白框写下问题并点击“发送”。生成状态显示在顶部状态胶囊；桌面端点击“桌宠”后，按住模型即可移动透明浮窗，悬停可显示打开主窗口和隐藏按钮，底部小聊天栏可直接发送。", "Chat", "新会话 / 对白框 / 发送 / 桌宠"],
+    ["06", "审计任务与结果", "需要长任务或外部工具时打开“工作台”：任务卡片展开详情，查看自治等级、预算、权限、日志和产物，并在“等待批准”时明确批准。重要提醒会进入“通知”，历史会话和记忆在“历史”查看。", "Tasks", "任务卡 / 通知筛选 / 历史会话"],
+    ["07", "试用后创建恢复点", "打开“设置”抽屉，在数据与备份区域选择系统、模块、角色或记忆范围，创建命名快照。点击快照先看差异，再导出或恢复；恢复前核心会自动创建恢复前快照。", "Settings", "快照范围 / 创建 / 差异 / 恢复"],
   ].map(([number, title, text, page, location]) => {
     const targetLabel = navItems.find(([id]) => id === page)?.[1] || page;
     return '<article class="guide-flow-item"><span class="guide-flow-number">' + number +
@@ -736,39 +708,15 @@ function renderGuide() {
     '<section class="guide-section"><div class="guide-section-heading"><div><span class="eyebrow">WORKSPACE MAP</span><strong>界面地图</strong><small>侧边导航中的每个页面，以及它负责的操作。</small></div></div><div class="guide-map-grid">' + navigation + '</div></section>' +
     '<section class="guide-section"><div class="guide-section-heading"><div><span class="eyebrow">BASIC FLOW</span><strong>完整基本使用流程</strong><small>按顺序完成一次“配置 → 对话 → 审计 → 恢复点”闭环。</small></div></div><div class="guide-flow">' + flow + '</div></section>' +
     '<section class="guide-section guide-quick-reference"><div class="guide-section-heading"><div><span class="eyebrow">CONTROL SURFACE</span><strong>当前窗口的可操作位置</strong><small>顶部和聊天页上的控件是高频入口，复杂设置仍在对应页面完成。</small></div></div><div class="guide-control-grid">' +
-      '<article><strong>左侧导航</strong><p>点击页面名称切换工作区；底部“开发者模式”直接打开 Developer。</p></article>' +
-       '<article><strong>顶部栏</strong><p>切换角色，查看 LLM、核心连接与隐私状态；点击 LLM 状态可进入模块页，右侧圆形按钮控制 Avatar 可见性，桌面端的“桌宠模式”打开透明桌宠浮窗。</p></article>' +
-      '<article><strong>聊天舞台</strong><p>“新会话”、输入框和“发送”可直接操作；Avatar 下方状态文字显示驱动和模型。</p></article>' +
-      '<article><strong>右侧状态面板</strong><p>可折叠查看 LLM、当前任务、隐私采集和最近事件；“查看全部/管理/审计”会跳转。</p></article>' +
-      '<article><strong>模块与权限</strong><p>模块卡片的开关、实现选择和配置表单会持久化到本机；设备权限和运行按钮必须逐项确认。</p></article>' +
+      '<article><strong>左侧竖排图标</strong><p>打开工作台、角色、模块和设置四个抽屉；抽屉打开时场景在背后变暗，按 Esc 或 ✕ 回到场景。</p></article>' +
+       '<article><strong>顶部状态胶囊</strong><p>切换角色，查看 LLM、核心连接与隐私状态；点击 LLM 状态进入模块抽屉，桌面端的“桌宠”打开透明桌宠浮窗。</p></article>' +
+      '<article><strong>场景与对白框</strong><p>Avatar 常驻场景中央，左侧是对话流和对白框输入；“新会话”“发送”可直接操作。</p></article>' +
+      '<article><strong>模块与权限</strong><p>已启用模块平铺为卡片，未启用的收进“＋ 添加模块”；连接档案、设备权限和运行按钮必须逐项确认。</p></article>' +
       '<article><strong>安全边界</strong><p>插件扫描不会执行代码；外部软件、任务和视觉采集都需要明确操作或批准。原始视觉数据默认即时丢弃。</p></article>' +
     '</div></section>' +
     '<section class="guide-section guide-reserved"><div class="guide-section-heading"><div><span class="eyebrow">CURRENT LIMITS</span><strong>首版中的预留入口</strong><small>这些控件保留了交互位置，但当前不会执行完整功能。</small></div></div><div class="guide-reserved-list">' +
-       '<span>聊天页“附件”圆钮：附件处理尚未接入。</span><span>聊天页“语音”圆钮：需先在模块页配置、授权并启动 ASR；随后会在本机录音并把识别文字填入输入框。</span><span>聊天页“更多操作”：菜单尚未接入。</span><span>内容页标题右侧“查看文档”：文档链接尚未接入。</span><span>设置页“常规 / 隐私与权限 / 快捷键 / 外观与 Avatar”：当前是信息架构占位；可用数据和快照操作在同页内容区。</span><span>开发者 Provider 行中的“manifest”：详情查看尚未接入。</span><span>当前 Avatar 渲染器支持 VRM；其他模型格式可以保留登记信息，待对应驱动通过审核后再启用。</span>' +
+       '<span>对白框“附件”圆钮：附件处理尚未接入。</span><span>对白框“语音”圆钮：需先在模块页配置、授权并启动 ASR；随后会在本机录音并把识别文字填入输入框。</span><span>内容页标题右侧“查看文档”：文档链接尚未接入。</span><span>背景当前支持纯色与本地图片；视频与网页动态壁纸属于后续能力。</span><span>开发者 Provider 行中的“manifest”：详情查看尚未接入。</span><span>当前 Avatar 渲染器支持 VRM；其他模型格式可以保留登记信息，待对应驱动通过审核后再启用。</span>' +
     '</div></section>');
-}
-
-function renderChat() {
-  return `
-    <section class="chat-layout page-layout">
-      <div class="chat-stage">
-        <div class="stage-toolbar"><span class="live-label"><i></i> ${escapeHtml(currentCharacter().name)} 在线</span><div class="toolbar-actions"><button class="text-button" id="new-session" type="button" ${state.sessionBusy ? "disabled" : ""}>${state.sessionBusy ? "创建中" : "新会话"}</button><button class="icon-button" type="button" title="更多操作">•••</button></div></div>
-        ${state.sessionNotice ? `<div class="session-notice" role="status">${escapeHtml(state.sessionNotice)}</div>` : ""}
-           <div class="avatar-stage" data-avatar-signature="${escapeHtml(avatarRenderSignature())}" aria-label="Avatar 预览">
-           <div class="avatar-orbit" aria-hidden="true"></div>${state.avatarVisible ? renderAvatarPresenter() : `<div class="avatar-hidden-state" role="status"><span>Avatar 已隐藏</span></div>`}
-           <div class="speech-hint">${state.sending ? "正在思考..." : "今天也一起完成一点小目标吧。"}</div>
-         </div>
-        <div class="message-list" id="message-list">
-          ${state.messages.length ? state.messages.map(renderMessage).join("") : renderEmptyChat()}
-        </div>
-        ${state.voiceNotice ? `<div class="voice-notice" role="status">${escapeHtml(state.voiceNotice)}</div>` : ""}
-        <form class="composer" id="chat-form">
-          <textarea id="chat-input" rows="1" placeholder="和 ${escapeHtml(currentCharacter().name)} 说点什么..." ${state.sending || !state.connected ? "disabled" : ""}>${escapeHtml(state.composerDraft)}</textarea>
-          <div class="composer-footer"><div class="composer-tools"><button type="button" class="round-button" title="附件">＋</button><button type="button" class="round-button ${state.voiceRecording ? "recording" : ""}" data-audio-record title="${state.voiceRecording ? "停止录音" : "语音输入"}" aria-label="${state.voiceRecording ? "停止录音" : "语音输入"}" aria-pressed="${state.voiceRecording}">⌁</button><span class="composer-note">语音按需启用 · 本地优先</span></div><button class="send-button" type="submit" ${state.sending || !llmReady() ? "disabled" : ""}>${state.sending ? "处理中" : "发送"}<span>↗</span></button></div>
-        </form>
-      </div>
-      ${renderInspector()}
-    </section>`;
 }
 
 function renderEmptyChat() {
@@ -811,6 +759,27 @@ function renderOverlay() {
     </form>
     <span class="sr-only" role="status" aria-live="polite">${state.sending ? "正在思考" : "桌宠等待互动"}</span>
   </main>`;
+}
+
+function onboarded() {
+  return localStorage.getItem("sumika.onboarded.v1") === "1";
+}
+
+function markOnboarded() {
+  if (!onboarded()) {
+    localStorage.setItem("sumika.onboarded.v1", "1");
+    render();
+  }
+}
+
+function renderWelcomeCard() {
+  if (onboarded() || drawerForPage(state.activePage)) return "";
+  return `
+    <aside class="welcome-card">
+      <strong>欢迎来到 Sumika</strong>
+      <p>这里是你的角色陪伴工作台。左侧图标打开工作台、角色、模块和设置；先在「模块」里选择一个模型连接，就能开始对话。</p>
+      <div class="welcome-actions"><button class="small-button" type="button" data-page="Guide">查看入门指南</button><button class="ghost-button" type="button" data-onboard-dismiss>知道了</button></div>
+    </aside>`;
 }
 
 function renderSceneTopbar() {
@@ -857,6 +826,7 @@ function renderSceneChat() {
   return `
     <div class="scene-chat">
       <div class="stage-toolbar"><span class="live-label"><i></i> ${escapeHtml(currentCharacter().name)} 在线</span><div class="toolbar-actions"><button class="text-button" id="new-session" type="button" ${state.sessionBusy ? "disabled" : ""}>${state.sessionBusy ? "创建中" : "新会话"}</button></div></div>
+      ${renderWelcomeCard()}
       ${state.sessionNotice ? `<div class="session-notice" role="status">${escapeHtml(state.sessionNotice)}</div>` : ""}
       <div class="message-list scroll-hidden" id="message-list">
         ${state.messages.length ? state.messages.map(renderMessage).join("") : renderEmptyChat()}
@@ -906,21 +876,6 @@ function renderAvatarPresenter({ compact = false } = {}) {
 function renderMessage(message) {
   const role = message.role === "user" ? "你" : currentCharacter().name;
   return `<article class="message ${message.role}"><div class="message-meta"><span>${role}</span><time>${formatTime(message.created_at)}</time></div><div class="message-body">${escapeHtml(message.content).replaceAll("\n", "<br>")}</div></article>`;
-}
-
-function renderInspector() {
-  const event = state.events[0];
-  const visionRunning = (state.visionStatus?.sources || []).filter((source) => source.running);
-  const visionState = visionRunning.length ? `运行中 · ${visionRunning.map((source) => visionSourceLabel(source.id)).join("、")}` : "未启用 · 原始数据不落盘";
-  return `<aside class="inspector ${state.taskOpen ? "" : "collapsed"}">
-    <div class="inspector-header"><div><span class="eyebrow">LIVE STATE</span><strong>当前状态</strong></div><button class="icon-button" id="toggle-inspector" title="折叠状态面板">${state.taskOpen ? "›" : "‹"}</button></div>
-    ${state.taskOpen ? `<div class="inspector-body">
-       <div class="state-card"><div class="state-card-head"><span class="state-icon">◌</span><div><strong>${state.sending ? "LLM 生成中" : llmStatusLabel()}</strong><small>${escapeHtml(providerName())}</small></div><i class="pulse-dot ${state.sending ? "active" : ""}"></i></div><div class="progress-track"><span style="width:${state.sending ? "62" : llmReady() ? "100" : "18"}%"></span></div><div class="state-card-foot"><span>${state.sending ? "正在接收 token" : llmReady() ? "模型服务就绪" : !currentLlmModule()?.enabled ? "模块已关闭" : "等待模型服务"}</span><span>${state.sending ? "运行中" : llmReady() ? "ready" : "off"}</span></div></div>
-      <div class="inspector-section"><div class="section-label"><span>任务</span><button class="link-button" data-page="Tasks">查看全部</button></div><div class="task-row"><span class="task-status done">✓</span><div><strong>文字对话</strong><small>当前会话 · ${state.events.length} 个事件</small></div><span class="task-chevron">›</span></div></div>
-      <div class="inspector-section"><div class="section-label"><span>隐私采集</span><button class="link-button" data-page="Modules">管理</button></div><div class="permission-row"><span class="permission-icon">◉</span><div><strong>摄像头 / 屏幕</strong><small>${escapeHtml(visionState)}</small></div><span class="switch ${visionRunning.length ? "on" : "off"}"></span></div></div>
-      <div class="inspector-section"><div class="section-label"><span>最近事件</span><button class="link-button" data-page="Developer">审计</button></div>${event ? `<div class="event-row"><span class="event-dot"></span><div><strong>${escapeHtml(event.event_type)}</strong><small>${formatTime(event.timestamp)}</small></div></div>` : `<div class="muted-row">暂无事件</div>`}</div>
-    </div>` : ""}
-  </aside>`;
 }
 
 function renderCharacters() {
@@ -1779,8 +1734,51 @@ function notificationFromEvent(event) {
   return null;
 }
 
+/* Appearance: one local-only record (solid color or a local image). Nothing
+   leaves the machine; video/web dynamic wallpapers are a later layer. */
+const APPEARANCE_STORAGE_KEY = "sumika.appearance.v1";
+const APPEARANCE_SWATCHES = [
+  { id: "", label: "默认夜蓝", value: "" },
+  { id: "night-violet", label: "暗紫", value: "#171326" },
+  { id: "deep-forest", label: "墨绿", value: "#12211d" },
+  { id: "ember", label: "暖赭", value: "#241519" },
+  { id: "abyss", label: "渊青", value: "#0f1d26" },
+];
+
+function readAppearance() {
+  try {
+    const value = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAppearance(value) {
+  localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(value || {}));
+}
+
+function applyAppearance() {
+  const shell = document.querySelector(".scene-shell");
+  if (!shell) return;
+  const backdrop = shell.querySelector(".scene-backdrop");
+  if (!backdrop) return;
+  const appearance = readAppearance();
+  backdrop.style.backgroundImage = "";
+  backdrop.style.backgroundColor = "";
+  if (appearance.backgroundImage) {
+    backdrop.style.backgroundImage = `url("${appearance.backgroundImage}")`;
+    backdrop.style.backgroundSize = "cover";
+    backdrop.style.backgroundPosition = "center";
+  } else if (appearance.backgroundColor) {
+    backdrop.style.background = appearance.backgroundColor;
+  }
+}
+
 function renderSettings() {
-  return renderPageFrame("设置", "参考分区设置和 schema-driven form，复杂配置按需展开。", `<div class="settings-layout"><div class="settings-nav"><button class="settings-item active">常规</button><button class="settings-item">隐私与权限</button><button class="settings-item active">数据与备份</button><button class="settings-item">快捷键</button><button class="settings-item">外观与 Avatar</button></div><div class="settings-content"><section class="settings-section"><div class="setting-title"><div><strong>本地运行</strong><small>核心服务默认只监听 localhost</small></div><span class="switch on"></span></div><div class="setting-title"><div><strong>长期记忆</strong><small>记忆模块默认关闭，按类别授权</small></div><span class="switch off"></span></div><div class="setting-title"><div><strong>语音输出</strong><small>按前台应用和专注模式自动降级</small></div><span class="switch off"></span></div></section><section class="settings-section"><div class="section-label"><span>数据目录</span><button class="link-button" type="button">查看</button></div><div class="path-box">.sumika/ <span>本机加密备份 · 可选局域网副本</span></div></section>${renderSnapshotSettings()}</div></div>`);
+  const appearance = readAppearance();
+  const dataDir = state.diagnostics?.data_dir;
+  return renderPageFrame("设置", "外观与本地数据。全部设置只保存在这台机器上。", `<div class="settings-stack"><section class="settings-section"><div class="section-label"><span>外观</span><small class="muted-text">纯色或本地图片背景；视频与网页动态壁纸属于后续能力</small></div><div class="appearance-row"><div class="appearance-swatches">${APPEARANCE_SWATCHES.map((swatch) => `<button class="appearance-swatch ${(!appearance.backgroundImage && (appearance.backgroundColor || "") === swatch.value) ? "active" : ""}" data-appearance-color="${swatch.value}" style="background:${swatch.value || "var(--scene-background)"}" title="${swatch.label}" aria-label="背景色：${swatch.label}"></button>`).join("")}</div><div class="appearance-image-actions"><input type="file" id="appearance-image" accept="image/*" hidden /><button class="outline-button" id="appearance-image-button" type="button">${appearance.backgroundImage ? "更换背景图" : "选择背景图"}</button>${appearance.backgroundImage ? '<button class="ghost-button" id="appearance-image-clear" type="button">清除背景图</button>' : ""}</div></div></section><section class="settings-section"><div class="section-label"><span>数据目录</span></div><div class="path-box">${escapeHtml(dataDir || "核心连接后显示")} <span>本地 SQLite · 未上传</span></div></section>${renderSnapshotSettings()}</div>`);
 }
 
 function renderSnapshotSettings() {
@@ -3606,6 +3604,45 @@ function bindEvents() {
   });
   document.querySelector("[data-drawer-close]")?.addEventListener("click", () => {
     state.activePage = "Chat";
+    markOnboarded();
+    render();
+  });
+  document.querySelector("[data-onboard-dismiss]")?.addEventListener("click", markOnboarded);
+  document.querySelectorAll("[data-appearance-color]").forEach((element) => element.addEventListener("click", () => {
+    const next = readAppearance();
+    delete next.backgroundImage;
+    next.backgroundColor = element.dataset.appearanceColor || "";
+    writeAppearance(next);
+    applyAppearance();
+    render();
+  }));
+  document.querySelector("#appearance-image-button")?.addEventListener("click", () => {
+    document.querySelector("#appearance-image")?.click();
+  });
+  document.querySelector("#appearance-image")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 4_500_000) {
+      window.alert("背景图请小于 4.5 MB；更大的图片请先压缩。");
+      event.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const next = readAppearance();
+      next.backgroundImage = String(reader.result);
+      delete next.backgroundColor;
+      writeAppearance(next);
+      applyAppearance();
+      render();
+    };
+    reader.readAsDataURL(file);
+  });
+  document.querySelector("#appearance-image-clear")?.addEventListener("click", () => {
+    const next = readAppearance();
+    delete next.backgroundImage;
+    writeAppearance(next);
+    applyAppearance();
     render();
   });
   document.addEventListener("keydown", (event) => {
@@ -3624,10 +3661,6 @@ function bindEvents() {
   document.querySelector("[data-overlay-hide]")?.addEventListener("click", hideDesktopOverlay);
   document.querySelector(".desktop-overlay-shell")?.addEventListener("pointerdown", (event) => {
     void startOverlayDrag(event);
-  });
-  document.querySelector("#toggle-inspector")?.addEventListener("click", () => {
-    state.taskOpen = !state.taskOpen;
-    render();
   });
   document.querySelector("#chat-form")?.addEventListener("submit", sendMessage);
   document.querySelector("#message-list")?.addEventListener("scroll", rememberChatScrollPreference, { passive: true });
