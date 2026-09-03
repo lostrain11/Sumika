@@ -82,6 +82,7 @@ const state = {
   moduleNotice: "",
   characterBusy: false,
   characterNotice: "",
+  portalPanelOpen: false,
   audioBusy: null,
   audioNotice: "",
   voiceRecording: false,
@@ -573,6 +574,7 @@ function render() {
       ${renderSceneTopbar()}
       ${renderSceneDock()}
       ${renderSceneChat()}
+      ${renderPortalPanel()}
       ${renderDrawer(drawer)}
     </div>`;
   if (preserveAvatarSurface) {
@@ -813,13 +815,111 @@ function renderSceneDock() {
     ["Settings", "设置", "☼"],
   ];
   const activeDrawer = drawerForPage(state.activePage);
+  const portalButton = isDesktopShell
+    ? `<button class="nav-item ${state.portalPanelOpen ? "active" : ""}" data-portal-panel title="网页门户" aria-label="网页门户">◨</button>`
+    : "";
   return `
     <nav class="scene-dock" aria-label="主导航">
       ${dockItems.map(([page, label, glyphText]) => {
         const active = drawerForPage(page) === activeDrawer && activeDrawer;
         return `<button class="nav-item ${active ? "active" : ""}" data-page="${page}" title="${label}" aria-label="${label}">${glyphText}</button>`;
       }).join("")}
+      ${portalButton}
     </nav>`;
+}
+
+/* Web portals: raw provider chat sites in their own Tauri windows, one
+   persistent isolated login per site. Desktop shell only; no persona
+   injection and no Agent access — these are the user's own sessions. */
+const PORTALS_STORAGE_KEY = "sumika.portals.v1";
+const PORTAL_PRESETS = [
+  { id: "kimi", title: "Kimi", url: "https://www.kimi.com" },
+  { id: "chatgpt", title: "ChatGPT", url: "https://chatgpt.com/" },
+  { id: "zhipu", title: "智谱清言", url: "https://chatglm.cn" },
+  { id: "deepseek", title: "DeepSeek", url: "https://chat.deepseek.com" },
+  { id: "qwen", title: "通义千问", url: "https://tongyi.aliyun.com/qianwen/" },
+  { id: "doubao", title: "豆包", url: "https://www.doubao.com/chat/" },
+];
+
+function readCustomPortals() {
+  try {
+    const value = JSON.parse(localStorage.getItem(PORTALS_STORAGE_KEY) || "[]");
+    return Array.isArray(value)
+      ? value.filter((item) => item && typeof item.id === "string" && typeof item.url === "string" && typeof item.title === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCustomPortals(portals) {
+  localStorage.setItem(PORTALS_STORAGE_KEY, JSON.stringify(portals));
+}
+
+function portalDefinitions() {
+  const custom = readCustomPortals();
+  const seen = new Set(PORTAL_PRESETS.map((preset) => preset.id));
+  return [...PORTAL_PRESETS, ...custom.filter((item) => !seen.has(item.id))];
+}
+
+let portalOpenSites = [];
+
+async function refreshPortalList() {
+  try {
+    const entries = await invokeDesktop("portal_list");
+    portalOpenSites = Array.isArray(entries) ? entries.map((entry) => entry.site_id) : [];
+  } catch {
+    portalOpenSites = [];
+  }
+  render();
+}
+
+async function togglePortal(site) {
+  const isOpen = portalOpenSites.includes(site.id);
+  try {
+    if (isOpen) {
+      await invokeDesktop("focus_portal", { siteId: site.id });
+    } else {
+      await invokeDesktop("open_portal", { siteId: site.id, title: site.title, url: site.url });
+      portalOpenSites.push(site.id);
+    }
+    render();
+  } catch (error) {
+    window.alert(`门户打开失败：${error.message}`);
+    void refreshPortalList();
+  }
+}
+
+function addCustomPortal(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const title = String(new FormData(form).get("portal_title") || "").trim();
+  const url = String(new FormData(form).get("portal_url") || "").trim();
+  if (!title || !url) return;
+  const id = `custom-${title.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase().replace(/^-+|-+$/g, "") || Date.now().toString(36)}`.slice(0, 40);
+  const portals = readCustomPortals().filter((item) => item.id !== id);
+  portals.push({ id, title, url: url.startsWith("http") ? url : `https://${url}` });
+  writeCustomPortals(portals);
+  state.portalPanelOpen = true;
+  render();
+}
+
+function renderPortalPanel() {
+  if (!state.portalPanelOpen) return "";
+  const definitions = portalDefinitions();
+  const items = definitions.map((site) => {
+    const open = portalOpenSites.includes(site.id);
+    return `<button class="portal-item ${open ? "open" : ""}" type="button" data-portal-open="${escapeHtml(site.id)}" title="${open ? "聚焦已打开的门户窗口" : "打开门户窗口"}"><strong>${escapeHtml(site.title)}</strong><small>${open ? "已打开 · 点击聚焦" : escapeHtml(site.url)}</small></button>`;
+  }).join("");
+  const closers = portalOpenSites.filter((id) => definitions.some((site) => site.id === id)).map((id) => `<button class="ghost-button" type="button" data-portal-close="${escapeHtml(id)}">关闭 ${escapeHtml(definitions.find((site) => site.id === id)?.title || id)}</button>`).join("");
+  return `
+    <aside class="portal-panel" role="dialog" aria-label="网页门户">
+      <div class="portal-panel-heading"><strong>网页门户</strong><button class="icon-button" type="button" data-portal-panel-close title="收起">✕</button></div>
+      <p class="portal-panel-note">每站一个独立窗口与独立登录存储；原始网页端，不附加任何角色设定，与 Agent 使用的网页 Route 互不影响。</p>
+      <div class="portal-list">${items}</div>
+      ${closers ? `<div class="portal-closers">${closers}</div>` : ""}
+      <form class="portal-add-form" id="portal-add-form"><input name="portal_title" type="text" placeholder="名称" maxlength="24" required /><input name="portal_url" type="text" placeholder="站点地址" maxlength="500" required /><button class="small-button" type="submit">＋ 添加门户</button></form>
+    </aside>`;
 }
 
 function renderSceneChat() {
@@ -3608,6 +3708,27 @@ function bindEvents() {
     render();
   });
   document.querySelector("[data-onboard-dismiss]")?.addEventListener("click", markOnboarded);
+  document.querySelector("[data-portal-panel]")?.addEventListener("click", () => {
+    state.portalPanelOpen = !state.portalPanelOpen;
+    render();
+    if (state.portalPanelOpen) void refreshPortalList();
+  });
+  document.querySelector("[data-portal-panel-close]")?.addEventListener("click", () => {
+    state.portalPanelOpen = false;
+    render();
+  });
+  document.querySelectorAll("[data-portal-open]").forEach((element) => element.addEventListener("click", () => {
+    const site = portalDefinitions().find((item) => item.id === element.dataset.portalOpen);
+    if (site) void togglePortal(site);
+  }));
+  document.querySelectorAll("[data-portal-close]").forEach((element) => element.addEventListener("click", async () => {
+    try {
+      await invokeDesktop("close_portal", { siteId: element.dataset.portalClose });
+    } finally {
+      void refreshPortalList();
+    }
+  }));
+  document.querySelector("#portal-add-form")?.addEventListener("submit", addCustomPortal);
   document.querySelectorAll("[data-appearance-color]").forEach((element) => element.addEventListener("click", () => {
     const next = readAppearance();
     delete next.backgroundImage;
