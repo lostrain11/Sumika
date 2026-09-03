@@ -1440,6 +1440,16 @@ class ServerTests(unittest.TestCase):
             )
             self.assertEqual(status, 200)
             self.assertEqual(selected["result"]["state"]["model"]["id"], model_id)
+            self.assertEqual(selected["result"]["character"]["config"]["avatar_model_id"], model_id)
+
+            _, events = self.request("GET", "/api/events")
+            changed = next(
+                item
+                for item in events
+                if item["event_type"] == "character.changed"
+                and item["payload"].get("character", {}).get("config", {}).get("avatar_model_id") == model_id
+            )
+            self.assertEqual(changed["payload"]["character"]["id"], "sumika")
 
             status, blocked = self.request(
                 "POST",

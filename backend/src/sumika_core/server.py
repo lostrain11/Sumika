@@ -5870,6 +5870,11 @@ class CoreApplication:
             except AvatarError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
             self.events.publish(EventEnvelope("avatar.changed", result["state"], character_id=result["character"]["id"]))
+            # The select rewrote the character's avatar binding; publish the
+            # updated record so open windows refresh their character list.
+            self.events.publish(
+                EventEnvelope("character.changed", {"character": result["character"]}, character_id=result["character"]["id"])
+            )
             return result
         if method == "avatar.state":
             character_id = params.get("character_id")
