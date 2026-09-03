@@ -20,7 +20,7 @@
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `0aadb99` (当前 `HEAD`；本轮 ChatGPT 选择器与页面级视觉基线改动已提交，工作树仅剩范围外未跟踪产物)
+- Baseline commit: `c5612aa` (当前 `HEAD`；本轮新增社区角色卡导入能力，安和昴角色卡已导入 `.sumika-desktop`；工作树仅剩范围外未跟踪产物)
 - Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
@@ -49,11 +49,13 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 本轮（2026-09-03）已提交 ChatGPT 网页适配器回归修复（`0aadb99`）：声明当前一代 ChatGPT composer/响应选择器（`textarea[data-composer-draft-react]`、`button[data-composer-submit]`、`[data-assistant-markdown]`、`[data-message-role='assistant']`，保留旧 `#prompt-textarea` 优先）；授权标记扩充无引号“打开个人资料菜单”“账户菜单”"Account menu"；HTML 投影属性白名单新增 `aria-label`、`placeholder`、`contenteditable` 等；`send_message` 在输入框裁剪基线之外新增独立页面级视觉基线 `visual_page_baseline_id`，超时诊断改为对比页面基线，避免输入框裁剪掩盖页面上可见的助手回复。相关 83 个测试（`test_web_chat`、`test_browser_runtime`、`test_web_chat_server`）通过。
 
+本轮（2026-09-03）已提交社区角色卡导入能力（`c5612aa`）：新增 `sumika_core/character_import.py`，对齐 SillyTavern 社区规范（`character-card-spec-v2`、CCv3/CHARX），支持 V1 扁平卡、`chara_card_v2`、`chara_card_v3` 与 JSON/PNG（tEXt `chara`/`ccv3`）/CHARX（zip `card.json`）容器，stdlib 实现、零依赖；通用字段映射（identity←description、traits←personality、relationship←scenario、system_prompt←system_prompt、greeting←first_mes，`mes_example` 在上限内以"示例对话"并入），`{{char}}`/`{{user}}` 占位符确定性替换，超限 fail-closed 不静默截断；原始卡与导入元数据保留在 `config.card_import`（世界书不注入运行时，条目保留）。新增 `character.import_card` RPC（同名需 `overwrite`、广播 `character.changed`）、角色页"导入角色卡"入口和 `tools/import_character_card.py` 离线 CLI。安和昴（GIRLS BAND CRY）角色卡已从 `D:\Code\安和昴角色卡项目\交付\安和昴_ST_V2.json` 导入 `.sumika-desktop`（id `character-446627f7a5bb`，9 条世界书保留未注入），聊天通道选中该角色即生效；Agent/DSH 通道 persona 投影仍为后续目标，设计钩子已记录在 [characters.md](architecture/characters.md)（参照 `dsh-browser-policy` 的 `ctx.skills.register` 模式，须走社区插件隔离验证 + 用户批准流程）。
+
 ## 接下来的三个动作
 
 1. 后续启动统一使用 `tools/run-desktop.ps1 -NoBuild`；若预检显示 `provider=needs-action`，由用户单独授权并重新健康检查。
-2. 继续逐站用 DOM/ARIA、HTML projection 与 OCR 修通真实网页发送和回复提取，优先解决 ChatGPT 的回复定位。
-3. 在同一新命名 BrowserSkill Profile 完成人工登录后，验收五站一窗五标签和 `3 + 2` 聚合；不同现有 Profile 不静默合并。
+2. 在日用会话中使用安和昴角色设定（聊天通道 persona 已生效），并继续逐站用 DOM/ARIA、HTML projection 与 OCR 修通真实网页发送和回复提取，优先解决 ChatGPT 的回复定位。
+3. 在同一新命名 BrowserSkill Profile 完成人工登录后，验收五站一窗五标签和 `3 + 2` 聚合；不同现有 Profile 不静默合并。Agent/DSH 通道 persona 投影为后续任务：按 characters.md 的 persona-bridge 设计钩子做独立 DSH 插件，先在隔离 Profile 验证，未开始前不进入。
 
 ## 固定决策
 
@@ -89,7 +91,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 当前工作树已通过：
 
-- Python unittest: 549 tests（含本轮 ChatGPT 选择器/页面级视觉基线 4 个新测试）；Tools unittest: 58 tests（含 DSH 启动夹具和观测投影）；Playwright: 49 tests（49 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
+- Python unittest: 573 tests（含本轮角色卡导入 24 个新测试）；Tools unittest: 58 tests（含 DSH 启动夹具和观测投影）；Playwright: 50 tests（50 passed；含角色卡导入回填、retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml` (6 passed);
