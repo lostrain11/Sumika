@@ -20,7 +20,7 @@
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `17bb9e4` (当前 `HEAD`；本轮固定启动改动仍在工作树，未提交)
+- Baseline commit: `0aadb99` (当前 `HEAD`；本轮 ChatGPT 选择器与页面级视觉基线改动已提交，工作树仅剩范围外未跟踪产物)
 - Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
@@ -46,6 +46,8 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 本轮启动闭环已验证：`tools/run-desktop.ps1 -NoBuild` 只接受固定或显式精确版本的 DSH，Tauri 在配置生成和 spawn 前再次核验；Core `8771`、DSH `3080`、`/api/health`、`/api/agent/status`、`/api/agent/diagnostics`、`host.describe` 和 `session/list` 均可用。
 隔离 `Plan→Execute`、审批、工具、checkpoint、diff 和精确恢复通过；真实 Provider 预检仍可能为 `needs-action`，本轮没有发送真实高价请求。
+
+本轮（2026-09-03）已提交 ChatGPT 网页适配器回归修复（`0aadb99`）：声明当前一代 ChatGPT composer/响应选择器（`textarea[data-composer-draft-react]`、`button[data-composer-submit]`、`[data-assistant-markdown]`、`[data-message-role='assistant']`，保留旧 `#prompt-textarea` 优先）；授权标记扩充无引号“打开个人资料菜单”“账户菜单”"Account menu"；HTML 投影属性白名单新增 `aria-label`、`placeholder`、`contenteditable` 等；`send_message` 在输入框裁剪基线之外新增独立页面级视觉基线 `visual_page_baseline_id`，超时诊断改为对比页面基线，避免输入框裁剪掩盖页面上可见的助手回复。相关 83 个测试（`test_web_chat`、`test_browser_runtime`、`test_web_chat_server`）通过。
 
 ## 接下来的三个动作
 
@@ -87,7 +89,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 当前工作树已通过：
 
-- Python unittest: 546 tests；Tools unittest: 58 tests（含 DSH 启动夹具和观测投影）；Playwright: 49 tests（49 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
+- Python unittest: 549 tests（含本轮 ChatGPT 选择器/页面级视觉基线 4 个新测试）；Tools unittest: 58 tests（含 DSH 启动夹具和观测投影）；Playwright: 49 tests（49 passed；含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml` (6 passed);
