@@ -1075,3 +1075,18 @@ input:focus, textarea:focus, select:focus { border-color: color-mix(in srgb, var
 .scene-chat .message .message-meta { margin-bottom: 4px; }
 .message.user .message-body { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .status-chip, .privacy-chip { border: 1px solid rgba(255,255,255,.07); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 999px; }
+
+/* "+" module library: enabled modules stay flat; disabled ones collapse into
+   an add-grid so unconfigured capabilities never clutter the page. */
+.module-add-library { margin-top: 18px; border: 1px dashed rgba(255,255,255,.14); border-radius: var(--radius); background: rgba(22,30,46,.35); }
+.module-add-library > summary { list-style: none; cursor: pointer; padding: 15px 18px; display: flex; align-items: center; }
+.module-add-library > summary::-webkit-details-marker { display: none; }
+.module-add-summary { display: grid; gap: 4px; }
+.module-add-summary strong { color: var(--accent-strong); font-size: 13px; }
+.module-add-summary small { color: var(--faint); font-size: 10.5px; }
+.module-add-library[open] > summary { border-bottom: 1px solid rgba(255,255,255,.06); }
+.module-add-grid { padding: 14px; }
+.module-add-card { border: 1px solid rgba(255,255,255,.07); background: rgba(22,30,46,.45); border-radius: var(--radius); padding: 14px; display: grid; gap: 8px; align-content: start; }
+.module-add-card p { color: var(--muted); font-size: 11px; line-height: 1.5; min-height: 30px; margin: 0; }
+.module-add-card strong { font-size: 12.5px; }
+.module-add-card .small-button { justify-self: start; padding: 6px 14px; }

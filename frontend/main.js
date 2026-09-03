@@ -1074,10 +1074,27 @@ function formatBytes(value) {
 function renderModules() {
   const modules = state.modules;
   const notices = [state.moduleNotice, state.providerNotice, state.webChatNotice].filter(Boolean).map((notice) => `<div class="module-notice" role="status">${escapeHtml(notice)}</div>`).join("");
-  const body = modules.length
-    ? `${renderCapabilityCatalogPanel()}${renderRoutePricingPanel()}${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${modules.map(renderModuleCard).join("")}</div>`
-    : `<div class="empty-panel">核心未连接，模块目录暂不可用。启动核心后刷新此页。</div>`;
+  if (!modules.length) {
+    return renderPageFrame("模块", "每个模块都有可替换实现。连接档案可保存、测试并随时切换。", `${notices}<div class="empty-panel">核心未连接，模块目录暂不可用。启动核心后刷新此页。</div>${renderProviderDrawer()}${renderWebChatDrawer()}`);
+  }
+  // "+" 模块库：已启用的能力平铺为卡片；未启用的收进添加网格，点击“添加”
+  // 才启用并展开配置。LLM 是对话的核心通道，始终平铺。
+  const pinned = modules.filter((module) => module.enabled || module.id === "llm");
+  const available = modules.filter((module) => !module.enabled && module.id !== "llm");
+  const addLibrary = available.length
+    ? `<details class="module-add-library"><summary><span class="module-add-summary"><strong>＋ 添加模块</strong><small>${available.length} 个能力已就绪未启用；添加后才会出现在上方。</small></span></summary><div class="module-grid module-add-grid">${available.map(renderModuleAddCard).join("")}</div></details>`
+    : "";
+  const body = `${renderCapabilityCatalogPanel()}${renderRoutePricingPanel()}${renderToolRuntime()}${renderVisionRuntime()}${renderAudioRuntime()}<div class="module-grid">${pinned.map(renderModuleCard).join("")}</div>${addLibrary}`;
   return renderPageFrame("模块", "每个模块都有可替换实现。连接档案可保存、测试并随时切换。", `${notices}${body}${renderProviderDrawer()}${renderWebChatDrawer()}`);
+}
+
+function renderModuleAddCard(module) {
+  const busy = state.moduleBusy === module.id;
+  return `<article class="module-add-card">
+    <div class="module-card-top"><span class="module-icon">${escapeHtml(module.capability.toUpperCase())}</span></div>
+    <strong>${escapeHtml(module.name)}</strong><p>${escapeHtml(module.description)}</p>
+    <button class="small-button" type="button" data-module-toggle="${escapeHtml(module.id)}" ${busy ? "disabled" : ""}>${busy ? "处理中" : "添加"}</button>
+  </article>`;
 }
 
 function pricingSourceLabel(value) {
