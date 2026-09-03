@@ -35,6 +35,7 @@ API、协议、类名和代码标识保留 English identifier。
 - [架构索引](architecture/README.md)
 - [Protocol v0.1](architecture/protocol.md)
 - [模块目录](architecture/modules.md)
+- [场景优先 UI 外壳](architecture/ui.md)
 - [Provider profiles](architecture/provider-profiles.md)
 - [Avatar 资产与驱动](architecture/avatar.md)
 - [角色与 persona](architecture/characters.md)

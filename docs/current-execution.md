@@ -20,7 +20,7 @@
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `a7dd446` (当前 `HEAD`；默认角色已切换为安和昴并绑定其 VRM，旧默认 Avatar 已注销；工作树仅剩范围外未跟踪产物)
+- Baseline commit: `e7950b7`（场景外壳重置代码提交；文档与远景入库见下一提交；工作树仅剩范围外未跟踪产物）
 - Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
@@ -32,15 +32,13 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 ## 当前里程碑
 
+**场景优先 UI 外壳重置（实现与回归完成，2026-09-04）**
+
+Phase 0、1、2 和 3 均已完成；本轮完成客户端 UI 彻底重置第一期（场景优先外壳），Phase 4 仍不开始。客户端从 11 页签工作台改为「全屏场景视口 + 4 抽屉」：Avatar 占屏 60%+ 常驻（WebGL 跨导航不卸载）、气泡流 + galgame 对白框输入、工作台/角色/模块/设置四个全屏抽屉（Esc/✕ 回场景）、竖排 dock 常驻抽屉之上、桌宠浮窗同款对白框。配色开源中立（夜蓝 + Sumika 自有薄荷强调色，不绑定任何版权角色）；每角色 `theme.accent` 由角色卡导入自动读取（`extensions.theme_color`），`color-mix` 派生全套色调；模块页启用「＋ 添加模块」折叠网格；设置页做实（背景色板/本地背景图/真实数据目录/快照）；首用欢迎卡替代常驻指南页。分层模型借鉴 amica、抽屉结构借鉴 Open-LLM-VTuber-Web、气泡借鉴 ChatVRM（三者 MIT，仅移植交互模式并全部以 Sumika token 重新表达，无文件复制，登记于 license-ledger）。Playwright 50/50、后端 576/576、build、check_docs 全绿。
+
 **固定 DSH 主 Agent 启动闭环（实现与实机验收完成，2026-09-03）**
 
 Phase 0、1、2 和 3 均已完成；本轮完成固定 DSH 启动链的 fail-closed 校验和真实 Windows 进程闭环，Phase 4 仍不开始。
-
-Phase 0 已完成：执行契约、固定恢复顺序和文档检查边界；WorkspaceRuntime 的检查、checkpoint、diff、恢复、worktree、patch 审阅和本地 commit 已接入 Agent 页。Phase 1 已完成：固定 DSH `0.1.1-rc.2` 的启动、健康检查、Provider route 桥接和安全凭据注入；隔离 OpenAI-compatible SSE stub 已通过 Session、模型选择、prompt、事件和最终 snapshot 协议闭环。
-
-Phase 2 已完成：DSH Session、Plan、Execute、工具、审批、队列、历史游标、Subagents、Workspace diff/恢复、失败回合重试、任务投影和 BrowserSkill 策略边界均可由 Agent 页或维护脚本重复验收。Execute 与 Plan Review 批准前会创建 checkpoint；旧 `tasks` 表不承载 DSH 活动状态。
-
-Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore、MCP preview/apply、mount validation、stdio/HTTP 配置、Skill metadata discover/approve/revoke、Plugin manifest discovery/approval/provider boundary 均已实现。固定 DSH 的组合验收已通过 Plan Review、MCP `initialize/tools/list/tools/call`、Skill discover/load、Subagent 创建/历史读取、Workspace diff 和精确恢复；报告只保留有界布尔值、计数和状态。
 
 固定版 DSH 没有独立 live `mcp.list`、Readonly policy、composition 写入、artifact 或 rollback RPC。Sumika 对这些边界明确返回 `not-exposed` 或由自身 WorkspaceRuntime 补足，不伪造能力，也不进入 Phase 4。
 
@@ -56,8 +54,8 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 ## 接下来的三个动作
 
 1. 后续启动统一使用 `tools/run-desktop.ps1 -NoBuild`；网页 Route 发消息前还需受管 Edge Agent Window 在线：运行 `tools/setup-browserskill.ps1 -LaunchAgentBrowser` 打开它，`browser.status` 变为 `ready` 后网页聊天才可用（窗口关闭或应用重启后需重新执行）；若预检显示 `provider=needs-action`，由用户单独授权并重新健康检查。
-2. 在日用会话中使用安和昴角色设定（聊天通道 persona 已生效），并继续逐站用 DOM/ARIA、HTML projection 与 OCR 修通真实网页发送和回复提取，优先解决 ChatGPT 的回复定位。
-3. 在同一新命名 BrowserSkill Profile 完成人工登录后，验收五站一窗五标签和 `3 + 2` 聚合；不同现有 Profile 不静默合并。Agent/DSH 通道 persona 投影为后续任务：按 characters.md 的 persona-bridge 设计钩子做独立 DSH 插件，先在隔离 Profile 验证，未开始前不进入。
+2. 在日用会话中使用安和昴角色设定（聊天通道 persona 已生效，场景壳下可直接体验新 UI），并继续逐站用 DOM/ARIA、HTML projection 与 OCR 修通真实网页发送和回复提取，优先解决 ChatGPT 的回复定位。
+3. UI 重置后续轮次（按需排期）：聊天上下文装配（世界书关键词注入 + 记忆分层）、工作台项目分组的会话绑定后端、背景视频/网页壁纸层；Agent/DSH 通道 persona 投影仍为后续任务（见 characters.md 设计钩子）。五站 `3 + 2` 聚合验收继续按既有口径执行。
 
 ## 固定决策
 
@@ -93,7 +91,7 @@ Phase 3 已完成：Provider/MCP 凭据隔离、Preset copy/open/remove/restore�
 
 当前工作树已通过：
 
-- Python unittest: 573 tests（含本轮角色卡导入 24 个新测试）；Tools unittest: 58 tests（含 DSH 启动夹具和观测投影）；Playwright: 50 tests（50 passed；含角色卡导入回填、retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
+- Python unittest: 576 tests；Tools unittest: 58 tests；Playwright: 50 tests（50 passed；UI 重置后选择器全面更新为场景壳导航，含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml` (6 passed);
