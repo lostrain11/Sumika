@@ -1,7 +1,7 @@
 {
   "identifier": "default",
-  "description": "Main Sumika desktop window capabilities.",
-  "windows": ["main", "overlay"],
+  "description": "Main Sumika desktop window capabilities, including dynamic web portal windows.",
+  "windows": ["main", "overlay", "portal-*"],
   "permissions": [
     "core:default",
     "dialog:default"

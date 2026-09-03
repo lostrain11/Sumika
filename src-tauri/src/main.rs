@@ -12,7 +12,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewWindowBuilder, WindowEvent};
+
+const PORTAL_DATA_DIRNAME: &str = "portals";
 
 const DSH_CREDENTIAL_PROTOCOL_MAGIC: &[u8] = b"SUMIKA_DSH_CREDENTIAL_V2";
 const LOCAL_DSH_CREDENTIAL_REF: &str = "SUMIKA_LOCAL_PROVIDER_API_KEY";
@@ -1015,6 +1017,116 @@ fn open_main_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_portal_site_id(site_id: &str) -> Result<(), String> {
+    let valid = !site_id.is_empty()
+        && site_id.len() <= 48
+        && !site_id.starts_with('-')
+        && site_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err("站点 ID 只能包含字母、数字、短横线或下划线，最长 48 字符".to_string())
+    }
+}
+
+fn validate_portal_url(url: &str) -> Result<tauri::Url, String> {
+    let trimmed = url.trim();
+    if trimmed.len() > 2048 || trimmed.contains(char::is_whitespace) {
+        return Err("门户地址无效".to_string());
+    }
+    let parsed: tauri::Url = if trimmed.contains("://") {
+        trimmed.parse().map_err(|_| "门户地址无法解析".to_string())?
+    } else {
+        format!("https://{trimmed}").parse().map_err(|_| "门户地址无法解析".to_string())?
+    };
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed),
+        _ => Err("门户地址只支持 http/https".to_string()),
+    }
+}
+
+fn portal_window_label(site_id: &str) -> String {
+    format!("portal-{site_id}")
+}
+
+fn ensure_portal_window(
+    app: &AppHandle,
+    site_id: &str,
+    title: &str,
+    url: &tauri::Url,
+) -> Result<(), String> {
+    validate_portal_site_id(site_id)?;
+    let label = portal_window_label(site_id);
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.unminimize();
+        existing.show().map_err(|error| format!("显示门户窗口失败: {error}"))?;
+        existing.set_focus().map_err(|error| format!("聚焦门户窗口失败: {error}"))?;
+        return Ok(());
+    }
+    let root = repository_root()?;
+    let data_dir = root.join(".sumika-desktop").join(PORTAL_DATA_DIRNAME).join(site_id);
+    std::fs::create_dir_all(&data_dir).map_err(|error| format!("创建门户数据目录失败: {error}"))?;
+    let display_title = if title.trim().is_empty() { site_id } else { title.trim() };
+    WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(url.clone()))
+        .title(format!("{display_title} · Sumika 门户"))
+        .inner_size(1200.0, 860.0)
+        .min_inner_size(480.0, 360.0)
+        .data_directory(data_dir)
+        .build()
+        .map_err(|error| format!("打开门户窗口失败: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_portal(app: AppHandle, site_id: String, title: String, url: String) -> Result<(), String> {
+    let parsed = validate_portal_url(&url)?;
+    ensure_portal_window(&app, &site_id, &title, &parsed)
+}
+
+#[tauri::command]
+fn focus_portal(app: AppHandle, site_id: String) -> Result<(), String> {
+    validate_portal_site_id(&site_id)?;
+    let window = app
+        .get_webview_window(&portal_window_label(&site_id))
+        .ok_or_else(|| format!("门户窗口未打开: {site_id}"))?;
+    let _ = window.unminimize();
+    window.show().map_err(|error| format!("显示门户窗口失败: {error}"))?;
+    window.set_focus().map_err(|error| format!("聚焦门户窗口失败: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_portal(app: AppHandle, site_id: String) -> Result<(), String> {
+    validate_portal_site_id(&site_id)?;
+    if let Some(window) = app.get_webview_window(&portal_window_label(&site_id)) {
+        window.close().map_err(|error| format!("关闭门户窗口失败: {error}"))?;
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct PortalWindowEntry {
+    site_id: String,
+    title: String,
+}
+
+#[tauri::command]
+fn portal_list(app: AppHandle) -> Vec<PortalWindowEntry> {
+    let mut entries: Vec<PortalWindowEntry> = app
+        .webview_windows()
+        .into_iter()
+        .filter_map(|(label, window)| {
+            let site_id = label.strip_prefix("portal-")?.to_string();
+            let title = window.title().unwrap_or_default();
+            Some(PortalWindowEntry { site_id, title })
+        })
+        .collect();
+    entries.sort_by(|left, right| left.site_id.cmp(&right.site_id));
+    entries
+}
+
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let root = repository_root().map_err(std::io::Error::other)?;
     let (host, port) = core_endpoint();
@@ -1180,8 +1292,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        first_nonempty_version_line, parse_dsh_credential_bindings,
-        validate_dsh_executable, DSH_CREDENTIAL_PROTOCOL_MAGIC,
+        first_nonempty_version_line, parse_dsh_credential_bindings, validate_dsh_executable,
+        validate_portal_site_id, validate_portal_url, DSH_CREDENTIAL_PROTOCOL_MAGIC,
         PINNED_DSH_EXECUTABLE, PINNED_DSH_VERSION,
     };
 
@@ -1290,6 +1402,31 @@ mod tests {
         oversized.push(0);
         assert!(parse_dsh_credential_bindings(&oversized).is_err());
     }
+
+    #[test]
+    fn portal_site_ids_reject_path_traversal_and_symbols() {
+        assert!(validate_portal_site_id("kimi").is_ok());
+        assert!(validate_portal_site_id("chatgpt-2").is_ok());
+        assert!(validate_portal_site_id("site_1").is_ok());
+        assert!(validate_portal_site_id("").is_err());
+        assert!(validate_portal_site_id("-lead").is_err());
+        assert!(validate_portal_site_id("../etc").is_err());
+        assert!(validate_portal_site_id("white space").is_err());
+        assert!(validate_portal_site_id("中文名").is_err());
+        let oversized = "a".repeat(49);
+        assert!(validate_portal_site_id(&oversized).is_err());
+    }
+
+    #[test]
+    fn portal_urls_require_http_schemes() {
+        assert!(validate_portal_url("https://www.kimi.com").is_ok());
+        assert!(validate_portal_url("http://127.0.0.1:8080").is_ok());
+        assert!(validate_portal_url("kimi.com").is_ok());
+        assert!(validate_portal_url("javascript:alert(1)").is_err());
+        assert!(validate_portal_url("file:///C:/Windows").is_err());
+        assert!(validate_portal_url("").is_err());
+        assert!(validate_portal_url("https://bad host").is_err());
+    }
 }
 
 fn main() {
@@ -1299,7 +1436,11 @@ fn main() {
             show_overlay,
             hide_overlay,
             open_main_window,
-            core_status
+            core_status,
+            open_portal,
+            focus_portal,
+            close_portal,
+            portal_list
         ])
         .setup(setup)
         .build(tauri::generate_context!())
