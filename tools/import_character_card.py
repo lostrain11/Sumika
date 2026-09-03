@@ -65,7 +65,7 @@ def main() -> int:
         print(json.dumps({**summary, "config": config}, ensure_ascii=False, indent=2))
         return 0
 
-    storage = Storage(Path(args.data_dir) / "sumika.db")
+    storage = Storage(Path(args.data_dir) / "sumika.sqlite3")
     existing = next(
         (row for row in storage.list_characters() if row["name"] == result["name"]),
         None,
