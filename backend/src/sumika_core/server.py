@@ -51,6 +51,7 @@ from .agent.supervisor import (
 from .agent.route_trace import RouteDecisionTrace
 from .avatar import AvatarError, AvatarManager
 from .capabilities import CapabilityCatalog, CapabilityCatalogError
+from .character_import import CharacterCardError, convert_character_card, parse_card_bytes, parse_card_text
 from .browser import (
     BrowserRuntime,
     BrowserRuntimeError,
@@ -5576,6 +5577,68 @@ class CoreApplication:
                 self.avatar.restore_character(character_id)
             self.events.publish(EventEnvelope("character.changed", {"character": updated}, character_id=character_id))
             return updated
+        if method == "character.import_card":
+            card_text = params.get("card_text")
+            card_base64 = params.get("card_base64")
+            if (card_text is None) == (card_base64 is None):
+                raise JsonRpcError(
+                    -32602,
+                    "character.import_card requires exactly one of card_text or card_base64",
+                )
+            try:
+                if card_base64 is not None:
+                    if not isinstance(card_base64, str) or not card_base64.strip():
+                        raise CharacterCardError("card_base64 must be a non-empty string")
+                    try:
+                        card = parse_card_bytes(base64.b64decode(card_base64))
+                    except (binascii.Error, ValueError) as exc:
+                        raise CharacterCardError(f"card_base64 is not valid: {exc}") from exc
+                else:
+                    if not isinstance(card_text, str):
+                        raise CharacterCardError("card_text must be a string")
+                    card = parse_card_text(card_text)
+                name_override = params.get("name")
+                if name_override is not None:
+                    if not isinstance(name_override, str):
+                        raise CharacterCardError("name must be a string")
+                    _validate_character_name(name_override)
+                    name_override = name_override.strip()
+                result = convert_character_card(card, character_name=name_override)
+                _validate_character_name(result["name"])
+                config = _validate_character_config(result["config"])
+            except (CharacterCardError, ValueError, TypeError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            existing = next(
+                (row for row in self.storage.list_characters() if row["name"] == result["name"]),
+                None,
+            )
+            if existing is not None:
+                if not params.get("overwrite"):
+                    raise JsonRpcError(
+                        -32602,
+                        f"character already exists: {result['name']} (pass overwrite to replace)",
+                    )
+                character = self.storage.update_character_config(existing["id"], config)
+                if character is None:
+                    raise JsonRpcError(-32602, f"Unknown character: {existing['id']}")
+                if self.avatar.active_character_id == character["id"]:
+                    self.avatar.restore_character(character["id"])
+            else:
+                character = self.storage.create_character(
+                    str(params.get("id") or _safe_id("character")), result["name"], config
+                )
+            self.events.publish(
+                EventEnvelope("character.changed", {"character": character}, character_id=character["id"])
+            )
+            return {
+                "ok": True,
+                "character": character,
+                "character_id": character["id"],
+                "name": character["name"],
+                "warnings": result["warnings"],
+                "mapped": result["mapped"],
+                "book_entries": result["book_entries"],
+            }
         if method == "event.list":
             return self.storage.list_events(int(params.get("limit", 100)))
         if method == "snapshot.list":

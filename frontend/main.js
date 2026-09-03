@@ -831,7 +831,7 @@ function renderCharacters() {
     const preview = avatarPreviewUrl(model);
     return `<article class="character-card ${character.id === state.selectedCharacter ? "selected" : ""}"><div class="character-art">${preview ? `<img class="character-art-image" src="${escapeHtml(preview)}" alt="${escapeHtml(model?.name || "Avatar 模型")}" />` : ""}<div class="character-art-copy"><span>${escapeHtml(avatarDriverLabel(character.config?.avatar_driver || "none"))}</span><strong>${escapeHtml(character.name)}</strong></div></div><div class="character-card-body"><div><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(model?.name || "未绑定 Avatar 模型")} · ${character.config?.memory_enabled ? "记忆已启用" : "记忆默认关闭"}</small></div><button class="small-button" data-character="${escapeHtml(character.id)}">${character.id === state.selectedCharacter ? "当前角色" : "使用"}</button></div></article>`;
   }).join("");
-  return renderPageFrame("角色", "Sumika 是项目名；每个角色都有独立名称、persona、Avatar 和记忆空间。", `<div class="character-grid">${cards}<button class="add-card" id="add-character"><span>＋</span><strong>创建角色</strong><small>从独立配置开始</small></button></div>${renderCharacterEditor()}${renderAvatarLibrary()}`);
+  return renderPageFrame("角色", "Sumika 是项目名；每个角色都有独立名称、persona、Avatar 和记忆空间。", `<div class="character-grid">${cards}<button class="add-card" id="add-character"><span>＋</span><strong>创建角色</strong><small>从独立配置开始</small></button><button class="add-card" id="import-character-card"><span>↥</span><strong>导入角色卡</strong><small>SillyTavern JSON / PNG / CHARX</small></button></div>${renderCharacterEditor()}${renderAvatarLibrary()}`);
 }
 
 function currentPersonaConfig() {
@@ -3523,6 +3523,7 @@ function bindEvents() {
     if (output) output.value = Number(element.value).toFixed(2);
   }));
   document.querySelector("#add-character")?.addEventListener("click", createCharacter);
+  document.querySelector("#import-character-card")?.addEventListener("click", importCharacterCard);
   document.querySelector("#import-avatar")?.addEventListener("click", importAvatar);
   document.querySelector("#discover-avatar-assets")?.addEventListener("click", discoverAvatarAssets);
   document.querySelectorAll("[data-avatar-select]").forEach((element) => element.addEventListener("click", () => {
@@ -8529,6 +8530,53 @@ async function selectSession(sessionId) {
   }
   state.activePage = "Chat";
   await loadMessages();
+}
+
+async function importCharacterCard() {
+  if (state.characterBusy) return;
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json,.png,.charx";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const params = {};
+    try {
+      if (/\.(png|charx)$/i.test(file.name)) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("无法读取所选文件"));
+          reader.readAsDataURL(file);
+        });
+        params.card_base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      } else {
+        params.card_text = await file.text();
+      }
+      state.characterBusy = true;
+      state.characterNotice = "";
+      render();
+      const result = await rpc("character.import_card", params);
+      const character = result.character;
+      // The character.changed event may have landed first; upsert by id so the
+      // imported character never appears twice in the grid.
+      state.characters = state.characters.some((item) => item.id === character.id)
+        ? state.characters.map((item) => (item.id === character.id ? character : item))
+        : [...state.characters, character];
+      state.selectedCharacter = character.id;
+      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+      state.characterNotice = warnings.length
+        ? `${result.character.name} 已导入角色卡；注意：${warnings.join("；")}`
+        : `${result.character.name} 已从角色卡导入。`;
+      await loadAvatarState();
+    } catch (error) {
+      state.characterNotice = `角色卡导入失败：${error.message}`;
+    } finally {
+      state.characterBusy = false;
+      render();
+    }
+  };
+  input.click();
 }
 
 async function createCharacter() {

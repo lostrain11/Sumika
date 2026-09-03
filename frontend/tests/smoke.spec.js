@@ -422,6 +422,43 @@ test.describe("Sumika UI shell", () => {
     expect(nextYaw).not.toBe(rotatingYaw);
   });
 
+  test("导入 SillyTavern 角色卡并回填编辑器", async ({ page }) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    const cardPath = join(tmpdir(), `sumika-import-card-${Date.now()}.json`);
+    await writeFile(
+      cardPath,
+      JSON.stringify({
+        spec: "chara_card_v2",
+        spec_version: "2.0",
+        data: {
+          name: "卡牌酱",
+          description: "Playwright 导入的合成角色。",
+          scenario: "{{user}}是{{char}}的测试伙伴。",
+          first_mes: "你好，{{user}}。",
+          system_prompt: "保持简洁。",
+          character_book: { entries: [{ keys: ["测试"], content: "世界书条目" }] },
+        },
+      }),
+      "utf-8",
+    );
+    try {
+      await page.locator('.nav-item[data-page="Characters"]').click();
+      const chooserPromise = page.waitForEvent("filechooser");
+      await page.locator("#import-character-card").click();
+      const chooser = await chooserPromise;
+      await chooser.setFiles(cardPath);
+      await expect(page.locator(".character-notice")).toContainText("卡牌酱 已导入角色卡");
+      await expect(page.locator(".character-notice")).toContainText("character_book");
+      await expect(page.locator('.character-card:has-text("卡牌酱")')).toHaveCount(1);
+      const persona = await openCharacterSection(page, "persona");
+      await expect(persona.locator('textarea[name="persona_relationship"]')).toHaveValue("你是卡牌酱的测试伙伴。");
+      await expect(persona.locator('textarea[name="greeting"]')).toHaveValue("你好，你。");
+      await expect(persona.locator('textarea[name="system_prompt"]')).toHaveValue("保持简洁。");
+    } finally {
+      await rm(cardPath, { force: true });
+    }
+  });
+
   test("Avatar 信息层与模型画布分离", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const placeholder = page.locator(".avatar-stage .avatar-placeholder");

@@ -1858,3 +1858,108 @@ class ServerTests(unittest.TestCase):
         _, events = self.request("GET", "/api/events")
         event = next(item for item in events if item["event_type"] == "vision.observed")
         self.assertNotIn("private-image", json.dumps(event["payload"], ensure_ascii=False))
+
+    def test_character_import_card_creates_and_overwrites_character(self):
+        card = {
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {
+                "name": "导入酱",
+                "description": "RPC 导入测试角色。",
+                "scenario": "{{user}}是{{char}}的测试者。",
+                "first_mes": "你好，{{user}}。",
+                "system_prompt": "保持简洁。",
+            },
+        }
+        card_text = json.dumps(card, ensure_ascii=False)
+        status, result = self.request(
+            "POST",
+            "/rpc",
+            {"jsonrpc": "2.0", "id": 70, "method": "character.import_card", "params": {"card_text": card_text}},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(result["result"]["ok"])
+        character_id = result["result"]["character_id"]
+        self.assertEqual(result["result"]["name"], "导入酱")
+        self.assertEqual(result["result"]["book_entries"], 0)
+        persona = result["result"]["character"]["config"]["persona"]
+        self.assertEqual(persona["relationship"], "你是导入酱的测试者。")
+        self.assertEqual(persona["greeting"], "你好，你。")
+        self.assertEqual(
+            result["result"]["character"]["config"]["card_import"]["spec"],
+            "chara_card_v2",
+        )
+        self.assertIn("avatar", result["result"]["character"]["config"])
+
+        status, duplicate = self.request(
+            "POST",
+            "/rpc",
+            {"jsonrpc": "2.0", "id": 71, "method": "character.import_card", "params": {"card_text": card_text}},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("already exists", duplicate["error"]["message"])
+
+        card["data"]["description"] = "覆盖后的描述。"
+        status, replaced = self.request(
+            "POST",
+            "/rpc",
+            {
+                "jsonrpc": "2.0",
+                "id": 72,
+                "method": "character.import_card",
+                "params": {"card_text": json.dumps(card, ensure_ascii=False), "overwrite": True},
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(replaced["result"]["character_id"], character_id)
+        self.assertEqual(
+            replaced["result"]["character"]["config"]["persona"]["identity"],
+            "覆盖后的描述。",
+        )
+
+        _, listed = self.request(
+            "POST",
+            "/rpc",
+            {"jsonrpc": "2.0", "id": 73, "method": "character.list", "params": {}},
+        )
+        self.assertIn(character_id, {item["id"] for item in listed["result"]})
+        _, events = self.request("GET", "/api/events")
+        self.assertIn(
+            "character.changed",
+            [item["event_type"] for item in events],
+        )
+
+    def test_character_import_card_requires_exactly_one_payload(self):
+        for params in ({}, {"card_text": "{}", "card_base64": "e30="}):
+            status, result = self.request(
+                "POST",
+                "/rpc",
+                {"jsonrpc": "2.0", "id": 80, "method": "character.import_card", "params": params},
+            )
+            self.assertEqual(status, 400)
+            self.assertIn("card_text or card_base64", result["error"]["message"])
+
+    def test_character_import_card_rejects_unsupported_spec(self):
+        card = json.dumps({"spec": "chara_card_v9", "data": {"name": "不支持"}})
+        status, result = self.request(
+            "POST",
+            "/rpc",
+            {"jsonrpc": "2.0", "id": 81, "method": "character.import_card", "params": {"card_text": card}},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("unsupported character card spec", result["error"]["message"])
+
+    def test_character_import_card_accepts_base64_v1_card(self):
+        card = {"name": "旧版导入", "description": "旧版扁平卡。", "first_mes": "嗨。"}
+        payload = base64.b64encode(json.dumps(card, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        status, result = self.request(
+            "POST",
+            "/rpc",
+            {"jsonrpc": "2.0", "id": 82, "method": "character.import_card", "params": {"card_base64": payload}},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["result"]["name"], "旧版导入")
+        self.assertEqual(
+            result["result"]["character"]["config"]["card_import"]["spec"],
+            "v1",
+        )
