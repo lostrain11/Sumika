@@ -372,6 +372,34 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertEqual(result["text_counts"], [1, 1])
         self.assertEqual(result["selected_node_count"], 2)
 
+    def test_html_projection_supports_current_chatgpt_composer_and_assistant_attributes(self):
+        def runner(args):
+            if args == ("status",):
+                return {"browsers": [{"id": "browser-1"}], "sessions": []}
+            if args == ("session", "start"):
+                return {"id": "bsk-session-1"}
+            if args[0] == "get-html":
+                return {
+                    "html": (
+                        '<textarea data-composer-draft-react="" aria-label="与 ChatGPT 聊天"></textarea>'
+                        '<button data-composer-submit="" aria-label="发送消息"></button>'
+                        '<li data-message-role="assistant">'
+                        '<div data-assistant-markdown="">当前 ChatGPT 回复</div>'
+                        '</li>'
+                    )
+                }
+            raise AssertionError(args)
+
+        runtime = BrowserRuntime(browser_skill=BrowserSkillClient("bsk", runner=runner))
+        session = runtime.create_session()
+        result = runtime.extract_html_text_session(
+            session["id"],
+            selectors=("[data-assistant-markdown]", "[data-message-role='assistant']"),
+        )
+
+        self.assertEqual(result["texts"], ["当前 ChatGPT 回复"])
+        self.assertEqual(result["selected_node_count"], 1)
+
     def test_html_projection_scans_a_bounded_large_page_for_a_late_response(self):
         calls = []
 

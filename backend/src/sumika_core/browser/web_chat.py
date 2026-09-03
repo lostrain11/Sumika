@@ -344,8 +344,27 @@ def _builtin_specs() -> tuple[WebChatAdapterSpec, ...]:
             chat_url="https://chatgpt.com/",
             selectors={
                 **selectors,
-                "input": ("#prompt-textarea", *selectors["input"]),
-                "send": ("[data-testid='send-button']", *selectors["send"]),
+                # Keep the established prompt id first for older shells; the
+                # current mobile/web-compatible composer follows as a
+                # declarative fallback.
+                "input": (
+                    "#prompt-textarea",
+                    "textarea[data-composer-draft-react]",
+                    "#mobile-composer-prompt",
+                    *selectors["input"],
+                ),
+                "send": (
+                    "[data-testid='send-button']",
+                    "button[data-composer-submit]",
+                    "button[aria-label='发送消息']",
+                    "button[aria-label='Send message']",
+                    *selectors["send"],
+                ),
+                "response": (
+                    "[data-assistant-markdown]",
+                    "[data-message-role='assistant']",
+                    *selectors["response"],
+                ),
             },
             submission_strategy="enter-first",
             authorized_markers=(
@@ -353,8 +372,11 @@ def _builtin_specs() -> tuple[WebChatAdapterSpec, ...]:
                 "Log out",
                 "Sign out",
                 "注销",
+                "打开个人资料菜单",
                 "打开“个人资料”菜单",
                 "打开\"个人资料\"菜单",
+                "账户菜单",
+                "Account menu",
                 "Open profile menu",
                 "Open user menu",
             ),
@@ -699,8 +721,11 @@ def _auth_state(
                 *spec.authorized_markers,
                 *(
                     (
+                        "打开个人资料菜单",
                         "打开“个人资料”菜单",
                         "打开\"个人资料\"菜单",
+                        "账户菜单",
+                        "Account menu",
                         "Open profile menu",
                         "Open user menu",
                     )
@@ -791,8 +816,11 @@ def _marker_sets_for(spec: WebChatAdapterSpec) -> dict[str, tuple[str, ...]]:
             dict.fromkeys(
                 (
                     *authorized,
+                    "打开个人资料菜单",
                     "打开“个人资料”菜单",
                     '打开"个人资料"菜单',
+                    "账户菜单",
+                    "Account menu",
                     "Open profile menu",
                     "Open user menu",
                 )
@@ -843,6 +871,14 @@ def _node_attributes(value: Mapping[str, Any]) -> dict[str, str]:
             "testid",
             "data-testid",
             "data-message-author-role",
+            "data-message-role",
+            "data-assistant-markdown",
+            "data-composer-submit",
+            "data-composer-draft-react",
+            "aria-label",
+            "placeholder",
+            "contenteditable",
+            "type",
             "selector",
             "css_selector",
         } and isinstance(item, (str, int, float, bool)):
@@ -2447,6 +2483,7 @@ class WebChatRuntime:
 
         submitted_key = _normalized_response_text(message)
         visual_baseline_id: str | None = None
+        visual_page_baseline_id: str | None = None
         input_ref = _find_input_ref(before_payload, spec.selectors.get("input", ()))
 
         def capture_visual(*, baseline_id: str | None = None, input_only: bool = False) -> dict[str, Any]:
@@ -2617,6 +2654,15 @@ class WebChatRuntime:
         visual_baseline = capture_visual(input_only=True)
         if visual_baseline.get("available") and visual_baseline.get("evidence_id"):
             visual_baseline_id = str(visual_baseline["evidence_id"])
+
+        # Keep a page-level baseline separate from the input crop. A crop can
+        # prove that a composer changed, but it cannot show whether a new
+        # assistant response appeared elsewhere on the page. Without this
+        # baseline, the timeout diagnostic has no independent visual comparison
+        # and must always report an unknown response state.
+        visual_page_baseline = capture_visual()
+        if visual_page_baseline.get("available") and visual_page_baseline.get("evidence_id"):
+            visual_page_baseline_id = str(visual_page_baseline["evidence_id"])
 
         sent = False
         submission_confirmed = False
@@ -2835,9 +2881,10 @@ class WebChatRuntime:
                 )
             time.sleep(0.25)
         if response is None:
-            # Page-level timeout diagnostics must compare against no input-only
-            # baseline; otherwise a composer crop can hide a visible reply.
-            visual = capture_visual(baseline_id=None)
+            # Page-level timeout diagnostics must compare against the page
+            # baseline; using the input-only crop here can hide or misclassify
+            # a visible assistant reply.
+            visual = capture_visual(baseline_id=visual_page_baseline_id)
             if visual.get("blocking_surface_visible") is True:
                 return {
                     "ok": False,

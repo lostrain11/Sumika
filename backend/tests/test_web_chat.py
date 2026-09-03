@@ -715,6 +715,36 @@ class WebChatRuntimeTests(unittest.TestCase):
         self.assertEqual(result["auth_state"], "authorized")
         self.assertTrue(result["page_ready"])
 
+    def test_chatgpt_current_composer_and_response_selectors_are_declared(self):
+        spec = WebChatAdapterRegistry().get("chatgpt-web")
+
+        self.assertIn("textarea[data-composer-draft-react]", spec.selectors["input"])
+        self.assertIn("button[data-composer-submit]", spec.selectors["send"])
+        self.assertIn("[data-assistant-markdown]", spec.selectors["response"])
+        self.assertIn("[data-message-role='assistant']", spec.selectors["response"])
+
+    def test_chatgpt_unquoted_profile_menu_proves_authorization(self):
+        runtime, _browser = self.runtime(
+            [
+                {
+                    "ready": True,
+                    "snapshot": {
+                        "text": (
+                            'button "打开个人资料菜单 [has-submenu]"\n'
+                            'button "发送消息"\n'
+                            'textbox "与 ChatGPT 聊天"'
+                        )
+                    },
+                }
+            ]
+        )
+        profile = self.create_profile(runtime, adapter_id="chatgpt-web")
+
+        result = runtime.check_profile(profile["id"], approved=True)
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["auth_state"], "authorized")
+
     def test_chatgpt_uses_enter_before_unstable_send_button(self):
         runtime, browser = self.runtime(
             [
@@ -1035,6 +1065,14 @@ class WebChatRuntimeTests(unittest.TestCase):
                 "prompt_in_input": True,
                 "assistant_response_visible": False,
                 "blocking_surface_visible": False,
+                "evidence_id": "visual-page-baseline",
+            },
+            {
+                "available": True,
+                "confidence": "high",
+                "prompt_in_input": True,
+                "assistant_response_visible": False,
+                "blocking_surface_visible": False,
                 "evidence_id": "visual-input-after",
             },
         ]
@@ -1052,10 +1090,14 @@ class WebChatRuntimeTests(unittest.TestCase):
         result = runtime.send_message(profile["id"], message)
 
         self.assertTrue(result["ok"], result)
-        self.assertEqual(browser.visual_calls[0][1]["scope"], "input")
+        self.assertEqual(
+            [call[1]["scope"] for call in browser.visual_calls],
+            ["input", "page", "input"],
+        )
         self.assertEqual(browser.visual_calls[0][1]["ref"], "@e42")
-        self.assertEqual(browser.visual_calls[1][1]["scope"], "input")
-        self.assertEqual(browser.visual_calls[1][1]["ref"], "@e42")
+        self.assertIsNone(browser.visual_calls[1][1]["ref"])
+        self.assertEqual(browser.visual_calls[2][1]["ref"], "@e42")
+        self.assertEqual(browser.visual_calls[2][1]["baseline_id"], "visual-input-baseline")
 
     def test_send_uses_html_projection_when_snapshot_flattens_assistant_node(self):
         browser = HtmlResponseBrowserStub(
@@ -1287,12 +1329,16 @@ class WebChatRuntimeTests(unittest.TestCase):
                 page_snapshot(authorized=True, ready=True),
                 transient,
                 transient,
+                transient,
+                transient,
                 page_snapshot(authorized=True, ready=True, response="已收到"),
             ]
         )
         browser.visual_results = [
             {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-before"},
+            {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-page-baseline"},
             {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-after"},
+            {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-second-fallback"},
         ]
         profile = self.create_profile(
             runtime,
@@ -1320,7 +1366,7 @@ class WebChatRuntimeTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         clicks = [item["target"] for item in browser.actions if item["action"] == "click"]
         self.assertEqual(clicks, ["button.first", "button.second"])
-        self.assertEqual(len(browser.visual_calls), 2)
+        self.assertEqual(len(browser.visual_calls), 4)
 
     def test_visual_uncertainty_never_repeats_a_possibly_sent_message(self):
         message = "不要重复发送"
@@ -1338,6 +1384,7 @@ class WebChatRuntimeTests(unittest.TestCase):
         )
         browser.visual_results = [
             {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-before"},
+            {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-page-baseline"},
             {"available": True, "confidence": "low", "prompt_in_input": None, "assistant_response_visible": None, "blocking_surface_visible": None, "evidence_id": "visual-unknown"},
         ]
         profile = self.create_profile(
@@ -1374,6 +1421,7 @@ class WebChatRuntimeTests(unittest.TestCase):
         )
         browser.visual_results = [
             {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-before"},
+            {"available": True, "confidence": "high", "prompt_in_input": True, "assistant_response_visible": False, "blocking_surface_visible": False, "evidence_id": "visual-page-baseline"},
             {"available": True, "confidence": "high", "prompt_in_input": False, "assistant_response_visible": True, "blocking_surface_visible": False, "evidence_id": "visual-after"},
         ]
         runtime = WebChatRuntime(self.storage, browser)
@@ -1396,6 +1444,8 @@ class WebChatRuntimeTests(unittest.TestCase):
         self.assertTrue(result["possibly_sent"])
         self.assertEqual(result["error_code"], "response-visible-extraction-failed")
         self.assertNotIn("text", result)
+        self.assertEqual(browser.visual_calls[-1][1]["baseline_id"], "visual-page-baseline")
+        self.assertEqual(browser.visual_calls[-1][1]["scope"], "page")
 
     def test_profiles_bound_to_one_named_browser_profile_share_session_but_not_tab(self):
         runtime, browser = self.runtime()
