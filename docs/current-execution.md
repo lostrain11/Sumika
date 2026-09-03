@@ -20,7 +20,7 @@
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `e7950b7`（场景外壳重置代码提交；文档与远景入库见下一提交；工作树仅剩范围外未跟踪产物）
+- Baseline commit: `05d511f` (当前 `HEAD`；场景外壳重置与远景入库已完成；工作树仅剩范围外未跟踪产物)
 - Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
