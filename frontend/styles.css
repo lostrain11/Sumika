@@ -1,18 +1,27 @@
 :root {
   color-scheme: dark;
-  --bg: #0d1013;
-  --surface: #14191e;
-  --surface-2: #1a2026;
-  --surface-3: #222a31;
-  --line: #2a343c;
-  --text: #eef2f3;
-  --muted: #8f9ba2;
-  --faint: #607078;
-  --accent: #86d5c8;
-  --accent-strong: #c0f0e5;
+  /* Scene-first theme. The palette stays project-neutral on purpose: no
+     character-specific brand color may land in the repo default. A character
+     can override --accent via its own theme.accent at runtime. */
+  --bg: #101623;
+  --bg-deep: #0b101b;
+  --surface: #161e2d;
+  --surface-2: #1c2739;
+  --surface-3: #243250;
+  --line: #2a3950;
+  --text: #e8edf5;
+  --muted: #93a1b8;
+  --faint: #5f6f88;
+  --accent: #6fd3b8;
+  --accent-strong: color-mix(in srgb, var(--accent) 62%, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 38%, transparent);
   --warn: #e8bc82;
   --danger: #e58f8f;
-  --radius: 8px;
+  --radius: 10px;
+  --glass: rgba(18, 26, 41, 0.62);
+  --glass-strong: rgba(13, 18, 28, 0.78);
+  --scene-background: radial-gradient(120% 90% at 62% 30%, #1a2740 0%, #121a2b 46%, #0b101b 100%);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0;
 }
@@ -969,3 +978,100 @@ select { background: var(--surface-2); border: 1px solid var(--line); color: var
   .capability-group-grid { grid-template-columns: 1fr; }
   .capability-entry-state { max-width: 96px; }
 }
+
+/* ============================================================
+   Scene-first shell (borrowed layering model from amica, MIT):
+   backdrop z-0 / avatar viewport z-1 / topbar+chat z-10 /
+   dock z-20 / fullscreen drawer z-30.
+   The viewport IS the interface; drawers take over fullscreen
+   and the scene dims+blurs behind them.
+   ============================================================ */
+.scene-shell { position: relative; height: 100vh; min-height: 0; overflow: hidden; }
+.scene-backdrop { position: absolute; inset: 0; z-index: 0; background: var(--scene-background); }
+.scene-backdrop::after { content: ""; position: absolute; inset: 0; background: radial-gradient(90% 70% at 30% 100%, color-mix(in srgb, var(--accent) 05%, transparent), transparent 60%); }
+.scene-backdrop-image { position: absolute; inset: 0; background-size: cover; background-position: center; display: none; }
+.scene-shell[data-background-image] .scene-backdrop-image { display: block; }
+.scene-viewport { position: absolute; inset: 0; z-index: 1; transition: filter .28s ease, transform .28s ease; }
+.scene-shell.drawer-open .scene-viewport { filter: blur(16px) brightness(.45); transform: scale(.965); }
+.scene-viewport .avatar-stage { position: absolute; inset: 0; border: 0; border-bottom: 0; padding: 64px 0 0; display: grid; place-items: center; overflow: hidden; }
+.scene-viewport .avatar-orbit { width: min(760px, 92%); height: 300px; }
+.scene-viewport .avatar-presenter { grid-template-rows: min(62vh, 640px) auto; width: min(440px, 60%); transform: translateX(16%); }
+.scene-viewport .avatar-placeholder { height: 100%; }
+.scene-viewport .speech-hint { top: 84px; right: auto; left: 50%; transform: translateX(-50%); }
+
+.scene-topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 16px; pointer-events: none; }
+.scene-topbar > * { pointer-events: auto; }
+.scene-pill { display: inline-flex; align-items: center; gap: 9px; border: 1px solid rgba(255,255,255,.07); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 999px; padding: 7px 13px; font-size: 12px; color: var(--muted); }
+.scene-pill strong { color: var(--text); font-size: 12.5px; font-weight: 600; }
+.scene-topbar select { background: transparent; border: 0; color: var(--text); padding: 0 20px 0 2px; font-size: 12.5px; }
+.scene-topbar .provider-summary { width: auto; max-width: 300px; }
+
+.scene-dock { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); z-index: 40; display: grid; gap: 4px; border: 1px solid rgba(255,255,255,.07); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 14px; padding: 7px 6px; }
+.scene-shell.drawer-open .scene-dock { border-color: rgba(255,255,255,.12); }
+.scene-dock .nav-item { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border-radius: 10px; color: var(--muted); font-size: 17px; }
+.scene-dock .nav-item:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.scene-dock .nav-item.active { background: var(--accent-soft); color: var(--accent-strong); }
+
+.scene-chat { position: absolute; top: 0; bottom: 0; left: 0; width: min(480px, 44%); z-index: 10; display: flex; flex-direction: column; min-height: 0; padding: 66px 10px 18px 74px; }
+.scene-chat .stage-toolbar { min-height: 32px; margin-bottom: 4px; }
+.scene-chat .session-notice { margin: 0 0 8px; }
+.scene-chat .message-list { flex: 1; min-height: 0; padding: 12px 4px; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
+.scene-chat .composer { margin: 8px 0 0; }
+.scene-chat .voice-notice { margin: 8px 0 0; }
+.scroll-hidden { scrollbar-width: none; }
+.scroll-hidden::-webkit-scrollbar { display: none; }
+
+.drawer { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column; background: var(--glass-strong); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.drawer.open { display: flex; }
+.drawer-header { display: flex; align-items: center; gap: 22px; padding: 15px 26px 13px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.drawer-title strong { display: block; font-size: 16px; font-weight: 650; }
+.drawer-tabs { display: flex; gap: 4px; flex: 1; }
+.drawer-tabs .nav-item { padding: 7px 12px; border-radius: 8px; font-size: 12px; }
+.drawer-tabs .nav-item.active { background: var(--accent-soft); color: var(--accent-strong); }
+.drawer-close { border: 0; background: rgba(255,255,255,.05); color: var(--muted); width: 34px; height: 34px; border-radius: 9px; font-size: 14px; }
+.drawer-close:hover { background: rgba(255,255,255,.1); color: var(--text); }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 22px 26px 46px; }
+.drawer-body .content-page { height: auto; overflow: visible; padding: 0; }
+
+@media (max-width: 1150px) {
+  .scene-chat { width: min(420px, 50%); padding-left: 68px; }
+  .scene-viewport .avatar-presenter { transform: translateX(6%); }
+}
+
+/* ============================================================
+   Unified component layer. Every visible surface derives from
+   the same tokens: ONE glass material, ONE radius scale, ONE
+   accent rule. Legacy page classes are redefined here so drawer
+   content inherits the scene skin automatically.
+   ============================================================ */
+.small-button, .outline-button, .ghost-button, .text-button, .link-button, .icon-button, .round-button { border-radius: 8px; transition: color .15s ease, background .15s ease, border-color .15s ease; }
+.small-button { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.08); color: var(--muted); }
+.small-button:hover { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 4%, transparent); color: var(--accent-strong); }
+.outline-button { border-color: rgba(255,255,255,.1); color: var(--muted); }
+.outline-button:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent-strong); background: var(--accent-soft); }
+.send-button { border-radius: 9px; background: var(--accent); color: #0d1a17; }
+.add-card { border-color: rgba(255,255,255,.1); }
+.add-card span { color: var(--accent); }
+.agent-panel, .dev-panel, .module-card, .character-card, .task-column, .settings-section, .notification-panel { background: rgba(22,30,46,.55); border-color: rgba(255,255,255,.06); }
+.panel-heading strong { color: var(--text); }
+textarea, input[type="text"], input[type="password"], input[type="number"] { border-radius: 8px; }
+input, textarea, select { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.04); }
+input:focus, textarea:focus, select:focus { border-color: color-mix(in srgb, var(--accent) 5%, transparent); }
+.composer { background: var(--glass); border: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 14px; }
+/* Galgame dialogue-box input: one shared material for main window and pet
+   overlay. The nameplate is the speaking character; the box is the player's
+   line. Borrowed interaction pattern (visual-novel textbox), Sumika skin. */
+.scene-chat .composer, .overlay-composer { position: relative; border-radius: 16px; padding: 14px 14px 10px; overflow: hidden; }
+.scene-chat .composer::before, .overlay-composer::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: .5; }
+.composer textarea { min-height: 44px; font-size: 13.5px; line-height: 1.6; }
+.composer textarea::placeholder, .overlay-composer textarea::placeholder { color: var(--faint); }
+.dialogue-nameplate { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 6px; padding: 3px 12px 4px; border-radius: 999px 999px 999px 3px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); color: var(--accent-strong); font-size: 11.5px; font-weight: 650; letter-spacing: .04em; }
+.dialogue-nameplate i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* Scene chat bubbles: compact round-corner cards, user tinted with accent. */
+.scene-chat .message { max-width: 92%; }
+.scene-chat .message .message-body { font-size: 13px; }
+.scene-chat .message.assistant .message-body { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.07); border-radius: 4px 12px 12px 12px; padding: 9px 12px; }
+.scene-chat .message.user .message-body { border-radius: 12px 4px 12px 12px; }
+.scene-chat .message .message-meta { margin-bottom: 4px; }
+.message.user .message-body { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.status-chip, .privacy-chip { border: 1px solid rgba(255,255,255,.07); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 999px; }

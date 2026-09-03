@@ -150,6 +150,22 @@ class CharacterImportTests(unittest.TestCase):
         self.assertEqual(result["name"], "覆盖酱")
         self.assertEqual(result["config"]["persona"]["relationship"], "你是覆盖酱的测试伙伴。")
 
+    def test_extension_theme_color_becomes_character_accent(self):
+        card = v2_card()
+        card["data"]["extensions"] = {"theme_color": "#76BD53"}
+        result = convert_character_card(card)
+        self.assertEqual(result["config"]["theme"], {"accent": "#76BD53"})
+
+    def test_invalid_extension_color_is_ignored(self):
+        card = v2_card()
+        card["data"]["extensions"] = {"theme_color": "bright-green"}
+        result = convert_character_card(card)
+        self.assertNotIn("theme", result["config"])
+
+    def test_missing_extension_keeps_default_theme(self):
+        result = convert_character_card(v2_card())
+        self.assertNotIn("theme", result["config"])
+
     def test_parse_card_bytes_accepts_json(self):
         card = parse_card_bytes(json.dumps(v2_card(), ensure_ascii=False).encode("utf-8"))
         self.assertEqual(card["spec"], "chara_card_v2")

@@ -254,6 +254,36 @@ const navItems = [
   ["Guide", "入门指南"],
 ];
 
+/* Scene-first shell: the viewport is the interface; everything else lives in
+   one of four fullscreen drawers. Legacy page ids map into a drawer as tabs
+   so existing renderers and tests keep working during the migration. */
+const drawerGroups = {
+  workbench: ["Agent", "WebWorkbench", "Tasks", "History", "Notifications"],
+  characters: ["Characters"],
+  modules: ["Modules", "Developer"],
+  settings: ["Settings", "Guide"],
+};
+const drawerTitles = { workbench: "工作台", characters: "角色", modules: "模块", settings: "设置" };
+
+function drawerForPage(page) {
+  for (const [drawer, pages] of Object.entries(drawerGroups)) {
+    if (pages.includes(page)) return drawer;
+  }
+  return null;
+}
+
+/* Per-character accent: one CSS variable drives every derived tint via
+   color-mix, so a character card's theme color reskins the whole shell. */
+function applyCharacterTheme() {
+  const accent = String(currentCharacter().config?.theme?.accent || "").trim();
+  const root = document.documentElement;
+  if (/^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{3}$/.test(accent)) {
+    root.style.setProperty("--accent", accent);
+  } else {
+    root.style.removeProperty("--accent");
+  }
+}
+
 const fallbackModules = [];
 
 const fallbackAvatarState = { driver: "none", driver_status: "ready", character_id: "sumika", model: null, presentation: {}, state: {} };
@@ -500,9 +530,10 @@ function render() {
     activeAudioCapture = null;
     state.voiceRecording = false;
   }
+  applyCharacterTheme();
   const avatarSurfaceSelector = state.overlayMode
     ? ".desktop-overlay-avatar"
-    : state.activePage === "Chat" ? ".avatar-stage" : null;
+    : ".avatar-stage";
   const previousAvatarSurface = avatarSurfaceSelector ? document.querySelector(avatarSurfaceSelector) : null;
   const preserveAvatarSurface = Boolean(
     previousAvatarSurface
@@ -528,28 +559,20 @@ function render() {
     if (!preserveAvatarSurface) queueVrmViewerMount();
     return;
   }
+  const drawer = drawerForPage(state.activePage);
   app.innerHTML = `
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="主导航">
-        <div class="brand-lockup">
-          <div class="brand-mark">S</div>
-          <div><strong>Sumika</strong><span>local companion</span></div>
+    <div class="scene-shell ${drawer ? "drawer-open" : ""}" data-drawer="${drawer || ""}">
+      <div class="scene-backdrop"><div class="scene-backdrop-image"></div></div>
+      <div class="scene-viewport">
+        <div class="avatar-stage" data-avatar-signature="${escapeHtml(avatarRenderSignature())}" aria-label="Avatar 预览">
+          <div class="avatar-orbit" aria-hidden="true"></div>${state.avatarVisible ? renderAvatarPresenter() : `<div class="avatar-hidden-state" role="status"><span>Avatar 已隐藏</span></div>`}
+          <div class="speech-hint">${state.sending ? "正在思考..." : "今天也一起完成一点小目标吧。"}</div>
         </div>
-        <nav class="nav-list">
-          ${navItems.map(([id, label]) => `
-            <button class="nav-item ${state.activePage === id ? "active" : ""}" data-page="${id}">
-              <span class="nav-glyph">${glyph(id)}</span><span>${label}</span>
-            </button>`).join("")}
-        </nav>
-        <div class="sidebar-footer">
-          <div class="runtime-dot"><i></i> 核心服务 ${state.connected ? "已连接" : "未连接"}</div>
-          <button class="developer-link" data-page="Developer">开发者模式 <span>›</span></button>
-        </div>
-      </aside>
-      <main class="main-shell">
-        ${renderTopbar()}
-        ${renderPage()}
-      </main>
+      </div>
+      ${renderSceneTopbar()}
+      ${renderSceneDock()}
+      ${renderSceneChat()}
+      ${renderDrawer(drawer)}
     </div>`;
   if (preserveAvatarSurface) {
     document.querySelector(".avatar-stage")?.replaceWith(previousAvatarSurface);
@@ -790,6 +813,81 @@ function renderOverlay() {
   </main>`;
 }
 
+function renderSceneTopbar() {
+  const llm = currentLlmModule();
+  const llmClass = !state.connected || !llm?.enabled ? "offline" : llmReady() ? "online" : "warning";
+  const llmStatus = llmStatusLabel().replace(/^LLM\s*/, "");
+  return `
+    <header class="scene-topbar">
+      <div class="scene-pill">
+        <label class="compact-field" style="gap:6px">角色
+          <select id="character-select">${state.characters.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === state.selectedCharacter ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select>
+        </label>
+      </div>
+      <div class="scene-pill" style="gap:10px">
+        <button class="provider-summary topbar-status-item" type="button" data-page="Modules" title="在模块页管理大语言模型：${escapeHtml(llmStatusLabel())}" aria-label="LLM：${escapeHtml(providerName())}，${escapeHtml(llmStatusLabel())}">
+          <i class="status-dot ${llmClass}" aria-hidden="true"></i><strong class="provider-summary-name">${escapeHtml(providerName())}</strong><small class="provider-summary-state">${escapeHtml(llmStatus)}</small>
+        </button>
+        <span class="status-chip topbar-status-item"><i class="status-dot ${state.connected ? "online" : "offline"}"></i>${state.connected ? "核心已连接" : "核心未连接"}</span>
+        <span class="privacy-chip topbar-status-item"><span class="privacy-icon">◉</span>${state.privacy}</span>
+        <button class="icon-button" type="button" data-avatar-toggle title="${state.avatarVisible ? "隐藏 Avatar" : "显示 Avatar"}" aria-label="${state.avatarVisible ? "隐藏 Avatar 预览" : "显示 Avatar 预览"}" aria-pressed="${state.avatarVisible}">${state.avatarVisible ? "◉" : "○"}</button>
+        ${isDesktopShell ? '<button class="outline-button desktop-overlay-open" type="button" data-overlay-open title="打开可拖动的桌宠浮窗">桌宠</button>' : ""}
+      </div>
+    </header>`;
+}
+
+function renderSceneDock() {
+  const dockItems = [
+    ["Agent", "工作台", "⚒"],
+    ["Characters", "角色", "♡"],
+    ["Modules", "模块", "⚙"],
+    ["Settings", "设置", "☼"],
+  ];
+  const activeDrawer = drawerForPage(state.activePage);
+  return `
+    <nav class="scene-dock" aria-label="主导航">
+      ${dockItems.map(([page, label, glyphText]) => {
+        const active = drawerForPage(page) === activeDrawer && activeDrawer;
+        return `<button class="nav-item ${active ? "active" : ""}" data-page="${page}" title="${label}" aria-label="${label}">${glyphText}</button>`;
+      }).join("")}
+    </nav>`;
+}
+
+function renderSceneChat() {
+  return `
+    <div class="scene-chat">
+      <div class="stage-toolbar"><span class="live-label"><i></i> ${escapeHtml(currentCharacter().name)} 在线</span><div class="toolbar-actions"><button class="text-button" id="new-session" type="button" ${state.sessionBusy ? "disabled" : ""}>${state.sessionBusy ? "创建中" : "新会话"}</button></div></div>
+      ${state.sessionNotice ? `<div class="session-notice" role="status">${escapeHtml(state.sessionNotice)}</div>` : ""}
+      <div class="message-list scroll-hidden" id="message-list">
+        ${state.messages.length ? state.messages.map(renderMessage).join("") : renderEmptyChat()}
+      </div>
+      ${state.voiceNotice ? `<div class="voice-notice" role="status">${escapeHtml(state.voiceNotice)}</div>` : ""}
+      <form class="composer" id="chat-form">
+        <div class="dialogue-nameplate"><i aria-hidden="true"></i>${escapeHtml(currentCharacter().name)}</div>
+        <textarea id="chat-input" rows="1" placeholder="和 ${escapeHtml(currentCharacter().name)} 说点什么..." ${state.sending || !state.connected ? "disabled" : ""}>${escapeHtml(state.composerDraft)}</textarea>
+        <div class="composer-footer"><div class="composer-tools"><button type="button" class="round-button" title="附件">＋</button><button type="button" class="round-button ${state.voiceRecording ? "recording" : ""}" data-audio-record title="${state.voiceRecording ? "停止录音" : "语音输入"}" aria-label="${state.voiceRecording ? "停止录音" : "语音输入"}" aria-pressed="${state.voiceRecording}">⌁</button><span class="composer-note">语音按需启用 · 本地优先</span></div><button class="send-button" type="submit" ${state.sending || !llmReady() ? "disabled" : ""}>${state.sending ? "处理中" : "发送"}<span>↗</span></button></div>
+      </form>
+    </div>`;
+}
+
+function renderDrawer(drawer) {
+  if (!drawer) return "";
+  const pages = drawerGroups[drawer];
+  const tabs = pages.map((page) => {
+    const item = navItems.find(([id]) => id === page);
+    return `<button class="nav-item ${state.activePage === page ? "active" : ""}" data-page="${page}">${glyph(page)} ${escapeHtml(item?.[1] || page)}</button>`;
+  }).join("");
+  return `
+    <section class="drawer open" aria-label="${escapeHtml(drawerTitles[drawer])}">
+      <header class="drawer-header">
+        <div class="drawer-title"><span class="eyebrow">SUMIKA</span><strong>${escapeHtml(drawerTitles[drawer])}</strong></div>
+        ${pages.length > 1 ? `<nav class="drawer-tabs">${tabs}</nav>` : ""}
+        <button class="drawer-close" type="button" data-drawer-close title="回到场景" aria-label="回到场景">✕</button>
+      </header>
+      <div class="drawer-body">${renderPage()}</div>
+    </section>`;
+}
+
 function renderAvatarPresenter({ compact = false } = {}) {
   const avatarModel = currentAvatarModel();
   const avatarDriver = state.avatarState?.driver || currentCharacter().config?.avatar_driver || "none";
@@ -879,6 +977,8 @@ function renderCharacterEditor() {
       <div class="character-settings-body"><div class="character-settings-grid">
         <label class="character-field"><span>角色名称</span><input name="name" type="text" maxlength="100" value="${escapeHtml(character.name)}" required /></label>
         <label class="character-field"><span>语言</span><select name="language"><option value="zh-CN" ${config.language === "zh-CN" ? "selected" : ""}>简体中文（zh-CN）</option><option value="zh-TW" ${config.language === "zh-TW" ? "selected" : ""}>繁體中文（zh-TW）</option><option value="ja-JP" ${config.language === "ja-JP" ? "selected" : ""}>日本語（ja-JP）</option><option value="en-US" ${config.language === "en-US" ? "selected" : ""}>English（en-US）</option></select></label>
+        <label class="character-field"><span>主题强调色</span><input name="theme_accent" type="color" value="${escapeHtml(/^#[0-9a-fA-F]{6}$/.test(String(config.theme?.accent || "")) ? config.theme.accent : "#6fd3b8")}" /></label>
+        <label class="character-field character-field-inline"><span class="toggle-control"><input name="theme_accent_reset" type="checkbox" /><span>恢复默认强调色（忽略角色卡自带颜色）</span></label></label>
         <label class="character-field character-field-wide"><span>角色身份 / 定位</span><textarea name="persona_identity" rows="3" maxlength="4000" placeholder="例如：温和、可靠的学习搭档">${escapeHtml(persona.identity)}</textarea></label>
       </div></div>
     </details>
@@ -3486,6 +3586,17 @@ function bindEvents() {
     loadMessages();
     loadAvatarState();
     loadMemories();
+  });
+  document.querySelector("[data-drawer-close]")?.addEventListener("click", () => {
+    state.activePage = "Chat";
+    render();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (drawerForPage(state.activePage)) {
+      state.activePage = "Chat";
+      render();
+    }
   });
   document.querySelector("[data-avatar-toggle]")?.addEventListener("click", () => {
     state.avatarVisible = !state.avatarVisible;
@@ -8603,11 +8714,19 @@ async function saveCharacter(event) {
   state.characterNotice = "";
   render();
   try {
+    const theme = { ...(currentCharacter().config?.theme || {}) };
+    if (formData.get("theme_accent_reset") === "on") {
+      delete theme.accent;
+    } else {
+      const accent = String(formData.get("theme_accent") || "").toLowerCase();
+      if (/^#[0-9a-f]{6}$/.test(accent)) theme.accent = accent;
+    }
     const character = await rpc("character.update", {
       character_id: state.selectedCharacter,
       name,
       config: {
         language: String(formData.get("language") || "zh-CN"),
+        theme,
         persona: {
           identity: String(formData.get("persona_identity") || ""),
           traits: String(formData.get("persona_traits") || ""),

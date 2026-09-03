@@ -76,6 +76,34 @@ async function openCharacterSection(page, section) {
   return details;
 }
 
+/* Scene-first shell navigation: pages live inside four fullscreen drawers.
+   Dock buttons open the drawer; multi-page drawers expose tabs. */
+const pageDrawer = {
+  Chat: null,
+  Agent: "Agent",
+  WebWorkbench: "Agent",
+  Tasks: "Agent",
+  History: "Agent",
+  Notifications: "Agent",
+  Characters: "Characters",
+  Modules: "Modules",
+  Developer: "Modules",
+  Settings: "Settings",
+  Guide: "Settings",
+};
+
+async function openPage(page, target) {
+  const dock = pageDrawer[target];
+  if (!dock) {
+    await page.keyboard.press("Escape");
+    return;
+  }
+  await page.locator(`.scene-dock .nav-item[data-page="${dock}"]`).click();
+  if (dock !== target) {
+    await page.locator(`.drawer-tabs .nav-item[data-page="${target}"]`).click();
+  }
+}
+
 test.describe("Sumika UI shell", () => {
   test.beforeAll(async () => {
     providerStub = createServer((request, response) => {
@@ -121,12 +149,12 @@ test.describe("Sumika UI shell", () => {
     await page.locator("#chat-form button[type=submit]").click();
     await expect(page.locator(".message.assistant").last()).toContainText("Playwright stub reply");
 
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     await expect(page.locator("body")).toContainText("语音识别");
-    await page.locator('.nav-item[data-page="Tasks"]').click();
+    await openPage(page, "Tasks");
     await expect(page.locator("body")).toContainText("任务中心");
 
-    await page.locator('.nav-item[data-page="Chat"]').click();
+    await openPage(page, "Chat");
     await page.locator("[data-avatar-toggle]").click();
     await expect(page.locator("body")).toContainText("Avatar 已隐藏");
     await page.locator("[data-avatar-toggle]").click();
@@ -218,7 +246,7 @@ test.describe("Sumika UI shell", () => {
       await mkdir(join(skillRoot, "catalog-smoke"), { recursive: true });
       await writeFile(skillPath, "---\nname: Catalog Skill\ndescription: safe metadata\npermissions: read\n---\nsecret body must stay private\n", { encoding: "utf-8" });
       await page.goto(baseUrl, { waitUntil: "networkidle" });
-      await page.locator('.nav-item[data-page="Developer"]').click();
+      await openPage(page, "Developer");
       await expect(page.locator("[data-agent-mcp-catalog-panel]")).toContainText("Runtime 在线");
       await expect(page.locator('[data-agent-mcp-catalog-row="github"]')).toContainText("search");
       await page.locator("#agent-skills-path").fill(join(skillRoot, "catalog-smoke"));
@@ -240,7 +268,7 @@ test.describe("Sumika UI shell", () => {
   test("顶部运行状态使用统一的扁平高度", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const metrics = await page.evaluate(() => {
-      const selectors = [".provider-summary", ".status-chip", ".privacy-chip"];
+      const selectors = [".provider-summary", ".status-chip"];
       return selectors.map((selector) => {
         const element = document.querySelector(selector);
         if (!element) return null;
@@ -249,8 +277,6 @@ test.describe("Sumika UI shell", () => {
           selector,
           height: element.getBoundingClientRect().height,
           center: element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2,
-          border: style.borderWidth,
-          background: style.backgroundColor,
         };
       });
     });
@@ -259,8 +285,6 @@ test.describe("Sumika UI shell", () => {
     expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
     const centers = metrics.map((item) => item.center);
     expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
-    expect(metrics[0].border).toBe("0px");
-    expect(metrics[0].background).toBe("rgba(0, 0, 0, 0)");
     await expect(page.locator(".provider-summary")).toHaveCSS("white-space", "nowrap");
     await expect(page.locator(".provider-summary-name")).toBeVisible();
     await expect(page.locator(".provider-summary-state")).toHaveCSS("white-space", "nowrap");
@@ -270,9 +294,11 @@ test.describe("Sumika UI shell", () => {
       document.body.append(probe);
       const muted = getComputedStyle(probe).color;
       probe.remove();
-      return { task: getComputedStyle(document.querySelector('.nav-item[data-page="Tasks"] .nav-glyph')).color, muted };
+      const dockItem = document.querySelector('.scene-dock .nav-item[data-page="Agent"]');
+      return { dock: dockItem ? getComputedStyle(dockItem).color : null, muted };
     });
-    expect(palette.task).toBe(palette.muted);
+    expect(palette.dock).toBe(palette.muted);
+    await expect(page.locator(".scene-dock .nav-item")).toHaveCount(4);
   });
 
   test("能力目录展示真实实现、网页登录边界并适配窄窗口", async ({ page }) => {
@@ -340,7 +366,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.setViewportSize({ width: 560, height: 720 });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     const panel = page.locator("[data-capability-catalog]");
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("本地 Ollama · qwen3:4b");
@@ -355,11 +381,11 @@ test.describe("Sumika UI shell", () => {
 
   test("LLM 模块开关是聊天的唯一启停入口", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     const toggle = page.locator('[data-module-toggle="llm"]');
     if (await toggle.getAttribute("aria-checked") === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await page.locator('.nav-item[data-page="Chat"]').click();
+    await openPage(page, "Chat");
     await expect(page.locator(".provider-summary")).toContainText("已关闭");
     const send = page.locator("#chat-form .send-button");
     await expect(send).toBeDisabled();
@@ -407,13 +433,13 @@ test.describe("Sumika UI shell", () => {
     await page.waitForTimeout(300);
     await expect(renderer).toHaveAttribute("data-vrm-yaw", initialYaw || "3.142");
 
-    await page.locator('.nav-item[data-page="Characters"]').click();
+    await openPage(page, "Characters");
     await openCharacterSection(page, "model");
     const autoRotate = page.locator('input[name="avatar_auto_rotate"]');
     await autoRotate.check();
     await page.locator("#character-form button[type=submit]").click();
     await expect(page.locator(".character-notice")).toContainText("已保存");
-    await page.locator('.nav-item[data-page="Chat"]').click();
+    await openPage(page, "Chat");
     const rotatingRenderer = page.locator('[data-vrm-source][data-vrm-status="ready"]');
     await expect(rotatingRenderer).toHaveAttribute("data-vrm-auto-rotate", "true");
     const rotatingYaw = await rotatingRenderer.getAttribute("data-vrm-yaw");
@@ -442,7 +468,7 @@ test.describe("Sumika UI shell", () => {
       "utf-8",
     );
     try {
-      await page.locator('.nav-item[data-page="Characters"]').click();
+      await openPage(page, "Characters");
       const chooserPromise = page.waitForEvent("filechooser");
       await page.locator("#import-character-card").click();
       const chooser = await chooserPromise;
@@ -490,10 +516,10 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Characters"]').click();
+    await openPage(page, "Characters");
     await expect(page.locator(".avatar-ignored")).toContainText("1 条失效忽略记录");
     await expect(page.locator(".avatar-ignored-row")).toHaveCount(0);
-    await page.locator('.nav-item[data-page="Developer"]').click();
+    await openPage(page, "Developer");
     await expect(page.locator(".avatar-audit-panel")).toContainText("Missing Sample");
     await expect(page.locator(".avatar-audit-panel")).toContainText("missing.vrm");
     await expect(page.locator("[data-avatar-ignored-clear]")).toBeVisible();
@@ -537,8 +563,8 @@ test.describe("Sumika UI shell", () => {
 
   test("入门指南 covers the workspace and links to controls", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await expect(page.locator(".nav-item").last()).toHaveAttribute("data-page", "Guide");
-    await page.locator('.nav-item[data-page="Guide"]').click();
+    await expect(page.locator(".scene-dock .nav-item")).toHaveCount(4);
+    await openPage(page, "Guide");
     await expect(page.locator("h1")).toHaveText("入门指南");
     await expect(page.locator("body")).toContainText("界面地图");
     await expect(page.locator("body")).toContainText("完整基本使用流程");
@@ -558,14 +584,14 @@ test.describe("Sumika UI shell", () => {
   test("聊天草稿在工作区重绘后仍保留", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator("#chat-input").fill("等待确认的草稿");
-    await page.locator('.nav-item[data-page="Modules"]').click();
-    await page.locator('.nav-item[data-page="Chat"]').click();
+    await openPage(page, "Modules");
+    await openPage(page, "Chat");
     await expect(page.locator("#chat-input")).toHaveValue("等待确认的草稿");
   });
 
   test("开发者页 exposes safe runtime diagnostics", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Developer"]').click();
+    await openPage(page, "Developer");
     await expect(page.locator(".diagnostics-panel")).toContainText("核心诊断");
     await expect(page.locator(".diagnostics-panel")).toContainText("核心日志");
     await expect(page.locator(".diagnostics-panel")).toContainText("PID");
@@ -588,7 +614,7 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".page-layout h1")).toContainText("Agent 工作区");
     await expect(page.locator(".agent-status-line")).toContainText(/未连接|已关闭/);
     await expect(page.locator("#agent-send")).toBeDisabled();
@@ -625,7 +651,7 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     const panel = page.locator(".agent-provider-panel");
     await expect(panel).toHaveAttribute("data-agent-provider-state", "restart-required");
     await expect(panel).toContainText("Windows 安全存储");
@@ -703,7 +729,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Tasks"]').click();
+    await openPage(page, "Tasks");
     const card = page.locator(`[data-task-open="agent:dsh:${sessionId}"]`).locator("..");
     await expect(card).toContainText("只读 Agent 任务");
     await card.locator("[data-task-open]").click();
@@ -765,7 +791,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
 
     await expect(page.locator(".agent-status-line")).toContainText("minimal 已连接");
     await expect(page.locator("#agent-create-session")).toBeEnabled();
@@ -861,7 +887,7 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".agent-status-line")).toContainText("DSH 已连接");
     await expect(page.locator(".agent-provider-panel")).toContainText("Playwright stub");
     await expect(page.locator(".agent-provider-panel")).toContainText("sumika-playwright-openai-stub-test");
@@ -983,7 +1009,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".agent-session-panel")).toContainText("当前目标");
     await expect(page.locator("#agent-load-older")).toBeVisible();
     await page.locator("#agent-load-older").click();
@@ -1090,7 +1116,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#workspace-runtime-path").fill(workspacePath);
     await page.locator("#workspace-runtime-inspect").click();
     await expect(page.locator(".workspace-runtime-panel")).toContainText("1 项变更");
@@ -1228,7 +1254,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#workspace-runtime-path").fill(sourcePath);
     await page.locator("#workspace-runtime-inspect").click();
     await expect(page.locator(".workspace-runtime-panel")).toContainText("2 项变更");
@@ -1338,7 +1364,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator("#agent-create-session")).toBeDisabled();
     await expect(page.locator("#agent-mode option[value='readonly']")).toHaveCount(0);
     await page.locator("#agent-prompt").fill("尚未绑定 Workspace");
@@ -1514,7 +1540,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
     await expect(page.locator(".agent-session-panel")).toContainText("契约测试会话");
@@ -1677,7 +1703,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#agent-workspace-path").fill("D:\\Code\\Sumika");
     await page.locator("#agent-register-workspace").click();
     await expect(page.locator(".agent-notice")).toContainText("已登记 Workspace");
@@ -1777,7 +1803,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".agent-session-visible-title")).toHaveText("最近会话");
     await page.locator(`[data-agent-session-select="${selectedSessionId}"]`).click();
     await expect(page.locator(".agent-session-visible-title")).toHaveText("恢复会话");
@@ -1789,7 +1815,7 @@ test.describe("Sumika UI shell", () => {
     scopedCalls.length = 0;
     snapshotRequests.length = 0;
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(`[data-agent-session-select="${selectedSessionId}"]`)).toHaveClass(/active/);
     await expect(page.locator(".agent-session-visible-title")).toHaveText("恢复会话");
     await expect(page.locator('#agent-mode option[value="plan"]')).toHaveCount(1);
@@ -1848,7 +1874,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
     expect(sessionCreated).toBe(true);
@@ -1932,7 +1958,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".question-interaction")).toContainText("如何继续？");
     await page.locator('.agent-question-option input[value="现在执行"]').check();
     await page.locator('.question-interaction button[type="submit"]').click();
@@ -2007,7 +2033,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".plan-review-interaction")).toContainText("Update Sumika");
     await expect(page.locator('[data-agent-plan-review-action="approve"]')).toContainText("批准并执行");
     await expect(page.locator('[data-agent-plan-review-action="keep-planning"]')).toContainText("继续规划");
@@ -2019,7 +2045,7 @@ test.describe("Sumika UI shell", () => {
 
     answered = false;
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator('[data-agent-plan-review-action="cancel"]').click();
     await expect(page.locator(".agent-notice")).toContainText("保持 Plan 模式");
     await expect.poll(() => cancelBody?.params).toEqual({ rpcId: "plan-review-playwright", sessionId: "playwright-plan-session" });
@@ -2027,7 +2053,7 @@ test.describe("Sumika UI shell", () => {
 
     answered = false;
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator('[data-agent-plan-review-feedback]').fill("先补充边界测试，再继续规划");
     await page.locator('[data-agent-plan-review-action="keep-planning"]').click();
     await expect.poll(() => answerBody?.params?.answer?.answers?.[0]).toEqual({
@@ -2038,7 +2064,7 @@ test.describe("Sumika UI shell", () => {
 
     answered = false;
     await page.reload({ waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator('[data-agent-plan-review-action="approve"]').click();
     await expect.poll(() => answerBody?.params?.workspaceId).toBe(workspaceId);
     await expect.poll(() => answerBody?.params?.answer?.answers?.[0]?.selected).toEqual(["Approve"]);
@@ -2093,7 +2119,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#agent-session-search").fill("契约");
     await page.locator("#agent-session-search-form button[type=submit]").click();
     await expect.poll(() => searchQuery).toBe("契约");
@@ -2162,7 +2188,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
     expect(sessionCreated).toBe(true);
@@ -2235,7 +2261,7 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator("#agent-retry-turn")).toBeVisible();
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#agent-retry-turn").click();
@@ -2308,7 +2334,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator(".browser-session-row")).toContainText("browser-test");
     await expect(page.locator(".browser-tab-row")).toContainText("安全页");
     await page.locator('[data-browser-tabs="browser-test"]').click();
@@ -2342,7 +2368,7 @@ test.describe("Sumika UI shell", () => {
 
   test("Avatar library explains discovery and binding-safe unregister", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Characters"]').click();
+    await openPage(page, "Characters");
     await expect(page.locator("#discover-avatar-assets")).toContainText("扫描内置目录");
     await expect(page.locator("#import-avatar")).toContainText("选择模型文件");
     await expect(page.locator(".avatar-library")).toContainText("放入 assets/avatars 后可扫描登记");
@@ -2355,7 +2381,7 @@ test.describe("Sumika UI shell", () => {
 
   test("角色配置按职责折叠并持久化可生效人格字段", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Characters"]').click();
+    await openPage(page, "Characters");
 
     const groups = page.locator(".character-settings-group");
     await expect(groups).toHaveCount(3);
@@ -2408,14 +2434,14 @@ test.describe("Sumika UI shell", () => {
     await expect(renderer).toHaveAttribute("data-vrm-pointer-state", "centered");
     await expect.poll(async () => Math.abs(Number(await renderer.getAttribute("data-vrm-head-yaw")))).toBeLessThan(0.02);
 
-    await page.locator('.nav-item[data-page="Characters"]').click();
+    await openPage(page, "Characters");
     await openCharacterSection(page, "model");
     await page.locator('input[name="avatar_natural_pose"]').uncheck();
     await page.locator('input[name="avatar_look_at_enabled"]').uncheck();
     await page.locator('input[name="avatar_head_follow_enabled"]').uncheck();
     await page.locator("#character-form button[type=submit]").click();
     await expect(page.locator(".character-notice")).toContainText("已保存");
-    await page.locator('.nav-item[data-page="Chat"]').click();
+    await openPage(page, "Chat");
     const disabledRenderer = page.locator('[data-vrm-source][data-vrm-status="ready"]');
     await expect(disabledRenderer).toHaveAttribute("data-vrm-natural-pose", "false");
     await expect(disabledRenderer).toHaveAttribute("data-vrm-natural-pose-status", "disabled");
@@ -2468,7 +2494,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ label: "混合处理", mode: "mixed" }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     await page.locator(".provider-picker summary").click();
     const rows = page.locator(".provider-profile-row");
     await expect(rows).toHaveCount(3);
@@ -2557,7 +2583,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     const pricingPanel = page.locator("[data-route-pricing-panel]");
     await expect(pricingPanel).toContainText("model-a");
     await expect(pricingPanel).toContainText("vip");
@@ -2697,7 +2723,7 @@ test.describe("Sumika UI shell", () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="WebWorkbench"]').click();
+    await openPage(page, "WebWorkbench");
     await expect(page.locator("[data-web-workbench-profile]")).toHaveCount(5);
     await expect(page.locator("[data-web-workbench-catalog]")).toContainText("5 个可咨询");
     await expect(page.locator(".web-workbench-consultation-panel")).toContainText("5 个成员按 3 + 2 两批执行");
@@ -2780,7 +2806,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { profiles: [namedBrowserProfile] } }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     await expect(page.locator(".provider-picker")).toBeVisible();
     await page.locator(".provider-picker summary").click();
     await page.locator('[data-web-chat-new-adapter="deepseek-web"]').click();
@@ -2821,7 +2847,7 @@ test.describe("Sumika UI shell", () => {
       await route.continue();
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Developer"]').click();
+    await openPage(page, "Developer");
     const panel = page.locator("[data-web-chat-archive-panel]");
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("已归档网页账号");
@@ -2857,7 +2883,7 @@ test.describe("Sumika UI shell", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: preview }) });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     await page.locator(".provider-picker summary").click();
     await page.locator("[data-provider-new]").click();
     await page.locator('[data-provider-drawer-mode="import"]').click();
@@ -2897,7 +2923,7 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Modules"]').click();
+    await openPage(page, "Modules");
     await page.locator(".provider-picker summary").click();
     await page.locator('[data-provider-select="draft-only"]').click();
     await expect(page.locator(".provider-drawer")).toBeVisible();
@@ -2948,7 +2974,7 @@ test.describe("Sumika UI shell", () => {
       });
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Developer"]').click();
+    await openPage(page, "Developer");
     await expect(page.locator('[data-provider-restore="archived-profile"]')).toBeVisible();
     await page.locator('[data-provider-restore="archived-profile"]').click();
     await expect(page.locator(".provider-row").first()).toContainText("已归档连接");
@@ -3046,7 +3072,7 @@ test.describe("Sumika UI shell", () => {
       await route.continue();
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await expect(page.locator("[data-agent-routing-panel]")).toBeVisible();
     await page.locator("#agent-routing-mode").selectOption("recommendation-then-confirmation");
     await page.locator("#agent-prompt").fill("检查当前仓库并给出计划");
@@ -3104,7 +3130,7 @@ test.describe("Sumika UI shell", () => {
       await route.continue();
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('.nav-item[data-page="Agent"]').click();
+    await openPage(page, "Agent");
     await page.locator("#agent-routing-mode").selectOption("automatic");
     await page.locator("#agent-prompt").fill("列出当前目录");
     await page.locator("#agent-send").click();

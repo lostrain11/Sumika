@@ -29,6 +29,9 @@ from typing import Any
 
 from .persona import PERSONA_TEXT_LIMITS
 
+_HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+ACCENT_EXTENSION_KEYS = ("theme_color", "accent_color", "accent")
+
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 ZIP_SIGNATURE = b"PK\x03\x04"
 CARD_SPEC_V2 = "chara_card_v2"
@@ -146,7 +149,7 @@ def convert_character_card(
             "is not implemented, the entries are preserved in config.card_import"
         )
 
-    config = {
+    config: dict[str, Any] = {
         "persona": persona,
         "card_import": {
             "spec": normalized["spec"],
@@ -156,6 +159,12 @@ def convert_character_card(
             "card": data,
         },
     }
+    accent = _card_accent(data)
+    if accent:
+        # Community cards sometimes carry a theme color in data.extensions.
+        # It maps to the per-character UI accent; the repo default stays
+        # neutral when the field is absent or malformed.
+        config["theme"] = {"accent": accent}
     return {
         "name": name,
         "config": config,
@@ -224,6 +233,17 @@ def _decode_charx_card(data: bytes) -> dict[str, Any]:
     if not isinstance(card, dict):
         raise CharacterCardError(f"CHARX {CARD_JSON_MEMBER} must be a JSON object")
     return card
+
+
+def _card_accent(data: dict[str, Any]) -> str | None:
+    extensions = data.get("extensions")
+    if not isinstance(extensions, dict):
+        return None
+    for key in ACCENT_EXTENSION_KEYS:
+        value = extensions.get(key)
+        if isinstance(value, str) and _HEX_COLOR.match(value.strip()):
+            return value.strip()
+    return None
 
 
 def _count_book_entries(data: dict[str, Any]) -> int:
