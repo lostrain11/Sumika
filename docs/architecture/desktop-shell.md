@@ -18,6 +18,7 @@ shell now wraps the same UI and local core, with:
 
 - a main window;
 - an opt-in, always-on-top desktop pet overlay window;
+- dynamic per-site web portal windows with isolated persistent logins (desktop shell only, see below);
 - a native Avatar file picker through `tauri-plugin-dialog`;
 - a supervised Python child process on `127.0.0.1:8771`;
 - an optional Agent Runtime child supervised through a runtime-specific launcher config;
@@ -48,6 +49,26 @@ Sumika uses Tauri's official `getCurrentWindow().startDragging()` API and does
 not copy N.E.K.O source code, models or animation assets. Transparent means the
 window has no decorative panel background; it remains hit-testable so the model
 can be dragged and the chat composer can receive input.
+
+## Web portals
+
+Besides `main` and `overlay`, the shell can create dynamic portal windows:
+one Tauri `WebviewWindow` per chat site (Kimi, ChatGPT, 智谱清言, DeepSeek,
+通义千问, 豆包, plus user-added entries). Each portal loads the raw provider
+website and keeps its own persistent WebView2 data directory under
+`.sumika-desktop/portals/<site-id>/`, so a login survives restarts and sites
+never share cookies. Opening an already-running portal focuses it.
+
+Portals are the user's own browsing surface: no persona is injected, no Agent
+or web-chat route touches them, and they do not read or migrate the
+BrowserSkill named-profile logins (those belong to the managed Edge Agent
+Window used by [web chat routes](../integrations/browser-runtime.md)). Commands:
+`open_portal` / `focus_portal` / `close_portal` / `portal_list`; site ids are
+restricted to ASCII letters/digits/dash/underscore and URLs to http(s).
+The entry is the fifth dock icon in the scene shell, rendered only in the
+desktop shell — the browser preview cannot create Tauri windows and shows no
+portal entry. Custom portal entries stay in that desktop window's local
+storage only.
 
 Controlled automation of a separate desktop application is deliberately not
 implemented by the overlay. It is exposed through the runtime-neutral

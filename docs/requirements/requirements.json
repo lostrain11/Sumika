@@ -14,288 +14,539 @@
       "id": "HISTORY-OLLAMA-DEFAULT",
       "category": "history",
       "statement": "An earlier plan proposed automatically installing Ollama and pulling qwen3:4b as part of first-run setup.",
-      "acceptance": ["Historical intent remains visible for migration review"],
+      "acceptance": [
+        "Historical intent remains visible for migration review"
+      ],
       "provenance": "confirmed",
       "intent_state": "superseded",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-HISTORY-001"],
-      "implementation_refs": ["../../tools/setup-ollama.ps1"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-HISTORY-001"
+      ],
+      "implementation_refs": [
+        "../../tools/setup-ollama.ps1"
+      ],
       "test_refs": [],
-      "superseded_by": ["PROVIDER-002"],
+      "superseded_by": [
+        "PROVIDER-002"
+      ],
       "status_ref": "status-matrix:local-llm"
     },
     {
       "id": "CORE-001",
       "category": "product",
       "statement": "Sumika must be usable as a daily desktop Agent while retaining the first-version character, Avatar, desktop-pet, and local-data experience.",
-      "acceptance": ["A documented entry point starts the product", "A real repository task can be completed with a recoverable result"],
+      "acceptance": [
+        "A documented entry point starts the product",
+        "A real repository task can be completed with a recoverable result"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-CORE-001"],
-      "implementation_refs": ["../current-execution.md", "../architecture/agent-runtime.md"],
-      "test_refs": ["../../tools/agent_daily_acceptance.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-CORE-001"
+      ],
+      "implementation_refs": [
+        "../current-execution.md",
+        "../architecture/agent-runtime.md"
+      ],
+      "test_refs": [
+        "../../tools/agent_daily_acceptance.py"
+      ],
       "status_ref": "status-matrix:dsh-agent-runtime"
     },
     {
       "id": "PLATFORM-001",
       "category": "platform",
       "statement": "Windows is the stable desktop target; macOS and Linux expose direct Core startup first, with native Tauri launchers explicitly experimental or reserved.",
-      "acceptance": ["Platform-specific startup documentation is separate", "Launchers do not install or update dependencies automatically"],
+      "acceptance": [
+        "Platform-specific startup documentation is separate",
+        "Launchers do not install or update dependencies automatically"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../README.md", "../../README_zh.md", "../architecture/local-model.md"],
-      "test_refs": ["../../tools/run_core.ps1"],
+      "implementation_refs": [
+        "../../README.md",
+        "../../README_zh.md",
+        "../architecture/local-model.md"
+      ],
+      "test_refs": [
+        "../../tools/run_core.ps1"
+      ],
       "status_ref": "status-matrix:local-llm"
     },
     {
       "id": "UX-001",
       "category": "ux",
       "statement": "Fixed navigation and status regions remain stable while the right content area scrolls independently and exposes accessible error states.",
-      "acceptance": ["Navigation does not move when content grows", "Status items have keyboard focus and no misleading success state"],
+      "acceptance": [
+        "Navigation does not move when content grows",
+        "Status items have keyboard focus and no misleading success state"
+      ],
       "provenance": "normalized",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../frontend/main.js", "../../frontend/styles.css"],
-      "test_refs": ["../../frontend/tests/smoke.spec.js"],
+      "implementation_refs": [
+        "../../frontend/main.js",
+        "../../frontend/styles.css"
+      ],
+      "test_refs": [
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:chat"
     },
     {
       "id": "CHAT-001",
       "category": "chat",
       "statement": "Chat keeps the latest record visible, reports sending/failure/cancelled/unconfigured states, and never emits a Fake reply.",
-      "acceptance": ["A new message scrolls to the latest record", "Unavailable providers produce an actionable error"],
+      "acceptance": [
+        "A new message scrolls to the latest record",
+        "Unavailable providers produce an actionable error"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../frontend/main.js", "../../backend/src/sumika_core/server.py"],
-      "test_refs": ["../../backend/tests/test_server.py", "../../frontend/tests/smoke.spec.js"],
+      "implementation_refs": [
+        "../../frontend/main.js",
+        "../../backend/src/sumika_core/server.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_server.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:chat"
     },
     {
       "id": "CHARACTER-001",
       "category": "character",
       "statement": "Each character has an independent display name; Sumika is the project name, not a forced character name.",
-      "acceptance": ["Two characters can be displayed with different names", "Renaming does not change project identity"],
+      "acceptance": [
+        "Two characters can be displayed with different names",
+        "Renaming does not change project identity"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-CHARACTER-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/server.py", "../../backend/src/sumika_core/storage.py", "../../frontend/main.js"],
-      "test_refs": ["../../backend/tests/test_persona.py", "../../frontend/tests/smoke.spec.js"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-CHARACTER-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/server.py",
+        "../../backend/src/sumika_core/storage.py",
+        "../../frontend/main.js"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_persona.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:characters"
     },
     {
       "id": "CHARACTER-002",
       "category": "character",
       "statement": "Structured persona fields enter the Provider system message in a fixed order, while the first greeting remains temporary context.",
-      "acceptance": ["Provider fixtures receive the system message", "The greeting is not persisted as a chat message"],
+      "acceptance": [
+        "Provider fixtures receive the system message",
+        "The greeting is not persisted as a chat message"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/persona.py", "../../backend/src/sumika_core/server.py"],
-      "test_refs": ["../../backend/tests/test_persona.py", "../../backend/tests/test_server.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/persona.py",
+        "../../backend/src/sumika_core/server.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_persona.py",
+        "../../backend/tests/test_server.py"
+      ],
       "status_ref": "status-matrix:characters"
     },
     {
       "id": "AVATAR-001",
       "category": "avatar",
       "statement": "VRM Avatars render centered, face the user, support natural pose, idle motion, and bounded cursor following, and degrade safely when optional rig features are absent.",
-      "acceptance": ["VRM 0 orientation is corrected", "Missing humanoid/lookAt features do not crash the viewer"],
+      "acceptance": [
+        "VRM 0 orientation is corrected",
+        "Missing humanoid/lookAt features do not crash the viewer"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../frontend/main.js", "../../frontend/styles.css", "../../backend/src/sumika_core/avatar"],
-      "test_refs": ["../../backend/tests/test_avatar.py", "../../frontend/tests/smoke.spec.js"],
+      "implementation_refs": [
+        "../../frontend/main.js",
+        "../../frontend/styles.css",
+        "../../backend/src/sumika_core/avatar"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_avatar.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:avatar-vrm-desktop"
     },
     {
       "id": "AVATAR-002",
       "category": "avatar",
       "statement": "Desktop-pet mode is visually transparent, shows only Avatar plus a compact chat bar, and supports native window dragging without dragging controls.",
-      "acceptance": ["The overlay background is transparent", "Model drag and chat input remain independently usable"],
+      "acceptance": [
+        "The overlay background is transparent",
+        "Model drag and chat input remain independently usable"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-AVATAR-001"],
-      "implementation_refs": ["../../frontend/main.js", "../../frontend/styles.css", "../../src-tauri/src/main.rs"],
-      "test_refs": ["../../frontend/tests/smoke.spec.js"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-AVATAR-001"
+      ],
+      "implementation_refs": [
+        "../../frontend/main.js",
+        "../../frontend/styles.css",
+        "../../src-tauri/src/main.rs"
+      ],
+      "test_refs": [
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:avatar-vrm-desktop"
     },
     {
       "id": "PROVIDER-001",
       "category": "provider",
       "statement": "Provider connections are reusable profiles with tested endpoints, editable templates, draft/archive states, and explicit enablement.",
-      "acceptance": ["A profile can be saved and tested without exposing its secret", "A draft cannot be silently enabled"],
+      "acceptance": [
+        "A profile can be saved and tested without exposing its secret",
+        "A draft cannot be silently enabled"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/provider_profiles.py", "../../frontend/main.js"],
-      "test_refs": ["../../backend/tests/test_provider_profiles.py", "../../frontend/tests/smoke.spec.js"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/provider_profiles.py",
+        "../../frontend/main.js"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_provider_profiles.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:provider-profiles"
     },
     {
       "id": "PROVIDER-002",
       "category": "provider",
       "statement": "Ollama and model installation are user choices; qwen3:4b is an optional template, not a mandatory startup default.",
-      "acceptance": ["Startup works without Ollama", "No provider is silently created or enabled for a new user"],
+      "acceptance": [
+        "Startup works without Ollama",
+        "No provider is silently created or enabled for a new user"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-HISTORY-001"],
-      "implementation_refs": ["../../tools/setup-ollama.ps1", "../../backend/src/sumika_core/provider_profiles.py"],
-      "test_refs": ["../../backend/tests/test_provider_profiles.py"],
-      "supersedes": ["HISTORY-OLLAMA-DEFAULT"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-HISTORY-001"
+      ],
+      "implementation_refs": [
+        "../../tools/setup-ollama.ps1",
+        "../../backend/src/sumika_core/provider_profiles.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_provider_profiles.py"
+      ],
+      "supersedes": [
+        "HISTORY-OLLAMA-DEFAULT"
+      ],
       "status_ref": "status-matrix:local-llm"
     },
     {
       "id": "PROVIDER-003",
       "category": "security",
       "statement": "Provider and ZCode credentials remain in protected storage or the provider's supported login session and never enter project data, logs, or model context.",
-      "acceptance": ["Secret values are absent from SQLite and logs", "ZCode adapter never reads token files"],
+      "acceptance": [
+        "Secret values are absent from SQLite and logs",
+        "ZCode adapter never reads token files"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/credentials.py", "../../backend/src/sumika_core/agent/credential_binding.py"],
-      "test_refs": ["../../backend/tests/test_agent_credential_binding.py", "../../backend/tests/test_provider_profiles.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/credentials.py",
+        "../../backend/src/sumika_core/agent/credential_binding.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_agent_credential_binding.py",
+        "../../backend/tests/test_provider_profiles.py"
+      ],
       "status_ref": "status-matrix:provider-profiles"
     },
     {
       "id": "PROVIDER-004",
       "category": "integration",
       "statement": "CC Switch import is versioned and previewed, stores endpoints, redacts secrets, and never executes imported JavaScript or unknown protocol versions.",
-      "acceptance": ["Known v1 fixtures import after confirmation", "Unknown versions and executable scripts fail closed"],
+      "acceptance": [
+        "Known v1 fixtures import after confirmation",
+        "Unknown versions and executable scripts fail closed"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../docs/integrations/cc-switch.md", "../../backend/src/sumika_core/provider_profiles.py"],
-      "test_refs": ["../../backend/tests/test_ccswitch_compatibility.py"],
+      "implementation_refs": [
+        "../../docs/integrations/cc-switch.md",
+        "../../backend/src/sumika_core/provider_profiles.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_ccswitch_compatibility.py"
+      ],
       "status_ref": "status-matrix:ccswitch-import"
     },
     {
       "id": "PROVIDER-005",
       "category": "reliability",
       "statement": "Unavailable providers, models, credentials, and runtimes fail explicitly and never fall back to Fake or silently paid routes.",
-      "acceptance": ["Health failure is visible as not ready", "A failed free route requires an explicit alternative"],
+      "acceptance": [
+        "Health failure is visible as not ready",
+        "A failed free route requires an explicit alternative"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/server.py", "../../backend/src/sumika_core/providers/openai_compatible.py"],
-      "test_refs": ["../../backend/tests/test_providers.py", "../../backend/tests/test_server.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/server.py",
+        "../../backend/src/sumika_core/providers/openai_compatible.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_providers.py",
+        "../../backend/tests/test_server.py"
+      ],
       "status_ref": "status-matrix:provider-profiles"
     },
     {
       "id": "PROVIDER-006",
       "category": "provider",
       "statement": "One protected Provider profile may discover and enable multiple models, with each model exposed as an independent Route that shares the credential and can run in parallel within provider limits.",
-      "acceptance": ["Authenticated model discovery merges changes without overwriting user enablement", "Parallel model Routes record health and usage independently and do not require duplicate API keys"],
+      "acceptance": [
+        "Authenticated model discovery merges changes without overwriting user enablement",
+        "Parallel model Routes record health and usage independently and do not require duplicate API keys"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-005"],
-      "implementation_refs": ["../../backend/src/sumika_core/provider_profiles.py", "../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/agent/runtime_workers.py", "../../frontend/main.js"],
-      "test_refs": ["../../backend/tests/test_provider_profiles.py", "../../backend/tests/test_model_policy.py", "../../backend/tests/test_dynamic_route_supervisor.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-005"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/provider_profiles.py",
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../backend/src/sumika_core/agent/runtime_workers.py",
+        "../../frontend/main.js"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_provider_profiles.py",
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_dynamic_route_supervisor.py"
+      ],
       "status_ref": "status-matrix:provider-profiles"
     },
     {
       "id": "AGENT-001",
       "category": "runtime",
       "statement": "DSH is the default Harness adapter, while Core, UI, Tauri, Avatar, Browser, and Workspace remain runtime-neutral capability boundaries.",
-      "acceptance": ["A minimal non-DSH runtime can satisfy the stable contract", "Unsupported capabilities fail explicitly"],
+      "acceptance": [
+        "A minimal non-DSH runtime can satisfy the stable contract",
+        "Unsupported capabilities fail explicitly"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-CORE-002"],
-      "implementation_refs": ["../../backend/src/sumika_core/agent/contracts.py", "../../docs/architecture/agent-runtime.md"],
-      "test_refs": ["../../backend/tests/test_agent_portability.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-CORE-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/agent/contracts.py",
+        "../../docs/architecture/agent-runtime.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_agent_portability.py"
+      ],
       "status_ref": "status-matrix:agent-runtime-portability"
     },
     {
       "id": "AGENT-002",
       "category": "runtime",
       "statement": "The Agent surface exposes real Session, Plan, Execute, events, tools, approvals, MCP, Skills, Subagents, and failure recovery where the selected runtime supports them.",
-      "acceptance": ["Unsupported runtime capabilities are not rendered as working controls", "Fixed DSH composition passes isolated protocol smoke"],
+      "acceptance": [
+        "Unsupported runtime capabilities are not rendered as working controls",
+        "Fixed DSH composition passes isolated protocol smoke"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/agent/adapters/dsh/runtime.py", "../../frontend/main.js"],
-      "test_refs": ["../../tools/agent_daily_acceptance.py", "../../backend/tests/test_agent_runtime.py", "../../frontend/tests/smoke.spec.js"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/agent/adapters/dsh/runtime.py",
+        "../../frontend/main.js"
+      ],
+      "test_refs": [
+        "../../tools/agent_daily_acceptance.py",
+        "../../backend/tests/test_agent_runtime.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:dsh-agent-runtime"
     },
     {
       "id": "MCP-001",
       "category": "mcp",
       "statement": "MCP connections enter DSH through a previewed and approved user Preset with mount validation, protected credentials, and fail-closed handling for unknown or executable fields.",
-      "acceptance": ["A stdio or HTTP configuration can be reviewed before it is mounted", "Unknown fields and unverified servers cannot execute"],
+      "acceptance": [
+        "A stdio or HTTP configuration can be reviewed before it is mounted",
+        "Unknown fields and unverified servers cannot execute"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/agent/adapters/dsh/mcp_config.py"],
-      "test_refs": ["../../backend/tests/test_dsh_mcp_config.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/agent/adapters/dsh/mcp_config.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_dsh_mcp_config.py"
+      ],
       "status_ref": "status-matrix:dsh-agent-runtime"
     },
     {
       "id": "SKILL-001",
       "category": "skill",
       "statement": "Skills have an auditable discover, load, approve, revoke, and invoke lifecycle bound to an isolated Profile and the current Agent Session.",
-      "acceptance": ["Unverified source or permissions keep a Skill disabled", "A Skill can be revoked without leaving an active registration"],
+      "acceptance": [
+        "Unverified source or permissions keep a Skill disabled",
+        "A Skill can be revoked without leaving an active registration"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/agent/skill_catalog.py"],
-      "test_refs": ["../../backend/tests/test_skill_catalog.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/agent/skill_catalog.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_skill_catalog.py"
+      ],
       "status_ref": "status-matrix:dsh-agent-runtime"
     },
     {
       "id": "TASK-001",
       "category": "tasks",
       "statement": "DSH Session and turn state remain the activity source of truth while Sumika Tasks provide a bounded projection with traceable checkpoint links.",
-      "acceptance": ["Task views reflect session, approval, failure, cancellation, and retry events", "The projection does not create a second active turn state"],
+      "acceptance": [
+        "Task views reflect session, approval, failure, cancellation, and retry events",
+        "The projection does not create a second active turn state"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/tasks/agent_projection.py"],
-      "test_refs": ["../../backend/tests/test_agent_task_projection.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/tasks/agent_projection.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_agent_task_projection.py"
+      ],
       "status_ref": "status-matrix:tasks"
     },
     {
       "id": "WORKSPACE-001",
       "category": "workspace",
       "statement": "Repository edits happen in a checked Workspace with checkpoints, file-level diff, exact restore, worktree support, and previewed local commit.",
-      "acceptance": ["Execute and Plan Review approval checkpoint before writes", "Restore and commit require exact confirmation"],
+      "acceptance": [
+        "Execute and Plan Review approval checkpoint before writes",
+        "Restore and commit require exact confirmation"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/workspace", "../../docs/architecture/agent-runtime.md"],
-      "test_refs": ["../../backend/tests/test_workspace_runtime.py", "../../backend/tests/test_agent_server.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/workspace",
+        "../../docs/architecture/agent-runtime.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_workspace_runtime.py",
+        "../../backend/tests/test_agent_server.py"
+      ],
       "status_ref": "status-matrix:tasks"
     },
     {
       "id": "PLUGIN-001",
       "category": "plugin",
       "statement": "Same-type plugins are replaceable; community plugins require isolated license, API, permission, uninstall, and end-to-end validation before approval.",
-      "acceptance": ["A rejected plugin remains disabled", "A validated plugin can be approved without coupling Core to its internals"],
+      "acceptance": [
+        "A rejected plugin remains disabled",
+        "A validated plugin can be approved without coupling Core to its internals"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-CORE-002"],
-      "implementation_refs": ["../../backend/src/sumika_core/plugins", "../../docs/architecture/manifest.md"],
-      "test_refs": ["../../backend/tests/test_plugins.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-CORE-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/plugins",
+        "../../docs/architecture/manifest.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_plugins.py"
+      ],
       "status_ref": "status-matrix:plugins-manifest"
     },
     {
@@ -310,7 +561,10 @@
       ],
       "provenance": "normalized",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context", "repository-docs"],
+      "source_refs": [
+        "visible-conversation-context",
+        "repository-docs"
+      ],
       "excerpt_refs": [],
       "implementation_refs": [
         "../../backend/src/sumika_core/capabilities.py",
@@ -334,14 +588,18 @@
       ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
       "implementation_refs": [
         "../../backend/src/sumika_core/desktop_automation/contracts.py",
         "../../backend/src/sumika_core/desktop_automation/adapters.py",
         "../../docs/architecture/desktop-automation.md"
       ],
-      "test_refs": ["../../backend/tests/test_desktop_automation.py"],
+      "test_refs": [
+        "../../backend/tests/test_desktop_automation.py"
+      ],
       "status_ref": "status-matrix:desktop-automation"
     },
     {
@@ -354,7 +612,10 @@
       ],
       "provenance": "normalized",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context", "repository-docs"],
+      "source_refs": [
+        "visible-conversation-context",
+        "repository-docs"
+      ],
       "excerpt_refs": [],
       "implementation_refs": [
         "../../backend/src/sumika_core/desktop_automation/runtime.py",
@@ -372,51 +633,97 @@
       "id": "BROWSER-001",
       "category": "browser",
       "statement": "BrowserSkill handles browser mechanics while Sumika enforces isolated profiles, sensitive-action approval, human handoff, and download quarantine.",
-      "acceptance": ["Credential and CAPTCHA actions pause for the user", "Downloads remain quarantined until confirmation"],
+      "acceptance": [
+        "Credential and CAPTCHA actions pause for the user",
+        "Downloads remain quarantined until confirmation"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/browser/policy.py", "../../docs/integrations/browser-runtime.md"],
-      "test_refs": ["../../backend/tests/test_browser_policy.py", "../../frontend/tests/smoke.spec.js"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/browser/policy.py",
+        "../../docs/integrations/browser-runtime.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_browser_policy.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:browser-runtime"
     },
     {
       "id": "BROWSER-002",
       "category": "browser",
       "statement": "Authorized named web-chat profiles can act as independent WebWorker consultation members, with up to five distinct providers executed in bounded 3 plus 2 waves and all results treated as untrusted advice.",
-      "acceptance": ["Profiles are unroutable until login, page health, text permission, and unknown-quota consent are complete", "Partial and total failure, lease conflicts, and human takeover remain explicit without reading personal browser tabs or credentials"],
+      "acceptance": [
+        "Profiles are unroutable until login, page health, text permission, and unknown-quota consent are complete",
+        "Partial and total failure, lease conflicts, and human takeover remain explicit without reading personal browser tabs or credentials"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-BROWSER-002"],
-      "implementation_refs": ["../../backend/src/sumika_core/browser/web_chat.py", "../../backend/src/sumika_core/agent/supervisor.py", "../../frontend/main.js", "../../docs/integrations/browser-runtime.md"],
-      "test_refs": ["../../backend/tests/test_web_chat.py", "../../backend/tests/test_dynamic_route_supervisor.py", "../../frontend/tests/smoke.spec.js"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-BROWSER-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/browser/web_chat.py",
+        "../../backend/src/sumika_core/agent/supervisor.py",
+        "../../frontend/main.js",
+        "../../docs/integrations/browser-runtime.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_web_chat.py",
+        "../../backend/tests/test_dynamic_route_supervisor.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:web-chat-runtime"
     },
     {
       "id": "SEC-001",
       "category": "security",
       "statement": "Existing data and archives are preserved; destructive deletion, force overwrite, global runtime changes, and unapproved external writes are prohibited.",
-      "acceptance": ["Recovery path exists for cleanup and restore", "Secrets and user data do not enter the repository"],
+      "acceptance": [
+        "Recovery path exists for cleanup and restore",
+        "Secrets and user data do not enter the repository"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../architecture/security.md", "../current-execution.md"],
-      "test_refs": ["../../tools/check_docs.py", "../../backend/tests/test_workspace_runtime.py"],
+      "implementation_refs": [
+        "../architecture/security.md",
+        "../current-execution.md"
+      ],
+      "test_refs": [
+        "../../tools/check_docs.py",
+        "../../backend/tests/test_workspace_runtime.py"
+      ],
       "status_ref": "status-matrix:snapshots"
     },
     {
       "id": "STARTUP-001",
       "category": "startup",
       "statement": "A one-click entry only checks and starts installed, version-managed Core, Harness, and desktop services, then releases processes and ports created by that instance on exit.",
-      "acceptance": ["An unavailable dependency produces an actionable status instead of an implicit install", "Closing Sumika does not terminate an unrelated external service"],
+      "acceptance": [
+        "An unavailable dependency produces an actionable status instead of an implicit install",
+        "Closing Sumika does not terminate an unrelated external service"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../src-tauri/src/main.rs", "../../tools/run-desktop.ps1"],
+      "implementation_refs": [
+        "../../src-tauri/src/main.rs",
+        "../../tools/run-desktop.ps1"
+      ],
       "test_refs": [],
       "status_ref": "status-matrix:dsh-agent-runtime"
     },
@@ -424,207 +731,418 @@
       "id": "OBS-001",
       "category": "observability",
       "statement": "Agent observability is bounded, redacted, aggregatable, and suitable for comparing models and plugins without storing content.",
-      "acceptance": ["Daily reports include latency and outcome aggregates", "Prompts, outputs, tool payloads, files, and credentials are absent"],
+      "acceptance": [
+        "Daily reports include latency and outcome aggregates",
+        "Prompts, outputs, tool payloads, files, and credentials are absent"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-SEC-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/observability.py", "../../backend/src/sumika_core/model_evaluation.py", "../../tools/fixtures/model-evaluation-v1.json", "../../docs/architecture/agent-observability.md"],
-      "test_refs": ["../../backend/tests/test_agent_observability.py", "../../backend/tests/test_model_evaluation.py", "../../tools/test_agent_daily_acceptance.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-SEC-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/observability.py",
+        "../../backend/src/sumika_core/model_evaluation.py",
+        "../../tools/fixtures/model-evaluation-v1.json",
+        "../../docs/architecture/agent-observability.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_agent_observability.py",
+        "../../backend/tests/test_model_evaluation.py",
+        "../../tools/test_agent_daily_acceptance.py"
+      ],
       "status_ref": "status-matrix:agent-observability"
     },
     {
       "id": "OBS-002",
       "category": "observability",
       "statement": "Every dynamic route decision records a bounded content-free trace of boundaries, candidate gates, evidence freshness, ordering, selection, confirmation, dispatch, retry, cancellation, usage, cost, and final outcome for later policy analysis.",
-      "acceptance": ["Candidate and lifecycle records can be correlated with run-salted hashes without storing prompts, answers, code, DOM, paths, tool payloads, or credentials", "Trace analysis can propose a tested policy change but cannot alter routing, quality, budgets, or authorization automatically"],
+      "acceptance": [
+        "Candidate and lifecycle records can be correlated with run-salted hashes without storing prompts, answers, code, DOM, paths, tool payloads, or credentials",
+        "Trace analysis can propose a tested policy change but cannot alter routing, quality, budgets, or authorization automatically"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-OBS-003"],
-      "implementation_refs": ["../../backend/src/sumika_core/agent/route_trace.py", "../../backend/src/sumika_core/agent/supervisor.py", "../../backend/src/sumika_core/server.py", "../../docs/architecture/agent-observability.md"],
-      "test_refs": ["../../backend/tests/test_route_decision_trace.py", "../../backend/tests/test_observability_server.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-OBS-003"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/agent/route_trace.py",
+        "../../backend/src/sumika_core/agent/supervisor.py",
+        "../../backend/src/sumika_core/server.py",
+        "../../docs/architecture/agent-observability.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_route_decision_trace.py",
+        "../../backend/tests/test_observability_server.py"
+      ],
       "status_ref": "status-matrix:agent-observability"
     },
     {
       "id": "EVOLUTION-001",
       "category": "evolution",
       "statement": "External projects, plugins, memory systems, and quota sources are versioned in a knowledge registry; discovery and evaluation do not auto-enable changes.",
-      "acceptance": ["Each entry has version, license, capability, check time, and conclusion", "Install/upgrade/enable remains approval-gated"],
+      "acceptance": [
+        "Each entry has version, license, capability, check time, and conclusion",
+        "Install/upgrade/enable remains approval-gated"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../docs/integrations/evolution-registry.md", "../../docs/integrations/evolution-knowledge-registry.json"],
-      "test_refs": ["../../backend/tests/test_evolution_registry.py"],
+      "implementation_refs": [
+        "../../docs/integrations/evolution-registry.md",
+        "../../docs/integrations/evolution-knowledge-registry.json"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_evolution_registry.py"
+      ],
       "status_ref": "status-matrix:evolution-registry"
     },
     {
       "id": "LICENSE-001",
       "category": "governance",
       "statement": "External code, models, animation, icons, and behavioral references must have auditable source, version, license, and usage records.",
-      "acceptance": ["A source ledger entry exists before packaging or copying external material", "Unverified assets remain reference-only"],
+      "acceptance": [
+        "A source ledger entry exists before packaging or copying external material",
+        "Unverified assets remain reference-only"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../docs/ui/license-ledger.md", "../../THIRD_PARTY_NOTICES.md"],
-      "test_refs": ["../../backend/tests/test_evolution_registry.py"],
+      "implementation_refs": [
+        "../../docs/ui/license-ledger.md",
+        "../../THIRD_PARTY_NOTICES.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_evolution_registry.py"
+      ],
       "status_ref": "status-matrix:evolution-registry"
     },
     {
       "id": "MODEL-001",
       "category": "model-policy",
       "statement": "Use ZCode's time-limited entitlement and Zhipu's authorized free quota before consuming expensive model capacity when quality and safety gates allow.",
-      "acceptance": ["Eligible free routes appear as candidates only after health/auth checks", "Unknown quota is not labeled free"],
+      "acceptance": [
+        "Eligible free routes appear as candidates only after health/auth checks",
+        "Unknown quota is not labeled free"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/requirements/model-policy.md"],
-      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_server.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../docs/requirements/model-policy.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_agent_server.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-002",
       "category": "model-policy",
       "statement": "Keep ZCode, Zhipu, and Ollama in an extensible model catalog, with ZCode represented as a Harness adapter and Zhipu/Ollama as provider profiles.",
-      "acceptance": ["Harness and Provider identity are not conflated", "A future Harness can reuse catalog and policy types"],
+      "acceptance": [
+        "Harness and Provider identity are not conflated",
+        "A future Harness can reuse catalog and policy types"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-004"],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/architecture/agent-runtime.md", "../../backend/src/sumika_core/provider_profiles.py"],
-      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_portability.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-004"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../docs/architecture/agent-runtime.md",
+        "../../backend/src/sumika_core/provider_profiles.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_agent_portability.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-003",
       "category": "model-policy",
       "statement": "ZCode integration uses its supported app-server session protocol and login state, never token extraction or an unverified endpoint.",
-      "acceptance": ["Handshake and session operations are isolated and auditable", "Missing login state fails closed"],
+      "acceptance": [
+        "Handshake and session operations are isolated and auditable",
+        "Missing login state fails closed"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/agent/contracts.py", "../../backend/src/sumika_core/agent/adapters/zcode/runtime.py", "../../docs/requirements/model-policy.md"],
-      "test_refs": ["../../backend/tests/test_zcode_runtime.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/agent/contracts.py",
+        "../../backend/src/sumika_core/agent/adapters/zcode/runtime.py",
+        "../../docs/requirements/model-policy.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_zcode_runtime.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-004",
       "category": "model-policy",
       "statement": "Zhipu quota claims are dynamic and may be marked free only from an official usage source or explicit user confirmation.",
-      "acceptance": ["Credential Manager is the only secret store", "Expired or unauthenticated quota is not selected"],
+      "acceptance": [
+        "Credential Manager is the only secret store",
+        "Expired or unauthenticated quota is not selected"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-001"],
-      "implementation_refs": ["../../backend/src/sumika_core/provider_profiles.py", "../../backend/src/sumika_core/credentials.py", "../../backend/src/sumika_core/model_policy.py"],
-      "test_refs": ["../../backend/tests/test_provider_profiles.py", "../../backend/tests/test_model_policy.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/provider_profiles.py",
+        "../../backend/src/sumika_core/credentials.py",
+        "../../backend/src/sumika_core/model_policy.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_provider_profiles.py",
+        "../../backend/tests/test_model_policy.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-005",
       "category": "model-policy",
       "statement": "Choose models by task difficulty and risk after satisfying a minimum quality/capability gate, then optimize for free quota, cost, and latency.",
-      "acceptance": ["Routing decisions include difficulty, quality gate, cost, and reason codes", "A low-quality candidate is not selected only because it is cheap"],
+      "acceptance": [
+        "Routing decisions include difficulty, quality gate, cost, and reason codes",
+        "A low-quality candidate is not selected only because it is cheap"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-002"],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/requirements/model-policy.md"],
-      "test_refs": ["../../backend/tests/test_model_policy.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../docs/requirements/model-policy.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_policy.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-006",
       "category": "model-policy",
       "statement": "The router must not silently escalate from a free route to a paid route when quota is exhausted or health changes.",
-      "acceptance": ["The user receives an explicit alternative or pause", "Automatic mode remains bounded by a hard budget"],
+      "acceptance": [
+        "The user receives an explicit alternative or pause",
+        "Automatic mode remains bounded by a hard budget"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-002"],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/server.py", "../../docs/requirements/model-policy.md"],
-      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_server.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../backend/src/sumika_core/server.py",
+        "../../docs/requirements/model-policy.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_agent_server.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-007",
       "category": "model-policy",
       "statement": "Default routing is recommendation-then-confirmation; users may opt into fully automatic selection per preset or session.",
-      "acceptance": ["A recommendation explains candidates and impact", "Full-auto cannot bypass security, quality, or budget gates"],
+      "acceptance": [
+        "A recommendation explains candidates and impact",
+        "Full-auto cannot bypass security, quality, or budget gates"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-003"],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/server.py", "../../frontend/main.js", "../../docs/requirements/model-policy.md"],
-      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_agent_server.py", "../../frontend/tests/smoke.spec.js"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-003"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../backend/src/sumika_core/server.py",
+        "../../frontend/main.js",
+        "../../docs/requirements/model-policy.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_agent_server.py",
+        "../../frontend/tests/smoke.spec.js"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-008",
       "category": "model-policy",
       "statement": "Ollama remains available for no-quota local health and protocol tests, with the smaller model for fast smoke and the 4B model for fuller local validation.",
-      "acceptance": ["Model listing health check does not generate content", "Local smoke never stops or rewrites the user's existing service"],
+      "acceptance": [
+        "Model listing health check does not generate content",
+        "Local smoke never stops or rewrites the user's existing service"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-004"],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../docs/architecture/local-model.md", "../../tools/setup-ollama.ps1"],
-      "test_refs": ["../../backend/tests/test_openai_compatible_stub.py", "../../backend/tests/test_model_policy.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-004"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../docs/architecture/local-model.md",
+        "../../tools/setup-ollama.ps1"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_openai_compatible_stub.py",
+        "../../backend/tests/test_model_policy.py"
+      ],
       "status_ref": "status-matrix:local-llm"
     },
     {
       "id": "MODEL-009",
       "category": "model-policy",
       "statement": "Quota checks run only after a configurable interval and when the system is idle; login, OTP, CAPTCHA, payment, and entitlement claims require the user.",
-      "acceptance": ["Startup does not poll repeatedly during active work", "Protected actions pause with a clear handoff"],
+      "acceptance": [
+        "Startup does not poll repeatedly during active work",
+        "Protected actions pause with a clear handoff"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/agent/adapters/zcode/runtime.py", "../../docs/requirements/model-policy.md", "../../docs/integrations/browser-runtime.md"],
-      "test_refs": ["../../backend/tests/test_model_policy.py", "../../backend/tests/test_zcode_runtime.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../backend/src/sumika_core/agent/adapters/zcode/runtime.py",
+        "../../docs/requirements/model-policy.md",
+        "../../docs/integrations/browser-runtime.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_zcode_runtime.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MODEL-010",
       "category": "model-policy",
       "statement": "Model and plugin comparisons use fixed task cohorts and bounded observability rather than latency alone, and cannot auto-change production policy from weak samples.",
-      "acceptance": ["Reports include sample/version comparability", "Prompts and outputs are absent from evaluation records"],
+      "acceptance": [
+        "Reports include sample/version comparability",
+        "Prompts and outputs are absent from evaluation records"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-SEC-001", "EX-SEC-002"],
-      "implementation_refs": ["../../backend/src/sumika_core/observability.py", "../../docs/architecture/agent-observability.md"],
-      "test_refs": ["../../backend/tests/test_agent_observability.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-SEC-001",
+        "EX-SEC-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/observability.py",
+        "../../docs/architecture/agent-observability.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_agent_observability.py"
+      ],
       "status_ref": "status-matrix:agent-observability"
     },
     {
       "id": "MODEL-011",
       "category": "model-policy",
       "statement": "Pricing evidence is isolated by provider profile, model, and billing group, and separately reports provider-side charges and user-entered cash conversion without applying official prices to relay routes.",
-      "acceptance": ["Direct Official, New API, PinAI, and Manual sources produce versioned snapshots or explicit unknown results", "Unsupported expressions, unknown groups, and missing conversion rates never produce false precision or execute remote code"],
+      "acceptance": [
+        "Direct Official, New API, PinAI, and Manual sources produce versioned snapshots or explicit unknown results",
+        "Unsupported expressions, unknown groups, and missing conversion rates never produce false precision or execute remote code"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-MODEL-006"],
-      "implementation_refs": ["../../backend/src/sumika_core/route_pricing.py", "../../backend/src/sumika_core/model_policy.py", "../../backend/src/sumika_core/provider_profiles.py", "../../frontend/main.js", "../../docs/requirements/model-policy.md"],
-      "test_refs": ["../../backend/tests/test_route_pricing.py", "../../backend/tests/test_model_policy.py", "../../backend/tests/test_provider_profiles.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-MODEL-006"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/route_pricing.py",
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../backend/src/sumika_core/provider_profiles.py",
+        "../../frontend/main.js",
+        "../../docs/requirements/model-policy.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_route_pricing.py",
+        "../../backend/tests/test_model_policy.py",
+        "../../backend/tests/test_provider_profiles.py"
+      ],
       "status_ref": "status-matrix:model-policy"
     },
     {
       "id": "MULTI-001",
       "category": "future",
       "statement": "Future multi-character scenes keep persona, session, memory namespace, model policy, and budget independent while separating temporary interaction context from world location.",
-      "acceptance": ["A future design can represent multiple participants without sharing memory implicitly", "No current single-character data is rewritten"],
+      "acceptance": [
+        "A future design can represent multiple participants without sharing memory implicitly",
+        "No current single-character data is rewritten"
+      ],
       "provenance": "confirmed",
       "intent_state": "deferred",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../docs/architecture/characters.md"],
+      "implementation_refs": [
+        "../../docs/architecture/characters.md"
+      ],
       "test_refs": [],
       "status_ref": "status-matrix:virtual-world"
     },
@@ -632,79 +1150,173 @@
       "id": "MEMORY-001",
       "category": "memory",
       "statement": "Memory is an optional, replaceable Provider capability scoped to a character or Agent, and different implementations can be selected and compared without implicit sharing.",
-      "acceptance": ["A memory implementation can be replaced without rewriting character data", "Shared memory is never enabled without an explicit scope and policy"],
+      "acceptance": [
+        "A memory implementation can be replaced without rewriting character data",
+        "Shared memory is never enabled without an explicit scope and policy"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../../backend/src/sumika_core/memory", "../../docs/architecture/characters.md"],
-      "test_refs": ["../../backend/tests/test_memory.py"],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/memory",
+        "../../docs/architecture/characters.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_memory.py"
+      ],
       "status_ref": "status-matrix:memory"
     },
     {
       "id": "PROCESS-001",
       "category": "process",
       "statement": "Long-running Sumika work must preserve reconstructable requirements, sanitized source excerpts, decisions, acceptance criteria, and supersession links instead of depending on chat history.",
-      "acceptance": ["A future Agent can recover product intent from repository evidence", "Secrets and raw chat transcripts are absent from the durable record"],
+      "acceptance": [
+        "A future Agent can recover product intent from repository evidence",
+        "Secrets and raw chat transcripts are absent from the durable record"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-PROCESS-001"],
-      "implementation_refs": ["../../docs/requirements/README.md", "../../docs/current-execution.md"],
-      "test_refs": ["../../tools/test_check_docs.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-PROCESS-001"
+      ],
+      "implementation_refs": [
+        "../../docs/requirements/README.md",
+        "../../docs/current-execution.md"
+      ],
+      "test_refs": [
+        "../../tools/test_check_docs.py"
+      ],
       "status_ref": "status-matrix:dsh-agent-runtime"
     },
     {
       "id": "PROCESS-002",
       "category": "process",
       "statement": "Recurring or non-obvious failures must be distilled into a maintained project troubleshooting note with evidence, confirmed cause, failed approaches, fix, and verification commands.",
-      "acceptance": ["A repeated failure has one discoverable runbook", "Hypotheses are not recorded as confirmed causes"],
+      "acceptance": [
+        "A repeated failure has one discoverable runbook",
+        "Hypotheses are not recorded as confirmed causes"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-PROCESS-001"],
-      "implementation_refs": ["../../docs/troubleshooting/browser-web-chat.md"],
-      "test_refs": ["../../tools/test_check_docs.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-PROCESS-001"
+      ],
+      "implementation_refs": [
+        "../../docs/troubleshooting/browser-web-chat.md"
+      ],
+      "test_refs": [
+        "../../tools/test_check_docs.py"
+      ],
       "status_ref": "status-matrix:web-chat-runtime"
     },
     {
       "id": "TOOLING-001",
       "category": "tooling",
       "statement": "Task-required low-risk portable tools may be reused from a registered shared cache, while tools needing elevation, services, extensions, login, payment, or system changes still require separate approval.",
-      "acceptance": ["Reusable tooling records version, source, hash, license, install location, and verification state", "Unknown provenance or license remains explicit and does not become a trusted claim"],
+      "acceptance": [
+        "Reusable tooling records version, source, hash, license, install location, and verification state",
+        "Unknown provenance or license remains explicit and does not become a trusted claim"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-TOOLING-001"],
-      "implementation_refs": ["../../docs/troubleshooting/browser-web-chat.md"],
-      "test_refs": ["../../backend/tests/test_visual_evidence.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-TOOLING-001"
+      ],
+      "implementation_refs": [
+        "../../docs/troubleshooting/browser-web-chat.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_visual_evidence.py"
+      ],
       "status_ref": "status-matrix:browser-runtime"
     },
     {
       "id": "OBS-003",
       "category": "observability",
       "statement": "Non-trivial runtime conclusions use independent evidence when available; web-chat submission and response uncertainty combines DOM or ARIA evidence with local OCR while exporting neither screenshots nor OCR text.",
-      "acceptance": ["Conflicting evidence cannot trigger a duplicate send", "Only bounded booleans, confidence, counts, and error codes cross the visual probe boundary"],
+      "acceptance": [
+        "Conflicting evidence cannot trigger a duplicate send",
+        "Only bounded booleans, confidence, counts, and error codes cross the visual probe boundary"
+      ],
       "provenance": "confirmed",
       "intent_state": "active",
-      "source_refs": ["visible-conversation-context"],
-      "excerpt_refs": ["EX-OBS-004"],
-      "implementation_refs": ["../../backend/src/sumika_core/browser/visual.py", "../../backend/src/sumika_core/browser/runtime.py", "../../backend/src/sumika_core/browser/web_chat.py", "../../docs/troubleshooting/browser-web-chat.md"],
-      "test_refs": ["../../backend/tests/test_visual_evidence.py", "../../backend/tests/test_browser_runtime.py", "../../backend/tests/test_web_chat.py"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [
+        "EX-OBS-004"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/browser/visual.py",
+        "../../backend/src/sumika_core/browser/runtime.py",
+        "../../backend/src/sumika_core/browser/web_chat.py",
+        "../../docs/troubleshooting/browser-web-chat.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_visual_evidence.py",
+        "../../backend/tests/test_browser_runtime.py",
+        "../../backend/tests/test_web_chat.py"
+      ],
       "status_ref": "status-matrix:web-chat-runtime"
     },
     {
       "id": "DEFERRED-001",
       "category": "future",
       "statement": "Audio, vision, Live2D, external animation libraries, VirtualWorld, LifeAgent, RemoteRunner, Android, and formal multi-platform packaging remain deferred until real modules and safety boundaries exist.",
-      "acceptance": ["Deferred capabilities are not presented as production-ready", "Adding one later requires a real adapter and license/security review"],
+      "acceptance": [
+        "Deferred capabilities are not presented as production-ready",
+        "Adding one later requires a real adapter and license/security review"
+      ],
       "provenance": "confirmed",
       "intent_state": "deferred",
-      "source_refs": ["visible-conversation-context"],
+      "source_refs": [
+        "visible-conversation-context"
+      ],
       "excerpt_refs": [],
-      "implementation_refs": ["../current-execution.md", "../status-matrix.md"],
+      "implementation_refs": [
+        "../current-execution.md",
+        "../status-matrix.md"
+      ],
       "test_refs": [],
       "status_ref": "status-matrix:live2d"
+    },
+    {
+      "id": "UX-002",
+      "category": "ux",
+      "statement": "The desktop client is a fullscreen scene viewport: the Avatar is the persistent interface, chat is a bubble stream with a visual-novel dialogue-box input, and workbench/characters/modules/settings live in four fullscreen drawers. The default palette is project-neutral night blue with a Sumika-owned accent; a character may override the accent via config.theme.accent (character card imports read extensions theme colors), but no copyrighted character brand color may enter the repo default. Backgrounds evolve through layered slots: solid color, local image, later video/web wallpapers.",
+      "acceptance": [
+        "Dock drawers open and Esc or the close button returns to the scene",
+        "Avatar WebGL surface survives navigation without remounting",
+        "Disabled capabilities stay collapsed in the add-module library",
+        "Per-character accent reskins the shell and falls back to the neutral default",
+        "Background image stays local and never uploads"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context"
+      ],
+      "excerpt_refs": [],
+      "implementation_refs": [
+        "../../frontend/main.js",
+        "../../frontend/styles.css"
+      ],
+      "test_refs": [
+        "../../frontend/tests/smoke.spec.js"
+      ],
+      "status_ref": "status-matrix:web-portals"
     }
   ]
 }
