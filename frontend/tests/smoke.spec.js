@@ -469,11 +469,10 @@ test.describe("Sumika UI shell", () => {
     );
     try {
       await openPage(page, "Characters");
-      const chooserPromise = page.waitForEvent("filechooser");
-      await page.locator("#import-character-card").click();
-      const chooser = await chooserPromise;
-      await chooser.setFiles(cardPath);
-      await expect(page.locator(".character-notice")).toContainText("卡牌酱 已导入角色卡");
+      await page.locator("#add-character").click();
+      await page.locator('#character-create-form input[name="character_card"]').setInputFiles(cardPath);
+      await page.locator("#character-create-form button[type=submit]").click();
+      await expect(page.locator(".character-notice")).toContainText("卡牌酱 已从角色卡导入");
       await expect(page.locator(".character-notice")).toContainText("character_book");
       await expect(page.locator('.character-card:has-text("卡牌酱")')).toHaveCount(1);
       const persona = await openCharacterSection(page, "persona");
@@ -2369,9 +2368,10 @@ test.describe("Sumika UI shell", () => {
   test("Avatar library explains discovery and binding-safe unregister", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Characters");
-    await expect(page.locator("#discover-avatar-assets")).toContainText("扫描内置目录");
-    await expect(page.locator("#import-avatar")).toContainText("选择模型文件");
-    await expect(page.locator(".avatar-library")).toContainText("放入 assets/avatars 后可扫描登记");
+    const avatarSection = await openCharacterSection(page, "avatar");
+    await expect(avatarSection.locator("#discover-avatar-assets")).toContainText("扫描内置目录");
+    await expect(avatarSection.locator("#import-avatar")).toContainText("选择模型文件");
+    await expect(avatarSection.locator(".avatar-library")).toContainText("放入 assets/avatars 后可扫描登记");
     const boundRow = page.locator(".avatar-model-row").filter({ hasText: "已绑定" }).first();
     await expect(boundRow.locator("[data-avatar-clear]")).toContainText("解除当前角色绑定");
     await page.locator(".avatar-model-row [data-avatar-inspect]").first().click();
@@ -2384,12 +2384,13 @@ test.describe("Sumika UI shell", () => {
     await openPage(page, "Characters");
 
     const groups = page.locator(".character-settings-group");
-    await expect(groups).toHaveCount(3);
-    for (const section of ["identity", "persona", "model"]) {
+    await expect(groups).toHaveCount(4);
+    for (const section of ["identity", "persona", "avatar", "model"]) {
       await expect(page.locator(`[data-character-section="${section}"]`)).not.toHaveAttribute("open", "");
     }
-    await expect(page.locator(".avatar-library")).toBeVisible();
-    await expect(page.locator(".character-settings-group .avatar-library")).toHaveCount(0);
+    const avatarSection = await openCharacterSection(page, "avatar");
+    await expect(avatarSection.locator(".avatar-library")).toBeVisible();
+    await expect(page.locator(".character-settings-group .avatar-library")).toHaveCount(1);
 
     await openCharacterSection(page, "identity");
     await page.locator('textarea[name="persona_identity"]').fill("温和可靠的学习搭档");

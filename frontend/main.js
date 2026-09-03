@@ -82,6 +82,7 @@ const state = {
   moduleNotice: "",
   characterBusy: false,
   characterNotice: "",
+  characterCreating: false,
   portalPanelOpen: false,
   audioBusy: null,
   audioNotice: "",
@@ -984,7 +985,16 @@ function renderCharacters() {
     const preview = avatarPreviewUrl(model);
     return `<article class="character-card ${character.id === state.selectedCharacter ? "selected" : ""}"><div class="character-art">${preview ? `<img class="character-art-image" src="${escapeHtml(preview)}" alt="${escapeHtml(model?.name || "Avatar 模型")}" />` : ""}<div class="character-art-copy"><span>${escapeHtml(avatarDriverLabel(character.config?.avatar_driver || "none"))}</span><strong>${escapeHtml(character.name)}</strong></div></div><div class="character-card-body"><div><strong>${escapeHtml(character.name)}</strong><small>${escapeHtml(model?.name || "未绑定 Avatar 模型")} · ${character.config?.memory_enabled ? "记忆已启用" : "记忆默认关闭"}</small></div><button class="small-button" data-character="${escapeHtml(character.id)}">${character.id === state.selectedCharacter ? "当前角色" : "使用"}</button></div></article>`;
   }).join("");
-  return renderPageFrame("角色", "Sumika 是项目名；每个角色都有独立名称、persona、Avatar 和记忆空间。", `<div class="character-grid">${cards}<button class="add-card" id="add-character"><span>＋</span><strong>创建角色</strong><small>从独立配置开始</small></button><button class="add-card" id="import-character-card"><span>↥</span><strong>导入角色卡</strong><small>SillyTavern JSON / PNG / CHARX</small></button></div>${renderCharacterEditor()}${renderAvatarLibrary()}`);
+  const creating = state.characterCreating
+    ? `<form class="character-create-panel" id="character-create-form">
+        <strong>新建角色</strong>
+        <label>名称<input name="character_name" type="text" maxlength="100" placeholder="例如：小雪" /></label>
+        <label>角色卡（可选，SillyTavern JSON / PNG / CHARX）<input name="character_card" type="file" accept=".json,.png,.charx" /></label>
+        <div class="character-create-actions"><button class="small-button" type="submit" ${state.characterBusy ? "disabled" : ""}>${state.characterBusy ? "创建中" : "创建"}</button><button class="ghost-button" type="button" data-character-create-cancel>取消</button></div>
+        <p class="character-create-note">填了角色卡即从卡导入 persona（卡内 theme_color 会成为该角色的界面强调色）；不填则从空白配置开始。</p>
+      </form>`
+    : "";
+  return renderPageFrame("角色", "角色 = 人设 + Avatar 绑定；选定角色后在下方编辑器里完成全部配置。", `<div class="character-grid">${cards}<button class="add-card" id="add-character"><span>＋</span><strong>新建角色</strong><small>空白开始或导入角色卡</small></button></div>${creating}${renderCharacterEditor()}`);
 }
 
 function currentPersonaConfig() {
@@ -1026,7 +1036,7 @@ function renderCharacterEditor() {
   const notice = state.characterNotice ? `<div class="character-notice" role="status">${escapeHtml(state.characterNotice)}</div>` : "";
   const languageLabels = { "zh-CN": "简体中文", "zh-TW": "繁體中文", "ja-JP": "日本語", "en-US": "English" };
   const language = languageLabels[config.language] || config.language || "未设置语言";
-  return `<section class="character-editor"><div class="character-editor-heading"><div><span class="eyebrow">CHARACTER EDITOR</span><strong>当前角色配置</strong><small>角色身份、人格和模型表现分开管理；设置保存后会按角色持久化。</small></div></div>${notice}<form id="character-form">
+  return `<section class="character-editor"><div class="character-editor-heading"><div><span class="eyebrow">CHARACTER EDITOR</span><strong>当前角色配置</strong><small>身份、人格、Avatar 模型和表现都按角色持久化。</small></div></div>${notice}<form id="character-form">
     <details class="character-settings-group" data-character-section="identity">
       <summary><span>角色身份</span><small>${escapeHtml(character.name)} · ${escapeHtml(language)}</small></summary>
       <div class="character-settings-body"><div class="character-settings-grid">
@@ -1049,6 +1059,10 @@ function renderCharacterEditor() {
         <label class="character-field character-field-wide"><span>系统提示词</span><textarea name="system_prompt" rows="4" maxlength="20000" placeholder="补充需要长期遵循的指令">${escapeHtml(persona.systemPrompt)}</textarea></label>
         <label class="character-field character-field-wide"><span>首次问候</span><textarea name="greeting" rows="2" maxlength="2000" placeholder="新会话为空时显示，可选">${escapeHtml(persona.greeting)}</textarea></label>
       </div></div>
+    </details>
+    <details class="character-settings-group" data-character-section="avatar">
+      <summary><span>Avatar 模型</span><small>${escapeHtml(currentAvatarModel()?.name || "未绑定模型")}</small></summary>
+      <div class="character-settings-body">${renderAvatarLibrary()}</div>
     </details>
     <details class="character-settings-group" data-character-section="model">
       <summary><span>高级设置</span><small>模型表现 · ${escapeHtml(avatarPresentationSummary(presentation))}</small></summary>
@@ -1096,7 +1110,7 @@ function renderAvatarLibrary() {
     return `<article class="avatar-model-row avatar-ignored-row"><div class="avatar-model-type">${escapeHtml(model.kind.toUpperCase())}</div><div class="avatar-model-info"><strong>${escapeHtml(model.name)}</strong><small>${escapeHtml(model.path)} · ${formatBytes(model.size_bytes)} · 文件可用</small><small class="avatar-model-binding-hint">已忽略自动扫描；原文件未删除</small></div><div class="avatar-model-actions"><button class="small-button" data-avatar-restore="${escapeHtml(model.path)}" ${busy ? "disabled" : ""}>${busy ? "恢复中" : "恢复登记"}</button></div></article>`;
   }).join("") : `<div class="empty-panel">当前没有可恢复的已忽略模型。</div>`;
   const missingNotice = missingIgnoredCount ? `<div class="avatar-audit-summary" role="status"><span>有 ${missingIgnoredCount} 条失效忽略记录，路径当前不存在或不可访问，未确认模型已被删除。</span><button class="link-button" type="button" data-page="Developer">在开发者页审计 ↗</button></div>` : "";
-  return `<section class="avatar-library"><div class="avatar-library-heading"><div><span class="eyebrow">AVATAR ASSETS</span><strong>本地模型</strong><small>VRM 可直接在 Sumika 中渲染。放入 assets/avatars 后可扫描登记；桌面版选择模型文件会打开系统对话框，浏览器预览模式需粘贴绝对路径。</small></div><div class="avatar-library-actions"><button class="outline-button" id="discover-avatar-assets" title="扫描仓库 assets/avatars 中的新模型" ${state.avatarBusy === "discover" ? "disabled" : ""}>${state.avatarBusy === "discover" ? "扫描中" : "扫描内置目录"}</button><button class="outline-button" id="import-avatar">选择模型文件</button></div></div>${notice}<div class="avatar-model-list">${rows}</div><section class="avatar-ignored"><div class="avatar-library-heading"><div><span class="eyebrow">IGNORED ASSETS</span><strong>已忽略模型</strong><small>仅显示当前仍可访问的受管模型；恢复登记不会自动绑定当前角色。</small></div></div>${missingNotice}<div class="avatar-model-list">${ignoredRows}</div></section></section>`;
+  return `<section class="avatar-library"><div class="avatar-library-heading"><div><span class="eyebrow">AVATAR ASSETS</span><strong>本地模型</strong><small>VRM 可直接渲染；放入 assets/avatars 后可扫描登记。</small></div><div class="avatar-library-actions"><button class="outline-button" id="discover-avatar-assets" title="扫描仓库 assets/avatars 中的新模型" ${state.avatarBusy === "discover" ? "disabled" : ""}>${state.avatarBusy === "discover" ? "扫描中" : "扫描内置目录"}</button><button class="outline-button" id="import-avatar">选择模型文件</button></div></div>${notice}<div class="avatar-model-list">${rows}</div><section class="avatar-ignored"><div class="avatar-library-heading"><div><span class="eyebrow">IGNORED ASSETS</span><strong>已忽略模型</strong><small>恢复登记不会自动绑定当前角色。</small></div></div>${missingNotice}<div class="avatar-model-list">${ignoredRows}</div></section></section>`;
 }
 
 function renderAvatarAssetAudit() {
@@ -1312,7 +1326,7 @@ function renderCapabilityCatalogPanel() {
   const body = groupRows || (catalog
     ? `<div class="empty-column">当前没有可展示的真实实现。</div>`
     : `<div class="empty-column">目录尚未加载；点击刷新读取当前运行时和 Provider 状态。</div>`);
-  return `<section class="dev-panel capability-catalog-panel" data-capability-catalog><div class="panel-heading"><div><strong>统一能力目录</strong><small>同一能力可以由本地、云端、外部软件、插件或隔离浏览器实现；这里仅展示真实状态，不替代模块启停和 Provider 路由。</small></div><button class="small-button" id="refresh-capability-catalog" type="button" ${state.capabilityCatalogBusy ? "disabled" : ""}>${state.capabilityCatalogBusy ? "读取中" : "刷新"}</button></div>${notice}<div class="capability-catalog-summary"><span>实现 ${escapeHtml(String(summary.entry_count ?? 0))}</span><span>就绪 ${escapeHtml(String(summary.ready_count ?? 0))}</span><span>可选 ${escapeHtml(String(summary.selectable_count ?? 0))}</span>${summary.source_errors ? `<span class="warn">来源错误 ${escapeHtml(String(summary.source_errors))}</span>` : ""}</div><div class="capability-group-grid">${body}</div></section>`;
+  return `<section class="dev-panel capability-catalog-panel" data-capability-catalog><div class="panel-heading"><div><strong>统一能力目录</strong><small>各能力的真实实现状态；启停和路由仍在模块页。</small></div><button class="small-button" id="refresh-capability-catalog" type="button" ${state.capabilityCatalogBusy ? "disabled" : ""}>${state.capabilityCatalogBusy ? "读取中" : "刷新"}</button></div>${notice}<div class="capability-catalog-summary"><span>实现 ${escapeHtml(String(summary.entry_count ?? 0))}</span><span>就绪 ${escapeHtml(String(summary.ready_count ?? 0))}</span><span>可选 ${escapeHtml(String(summary.selectable_count ?? 0))}</span>${summary.source_errors ? `<span class="warn">来源错误 ${escapeHtml(String(summary.source_errors))}</span>` : ""}</div><div class="capability-group-grid">${body}</div></section>`;
 }
 
 function renderToolRuntime() {
@@ -3805,7 +3819,11 @@ function bindEvents() {
     if (output) output.value = Number(element.value).toFixed(2);
   }));
   document.querySelector("#add-character")?.addEventListener("click", createCharacter);
-  document.querySelector("#import-character-card")?.addEventListener("click", importCharacterCard);
+  document.querySelector("#character-create-form")?.addEventListener("submit", submitCharacterCreation);
+  document.querySelector("[data-character-create-cancel]")?.addEventListener("click", () => {
+    state.characterCreating = false;
+    render();
+  });
   document.querySelector("#import-avatar")?.addEventListener("click", importAvatar);
   document.querySelector("#discover-avatar-assets")?.addEventListener("click", discoverAvatarAssets);
   document.querySelectorAll("[data-avatar-select]").forEach((element) => element.addEventListener("click", () => {
@@ -8814,65 +8832,68 @@ async function selectSession(sessionId) {
   await loadMessages();
 }
 
-async function importCharacterCard() {
+async function submitCharacterCreation(event) {
+  event.preventDefault();
   if (state.characterBusy) return;
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".json,.png,.charx";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    const params = {};
-    try {
-      if (/\.(png|charx)$/i.test(file.name)) {
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const name = String(formData.get("character_name") || "").trim();
+  const cardFile = formData.get("character_card");
+  const hasCard = cardFile instanceof File && cardFile.size > 0;
+  if (!name && !hasCard) {
+    state.characterNotice = "请填写角色名称，或选择一张角色卡。";
+    render();
+    return;
+  }
+  state.characterBusy = true;
+  state.characterNotice = "";
+  render();
+  try {
+    let character;
+    if (hasCard) {
+      const params = {};
+      if (/\.(png|charx)$/i.test(cardFile.name)) {
         const dataUrl = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result));
           reader.onerror = () => reject(new Error("无法读取所选文件"));
-          reader.readAsDataURL(file);
+          reader.readAsDataURL(cardFile);
         });
         params.card_base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
       } else {
-        params.card_text = await file.text();
+        params.card_text = await cardFile.text();
       }
-      state.characterBusy = true;
-      state.characterNotice = "";
-      render();
+      if (name) params.name = name;
       const result = await rpc("character.import_card", params);
-      const character = result.character;
-      // The character.changed event may have landed first; upsert by id so the
-      // imported character never appears twice in the grid.
-      state.characters = state.characters.some((item) => item.id === character.id)
-        ? state.characters.map((item) => (item.id === character.id ? character : item))
-        : [...state.characters, character];
-      state.selectedCharacter = character.id;
+      character = result.character;
       const warnings = Array.isArray(result.warnings) ? result.warnings : [];
       state.characterNotice = warnings.length
-        ? `${result.character.name} 已导入角色卡；注意：${warnings.join("；")}`
-        : `${result.character.name} 已从角色卡导入。`;
-      await loadAvatarState();
-    } catch (error) {
-      state.characterNotice = `角色卡导入失败：${error.message}`;
-    } finally {
-      state.characterBusy = false;
-      render();
+        ? `${character.name} 已从角色卡导入；注意：${warnings.join("；")}`
+        : `${character.name} 已从角色卡导入。`;
+    } else {
+      const response = await api("/rpc", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "character.create", params: { name, config: { language: "zh-CN", memory_enabled: false, persona: { identity: "", traits: "", relationship: "", speaking_style: "", behavior: "", boundaries: "", response_length: "balanced", system_prompt: "", greeting: "" }, avatar: { position: "center", opacity: 1, scale: 1, idle_motion: true, auto_rotate: false, rotation_speed: 0.12 } } } }) });
+      if (response.error) throw new Error(response.error.message || "创建失败");
+      character = response.result;
+      state.characterNotice = `${character.name} 已创建；在下方完善人设并绑定 Avatar 模型。`;
     }
-  };
-  input.click();
+    state.characters = state.characters.some((item) => item.id === character.id)
+      ? state.characters.map((item) => (item.id === character.id ? character : item))
+      : [...state.characters, character];
+    state.selectedCharacter = character.id;
+    state.characterCreating = false;
+    await loadAvatarState();
+  } catch (error) {
+    state.characterNotice = `创建失败：${error.message}`;
+  } finally {
+    state.characterBusy = false;
+    render();
+  }
 }
 
 async function createCharacter() {
-  const name = window.prompt("角色名称", "新角色");
-  if (!name?.trim()) return;
-  try {
-    const character = await api("/rpc", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "character.create", params: { name: name.trim(), config: { language: "zh-CN", memory_enabled: false, persona: { identity: "", traits: "", relationship: "", speaking_style: "", behavior: "", boundaries: "", response_length: "balanced", system_prompt: "", greeting: "" }, avatar: { position: "center", opacity: 1, scale: 1, idle_motion: true, auto_rotate: false, rotation_speed: 0.12 } } } }) });
-    state.characters.push(character.result);
-    state.selectedCharacter = character.result.id;
-    await loadAvatarState();
-    render();
-  } catch (error) {
-    window.alert(`创建失败：${error.message}`);
-  }
+  state.characterCreating = !state.characterCreating;
+  state.characterNotice = "";
+  render();
 }
 
 async function saveCharacter(event) {

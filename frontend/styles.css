@@ -1123,3 +1123,12 @@ input:focus, textarea:focus, select:focus { border-color: color-mix(in srgb, var
 .portal-closers .ghost-button { font-size: 10px; }
 .portal-add-form { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 7px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.06); }
 .portal-add-form input { font-size: 11px; padding: 7px 8px; }
+
+/* Unified character creation: blank start or card import in one flow. */
+.character-create-panel { display: grid; gap: 10px; border: 1px solid var(--accent-border); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 16px; }
+.character-create-panel strong { font-size: 13px; color: var(--accent-strong); }
+.character-create-panel label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.character-create-panel input[type="text"] { padding: 8px 10px; }
+.character-create-panel input[type="file"] { font-size: 11px; color: var(--muted); }
+.character-create-actions { display: flex; gap: 9px; }
+.character-create-note { margin: 0; color: var(--faint); font-size: 10px; line-height: 1.5; }
