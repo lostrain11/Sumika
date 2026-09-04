@@ -20,7 +20,7 @@
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `05d511f` (当前 `HEAD`；场景外壳重置与远景入库已完成；工作树仅剩范围外未跟踪产物)
+- Baseline commit: `9cc76f1` (当前 `HEAD`；工作树干净，仅剩范围外未跟踪产物)
 - Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
 - Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
 - Status source: [status-matrix.md](status-matrix.md)
@@ -34,7 +34,7 @@ Existing untracked `example.txt`, `output/`, and `test-results/` are outside the
 
 **场景优先 UI 外壳重置（实现与回归完成，2026-09-04）**
 
-Phase 0、1、2 和 3 均已完成；本轮完成客户端 UI 彻底重置第一期（场景优先外壳）与网页门户，Phase 4 仍不开始。客户端从 11 页签工作台改为「全屏场景视口 + 4 抽屉」：Avatar 占屏 60%+ 常驻（WebGL 跨导航不卸载）、气泡流 + galgame 对白框输入、工作台/角色/模块/设置四个全屏抽屉（Esc/✕ 回场景）、竖排 dock 常驻抽屉之上、桌宠浮窗同款对白框。配色开源中立（夜蓝 + Sumika 自有薄荷强调色，不绑定任何版权角色）；每角色 `theme.accent` 由角色卡导入自动读取（`extensions.theme_color`），`color-mix` 派生全套色调；模块页启用「＋ 添加模块」折叠网格；设置页做实（背景色板/本地背景图/真实数据目录/快照）；首用欢迎卡替代常驻指南页。**网页门户**：dock 第 5 图标（仅桌面版），Kimi/ChatGPT/智谱/DeepSeek/Qwen/豆包各开独立 Tauri WebviewWindow，登录存 `.sumika-desktop/portals/<站点>/`（重启持久、站点 Cookie 隔离），支持自定义站点（localStorage）；原始站点无 persona 注入，与 BrowserSkill 网页 Route 完全隔离。分层模型借鉴 amica、抽屉结构借鉴 Open-LLM-VTuber-Web、气泡借鉴 ChatVRM（三者 MIT，仅移植交互模式并全部以 Sumika token 重新表达，无文件复制，登记于 license-ledger）。Playwright 50/50、后端 576/576、cargo 8/8、build、check_docs 全绿。
+Phase 0、1、2 和 3 均已完成；本轮完成客户端 UI 彻底重置第一期（场景优先外壳）与网页门户，Phase 4 仍不开始。客户端从 11 页签工作台改为「全屏场景视口 + 4 抽屉」：Avatar 占屏 60%+ 常驻（WebGL 跨导航不卸载）、气泡流 + galgame 对白框输入、工作台/角色/模块/设置四个全屏抽屉（Esc/✕ 回场景）、竖排 dock 常驻抽屉之上、桌宠浮窗同款对白框。配色开源中立（夜蓝 + Sumika 自有薄荷强调色，不绑定任何版权角色）；每角色 `theme.accent` 由角色卡导入自动读取（`extensions.theme_color`），`color-mix` 派生全套色调；模块页启用「＋ 添加模块」折叠网格；设置页做实（背景色板/本地背景图/真实数据目录/快照）；首用欢迎卡替代常驻指南页。**角色页重构**：新建角色与导入角色卡合并为单一「＋ 新建角色」内联面板（卡可选，卡内 theme_color 成为角色强调色）；Avatar 模型库从常驻页底移入编辑器第 4 折叠区「Avatar 模型」。**网页门户（当前为独立窗口形态）**：dock 第 5 图标（仅桌面版），Kimi/ChatGPT/智谱/DeepSeek/Qwen/豆包各开独立 Tauri WebviewWindow，登录存 `.sumika-desktop/portals/<站点>/`（重启持久、站点 Cookie 隔离），支持自定义站点；原始站点无 persona 注入，与 BrowserSkill 网页 Route 完全隔离。**一键启动**：仓库根 `启动Sumika.bat`（自动清理 3080/8771 残留进程 → 启动桌面版 → 打开受管 Edge Agent Window），桌面快捷方式 Sumika.lnk 指向它。**网页 Route 回复确认修复（`9cc76f1`）**：`WebChatProvider.stream` 遇 `pending+possibly_sent` 时轮询同一 attempt 直到完成（实测 Kimi 4 秒即报错、16 秒后台才提取到回复的时序问题），绝不重发。分层模型借鉴 amica、抽屉结构借鉴 Open-LLM-VTuber-Web、气泡借鉴 ChatVRM（三者 MIT，仅移植交互模式并全部以 Sumika token 重新表达，无文件复制，登记于 license-ledger）。Playwright 50/50、后端 576/576（web_chat 54/54）、cargo 8/8、build、check_docs 全绿。
 
 **固定 DSH 主 Agent 启动闭环（实现与实机验收完成，2026-09-03）**
 
@@ -53,9 +53,9 @@ Phase 0、1、2 和 3 均已完成；本轮完成固定 DSH 启动链的 fail-cl
 
 ## 接下来的三个动作
 
-1. 后续启动统一使用 `tools/run-desktop.ps1 -NoBuild`；网页 Route 发消息前还需受管 Edge Agent Window 在线：运行 `tools/setup-browserskill.ps1 -LaunchAgentBrowser` 打开它，`browser.status` 变为 `ready` 后网页聊天才可用（窗口关闭或应用重启后需重新执行）；若预检显示 `provider=needs-action`，由用户单独授权并重新健康检查。
-2. 在日用会话中使用安和昴角色设定（聊天通道 persona 已生效，场景壳下可直接体验新 UI），并继续逐站用 DOM/ARIA、HTML projection 与 OCR 修通真实网页发送和回复提取，优先解决 ChatGPT 的回复定位。
-3. UI 重置后续轮次（按需排期）：聊天上下文装配（世界书关键词注入 + 记忆分层）、工作台项目分组的会话绑定后端、背景视频/网页壁纸层；Agent/DSH 通道 persona 投影仍为后续任务（见 characters.md 设计钩子）。五站 `3 + 2` 聚合验收继续按既有口径执行。
+1. 后续启动使用桌面快捷方式 Sumika.lnk（或 `启动Sumika.bat`，内含残留进程清理 + `run-desktop.ps1 -NoBuild` + 受管 Edge Agent Window）；手动方式仍可分别运行两个脚本；若预检显示 `provider=needs-action`，由用户单独授权并重新健康检查。
+2. 网页门户形态重构（用户已确认方向、待实施）：从「独立 WebviewWindow」改为「主窗口内嵌子 webview」——启用 Tauri `unstable` feature，门户 webview `set_bounds` 到聊天列右侧、每站独立 data_directory 不变、门户激活时隐藏 Avatar 视口；站点切换入口移到对白框发送按钮右侧（图标显示当前站点，点击弹出切换面板）；dock 第 5 图标与 portal 面板移除。技术调研已确认：多 webview 必须开 unstable（`Window::add_child`/`WebviewBuilder` 均 unstable 门控），per-webview `data_directory` 在 wry/WebView2 层可用，open/close 必须 async command（Windows 同步命令建 webview 会死锁）；iframe 与窗口嵌入路线已排除。
+3. 其余排期：聊天上下文装配（世界书关键词注入 + 记忆分层）、工作台项目分组的会话绑定后端、背景视频/网页壁纸层；Agent/DSH 通道 persona 投影仍为后续任务（见 characters.md 设计钩子）。网页 Route 优先复测 ChatGPT 回复定位（Kimi 已随 `9cc76f1` 修复提交确认链路）；五站 `3 + 2` 聚合验收继续按既有口径执行。
 
 ## 固定决策
 
@@ -91,7 +91,7 @@ Phase 0、1、2 和 3 均已完成；本轮完成固定 DSH 启动链的 fail-cl
 
 当前工作树已通过：
 
-- Python unittest: 576 tests；Tools unittest: 58 tests；Playwright: 50 tests（50 passed；UI 重置后选择器全面更新为场景壳导航，含 retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；
+- Python unittest: 576 tests（含 web_chat 54：provider 轮询 pending attempt 新用例）；Tools unittest: 58 tests；Playwright: 50 tests（50 passed；UI 重置后选择器全面更新为场景壳导航，含角色创建/卡片导入合一流程、Avatar 模型折叠区、retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；cargo test: 8 passed（门户 site-id/URL 校验）；
 - `node --check frontend/main.js`;
 - frontend production build;
 - `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml` (6 passed);

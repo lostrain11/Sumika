@@ -70,6 +70,15 @@ desktop shell — the browser preview cannot create Tauri windows and shows no
 portal entry. Custom portal entries stay in that desktop window's local
 storage only.
 
+Next form (user-confirmed direction, not yet implemented): embed portals as
+child webviews inside the main window instead of separate windows. This
+requires the Tauri `unstable` feature (`Window::add_child`/`WebviewBuilder`
+are unstable-gated in 2.11.5), per-webview `data_directory` (supported by
+wry/WebView2), async commands (synchronous webview creation deadlocks on
+Windows), and moving the site switcher next to the chat composer's send
+button. iframe and OS-window embedding were evaluated and rejected (site CSP
+and the lack of window reparenting respectively).
+
 Controlled automation of a separate desktop application is deliberately not
 implemented by the overlay. It is exposed through the runtime-neutral
 [desktop automation toolkit](desktop-automation.md): an approved application
