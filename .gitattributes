@@ -1,0 +1,15 @@
+/.sumika* export-ignore
+/.zcode export-ignore
+/deprecated export-ignore
+/output export-ignore
+/test-results export-ignore
+/example.txt export-ignore
+/output.txt export-ignore
+**/.env* export-ignore
+**/*.db export-ignore
+**/*.db-* export-ignore
+**/*.sqlite3 export-ignore
+**/*.sqlite3-* export-ignore
+**/node_modules export-ignore
+/frontend/dist export-ignore
+/src-tauri/target export-ignore

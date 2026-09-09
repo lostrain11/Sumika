@@ -1,0 +1,300 @@
+{
+  "status": "passed",
+  "date": "2026-09-06T00:56:12.914Z",
+  "checks": [
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "a-companion-1440"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "a-companion-1440",
+      "colors": 175
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "a-companion-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "a-companion-1280",
+      "colors": 162
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "a-capabilities-1280"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "a-capabilities-1440"
+    },
+    {
+      "check": "categories-add-remove-no-enablement",
+      "passed": true,
+      "label": "a"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "a-pet"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "a-pet",
+      "colors": 100
+    },
+    {
+      "check": "mode-draft-focus-collapse-alpha",
+      "passed": true,
+      "label": "a"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "b-companion-1440"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "b-companion-1440",
+      "colors": 162
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "b-companion-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "b-companion-1280",
+      "colors": 153
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "b-capabilities-1280"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "b-capabilities-1440"
+    },
+    {
+      "check": "categories-add-remove-no-enablement",
+      "passed": true,
+      "label": "b"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "b-pet"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "b-pet",
+      "colors": 102
+    },
+    {
+      "check": "mode-draft-focus-collapse-alpha",
+      "passed": true,
+      "label": "b"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "c-companion-1440"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "c-companion-1440",
+      "colors": 179
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "c-companion-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "c-companion-1280",
+      "colors": 175
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "c-capabilities-1280"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "c-capabilities-1440"
+    },
+    {
+      "check": "categories-add-remove-no-enablement",
+      "passed": true,
+      "label": "c"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "c-pet"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "c-pet",
+      "colors": 98
+    },
+    {
+      "check": "mode-draft-focus-collapse-alpha",
+      "passed": true,
+      "label": "c"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "d-companion-1440"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "d-companion-1440",
+      "colors": 164
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "d-companion-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "d-companion-1280",
+      "colors": 145
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "d-capabilities-1280"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "d-capabilities-1440"
+    },
+    {
+      "check": "categories-add-remove-no-enablement",
+      "passed": true,
+      "label": "d"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "d-pet"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "d-pet",
+      "colors": 94
+    },
+    {
+      "check": "mode-draft-focus-collapse-alpha",
+      "passed": true,
+      "label": "d"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "e-companion-1440"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "e-companion-1440",
+      "colors": 199
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "e-companion-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "e-companion-1280",
+      "colors": 179
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "e-capabilities-1280"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "e-capabilities-1440"
+    },
+    {
+      "check": "categories-add-remove-no-enablement",
+      "passed": true,
+      "label": "e"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "e-pet"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "e-pet",
+      "colors": 96
+    },
+    {
+      "check": "mode-draft-focus-collapse-alpha",
+      "passed": true,
+      "label": "e"
+    },
+    {
+      "check": "history-focus-reorder-configuration-modal",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "compact-client"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "compact-client",
+      "colors": 136
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "compact-capabilities"
+    },
+    {
+      "check": "local-only-no-api-no-errors",
+      "passed": true
+    },
+    {
+      "check": "twenty-deliverables-and-overview",
+      "passed": true
+    }
+  ],
+  "scope": "Isolated visual studies only, not native windows, production capabilities or life simulation."
+}

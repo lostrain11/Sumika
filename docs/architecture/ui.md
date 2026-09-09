@@ -1,5 +1,7 @@
 # Scene-first UI shell
 
+当前 UI 已于 2026-09-07 改为 [A+ 五项文字导航与原生双模式](../ui/a-plus-client.md)。下面的 2026-09-04 竖排 dock、四抽屉和状态胶囊描述保留为历史设计；不再是当前导航或桌宠生命周期的事实源。HTTP/RPC 与各业务视图的所有权边界保持不变。
+
 The client is a single full-screen scene viewport, not a page-tab tool. The
 character IS the interface: the viewport is always visible and everything else
 floats above it. This contract was introduced in the 2026-09-04 UI reset and

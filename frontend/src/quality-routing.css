@@ -1,0 +1,81 @@
+.quality-settings, .quality-workbench { display: grid; gap: 14px; }
+.quality-refresh { border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; overflow-wrap: anywhere; }
+.quality-refresh summary { cursor: pointer; color: var(--accent-strong); }
+.quality-refresh p, .quality-selection-modes p { color: var(--muted); line-height: 1.6; }
+.quality-refresh-grid { display: grid; gap: 8px; margin-top: 10px; }
+.quality-refresh-grid > div { border: 1px solid var(--line); border-radius: 6px; padding: 10px; display: grid; gap: 5px; }
+.quality-refresh-grid span, .quality-refresh-grid small { color: var(--muted); }
+.benefits-section { min-width: 0; max-width: 100%; border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; letter-spacing: 0; overflow-wrap: anywhere; }
+.benefits-section summary { cursor: pointer; color: var(--accent-strong); }
+.benefits-body { display: grid; gap: 10px; min-width: 0; margin-top: 10px; }
+.benefits-toolbar, .benefits-actions, .benefits-row-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; min-width: 0; }
+.benefits-section .ghost-button { white-space: normal; max-width: 100%; min-height: 30px; font-size: 11px; overflow-wrap: anywhere; }
+.benefits-section p { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.benefits-section strong { min-width: 0; font-size: 12px; font-weight: 600; }
+.benefits-section a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.benefits-section span { color: var(--muted); font-size: 11px; }
+.benefits-configure { display: grid; gap: 8px; min-width: 0; }
+.benefits-toggle { display: flex; align-items: flex-start; gap: 7px; color: var(--muted); font-size: 11px; }
+.benefits-toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin: 1px 0 0; accent-color: var(--accent-strong); }
+.benefits-browser { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; min-width: 0; }
+.benefits-browser label { display: grid; gap: 5px; flex: 1 1 150px; min-width: 0; font-size: 11px; color: var(--muted); }
+.benefits-browser select { width: 100%; min-width: 0; max-width: 100%; font-size: 11px; }
+.benefits-actions { justify-content: flex-start; }
+.benefits-checkin { display: grid; gap: 5px; border-top: 1px solid var(--line); padding-top: 8px; min-width: 0; }
+.benefits-tabs { display: flex; flex-wrap: wrap; gap: 4px 12px; border-bottom: 1px solid var(--line); }
+.benefits-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; min-height: 32px; max-width: 100%; padding: 6px 0; white-space: normal; overflow-wrap: anywhere; }
+.benefits-tabs button[aria-selected="true"] { color: var(--accent-strong); border-bottom-color: var(--accent-strong); }
+.benefits-section :focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.benefits-offers, .benefits-sources, .benefits-grants { display: grid; gap: 0; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.benefits-offers { max-height: 360px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.benefits-sources { max-height: 180px; overflow-y: auto; overscroll-behavior: contain; }
+.benefits-offer { display: grid; gap: 4px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.benefits-row-heading strong { flex: 1 1 150px; }
+.benefits-sources li { display: grid; gap: 3px; min-width: 0; padding: 6px 0; }
+.benefits-grants li { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.benefits-section .benefits-error { color: var(--warn); }
+.benefits-notice:empty { display: none; }
+.quality-selection-modes { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--line); border-radius: 6px; }
+.quality-selection-modes > label { display: grid; gap: 5px; }
+.quality-selection-modes .quality-candidate-list { max-height: 260px; overflow: auto; }
+.quality-section-heading, .quality-list-heading, .quality-form-actions, .quality-task-open, .quality-task-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.quality-section-heading strong, .quality-section-heading small { display: block; }
+.quality-section-heading strong { margin-top: 4px; font-size: 14px; color: var(--accent-strong); }
+.quality-section-heading small, .quality-disclosure, .quality-form-actions span, .quality-task-budget, .quality-task-open small, .quality-node-list small { color: var(--faint); font-size: 11px; line-height: 1.5; }
+.quality-settings-form, .quality-plan-form { display: grid; gap: 12px; }
+.quality-settings-form > label, .quality-goal-field, .quality-budget-fields > label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.quality-settings-form select, .quality-budget-fields input, .quality-goal-field textarea { width: 100%; min-width: 0; }
+.quality-budget-fields { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(130px, 1fr) auto; align-items: end; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 11px; }
+.quality-budget-fields legend { padding: 0 4px; color: var(--faint); font-size: 10px; }
+.quality-budget-fields.disabled { opacity: .62; }
+.quality-notice { border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--muted); padding: 9px 11px; font-size: 11px; line-height: 1.5; }
+.quality-candidate-list { display: grid; gap: 7px; }
+.quality-candidate { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--line); background: var(--surface-2); padding: 9px 10px; border-radius: 5px; }
+.quality-candidate input { margin-top: 3px; }
+.quality-candidate span { flex: 1; min-width: 0; }
+.quality-candidate strong, .quality-candidate small { display: block; }
+.quality-candidate strong { font-size: 12px; }
+.quality-candidate small { color: var(--faint); font-size: 10px; margin-top: 3px; overflow-wrap: anywhere; }
+.quality-candidate em { color: var(--warn); font-style: normal; font-size: 10px; }
+.quality-external, .quality-override { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 11px; }
+.quality-disclosure { margin: -5px 0 0 23px; }
+.quality-task-list { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+.quality-list-heading strong { font-size: 13px; }
+.quality-list-heading small { color: var(--faint); font-size: 10px; }
+.quality-task { border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.quality-task.selected { border-color: var(--accent-border); }
+.quality-task-open { width: 100%; border: 0; background: transparent; padding: 11px 12px; text-align: left; color: var(--muted); }
+.quality-task-open:hover { background: var(--accent-soft); }
+.quality-task-open strong, .quality-task-open small { display: block; }
+.quality-task-open strong { color: var(--text); font-size: 12px; }
+.quality-task-budget { margin: 0; padding: 0 12px 10px; }
+.quality-task-detail { display: grid; gap: 10px; border-top: 1px solid var(--line); padding: 12px; }
+.quality-task-budget-form { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(130px, 1fr) auto; align-items: end; gap: 10px; }
+.quality-task-budget-form label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.quality-task-detail > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.quality-node-list, .quality-result-list { display: grid; gap: 6px; }
+.quality-node-list > div, .quality-result-list .quality-result { border-left: 2px solid var(--line); padding: 5px 8px; }
+.quality-node-list strong, .quality-node-list small { display: block; }
+.quality-node-list strong, .quality-result-list strong { font-size: 11px; }
+.quality-result-list p { margin: 4px 0 0; color: var(--muted); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .quality-budget-fields, .quality-task-budget-form { grid-template-columns: 1fr; }.quality-section-heading, .quality-form-actions { align-items: flex-start; flex-direction: column; }.quality-task-actions { justify-content: flex-start; flex-wrap: wrap; } }

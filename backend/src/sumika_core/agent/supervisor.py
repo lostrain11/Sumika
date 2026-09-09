@@ -99,6 +99,7 @@ EVIDENCE_ORDER = {
 }
 QUALITY_ORDER = {"unknown": 0, "basic": 1, "standard": 2, "strong": 3, "premium": 4}
 COST_ORDER = {"free-limited": 0, "local": 1, "paid-low": 2, "paid-high": 3, "unknown": 4}
+REASONING_EFFORTS = frozenset({"off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"})
 # Browser and external-harness transports have a small boundary window for
 # process/stdio delivery.  The grace is part of the supervisor's effective
 # deadline (rather than a retry) so a late response is accepted once, while a
@@ -630,6 +631,8 @@ class RuntimeRouteDescriptor:
     source: str = "core"
     source_kind: str = "provider"
     quality_tier: str = "unknown"
+    reasoning_efforts: tuple[str, ...] = ()
+    default_reasoning_effort: str = "unknown"
     cost_class: str = "unknown"
     processing_location: str = "cloud"
     auth_state: str = "unknown"
@@ -680,12 +683,18 @@ class RuntimeRouteDescriptor:
         object.__setattr__(self, "source", sanitize_text(str(self.source or "core"), limit=120))
         object.__setattr__(self, "source_kind", _token(self.source_kind, "source_kind"))
         quality = str(self.quality_tier or "unknown").strip().lower()
+        efforts = tuple(dict.fromkeys(str(item).strip().lower() for item in tuple(self.reasoning_efforts or ()) if str(item).strip().lower() in REASONING_EFFORTS))
+        default_effort = str(self.default_reasoning_effort or "unknown").strip().lower()
+        if default_effort not in REASONING_EFFORTS or (efforts and default_effort not in efforts):
+            default_effort = "unknown"
         cost = str(self.cost_class or "unknown").strip().lower()
         if quality not in QUALITY_ORDER:
             quality = "unknown"
         if cost not in COST_ORDER:
             cost = "unknown"
         object.__setattr__(self, "quality_tier", quality)
+        object.__setattr__(self, "reasoning_efforts", efforts)
+        object.__setattr__(self, "default_reasoning_effort", default_effort)
         object.__setattr__(self, "cost_class", cost)
         object.__setattr__(self, "processing_location", _token(self.processing_location, "processing_location"))
         object.__setattr__(self, "auth_state", _token(self.auth_state, "auth_state"))
@@ -736,6 +745,8 @@ class RuntimeRouteDescriptor:
             "evidenceRefs": "evidence_refs",
             "sourceKind": "source_kind",
             "qualityTier": "quality_tier",
+            "reasoningEfforts": "reasoning_efforts",
+            "defaultReasoningEffort": "default_reasoning_effort",
             "costClass": "cost_class",
             "processingLocation": "processing_location",
             "authState": "auth_state",
@@ -749,7 +760,8 @@ class RuntimeRouteDescriptor:
             for key in (
                 "route_id", "provider_id", "model_id", "display_name",
                 "provider_profile_id", "harness_id", "capabilities",
-                "quality_tier", "cost_class", "processing_location",
+                "quality_tier", "reasoning_efforts", "default_reasoning_effort",
+                "cost_class", "processing_location",
                 "auth_state", "quota_state", "health_state", "observed_at",
                 "version", "source_kind", "transport", "metadata",
             )
@@ -794,6 +806,8 @@ class RuntimeRouteDescriptor:
             "source": self.source,
             "source_kind": self.source_kind,
             "quality_tier": self.quality_tier,
+            "reasoning_efforts": list(self.reasoning_efforts),
+            "default_reasoning_effort": self.default_reasoning_effort,
             "cost_class": self.cost_class,
             "processing_location": self.processing_location,
             "auth_state": self.auth_state,
@@ -830,6 +844,7 @@ class DynamicRoutingRequest:
     budget_policy: str = "prefer-free"
     preferred_route: str | None = None
     min_quality_tier: str | None = None
+    reasoning_effort: str = "auto"
     workspace_access: str = "none"
     depth: int = 0
     decision_key: str | None = None
@@ -880,6 +895,10 @@ class DynamicRoutingRequest:
             raise SupervisorValidationError("budget_policy is invalid")
         object.__setattr__(self, "confirmation_mode", confirmation)
         object.__setattr__(self, "budget_policy", budget_policy)
+        reasoning_effort = _token(self.reasoning_effort, "reasoning_effort", default="auto")
+        if reasoning_effort != "auto" and reasoning_effort not in REASONING_EFFORTS:
+            raise SupervisorValidationError("reasoning_effort is invalid")
+        object.__setattr__(self, "reasoning_effort", reasoning_effort)
         object.__setattr__(self, "preferred_route", _identifier(self.preferred_route, "preferred_route", required=False))
         quality = str(self.min_quality_tier or "").strip().lower() or None
         if quality and quality not in QUALITY_ORDER:
@@ -935,6 +954,7 @@ class DynamicRoutingRequest:
             "budgetPolicy": "budget_policy",
             "preferredRoute": "preferred_route",
             "minQualityTier": "min_quality_tier",
+            "reasoningEffort": "reasoning_effort",
             "workspaceAccess": "workspace_access",
             "decisionKey": "decision_key",
             "routeId": "route_id",
@@ -978,6 +998,7 @@ class DynamicRoutingRequest:
             "budget_policy": self.budget_policy,
             "preferred_route": self.preferred_route,
             "min_quality_tier": self.min_quality_tier,
+            "reasoning_effort": self.reasoning_effort,
             "workspace_access": self.workspace_access,
             "depth": self.depth,
             "decision_key": self.decision_key,
@@ -1008,6 +1029,7 @@ class DynamicRoutingRequest:
                 confirmation_mode=self.confirmation_mode,
                 preferred_route=self.preferred_route,
                 min_quality_tier=self.min_quality_tier,
+                reasoning_effort=self.reasoning_effort,
                 task_text=self.question,
             )
         except ImportError:
@@ -1041,6 +1063,7 @@ class DynamicSubtaskDispatch:
     quota_consent: bool = False
     confirmed: bool = False
     budget_policy: str = "prefer-free"
+    reasoning_effort: str = "auto"
     risk: str = "normal"
     difficulty: str = "auto"
     privacy_constraints: tuple[str, ...] = ()
@@ -1094,6 +1117,10 @@ class DynamicSubtaskDispatch:
         if budget_policy not in {"prefer-free", "free-only", "allow-paid", "no-paid"}:
             raise SupervisorValidationError("budget_policy is invalid")
         object.__setattr__(self, "budget_policy", budget_policy)
+        reasoning_effort = _token(self.reasoning_effort, "reasoning_effort", default="auto")
+        if reasoning_effort != "auto" and reasoning_effort not in REASONING_EFFORTS:
+            raise SupervisorValidationError("reasoning_effort is invalid")
+        object.__setattr__(self, "reasoning_effort", reasoning_effort)
         risk = str(self.risk or "normal").strip().lower()
         if risk not in {"low", "normal", "high", "critical"}:
             raise SupervisorValidationError("risk is invalid")
@@ -1150,6 +1177,7 @@ class DynamicSubtaskDispatch:
             "executorId": "executor",
             "quotaConsent": "quota_consent",
             "budgetPolicy": "budget_policy",
+            "reasoningEffort": "reasoning_effort",
             "privacyConstraints": "privacy_constraints",
             "minQualityTier": "min_quality_tier",
             "consultationId": "consultation_id",
@@ -1206,6 +1234,7 @@ class DynamicSubtaskDispatch:
             "quota_consent": self.quota_consent,
             "confirmed": self.confirmed,
             "budget_policy": self.budget_policy,
+            "reasoning_effort": self.reasoning_effort,
             "risk": self.risk,
             "difficulty": self.difficulty,
             "privacy_constraints": list(self.privacy_constraints),
@@ -1669,6 +1698,7 @@ class DynamicRouteSupervisor:
             "difficulty": request.difficulty,
             "risk": request.risk,
             "budget_policy": request.budget_policy,
+            "reasoning_effort": request.reasoning_effort,
             "budget_unit": request.budget_unit,
             "budget_class": budget_class,
             "budget_remaining": request.budget_remaining,
@@ -1732,6 +1762,8 @@ class DynamicRouteSupervisor:
             "route_requires_confirmation": route.requires_confirmation,
             "preferred": preferred,
             "quality_tier": route.quality_tier,
+            "reasoning_efforts": route.reasoning_efforts,
+            "default_reasoning_effort": route.default_reasoning_effort,
             "cost_class": route.cost_class,
             "quota_state": route.quota_state,
             "health_state": route.health_state,
@@ -1757,6 +1789,8 @@ class DynamicRouteSupervisor:
             "difficulty": record.dispatch.difficulty,
             "risk": record.dispatch.risk,
             "budget_policy": record.dispatch.budget_policy,
+            "reasoning_effort": record.dispatch.reasoning_effort,
+            "applied_reasoning_effort": "unknown",
             "budget_remaining": record.dispatch.budget_remaining,
             "budget_unit": "unknown",
             "budget_class": budget_class,
@@ -1883,6 +1917,10 @@ class DynamicRouteSupervisor:
 
     def register_worker(self, worker_id: str | Any, worker: Any | None = None, **kwargs: Any) -> str:
         return self.worker_registry.register(worker_id, worker, **kwargs)
+
+    def registered_routes(self) -> tuple[RuntimeRouteDescriptor, ...]:
+        with self._lock:
+            return tuple(self._routes.values())
 
     # ---- event boundary / replanning -------------------------------------------
     def arm_turn(self, value: Any, *, replace: bool = False) -> dict[str, Any]:
@@ -2270,6 +2308,8 @@ class DynamicRouteSupervisor:
                 "status": "no-compatible-route",
                 "trigger_event": event,
                 "selected_route": None,
+                "requested_reasoning_effort": routing.reasoning_effort,
+                "applied_reasoning_effort": "unknown",
                 "alternatives": [],
                 "reason_codes": ["no_compatible_route", *[f"{key}:{value}" for key, value in sorted(rejected.items())]],
                 "requires_confirmation": True,
@@ -2306,6 +2346,8 @@ class DynamicRouteSupervisor:
             "trigger_event": event,
             "selected_route": selected.route_id,
             "selected_worker": self._worker_kind(selected),
+            "requested_reasoning_effort": routing.reasoning_effort,
+            "applied_reasoning_effort": "unknown",
             "selection_source": selection_source,
             "selected_entry": selected.to_dict(evidence=self.evidence.references(selected.route_id, refs=selected.evidence_refs)),
             "alternatives": alternatives,
@@ -2372,6 +2414,7 @@ class DynamicRouteSupervisor:
                 quota_consent=routing.quota_consent,
                 confirmed=routing.confirmed,
                 budget_policy=routing.budget_policy,
+                reasoning_effort=routing.reasoning_effort,
                 risk=routing.risk,
                 runtime_id=selected.runtime_id,
                 executor=selected.executor,
@@ -2486,6 +2529,7 @@ class DynamicRouteSupervisor:
                         difficulty=request.difficulty,
                         risk=request.risk,
                         min_quality_tier=request.min_quality_tier,
+                        reasoning_effort=request.reasoning_effort,
                         explicit_route=request.route_id == route.route_id or request.preferred_route == route.route_id,
                     )
                     if rejection_code is None and request.budget_policy in {"free-only", "no-paid"} and route.cost_class not in {"free-limited", "local"}:
@@ -2571,6 +2615,7 @@ class DynamicRouteSupervisor:
         difficulty: str = "auto",
         risk: str = "normal",
         min_quality_tier: str | None = None,
+        reasoning_effort: str = "auto",
         explicit_route: bool = False,
     ) -> str | None:
         """Apply capability, privacy, health, quality, and evidence gates.
@@ -2598,6 +2643,13 @@ class DynamicRouteSupervisor:
             return "health_not_ready"
         if route.quota_state in {"exhausted", "expired", "blocked", "needs-auth"}:
             return f"quota_{route.quota_state}"
+
+        requested_reasoning_effort = str(reasoning_effort or "auto").strip().lower()
+        if requested_reasoning_effort != "auto":
+            if not route.reasoning_efforts:
+                return "reasoning_effort_unknown"
+            if requested_reasoning_effort not in route.reasoning_efforts:
+                return "reasoning_effort_unavailable"
 
         required_quality = self._required_quality(
             difficulty=difficulty,
@@ -2756,6 +2808,7 @@ class DynamicRouteSupervisor:
             difficulty=dispatch.difficulty,
             risk=dispatch.risk,
             min_quality_tier=dispatch.min_quality_tier,
+            reasoning_effort=dispatch.reasoning_effort,
             explicit_route=True,
         )
         if compatibility_error:

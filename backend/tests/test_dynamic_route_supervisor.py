@@ -399,6 +399,34 @@ class DynamicRouteSupervisorTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "completed")
 
+    def test_reasoning_effort_is_a_route_compatibility_gate(self):
+        supported = _route("reasoning-supported", reasoning_efforts=("low", "medium"), default_reasoning_effort="low")
+        worker = ProviderWorker(lambda dispatch: {"status": "completed", "answer": dispatch.reasoning_effort}, worker_id=supported.route_id, runtime_id="fixture")
+        supervisor = self.make_supervisor([supported], [(supported.route_id, worker)])
+
+        unavailable = supervisor.replan(
+            {
+                "parentSessionId": "reasoning-session",
+                "question": "use strong reasoning",
+                "reasoningEffort": "high",
+                "confirmationMode": "automatic",
+            }
+        )
+        self.assertEqual(unavailable["status"], "no-compatible-route")
+        self.assertIn("reasoning_effort_unavailable:1", unavailable["reason_codes"])
+
+        completed = supervisor.replan(
+            {
+                "parentSessionId": "reasoning-session",
+                "question": "use medium reasoning",
+                "reasoningEffort": "medium",
+                "confirmationMode": "automatic",
+                "autoDispatch": True,
+            }
+        )
+        self.assertEqual(completed["status"], "dispatched")
+        self.assertEqual(completed["dispatch"]["result"]["answer"], "medium")
+
     def test_only_event_boundaries_replan_and_duplicate_event_is_ignored(self):
         route = _route("route-event", cost_class="local")
         worker = ProviderWorker(lambda dispatch: {"status": "completed", "answer": "event-result"}, worker_id="route-event")

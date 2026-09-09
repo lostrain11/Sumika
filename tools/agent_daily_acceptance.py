@@ -545,7 +545,7 @@ def _full_checks(timeout: float) -> dict[str, Any]:
     backend_source = str(ROOT / "backend" / "src")
     existing_pythonpath = str(check_env.get("PYTHONPATH") or "").strip()
     check_env["PYTHONPATH"] = os.pathsep.join(
-        item for item in (backend_source, existing_pythonpath) if item
+        item for item in (backend_source, str(ROOT / "packages" / "quality-routing" / "src"), existing_pythonpath) if item
     )
     results: list[dict[str, Any]] = []
     for command in commands:

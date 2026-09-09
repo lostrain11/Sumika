@@ -565,6 +565,7 @@ class ProviderProfileWorker(ProviderWorker):
                 messages=[Message(role="user", content=content)],
                 provider_id=str(profile.get("adapter_id") or "openai-compatible"),
                 max_tokens=1024,
+                reasoning_effort=dispatch.reasoning_effort if dispatch.reasoning_effort not in {None, "auto"} else None,
             )
             chunks: list[str] = []
             for chunk in provider.stream(request):
@@ -696,7 +697,10 @@ class NativeRuntimeWorker(NativeChildAgentWorker):
                 model_ref = _model_ref(route)
                 selector = getattr(self.runtime, "select_model", None)
                 if model_ref and callable(selector):
-                    selector({"sessionId": child_id, "model": model_ref})
+                    selection = {"sessionId": child_id, "model": model_ref}
+                    if dispatch.reasoning_effort != "auto":
+                        selection["reasoningEffort"] = dispatch.reasoning_effort
+                    selector(selection)
                 receipt = prompt({"sessionId": child_id, "session_id": child_id, "text": dispatch.question, "mode": "execute"})
             if cancel_event.is_set():
                 cancel = getattr(self.runtime, "cancel", None)
@@ -802,7 +806,10 @@ class ZCodeExternalHarnessWorker(ExternalHarnessWorker):
             if model_ref:
                 selector = getattr(self.runtime, "select_model", None)
                 if callable(selector):
-                    selector({"sessionId": session_id, "model": model_ref})
+                    selection = {"sessionId": session_id, "model": model_ref}
+                    if dispatch.reasoning_effort != "auto":
+                        selection["reasoningEffort"] = dispatch.reasoning_effort
+                    selector(selection)
             if cancel_event.is_set():
                 return {"status": "cancelled", "error_code": "cancelled", "runtime_id": "zcode"}
             prompt_started = True

@@ -1,0 +1,44 @@
+{
+  "protocol_version": "1",
+  "task_id": "sumika-phase-2b-scene-store",
+  "title": "Extract pure scene state projection from the frontend entrypoint",
+  "stage": "implementation",
+  "risk": "medium",
+  "recommended_tier": "L2",
+  "assignment_mode": "direct",
+  "requested_reasoning_effort": "medium",
+  "applied_reasoning_effort": "unknown",
+  "goal": ["Centralize scene display state and navigation transitions without moving business state or changing RPC behavior"],
+  "dependencies": ["sumika-phase-2-scene-ui-shell"],
+  "workspace": {"root": ".", "worktree_required": false},
+  "allowed_paths": [
+    "frontend/src/scene-store.js",
+    "frontend/main.js",
+    "frontend/tests/scene-store.test.js",
+    "docs/refactor/phase-2b-scene-store-task.json",
+    "docs/architecture/README.md",
+    "docs/status-matrix.md"
+  ],
+  "forbidden_paths": ["backend/**", "frontend/styles.css", "src-tauri/**", ".sumika*/**", ".zcode/**", "deprecated/**"],
+  "acceptance": [
+    "Scene projection is pure, immutable and has safe defaults",
+    "Overlay mode never exposes a drawer",
+    "Unknown navigation falls back to Chat instead of creating an uncontrolled page",
+    "main.js consumes the projection for shell rendering and navigation",
+    "No RPC, storage, provider, permission, portal or Avatar lifecycle behavior changes"
+  ],
+  "verification": {
+    "commands": ["node frontend/tests/scene-shell.test.js", "node frontend/tests/scene-store.test.js", "npm --prefix frontend run build", "npm --prefix frontend run test:e2e", "python tools/check_docs.py"],
+    "levels": ["L0", "L1", "L2", "L3"]
+  },
+  "escalate_when": ["Projection requires backend data changes", "Existing smoke behavior changes", "Build or focused test failure repeats twice"],
+  "budget": {"estimated_calls": 1, "retry_limit": 1, "allow_external_cost_boundary_change": false, "currency": "unknown"},
+  "result": {
+    "status": "completed",
+    "focused_tests": ["scene-shell contract passed", "scene-store contract passed", "main.js syntax passed"],
+    "production_build": "passed",
+    "playwright_smoke": "50 passed",
+    "live_environment_verified": false,
+    "next_phase": "Drawer view modules and UI acceptance completed in phase-2c-ui-completion.json; RPC and Avatar lifecycle remain in the composition root"
+  }
+}

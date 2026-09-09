@@ -1,0 +1,14 @@
+:root { font-family:"Segoe UI","Microsoft YaHei",sans-serif; color:#303b37; background:#f4f6f3; }
+* { box-sizing:border-box; letter-spacing:0; }
+body { margin:0; padding:48px; }
+header { display:flex; justify-content:space-between; align-items:end; gap:24px; margin-bottom:36px; }
+header span { color:#a94067; font-size:12px; }
+h1 { font-family:"Yu Mincho","SimSun",serif; font-size:30px; font-weight:500; margin:14px 0 0; }
+header p,footer { font-size:12px; color:#6b7670; }
+main { display:grid; grid-template-columns:1fr 1fr; gap:30px; }
+figure { margin:0; min-width:0; }
+figure img { display:block; width:100%; aspect-ratio:1.6; object-fit:contain; background:white; border:1px solid #dce1d9; }
+figcaption { display:flex; justify-content:space-between; gap:16px; font-size:14px; margin-top:12px; }
+figcaption span { color:#6b7670; font-size:12px; }
+footer { margin-top:32px; padding-top:16px; border-top:1px solid #dce1d9; }
+@media(max-width:700px) { body { padding:24px; } header { display:block; } h1 { font-size:24px; } main { grid-template-columns:1fr; } figcaption { flex-wrap:wrap; } }

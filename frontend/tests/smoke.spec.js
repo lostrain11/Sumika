@@ -79,6 +79,7 @@ async function openCharacterSection(page, section) {
 /* Scene-first shell navigation: pages live inside four fullscreen drawers.
    Dock buttons open the drawer; multi-page drawers expose tabs. */
 const pageDrawer = {
+  Capabilities: "Capabilities",
   Chat: null,
   Agent: "Agent",
   WebWorkbench: "Agent",
@@ -86,8 +87,8 @@ const pageDrawer = {
   History: "Agent",
   Notifications: "Agent",
   Characters: "Characters",
-  Modules: "Modules",
-  Developer: "Modules",
+  Modules: "Settings",
+  Developer: "Settings",
   Settings: "Settings",
   Guide: "Settings",
 };
@@ -98,7 +99,7 @@ async function openPage(page, target) {
     await page.keyboard.press("Escape");
     return;
   }
-  await page.locator(`.scene-dock .nav-item[data-page="${dock}"]`).click();
+  await page.locator(`.scene-primary-nav .nav-item[data-page="${dock}"]`).click();
   if (dock !== target) {
     await page.locator(`.drawer-tabs .nav-item[data-page="${target}"]`).click();
   }
@@ -148,6 +149,14 @@ test.describe("Sumika UI shell", () => {
     await page.locator("#chat-input").fill("Playwright smoke message");
     await page.locator("#chat-form button[type=submit]").click();
     await expect(page.locator(".message.assistant").last()).toContainText("Playwright stub reply");
+    const messages = await page.locator(".message").allTextContents();
+    await page.locator("#chat-input").fill("next draft");
+    await page.locator("[data-overlay-open]").click();
+    await expect(page.locator(".pet-bubble")).toContainText("Playwright stub reply");
+    await page.locator("[data-overlay-open-main]").focus();
+    await page.locator("[data-overlay-open-main]").click();
+    await expect(page.locator("#chat-input")).toHaveValue("next draft");
+    expect(await page.locator(".message").allTextContents()).toEqual(messages);
 
     await openPage(page, "Modules");
     await expect(page.locator("body")).toContainText("语音识别");
@@ -265,10 +274,10 @@ test.describe("Sumika UI shell", () => {
     }
   });
 
-  test("顶部运行状态使用统一的扁平高度", async ({ page }) => {
+  test("A+ 文字导航和聊天状态无重复入口且不遮挡输入", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const metrics = await page.evaluate(() => {
-      const selectors = [".provider-summary", ".status-chip"];
+      const selectors = [".provider-summary-name", ".provider-summary-state"];
       return selectors.map((selector) => {
         const element = document.querySelector(selector);
         if (!element) return null;
@@ -281,8 +290,6 @@ test.describe("Sumika UI shell", () => {
       });
     });
     expect(metrics.every(Boolean)).toBe(true);
-    const heights = metrics.map((item) => item.height);
-    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
     const centers = metrics.map((item) => item.center);
     expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
     await expect(page.locator(".provider-summary")).toHaveCSS("white-space", "nowrap");
@@ -294,11 +301,15 @@ test.describe("Sumika UI shell", () => {
       document.body.append(probe);
       const muted = getComputedStyle(probe).color;
       probe.remove();
-      const dockItem = document.querySelector('.scene-dock .nav-item[data-page="Agent"]');
+      const dockItem = document.querySelector('.scene-primary-nav .nav-item[data-page="Agent"]');
       return { dock: dockItem ? getComputedStyle(dockItem).color : null, muted };
     });
     expect(palette.dock).toBe(palette.muted);
-    await expect(page.locator(".scene-dock .nav-item")).toHaveCount(4);
+    await expect(page.locator(".scene-primary-nav .nav-item")).toHaveCount(5);
+    await expect(page.locator(".scene-dock, .status-chip")).toHaveCount(0);
+    const composer = await page.locator(".composer").boundingBox();
+    const status = await page.locator(".provider-summary").boundingBox();
+    expect(status.y).toBeGreaterThanOrEqual(composer.y + composer.height - 1);
   });
 
   test("能力目录展示真实实现、网页登录边界并适配窄窗口", async ({ page }) => {
@@ -366,7 +377,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.setViewportSize({ width: 560, height: 720 });
-    await openPage(page, "Modules");
+    await openPage(page, "Developer");
     const panel = page.locator("[data-capability-catalog]");
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("本地 Ollama · qwen3:4b");
@@ -492,10 +503,12 @@ test.describe("Sumika UI shell", () => {
     expect(await copy.evaluate((element) => element.parentElement?.classList.contains("avatar-presenter"))).toBe(true);
     expect(await copy.evaluate((element) => element.parentElement?.classList.contains("avatar-placeholder"))).toBe(false);
     const placeholderBox = await placeholder.boundingBox();
-    const copyBox = await copy.boundingBox();
     expect(placeholderBox).not.toBeNull();
-    expect(copyBox).not.toBeNull();
-    expect(copyBox.y).toBeGreaterThanOrEqual(placeholderBox.y + placeholderBox.height - 1);
+    await expect(page.locator('[data-vrm-status="ready"]')).toBeVisible();
+    await expect(copy).toBeHidden();
+    await expect(page.locator(".scene-note")).toBeVisible();
+    await page.locator("[data-avatar-toggle]").click();
+    await expect(page.locator(".avatar-hidden-state")).toBeVisible();
   });
 
   test("缺失忽略墓碑只在开发者页审计", async ({ page }) => {
@@ -530,9 +543,13 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator(".desktop-overlay-toolbar")).toHaveCount(0);
     await expect(page.locator(".desktop-overlay-status")).toHaveCount(0);
     await expect(page.locator(".desktop-overlay-avatar .avatar-orbit")).toHaveCount(0);
-    await expect(page.locator(".desktop-overlay-avatar .avatar-preview-copy")).toHaveCount(0);
+    await expect(page.locator(".desktop-overlay-avatar .avatar-preview-copy")).toBeHidden();
     await expect(page.locator("[data-overlay-open-main]")).toBeVisible();
-    await expect(page.locator("[data-overlay-hide]")).toBeVisible();
+    await expect(page.locator("[data-overlay-hide]")).toHaveCount(0);
+    await page.locator("[data-pet-background]").focus();
+    await page.locator("[data-pet-background]").click();
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.mouse.move(-10, -10);
     const surfaceStyle = await page.locator(".desktop-overlay-shell").evaluate((element) => {
       const style = getComputedStyle(element);
       return { background: style.backgroundColor, border: style.borderWidth, shadow: style.boxShadow };
@@ -562,22 +579,23 @@ test.describe("Sumika UI shell", () => {
 
   test("入门指南 covers the workspace and links to controls", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await expect(page.locator(".scene-dock .nav-item")).toHaveCount(4);
+    await expect(page.locator(".scene-primary-nav .nav-item")).toHaveCount(5);
     await openPage(page, "Guide");
-    await expect(page.locator("h1")).toHaveText("入门指南");
+    await expect(page.locator(".drawer-body h1")).toHaveText("入门指南");
     await expect(page.locator("body")).toContainText("界面地图");
     await expect(page.locator("body")).toContainText("完整基本使用流程");
-    await expect(page.locator(".guide-map-item")).toHaveCount(10);
+    await expect(page.locator(".guide-map-item")).toHaveCount(11);
     await expect(page.locator(".guide-flow-item")).toHaveCount(7);
     await page.locator('.guide-jump[data-page="Modules"]').first().click();
     await expect(page.locator("body")).toContainText("语音识别");
   });
 
-  test("语音输入在 ASR 未启动时只显示配置引导", async ({ page }) => {
+  test("语音输入在 ASR 未启用时隐藏，配置入口保留在能力库", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator("[data-audio-record]").click();
-    await expect(page.locator(".voice-notice")).toContainText("请先在“模块”页启用语音识别");
-    await expect(page.locator("[data-audio-record]")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator("[data-audio-record]")).toHaveCount(0);
+    await openPage(page, "Capabilities");
+    await page.locator(".capability-add-tile").click();
+    await expect(page.locator('[data-capability-library-card][data-module-id="asr"]')).toContainText("语音识别");
   });
 
   test("聊天草稿在工作区重绘后仍保留", async ({ page }) => {
@@ -2502,7 +2520,7 @@ test.describe("Sumika UI shell", () => {
     await expect(rows.nth(0)).toContainText("最近云端");
     await expect(rows.nth(1)).toContainText("较早本地");
     await expect(rows.nth(2)).toContainText("待配置连接");
-    await expect(page.locator(".privacy-chip")).toContainText("混合处理");
+    await expect(page.locator(".scene-chat .composer-note")).toContainText("混合处理");
     await page.locator("[data-provider-new]").click();
     await expect(page.locator(".provider-drawer")).toBeVisible();
     await expect(page.locator("#provider-profile-form")).toContainText("当前 Base URL");
@@ -2586,6 +2604,7 @@ test.describe("Sumika UI shell", () => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Modules");
     const pricingPanel = page.locator("[data-route-pricing-panel]");
+    await page.locator('.module-evidence > summary').click();
     await expect(pricingPanel).toContainText("model-a");
     await expect(pricingPanel).toContainText("vip");
     await expect(pricingPanel).toContainText("USD-credit");

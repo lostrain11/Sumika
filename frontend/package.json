@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "python ../tools/check_release_assets.py && npm run build:vrm && vite build",
+    "test:unit": "node --test tests/*.test.js",
     "build:vrm": "esbuild src/vrm-viewer.js --bundle --format=esm --minify --outfile=public/vendor/sumika-vrm-viewer.js",
     "test:e2e": "node ../tools/run-playwright.mjs",
     "dev:desktop": "vite --host 127.0.0.1 --port 8771",

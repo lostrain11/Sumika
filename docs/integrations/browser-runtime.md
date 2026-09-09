@@ -1,5 +1,7 @@
 # 隔离浏览器
 
+> 2026-09-08：用户正式确认网页交互统一到Sumika内置浏览器，见[正式需求](../requirements/embedded-browser.md)（`BROWSER-003`）。本文的BrowserSkill、独立门户及原生咨询描述是当前实现边界，不能视为已完成统一。旧咨询五来源3+2不再规定默认策略，当前要求见 `BROWSER-004`。
+
 首版浏览器能力使用 Tencent BrowserSkill 作为可替换 capability：源码参考 commit
 `a004291848e8641400b973b8d612b4c4b74cdc90`；运行时固定 CLI `0.1.11`
 （tag commit `70b851a3e8408f4994a757e47137ef515bd82901`）、DSH plugin

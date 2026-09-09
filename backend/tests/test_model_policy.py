@@ -45,6 +45,30 @@ class ModelRouterTests(unittest.TestCase):
         self.assertEqual(decision.selected_route, "local:small")
         self.assertFalse(decision.requires_confirmation)
 
+    def test_explicit_reasoning_effort_requires_declared_support(self):
+        supported = entry("local:reasoning", reasoning_efforts=("low", "medium"), default_reasoning_effort="low")
+        decision = self.router.decide(
+            RoutingRequest(task_kind="chat", reasoning_effort="medium", confirmation_mode="automatic"),
+            [supported],
+        )
+        self.assertEqual(decision.selected_route, supported.route_id)
+        self.assertEqual(decision.requested_reasoning_effort, "medium")
+        self.assertEqual(decision.applied_reasoning_effort, "unknown")
+
+        unavailable = self.router.decide(
+            RoutingRequest(task_kind="chat", reasoning_effort="high", confirmation_mode="automatic"),
+            [supported],
+        )
+        self.assertEqual(unavailable.status, "no-compatible-route")
+        self.assertIn("reasoning_effort_unavailable:1", unavailable.reason_codes)
+
+        undeclared = self.router.decide(
+            RoutingRequest(task_kind="chat", reasoning_effort="low", confirmation_mode="automatic"),
+            [entry("local:undeclared")],
+        )
+        self.assertEqual(undeclared.status, "no-compatible-route")
+        self.assertIn("reasoning_effort_unknown:1", undeclared.reason_codes)
+
     def test_paid_candidate_requires_confirmation_even_in_automatic_mode(self):
         decision = self.router.decide(
             RoutingRequest(task_kind="chat", min_quality_tier="standard", confirmation_mode="automatic"),
@@ -69,6 +93,7 @@ class ModelRouterTests(unittest.TestCase):
                 entry("cloud:unknown", quality="standard", cost="unknown", location="cloud"),
                 entry("cloud:free", quality="standard", cost="free-limited", location="cloud"),
             ],
+            cost_estimates={"cloud:free": CostEstimate("cloud:free", "known", cash_currency="CNY", cash_min=0, cash_max=0)},
         )
         self.assertEqual(decision.selected_route, "cloud:free")
         self.assertEqual(decision.status, "selected")

@@ -1,4 +1,6 @@
 import "../styles.css";
+import "./scene-layout.css";
+import "./a-plus-layout.css";
 import "../main.js";
 
 /**
@@ -10,16 +12,8 @@ import "../main.js";
  * preview; future Vue pages can replace this bridge without changing the
  * routes, event contracts, or runtime renderer boundary.
  */
-export const pageRoutes = [
-  "Chat",
-  "Characters",
-  "Modules",
-  "Tasks",
-  "History",
-  "Notifications",
-  "Settings",
-  "Developer",
-  "Guide",
-] as const;
+import { NAV_ITEMS } from "./scene-shell.js";
+
+export const pageRoutes = NAV_ITEMS.map(([page]) => page);
 
 export type PageRoute = (typeof pageRoutes)[number];

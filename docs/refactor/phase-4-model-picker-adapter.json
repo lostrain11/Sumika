@@ -1,0 +1,40 @@
+{
+  "task_id": "sumika-phase-4-model-picker-advisory-adapter",
+  "stage": "completed",
+  "goal": "Expose model-picker catalog, pricing and evaluation evidence to Sumika without transferring routing or execution authority",
+  "repositories": ["D:/Code/model-picker", "D:/Code/Sumika"],
+  "public_contracts": {
+    "catalog": "model-picker/catalog/v1",
+    "pricing": "model-picker/pricing/v1",
+    "evaluations": "model-picker/evaluations/v1",
+    "sumika_policy": "model-policy/v1"
+  },
+  "completed": [
+    "model-picker GET /catalog and GET /evaluations",
+    "model-picker GET /pricing and advisory recommendation surface",
+    "backward-compatible GET /export projection",
+    "remote_id/vendor/pricing_source/billing_group/quota_type fields",
+    "official and relay price sources remain distinct",
+    "Sumika read-only loopback ModelPickerAdapter",
+    "explicit profile mapping and duplicate offer isolation",
+    "stale, unknown quota, unavailable endpoint and unknown price fail closed",
+    "reasoning effort evidence is projected without fabricating support or applied effort",
+    "picker adapter has no execution worker and cannot authorize a route"
+  ],
+  "configuration": {
+    "environment": "SUMIKA_MODEL_PICKER_URL",
+    "default_transport": "loopback HTTP",
+    "credentials": "none",
+    "allowlist": ["127.0.0.1", "localhost", "::1"]
+  },
+  "verification": [
+    "python -m unittest backend/tests/test_model_picker_adapter.py",
+    "python -m pytest D:/Code/model-picker/tests/test_webserver.py",
+    "git diff --check"
+  ],
+  "next": [
+    "map a real Sumika provider profile only after its own catalog/health/auth checks",
+    "keep picker recommendations advisory and revalidate every selected route",
+    "add provider-specific quota and usage receipts only from explicit authorized sources"
+  ]
+}

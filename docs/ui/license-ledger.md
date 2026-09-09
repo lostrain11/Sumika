@@ -7,6 +7,9 @@ review.
 
 | Source | Current use | Reuse status |
 | --- | --- | --- |
+| [温暖居所设计预览](concepts/warm-home-v1/README.md) | 独立静态双模式设计稿，未进入生产客户端 | 房间几何与纹理原创；仅引用既有 VRoid 示例模型，不复制参考项目素材；Lucide 0.468.0 在设计目录保留 ISC / Feather MIT 声明，来源和哈希见预览 README；无真实 Provider 或设备访问 |
+| [五套风格对照设计](concepts/style-studies-v1/README.md) | 独立陪伴/能力/桌宠视觉提案，未替换客户端 | 在旧稿原创房间基础上独立改造五套机位、材质与 HTML/CSS 布局；复用同一 VRoid 样例与已有 Lucide 文件和许可证；MyGO、GBC、《孤独摇滚》仅作气质参考，无作品素材复制，无新商业字体或依赖下载 |
+| [A+ 和风留白深化](concepts/a-plus-v1/README.md) | A 选定后的聊天收放、角色色板、壁纸构图与桌宠预览 | 只读复用五套稿原创 Three.js 房间、能力元数据和既有 VRoid 样例；新 HTML/CSS 布局与文字控件原创，无图标或新字体依赖，无外部素材下载；仅演示状态，不含原生 Windows 壁纸层 |
 | Sumika `src-tauri/icons/sumika-icon-transparent.png` and generated PNG/ICO sizes | current desktop application icon: transparent-background, enlarged pixel-art home scene | derived locally from the generated Sumika icon on 2026-08-24 by edge-connected background extraction and nearest-neighbor resizing; source pixel colors and internal shapes were preserved; alpha is used only for the exterior background; no API key or credential is stored in the repository; no third-party source material was intentionally supplied; Sumika-only asset unless the project owner confirms broader reuse terms |
 | Sumika `src-tauri/icons/sumika-icon-sharp.png` and `sumika-icon-sharp.ico` | current desktop application icon with per-size pixel-sharp ICO frames | copied from the transparent icon's nearest-neighbor PNG sizes without resampling; custom ICO directory preserves exact 16/24/32/48/64/128/256px frames to avoid Windows smoothing; Sumika project asset |
 | Sumika `src-tauri/icons/sumika-icon-generated.png` and generated PNG/ICO sizes | retained opaque icon fallback | generated on 2026-08-24 through the user-provided OpenAI-compatible image API using `gpt-image-2`; no API key or credential is stored in the repository; no third-party source material was intentionally supplied |
@@ -39,6 +42,8 @@ The current preview driver and CSS are original Sumika code. Any future
 copied file must add its exact path, upstream revision, license, attribution
 and modification note here before it enters the repository.
 
+2026-09-09重新通过pixiv官方帮助中心文章API核对Sample A条款：明确非CC0、保留版权，按条件可用作应用Avatar及免费分发；禁止CC0再许可、原样模型/内嵌图像收费转售及虚假背书等。源码及前端构建仅放行[分发清单](../../assets/avatars/distribution.json)中的样例与缩略图。安和昴保留为用户本地导入，不上传或打包；不得将用户导入等同再分发授权。
+
 ## Agent 与浏览器参考
 
 - DeepSeek Harness: `https://github.com/deepseek-ai/deepseek-harness`, fixed
@@ -55,6 +60,8 @@ and modification note here before it enters the repository.
 [`Evolution Knowledge Registry`](../integrations/evolution-knowledge-registry.json)。
 
 ## 相关文档
+
+2026-09-07 A+ 正式客户端：`frontend/src/home-room.js` 的固定房间、家具及画作为 Sumika 原创 Three.js 几何；`a-plus-scene-view.js`、`a-plus-layout.css`、能力页为本项目原创实现。未引入新角色、第三方场景或作品截图；验证仍使用既有 VRoid 示例资源及其使用条件。旧设计稿保留，原生双模式不复制参考仓库代码。
 
 - [UI 参考地图](reference-map.md)
 - [Avatar 资产与驱动](../architecture/avatar.md)

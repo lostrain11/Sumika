@@ -22,3 +22,11 @@ Bundled or installed dependencies and the sample Avatar retain their own
 license files and terms. See the license ledger and the package lockfile for
 the exact versions and source records. Downloaded Ollama runtimes and model
 weights are not redistributed by Sumika.
+
+The default `assets/avatars/AvatarSample_A.vrm` and its thumbnail are VRoid
+sample assets under the [VRoid Studio sample model conditions](https://vroid.pixiv.help/hc/en-us/articles/4402394424089),
+not CC0. Copyright is not waived. They are provided as a free example Avatar,
+not as an official Sumika character or a pixiv endorsement. Original source,
+hashes, restrictions and the distribution allowlist are recorded in
+`assets/avatars/README.md` and `assets/avatars/distribution.json`. Imported user
+models are not part of the repository or application distribution.

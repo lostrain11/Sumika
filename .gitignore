@@ -7,6 +7,9 @@ __pycache__/
 *.sqlite3
 .pytest_cache/
 backend/.venv/
+packages/quality-routing/src/*.egg-info/
+packages/quality-routing/build/
+packages/quality-routing/dist/
 
 # Frontend
 node_modules/
@@ -17,7 +20,31 @@ frontend/test-results/
 # Runtime data and local secrets
 .sumika/
 .sumika-desktop/
+/.sumika-*/
+/.zcode/
+/%SystemDrive%/
+/output/
+/test-results/
+/example.txt
+/output.txt
+*.db-*
+*.sqlite3-*
+.env
+.env.*
 *.log
+
+# Only the reviewed default Avatar is distributable.
+*.vrm
+*.vroid
+*.vrma
+*.moc3
+*.pmx
+*.pmd
+/assets/avatars/*
+!/assets/avatars/README.md
+!/assets/avatars/distribution.json
+!/assets/avatars/AvatarSample_A.vrm
+!/assets/avatars/AvatarSample_A.thumbnail.png
 
 # Tauri development output
 src-tauri/target/

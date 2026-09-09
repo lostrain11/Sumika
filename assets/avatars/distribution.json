@@ -1,0 +1,11 @@
+{
+  "schema": "sumika-avatar-distribution/v1",
+  "default": "AvatarSample_A.vrm",
+  "license": "VRoid Studio sample model conditions (not CC0)",
+  "license_url": "https://vroid.pixiv.help/hc/en-us/articles/4402394424089",
+  "verified_on": "2026-09-09",
+  "files": {
+    "AvatarSample_A.vrm": "b86b0b8a66d48911431d6f920a5211a974226f83aa672eca3f3dfade58ac346e",
+    "AvatarSample_A.thumbnail.png": "fb842ac062564ccb199555c20170dad502c63d87007d4f602712c194175349d8"
+  }
+}

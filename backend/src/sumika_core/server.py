@@ -50,6 +50,7 @@ from .agent.supervisor import (
 )
 from .agent.route_trace import RouteDecisionTrace
 from .avatar import AvatarError, AvatarManager
+from .benefits import BenefitsError, BenefitsService
 from .capabilities import CapabilityCatalog, CapabilityCatalogError
 from .character_import import CharacterCardError, convert_character_card, parse_card_bytes, parse_card_text
 from .browser import (
@@ -67,8 +68,10 @@ from .evolution import EvolutionRegistry
 from .diagnostics import close_logging, configure_logging, redact_text, safe_error
 from .desktop_automation import DesktopAutomationError, DesktopAutomationRuntime
 from .integrations import CCSwitchCompatibilityChecker
+from .integrations.model_picker import ModelPickerAdapter, ModelPickerAdapterError
 from .memory import MemoryRuntime, MemoryRuntimeError
 from .model_policy import (
+    VALID_REASONING_EFFORTS,
     ModelPolicyError,
     ModelPolicyService,
     RoutingRequest,
@@ -108,6 +111,8 @@ from .providers import (
     VisionProviderRegistry,
 )
 from .storage import Storage
+from .quality import QualityRoutingService
+from quality_routing import RoutingError
 from .tasks import AgentTaskProjector, TaskError, TaskManager, TaskRunner
 from .tools import ToolRuntime, ToolRuntimeError
 from .transport.websocket import accept_websocket, encode_text_frame
@@ -368,6 +373,15 @@ class CoreApplication:
         # rather than risking a transport close while a worker is active.
         self._retired_external_workers: list[Any] = []
         self._initial_external_route_sources = tuple(external_route_sources or ()) + tuple(route_sources or ())
+        picker_url = os.getenv("SUMIKA_MODEL_PICKER_URL", "").strip()
+        if picker_url:
+            try:
+                self._initial_external_route_sources += (ModelPickerAdapter(picker_url),)
+            except (ModelPickerAdapterError, TypeError, ValueError) as exc:
+                self.logger.warning(
+                    "model-picker adapter registration skipped error_type=%s",
+                    type(exc).__name__,
+                )
         # Registration is inert: no external desktop process or window is
         # started until an approved RPC explicitly opens a session.
         self.desktop_automation = DesktopAutomationRuntime(
@@ -475,7 +489,41 @@ class CoreApplication:
             web_chat=self.web_chat,
         )
         self._register_initial_external_route_sources()
+        self.model_policy.accounts.browser_client = self.browser.browser_skill
+        self.provider_profiles.runtime_wrapper = self.model_policy.wrap_provider
+        resource_session = os.getenv("SUMIKA_ZHIPU_RESOURCE_SESSION", "").strip()
+        resource_tab = os.getenv("SUMIKA_ZHIPU_RESOURCE_TAB", "").strip()
+        resource_profile = os.getenv("SUMIKA_ZHIPU_RESOURCE_PROFILE", "").strip()
+        if resource_session or resource_tab or resource_profile:
+            try:
+                from .integrations.zhipu_resources import ZhipuResourceReader
+                client = self.browser.browser_skill
+                def resource_runner(args: tuple[str, ...], *, timeout: float) -> Any:
+                    if client.runner == client._run:
+                        return client.runner(args, timeout=timeout)
+                    return client.runner(args)
+                self.model_policy.register_resource_reader(resource_profile, ZhipuResourceReader(
+                    resource_runner, session=resource_session, tab_id=int(resource_tab), provider_profile_id=resource_profile))
+            except (TypeError, ValueError):
+                self.model_policy.refresh.mark_failure("resources", "invalid-resource-reader-configuration")
         self._initialize_route_supervisor()
+        self.quality = QualityRoutingService(self)
+        from .embedded_browser import EmbeddedBrowserBridge, EmbeddedBenefitsReader
+        self.embedded_browser = EmbeddedBrowserBridge()
+        self.web_chat.set_native_exchange(self.embedded_browser.exchange)
+        self.web_chat.native_required = os.getenv("SUMIKA_EMBEDDED_BROWSER") == "1"
+        self.model_policy.accounts.native_reader = self.embedded_browser.read_portal
+        self.model_policy.accounts.native_required = self.web_chat.native_required
+        self.model_policy.accounts.receipt_reader = self._read_account_receipts
+        from .integrations.modelscope_benefits import ModelScopeBenefitsReader
+        self.benefits = BenefitsService(
+            self.configured_data_dir, profile_reader=self.storage.get_provider_profile,
+            browser_reader=EmbeddedBenefitsReader(self.embedded_browser, ModelScopeBenefitsReader(self.browser.browser_skill),
+                                                 native_required=self.web_chat.native_required),
+        )
+        if self.configured_data_dir is not None:
+            self.model_policy.start_refresh_worker()
+            self.benefits.start()
         self.capabilities = CapabilityCatalog(
             self.modules,
             agent=self.agent,
@@ -1333,7 +1381,8 @@ class CoreApplication:
             for key in (
                 "route_id", "provider_id", "model_id", "display_name",
                 "provider_profile_id", "harness_id", "capabilities",
-                "quality_tier", "cost_class", "processing_location",
+                "quality_tier", "reasoning_efforts", "default_reasoning_effort",
+                "cost_class", "processing_location",
                 "auth_state", "quota_state", "health_state", "observed_at",
                 "version", "source_kind", "transport",
             )
@@ -1446,6 +1495,8 @@ class CoreApplication:
             source=source_kind or "core",
             source_kind=source_kind or "provider",
             quality_tier=str(raw.get("quality_tier") or "unknown"),
+            reasoning_efforts=tuple(raw.get("reasoning_efforts") or ()),
+            default_reasoning_effort=str(raw.get("default_reasoning_effort") or "unknown"),
             cost_class=str(raw.get("cost_class") or "unknown"),
             processing_location=str(raw.get("processing_location") or "cloud"),
             auth_state=auth,
@@ -2307,7 +2358,41 @@ class CoreApplication:
         )
         return self._route_bridge_projection(plugin_id=plugin_id, status="registered")
 
+    def _read_account_receipts(self, source, browser_id, cancelled):
+        if browser_id == "sumika-native":
+            return self.embedded_browser.read_receipts(source, browser_id, cancelled)
+        from .integrations.account_portals import AccountPortalReader
+        return AccountPortalReader(self.browser.browser_skill).read_receipts(source, browser_id, cancelled)
+
     def _rpc(self, method: str, params: dict[str, Any]) -> Any:
+        if method.startswith("browser.embedded."):
+            try:
+                if method == "browser.embedded.attach":
+                    return self.embedded_browser.attach()
+                if method == "browser.embedded.poll":
+                    return self.embedded_browser.poll(params.get("token"), accept_requests=params.get("accept_requests", True))
+                if method == "browser.embedded.complete":
+                    return self.embedded_browser.complete(params.get("token"), params.get("attempt_id"), params.get("observation"))
+                if method == "browser.embedded.alive":
+                    return self.embedded_browser.alive(params.get("token"), params.get("attempt_id"))
+                if method == "browser.embedded.status":
+                    return self.embedded_browser.status()
+                if method == "browser.embedded.bind_portal":
+                    if set(params) != {"provider_profile_id", "source"} or not self.embedded_browser.available:
+                        raise ValueError("connected native browser and explicit portal binding required")
+                    if params["source"] == "moark":
+                        self.model_policy.accounts.bind_receipt_portal(params["provider_profile_id"], "sumika-native")
+                    else:
+                        self.model_policy.accounts.bind_portal(params["provider_profile_id"], params["source"], "sumika-native")
+                    return {"bound": True, "requires_login": True, "routable": False}
+                raise ValueError("unknown embedded browser operation")
+            except (TypeError, ValueError) as error:
+                raise JsonRpcError(-32602, str(error)) from None
+        if method.startswith("quality."):
+            try:
+                return self.quality.rpc(method, params)
+            except (RoutingError, TypeError, KeyError, ValueError) as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
         if method == "core.health":
             return {
                 "ok": True,
@@ -2331,6 +2416,41 @@ class CoreApplication:
                 )
             except ModelPolicyError as exc:
                 raise JsonRpcError(-32602, str(exc)) from exc
+        if method in {"benefits.status", "benefits.configure", "benefits.browsers", "benefits.refresh", "benefits.checkin"}:
+            if method != "benefits.configure" and params:
+                raise JsonRpcError(-32602, "benefits operation accepts no external evidence or commands")
+            try:
+                if method == "benefits.status":
+                    return self.benefits.status()
+                if method == "benefits.configure":
+                    return self.benefits.configure(params)
+                if method == "benefits.browsers":
+                    return self.benefits.browsers()
+                return self.benefits.request(method.split(".")[1])
+            except BenefitsError as exc:
+                raise JsonRpcError(-32602, str(exc)) from None
+        if method == "model.policy.refresh":
+            raw_kind = params.get("kind", "all")
+            raw_force = params.get("force", False)
+            if not isinstance(raw_kind, str) or raw_kind.strip().lower() not in {"all", "resources", "catalog", "pricing"}:
+                raise JsonRpcError(-32602, "kind must be all, resources, catalog, or pricing")
+            if not isinstance(raw_force, bool):
+                raise JsonRpcError(-32602, "force must be a boolean")
+            if set(params) - {"kind", "force", "interactive_allowed"}:
+                raise JsonRpcError(-32602, "refresh cannot import prices, quality evidence, or account grants")
+            if type(params.get("interactive_allowed", False)) is not bool:
+                raise JsonRpcError(-32602, "interactive_allowed must be boolean")
+            try:
+                result = self.model_policy.refresh_observations(
+                    kind=raw_kind,
+                    force=raw_force,
+                )
+            except ModelPolicyError as exc:
+                raise JsonRpcError(-32602, str(exc)) from exc
+            self.events.publish(EventEnvelope("model.policy.refreshed", {"kind": raw_kind, "changed": result.get("changed", {})}))
+            return result
+        if method == "model.policy.refresh.status":
+            return self.model_policy.refresh_status()
         if method == "model.policy.pricing":
             raw_refresh = params.get("refresh", False)
             if not isinstance(raw_refresh, bool):
@@ -2891,6 +3011,11 @@ class CoreApplication:
                             "session_id": session_id,
                             "provider": provider_binding["route_id"],
                             "model": provider_binding["model"],
+                            **(
+                                self._reasoning_selection_params(routing_decision)
+                                if isinstance(routing_decision, dict)
+                                else {}
+                            ),
                         }
                     )
                 except AgentRuntimeError as exc:
@@ -2908,7 +3033,7 @@ class CoreApplication:
                     applied = {
                         "applied": True,
                         "route_id": routing_decision.get("selected_route"),
-                        "decision": routing_decision,
+                        "decision": self._decision_with_applied_reasoning(routing_decision, selected),
                     }
                     if provider_binding:
                         applied["provider"] = provider_binding
@@ -4405,6 +4530,23 @@ class CoreApplication:
                 )
             )
             return result
+        if method == "browser.web_chat.profile.bind_native":
+            if params.get("approved") is not True:
+                raise JsonRpcError(-32031, "native binding requires explicit approval")
+            try:
+                result = self.web_chat.bind_native(str(params.get("profile_id") or ""), approved=True)
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
+            self._sync_web_chat_providers()
+            self._refresh_route_supervisor_catalog(refresh=False)
+            return result
+        if method == "browser.web_chat.profile.native_takeover":
+            if params.get("approved") is not True:
+                raise JsonRpcError(-32031, "native takeover requires explicit approval")
+            try:
+                return self.web_chat.takeover_profile(str(params.get("profile_id") or ""), enabled=params.get("enabled", True), approved=True)
+            except WebChatRuntimeError as exc:
+                raise JsonRpcError(-32031, str(exc)) from exc
         if method == "browser.web_chat.profile.authorize":
             if not params.get("approved"):
                 raise JsonRpcError(-32031, "opening a web-chat login window requires explicit approval")
@@ -6088,6 +6230,8 @@ class CoreApplication:
             "preferredRoute",
             "min_quality_tier",
             "minQualityTier",
+            "reasoning_effort",
+            "reasoningEffort",
         ):
             if key not in config and key in params:
                 config[key] = params[key]
@@ -6100,6 +6244,31 @@ class CoreApplication:
         if params.get("agentPreset") is not None and "agent_preset_id" not in config:
             config["agent_preset_id"] = params.get("agentPreset")
         return config
+
+    @staticmethod
+    def _reasoning_selection_params(decision: Mapping[str, Any]) -> dict[str, Any]:
+        effort = str(decision.get("requested_reasoning_effort") or "auto").strip().lower()
+        return {"reasoningEffort": effort} if effort in VALID_REASONING_EFFORTS else {}
+
+    @staticmethod
+    def _runtime_reasoning_effort(value: Any) -> str:
+        candidates: list[Any] = [value]
+        if isinstance(value, Mapping):
+            candidates.extend((value.get("selected"), value.get("current"), value.get("model")))
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            effort = candidate.get("reasoning_effort") or candidate.get("reasoningEffort")
+            normalized = str(effort or "").strip().lower()
+            if normalized in VALID_REASONING_EFFORTS:
+                return normalized
+        return "unknown"
+
+    @classmethod
+    def _decision_with_applied_reasoning(cls, decision: dict[str, Any], selected_model: Any) -> dict[str, Any]:
+        updated = dict(decision)
+        updated["applied_reasoning_effort"] = cls._runtime_reasoning_effort(selected_model)
+        return updated
 
     def _agent_routing_preflight(
         self,
@@ -6162,6 +6331,7 @@ class CoreApplication:
                         "session_id": session_id,
                         "provider": binding["route_id"],
                         "model": binding["model"],
+                        **self._reasoning_selection_params(decision),
                     }
                 )
             except (AgentRuntimeError, ProviderProfileError) as exc:
@@ -6171,7 +6341,7 @@ class CoreApplication:
                 "route_id": decision.get("selected_route"),
                 "provider": binding,
                 "selected_model": selected_model,
-                "decision": decision,
+                "decision": self._decision_with_applied_reasoning(decision, selected_model),
             }
 
         harness_id = str(selected.get("harness_id") or "").strip()
@@ -6183,7 +6353,12 @@ class CoreApplication:
             raise JsonRpcError(-32032, "所选模型缺少 Provider 或模型标识")
         try:
             selected_model = self.agent.select_model(
-                {"session_id": session_id, "provider": provider, "model": model}
+                {
+                    "session_id": session_id,
+                    "provider": provider,
+                    "model": model,
+                    **self._reasoning_selection_params(decision),
+                }
             )
         except AgentRuntimeError as exc:
             raise JsonRpcError(-32032, str(exc)) from exc
@@ -6191,7 +6366,7 @@ class CoreApplication:
             "applied": True,
             "route_id": decision.get("selected_route"),
             "selected_model": selected_model,
-            "decision": decision,
+            "decision": self._decision_with_applied_reasoning(decision, selected_model),
         }
 
     @staticmethod
@@ -6515,7 +6690,18 @@ class CoreApplication:
         web_profile_id = None
         runtime_provider = None
         event_provider_id = configured_provider_id
-        if configured_provider_id.startswith("web-chat:"):
+        role_binding = None
+        if params.get("character_id"):
+            try:
+                self.quality._scope({"assistant_id": str(params["character_id"]), "session_id": session_id})
+                role_binding = self.quality.role_runtime(str(params["character_id"]))
+            except RoutingError as exc:
+                raise JsonRpcError(-32010, str(exc)) from exc
+        if role_binding is not None:
+            runtime_provider, role_candidate = role_binding
+            event_provider_id = role_candidate.candidate_id
+            profile_id = None
+        elif configured_provider_id.startswith("web-chat:"):
             # Web accounts are projected into the same LLM registry as other
             # real providers, but their credentials remain in BrowserSkill.
             expected_profile_id = configured_provider_id.removeprefix("web-chat:").strip()
@@ -6592,7 +6778,13 @@ class CoreApplication:
             character_id=character_id,
             temperature=float(params.get("temperature", 0.7)),
             max_tokens=int(params.get("max_tokens", 512)),
+            reasoning_effort=role_binding[1].reasoning_effort if role_binding else None,
         )
+        if character_id and self.quality.select_bindings(character_id).get("leader_candidate_id"):
+            request.tools = [{"type": "function", "function": {"name": "sumika_plan_task",
+                "description": "Request a plan and quote for a complex task. Does not authorize execution. Send only a concise non-secret goal, not private conversation history.",
+                "parameters": {"type": "object", "properties": {"goal": {"type": "string", "maxLength": 12000}},
+                               "required": ["goal"], "additionalProperties": False}}}]
         latest = incoming_messages[-1]
         if latest.role == "user":
             self.storage.append_message(session_id, latest)
@@ -6623,6 +6815,27 @@ class CoreApplication:
             )
             raise JsonRpcError(-32000, f"Provider failed: {safe['message']}") from exc
         answer = "".join(pieces)
+        tool_calls = getattr(runtime_provider, "last_tool_calls", []) if runtime_provider is not None else []
+        if tool_calls:
+            if len(tool_calls) != 1 or tool_calls[0].get("name") != "sumika_plan_task" or not character_id:
+                raise JsonRpcError(-32010, "Unsupported task request")
+            try:
+                arguments = json.loads(tool_calls[0]["arguments"])
+                if set(arguments) != {"goal"}:
+                    raise RoutingError("Unsupported task arguments")
+                settings = self.quality.settings(character_id)
+                available = {row["candidate_id"] for row in self.quality.catalog(character_id)["candidates"]
+                             if row["authorized"] and row["available"]}
+                allowed_ids = list(dict.fromkeys(value for value in (
+                    settings["leader_candidate_id"], settings["role_candidate_id"], *settings["candidate_pool"])
+                    if value and value in available))
+                task = self.quality.plan({"assistant_id": character_id, "session_id": session_id, "goal": arguments["goal"],
+                                          "allowed_candidate_ids": allowed_ids, "external_allowed": True})
+            except (RoutingError, ValueError, TypeError) as exc:
+                raise JsonRpcError(-32010, str(exc)) from exc
+            self.events.publish(EventEnvelope("quality.quote.ready", {"task_id": task["task_id"]}, session_id, character_id))
+            self.events.publish(EventEnvelope("provider.status", {"provider_id": provider_id, "status": "ready"}, session_id, character_id))
+            return {"message": Message(role="assistant", content=answer, character_id=character_id).to_dict(), "provider_id": provider_id, "task": task}
         if profile_id:
             self.provider_profiles.mark_used(profile_id)
         if web_profile_id:
@@ -6646,6 +6859,14 @@ class CoreApplication:
         self._closed = True
         try:
             self.logger.info("core shutdown requested uptime_seconds=%.3f", time.monotonic() - self.started_at)
+            if hasattr(self, "embedded_browser"):
+                self.embedded_browser.close()
+            if hasattr(self, "benefits"):
+                self.benefits.close()
+            if hasattr(self, "quality"):
+                self.quality.close()
+            if hasattr(self, "model_policy"):
+                self.model_policy.close()
             # Stop the neutral supervisor first so queued/running workers are
             # marked interrupted before any underlying runtime or browser is
             # torn down.  It is idempotent and owns only Core-created worker
@@ -6764,16 +6985,52 @@ class CoreApplication:
 class SumikaRequestHandler(BaseHTTPRequestHandler):
     application: CoreApplication
 
+    def _origin_allowed(self, origin: str) -> bool:
+        try:
+            parsed = urlparse(origin)
+            if parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+                return False
+            if origin in {"http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"}:
+                return True
+            return (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+                    and parsed.port in {self.server.server_address[1], 8771, 5173})
+        except ValueError:
+            return False
+
+    def _send_origin_header(self) -> None:
+        origin = self.headers.get("Origin")
+        if origin and self._origin_allowed(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Vary", "Origin")
+
+    def _request_allowed(self) -> bool:
+        try:
+            host = urlparse("http://" + self.headers.get("Host", ""))
+            trusted_host = (host.hostname in {"127.0.0.1", "localhost", "::1"} and not host.username
+                            and not host.password and host.port == self.server.server_address[1])
+        except ValueError:
+            trusted_host = False
+        origin = self.headers.get("Origin")
+        trusted_origin = self._origin_allowed(origin) if origin is not None else self.headers.get("Sec-Fetch-Site") != "cross-site"
+        if trusted_host and trusted_origin:
+            return True
+        self._send_json({"error": "Untrusted request origin or host"}, HTTPStatus.FORBIDDEN)
+        return False
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         """Allow the production Tauri origin to call the local core API."""
+        if not self._request_allowed():
+            return
         self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_origin_header()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._request_allowed():
+            return
         if self.path == "/ws/events" and self.headers.get("Upgrade", "").lower() == "websocket":
             self._serve_websocket()
             return
@@ -6792,6 +7049,9 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             if session_id:
                 request["sessionId"] = session_id
             self._send_json(self.application.rpc("model.policy.catalog", request))
+            return
+        if parsed.path == "/api/model-policy/refresh/status":
+            self._send_json(self.application.rpc("model.policy.refresh.status", {}))
             return
         if parsed.path == "/api/model-policy/pricing":
             query = parse_qs(parsed.query)
@@ -6985,6 +7245,8 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         self._serve_static(parsed.path)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._request_allowed():
+            return
         payload: dict[str, Any] = {}
         try:
             payload = self._read_json()
@@ -7081,7 +7343,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_origin_header()
         self.end_headers()
         try:
             self.wfile.write(body)
@@ -7110,7 +7372,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_origin_header()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
@@ -7169,7 +7431,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
             )
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._send_origin_header()
             self.end_headers()
             shutil.copyfileobj(stream, self.wfile, length=64 * 1024)
             self.application.logger.info(
@@ -7191,7 +7453,7 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._send_origin_header()
         self.end_headers()
         try:
             self.wfile.write(body)

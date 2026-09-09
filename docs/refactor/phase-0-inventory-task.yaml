@@ -1,0 +1,99 @@
+protocol_version: "1"
+task_id: sumika-phase-0-inventory
+parent_task_id: sumika-reconstruction
+title: Sumika Phase 0 architecture and redundancy inventory
+stage: analysis
+risk: low
+recommended_tier: L1
+assigned_model: gpt-5.6-luna
+assignment_mode: delegated
+requested_reasoning_effort: medium
+applied_reasoning_effort: unknown
+applied_model: unknown
+execution_mode: read-only
+write_allowed: false
+host_setting_evidence: spawn accepted the requested model and effort but returned no applied-setting receipt
+
+goal:
+  - Produce a read-only inventory of Sumika responsibilities and coupling.
+  - Identify duplicate routing, provider, web-chat, and UI entry logic.
+  - Define a non-authoritative model-picker integration boundary.
+
+dependencies:
+  - R0-baseline
+workspace:
+  root: repository root
+  worktree_required: false
+
+allowed_paths:
+  - backend/src/**
+  - backend/tests/**
+  - frontend/main.js
+  - frontend/tests/**
+  - src-tauri/src/main.rs
+  - docs/**
+read_only_companion:
+  repository: model-picker
+  allowed_paths:
+    - src/pick/**
+    - tests/**
+    - README.md
+    - TODO.md
+forbidden_paths:
+  - credentials/**
+  - backend/src/sumika_core/credentials.py
+  - .env*
+  - .sumika*/**
+  - .zcode/**
+  - data/**
+  - deprecated/**
+
+inputs:
+  - docs/current-execution.md
+  - docs/status-matrix.md
+  - docs/requirements/requirements.json
+  - docs/requirements/model-policy.md
+  - Sumika source tree and tests
+  - model-picker source tree and tests
+  - requirements and status documents
+outputs:
+  - A bounded evidence table returned to the parent; no files written by the subagent
+parent_integration_outputs:
+  - docs/refactor/module-inventory.md
+  - docs/refactor/redundancy-report.md
+  - docs/refactor/requirement-coverage.md
+
+required_capabilities:
+  - repository-read
+
+invariants:
+  - Do not change source, tests, configuration, runtime data, or archives.
+  - Do not expose credentials, cookies, prompts, model output, or private runtime data.
+  - Treat model-picker as advisory; Sumika keeps authorization and execution authority.
+  - Treat status-matrix.md as the current implementation status source.
+
+acceptance:
+  - Every major backend, frontend, and Tauri area has an owner and evidence path.
+  - Suspected duplication is distinguished from an intentional adapter boundary.
+  - Active and deferred requirement IDs have an explicit coverage or gap note.
+  - The next implementation phase has disjoint work packages and escalation triggers.
+
+verification:
+  commands:
+    - python tools/check_docs.py
+    - git diff --check
+  levels:
+    - L0
+
+escalate_when:
+  - A public contract, schema, credential, payment, permission, or migration change is proposed.
+  - Evidence conflicts between source, tests, status matrix, or requirements.
+  - A task would need to modify server.py and a route policy at the same time.
+
+budget:
+  estimated_calls: 1
+  estimated_input_tokens: 20000
+  estimated_output_tokens: 3000
+  estimated_reasoning_tokens: null
+  retry_limit: 1
+  allow_external_cost_boundary_change: false

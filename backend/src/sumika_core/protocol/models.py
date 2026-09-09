@@ -36,6 +36,8 @@ class ChatRequest:
     character_id: str | None = None
     temperature: float = 0.7
     max_tokens: int = 512
+    reasoning_effort: str | None = None
+    tools: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

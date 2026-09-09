@@ -52,9 +52,9 @@ class ServerTests(unittest.TestCase):
         connection.close()
         return response.status, value
 
-    def request_bytes(self, method, path):
+    def request_bytes(self, method, path, headers=None):
         connection = HTTPConnection("127.0.0.1", self.port, timeout=3)
-        connection.request(method, path)
+        connection.request(method, path, headers=headers or {})
         response = connection.getresponse()
         body = response.read()
         headers = dict(response.getheaders())
@@ -167,10 +167,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual([message.role for message in second_request.messages], ["system", "user"])
 
     def test_tauri_cross_origin_preflight_is_allowed(self):
-        status, headers, body = self.request_bytes("OPTIONS", "/rpc")
+        status, headers, body = self.request_bytes("OPTIONS", "/rpc", {"Origin": "http://tauri.localhost"})
         self.assertEqual(status, 204)
         self.assertEqual(body, b"")
-        self.assertEqual(headers["Access-Control-Allow-Origin"], "*")
+        self.assertEqual(headers["Access-Control-Allow-Origin"], "http://tauri.localhost")
         self.assertIn("OPTIONS", headers["Access-Control-Allow-Methods"])
         self.assertIn("Content-Type", headers["Access-Control-Allow-Headers"])
 
@@ -360,9 +360,22 @@ class ServerTests(unittest.TestCase):
         status, headers, body = self.request_bytes("GET", "/vendor/sumika-vrm-viewer.js")
         self.assertEqual(status, 200)
         self.assertIn(headers["Content-Type"].split(";", 1)[0], {"text/javascript", "application/javascript"})
-        self.assertEqual(headers["Access-Control-Allow-Origin"], "*")
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
         self.assertIn(b"mountVrmViewer", body)
         self.assertNotIn(b"<!doctype html>", body[:128].lower())
+
+    def test_remote_web_cannot_reach_core_or_attach_native_bridge(self):
+        for origin in ("https://chatgpt.com", "https://evil.example", "null", "http://127.0.0.1.evil.example:8771"):
+            for method, path in (("GET", "/api/diagnostics"), ("OPTIONS", "/rpc"), ("POST", "/rpc"), ("GET", "/ws/events")):
+                with self.subTest(origin=origin, method=method):
+                    status, headers, _body = self.request_bytes(method, path, {"Origin": origin})
+                    self.assertEqual(status, 403)
+                    self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+    def test_dns_rebinding_host_and_cross_site_navigation_are_rejected(self):
+        for headers in ({"Host": f"evil.example:{self.port}"}, {"Sec-Fetch-Site": "cross-site"}):
+            status, _headers, _body = self.request_bytes("GET", "/api/health", headers)
+            self.assertEqual(status, 403)
 
     def test_session_create_selects_character_and_lists_messages(self):
         status, created = self.request(

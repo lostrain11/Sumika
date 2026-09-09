@@ -1,0 +1,36 @@
+{
+  "task_id": "sumika-phase-2c-ui-completion",
+  "stage": "completed",
+  "goal": "Complete the first scene-first client UI refactor, not future media, home, multi-assistant or device capabilities",
+  "requirements": ["UX-002", "CHARACTER-001", "AVATAR-001", "CAPABILITY-001"],
+  "scope": ["frontend/main.js", "frontend/index.html", "frontend/src/main.ts", "frontend/src/*-view.js", "frontend/src/scene-shell.js", "frontend/src/scene-store.js", "frontend/src/scene-layout.css", "frontend/src/module-selector.js", "frontend/src/view-state.js", "frontend/tests", "frontend/package.json", "frontend/playwright.config.mjs", "frontend/README.md", "docs/architecture/README.md", "docs/architecture/modules.md", "docs/architecture/desktop-shell.md", "docs/refactor/*.json", "docs/status-matrix.md", "docs/current-execution.md"],
+  "preserved": ["Existing uncommitted backend changes", "Runtime data", "RPC contracts and model policy", "Avatar WebGL lifecycle", "Existing native pet and portal commands", "User deletion of requirement excerpts"],
+  "acceptance": [
+    "Four drawers have separate render modules and one navigation registry",
+    "Disabled modules including LLM are only in the collapsed add library",
+    "Opening UI does not authorize, activate providers or start devices",
+    "Enabled modules in error remain visible and catalog failures have retry",
+    "Dead attachment and document buttons are removed; desktop portals have one chat entry",
+    "Background, keyboard focus and disclosure state survive render; Escape closes one layer",
+    "Avatar canvas persists across drawer navigation; pet stays transparent",
+    "360, 640, 900 and 1280 pixel browser views pass bounds checks and screenshot review"
+  ],
+  "execution": {"integration": "main agent", "delegated": "independent scene-layout stylesheet only", "billing": "unknown; no currency estimate"},
+  "verification": ["npm --prefix frontend run test:unit", "npm --prefix frontend run build", "npm --prefix frontend run test:e2e", "node --check frontend/main.js", "python tools/check_docs.py", "git diff --check"],
+  "result": {
+    "status": "completed",
+    "unit_test_files_passed": 3,
+    "syntax_check": "passed",
+    "production_build": "passed",
+    "full_suite": {"passed": 59, "failed": 0, "artifact_directory": "D:/Caches/Sumika-ui-tests/final-verified"},
+    "loaded_module_layout": {"passed": 4, "failed": 0, "widths": [360, 640, 900, 1280], "screenshot_review": "passed; loaded and expanded library, scene and drawers", "artifact_directory": "D:/Caches/Sumika-ui-tests/loaded-layout", "note": "Strengthened viewport assertions passed after full-suite completion; no product code changes"},
+    "prior_failures": [
+      "Avatar pointer stayed active at the top-left edge; topbar hit testing fixed and focused/full regressions passed",
+      "One earlier run timed out before the Agent drawer existed; no page snapshot or trace was available, root cause unconfirmed; targeted traced recheck 3/3 and final full suite passed"
+    ],
+    "documentation": {"scoped_checks": "passed", "full_checker": "blocked by the pre-existing deleted docs/requirements/original-excerpts.md and its references; deletion preserved"},
+    "native_windows_live": "not run",
+    "external_providers_live": "not run",
+    "next_phase": "model-picker advisory adapter with explicit identity mapping, stale/unknown isolation, relay pricing and reasoning evidence; Sumika retains final policy and dispatch authority"
+  }
+}

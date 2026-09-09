@@ -1,5 +1,7 @@
 # Module catalog
 
+当前 [A+ 能力页](../ui/a-plus-client.md)只管理卡片布局，模块配置、启用和权限位于「设置 → 连接与权限」，实现目录审计位于「设置 → 开发者」。页面添加/移除不能替代下面的 Runtime 契约。
+
 `ModuleCatalog` is the capability-level boundary between the core and concrete
 implementations. The core stores only a module's enabled flag, selected
 implementation id, and non-secret configuration. A provider or future plugin
@@ -71,7 +73,11 @@ stable error class. Fake/Stub/Placeholder names and credential/path-like values
 are filtered at the projection boundary. Web-chat entries are marked as manual
 login and are never presented as API Providers.
 
-The UI renders this projection on Modules and Developer. The existing module
+The UI renders this projection in Developer only, under the Modules drawer.
+The Modules page shows enabled modules and a collapsed add library instead of
+duplicating the diagnostic catalog. Disabled LLM configuration is also inside
+the add library; opening it never enables a provider or grants permission.
+The existing module
 toggle, Provider drawer, Skill approval and MCP/Preset controls remain the
 authoritative mutation paths.
 

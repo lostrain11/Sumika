@@ -7,6 +7,7 @@ name = "sumika-core"
 version = "0.1.0"
 description = "Modular desktop companion core for Sumika"
 requires-python = ">=3.11"
+dependencies = ["quality-routing>=0.1.0,<0.2"]
 license = { text = "Apache-2.0" }
 authors = [{ name = "Sumika contributors" }]
 
@@ -15,4 +16,3 @@ sumika-core = "sumika_core.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

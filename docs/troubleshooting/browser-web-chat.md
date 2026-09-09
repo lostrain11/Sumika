@@ -63,6 +63,14 @@ OCR 看见新回复但 DOM/HTML 无法定位时返回
 - 要验收一窗五标签，先创建一个新的共享命名 Profile，再由用户在该窗口逐站登录并授权。
 - Agent 创建的共享窗口在全部 Worker 释放 60 秒后关闭；手动登录窗口不受该定时器影响。
 
+## 原生维护手动可读但自动刷新无连接
+
+2026-09-09在custom-protocol桌面版确认：页面origin为`http://tauri.localhost`，首次维护桥attach早于Core URL初始化，请求误发相对地址；异常被吞且没有重连。表现为固定read-account可用，`browser.embedded.status.available=false`。
+
+首次attach移到`loadInitialData().finally`后；失败清理token并重新调度，poll失败后重新绑定。桌宠或不可见视口不接受任务。11项前端回归通过，重建后真实available=true，魔搭及Moark正式刷新通过。不要用重复登录、迁移Cookie或手动读成功代替自动链路验收。
+
+客户端运行中WebView可能映射VRM bundle，`npm run build`写入失败时先正常关闭本实例，再重建；通过UIAutomation按PID与窗口名找到真实Sumika窗口正常Close，勿把隐藏Tao窗口当作主窗口或强杀用户登录进程。
+
 ## 验证命令
 
 ```powershell

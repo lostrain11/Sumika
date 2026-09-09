@@ -1,0 +1,122 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "check": "canvas",
+      "label": "afternoon-client",
+      "colors": 221,
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "afternoon-1440",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "afternoon-1280",
+      "passed": true
+    },
+    {
+      "check": "canvas",
+      "label": "afternoon-pet",
+      "colors": 115,
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "afternoon-pet",
+      "passed": true
+    },
+    {
+      "check": "canvas",
+      "label": "evening-client",
+      "colors": 274,
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "evening-1440",
+      "passed": true
+    },
+    {
+      "check": "night-readable-text",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "evening-1280",
+      "passed": true
+    },
+    {
+      "check": "canvas",
+      "label": "evening-pet",
+      "colors": 139,
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "evening-pet",
+      "passed": true
+    },
+    {
+      "check": "night-pet-readable-placeholder",
+      "passed": true
+    },
+    {
+      "check": "canvas",
+      "label": "work-client",
+      "colors": 192,
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "work-1440",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "work-1280",
+      "passed": true
+    },
+    {
+      "check": "canvas",
+      "label": "work-pet",
+      "colors": 132,
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "work-pet",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "module-library",
+      "passed": true
+    },
+    {
+      "check": "module-add-remove-reorder-no-authorization",
+      "passed": true
+    },
+    {
+      "check": "transparent-pet-alpha",
+      "passed": true
+    },
+    {
+      "check": "mode-draft-collapse-transparent",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "label": "390-fallback",
+      "passed": true
+    },
+    {
+      "check": "local-only-no-api-no-browser-errors",
+      "passed": true
+    }
+  ],
+  "date": "2026-09-05T22:58:05.471Z",
+  "scope": "Isolated design preview. Not native Tauri or live runtime acceptance."
+}

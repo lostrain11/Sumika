@@ -1,0 +1,344 @@
+{
+  "status": "passed",
+  "date": "2026-09-06T14:28:59.350Z",
+  "checks": [
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "client-1440"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "client-1440",
+      "colors": 165,
+      "face": {
+        "x": 529.7395121951222,
+        "y": 268.6351219512193,
+        "left": 529.7395121951222,
+        "top": 268.6351219512193,
+        "right": 645.3004878048782,
+        "bottom": 394.24487804878027,
+        "width": 115.5609756097561,
+        "height": 125.60975609756098,
+        "centerX": 587.5200000000002,
+        "centerY": 331.43999999999977
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "client-collapsed"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "client-collapsed",
+      "colors": 156,
+      "face": {
+        "x": 719.819512195122,
+        "y": 268.6351219512193,
+        "left": 719.819512195122,
+        "top": 268.6351219512193,
+        "right": 835.3804878048782,
+        "bottom": 394.24487804878027,
+        "width": 115.5609756097561,
+        "height": 125.60975609756098,
+        "centerX": 777.6,
+        "centerY": 331.43999999999977
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper",
+      "colors": 170,
+      "face": {
+        "x": 714.4902439024393,
+        "y": 210.40243902439002,
+        "left": 714.4902439024393,
+        "top": 210.40243902439002,
+        "right": 840.7097560975612,
+        "bottom": 347.59756097560955,
+        "width": 126.21951219512195,
+        "height": 137.1951219512195,
+        "centerX": 777.6000000000003,
+        "centerY": 278.9999999999998
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper-chat"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper-chat",
+      "colors": 182,
+      "face": {
+        "x": 714.4902439024393,
+        "y": 210.40243902439002,
+        "left": 714.4902439024393,
+        "top": 210.40243902439002,
+        "right": 840.7097560975612,
+        "bottom": 347.59756097560955,
+        "width": 126.21951219512195,
+        "height": 137.1951219512195,
+        "centerX": 777.6000000000003,
+        "centerY": 278.9999999999998
+      }
+    },
+    {
+      "check": "chat-draft-mode-focus-single-renderer",
+      "passed": true
+    },
+    {
+      "check": "themes-preserve-renderer",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "client-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "client-1280",
+      "colors": 150,
+      "face": {
+        "x": 450.3517073170733,
+        "y": 245.25707317073153,
+        "left": 450.3517073170733,
+        "top": 245.25707317073153,
+        "right": 551.8882926829269,
+        "bottom": 355.6229268292681,
+        "width": 101.53658536585367,
+        "height": 110.36585365853658,
+        "centerX": 501.1200000000001,
+        "centerY": 300.4399999999998
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper-1280",
+      "colors": 161,
+      "face": {
+        "x": 635.1024390243904,
+        "y": 187.02439024390222,
+        "left": 635.1024390243904,
+        "top": 187.02439024390222,
+        "right": 747.2975609756099,
+        "bottom": 308.97560975609736,
+        "width": 112.1951219512195,
+        "height": 121.95121951219512,
+        "centerX": 691.2000000000002,
+        "centerY": 247.99999999999977
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper-chat-1280"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper-chat-1280",
+      "colors": 174,
+      "face": {
+        "x": 635.1024390243904,
+        "y": 187.02439024390222,
+        "left": 635.1024390243904,
+        "top": 187.02439024390222,
+        "right": 747.2975609756099,
+        "bottom": 308.97560975609736,
+        "width": 112.1951219512195,
+        "height": 121.95121951219512,
+        "centerX": 691.2000000000002,
+        "centerY": 247.99999999999977
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper-1920"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper-1920",
+      "colors": 199,
+      "face": {
+        "x": 961.0682926829272,
+        "y": 252.48292682926797,
+        "left": 961.0682926829272,
+        "top": 252.48292682926797,
+        "right": 1112.5317073170736,
+        "bottom": 417.1170731707314,
+        "width": 151.46341463414637,
+        "height": 164.6341463414634,
+        "centerX": 1036.8000000000004,
+        "centerY": 334.79999999999967
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "capabilities-1440"
+    },
+    {
+      "check": "module-states-library-reorder-keyboard-no-devices",
+      "passed": true
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "character"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "settings"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "workbench"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "pet-480"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "pet-480",
+      "colors": 125,
+      "face": {
+        "x": 229.748780487805,
+        "y": 98.18780487804867,
+        "left": 229.748780487805,
+        "top": 98.18780487804867,
+        "right": 288.6512195121952,
+        "bottom": 162.21219512195108,
+        "width": 58.90243902439025,
+        "height": 64.02439024390243,
+        "centerX": 259.2000000000001,
+        "centerY": 130.19999999999987
+      }
+    },
+    {
+      "check": "pet-draft-collapse-focus-alpha",
+      "passed": true,
+      "transparentPixels": 137234
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "client-390"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "client-390",
+      "colors": 123,
+      "face": {
+        "x": 178.48414634146346,
+        "y": 213.07146341463402,
+        "left": 178.48414634146346,
+        "top": 213.07146341463402,
+        "right": 242.71585365853664,
+        "bottom": 282.8885365853657,
+        "width": 64.23170731707319,
+        "height": 69.8170731707317,
+        "centerX": 210.60000000000005,
+        "centerY": 247.97999999999988
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "capabilities-390"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "library-390"
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper-390"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper-390",
+      "colors": 140,
+      "face": {
+        "x": 160.76666666666677,
+        "y": 207.47333333333316,
+        "left": 160.76666666666677,
+        "top": 207.47333333333316,
+        "right": 260.4333333333334,
+        "bottom": 315.8066666666665,
+        "width": 99.66666666666666,
+        "height": 108.33333333333333,
+        "centerX": 210.6000000000001,
+        "centerY": 261.6399999999998
+      }
+    },
+    {
+      "check": "layout",
+      "passed": true,
+      "label": "wallpaper-chat-390"
+    },
+    {
+      "check": "canvas-and-face",
+      "passed": true,
+      "label": "wallpaper-chat-390",
+      "colors": 157,
+      "face": {
+        "x": 160.76666666666677,
+        "y": 207.47333333333316,
+        "left": 160.76666666666677,
+        "top": 207.47333333333316,
+        "right": 260.4333333333334,
+        "bottom": 315.8066666666665,
+        "width": 99.66666666666666,
+        "height": 108.33333333333333,
+        "centerX": 210.6000000000001,
+        "centerY": 261.6399999999998
+      }
+    },
+    {
+      "check": "direct-capability-link-loads",
+      "passed": true
+    },
+    {
+      "check": "no-runtime-errors-or-external-requests",
+      "passed": true
+    },
+    {
+      "check": "comparison-boards",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "total": 37,
+  "nativeDesktopIntegration": false
+}

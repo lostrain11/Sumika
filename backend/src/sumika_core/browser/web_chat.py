@@ -1,8 +1,8 @@
 """Generic, fail-closed adapters for browser based chat accounts.
 
 Web chat providers are intentionally modelled as *profiles*, rather than as
-API keys.  The authenticated state belongs to a dedicated Edge/Chromium
-profile managed by BrowserSkill.  Sumika stores only the site adapter,
+API keys. Authenticated state belongs to a dedicated BrowserSkill profile
+or an explicitly selected native host profile. Sumika stores only the site adapter,
 consent and other non-sensitive metadata, so a browser login can be reused
 without importing cookies, localStorage or authorization headers.
 
@@ -26,6 +26,7 @@ from ..protocol.models import ChatRequest, ProviderInfo, utc_now
 from ..providers.base import LLMProvider
 from ..storage import Storage
 from .policy import BrowserPolicyError, normalize_domain
+from .native_web_chat import NATIVE_TRANSPORT, NativeWebChatTransport
 
 if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
     from .runtime import BrowserRuntime
@@ -1465,6 +1466,7 @@ class WebChatRuntime:
         registry: WebChatAdapterRegistry | None = None,
         logger: Any = None,
         worker_idle_close_seconds: float = WEB_CHAT_WORKER_IDLE_CLOSE_SECONDS,
+        native_exchange: Callable[..., Mapping[str, Any]] | None = None,
     ) -> None:
         self.storage = storage
         self.browser = browser
@@ -1487,6 +1489,80 @@ class WebChatRuntime:
         self._profile_attempts: dict[str, str] = {}
         self._closed = False
         self._session_invalidated_callback: Callable[[str], Any] | None = None
+        self._native = NativeWebChatTransport(storage, native_exchange)
+        self.native_required = False
+
+    @property
+    def native(self) -> NativeWebChatTransport:
+        return self._native
+
+    def set_native_exchange(self, exchange: Callable[..., Mapping[str, Any]] | None) -> None:
+        if exchange is not None and not callable(exchange):
+            raise WebChatRuntimeError("native exchange must be callable")
+        self._native.exchange = exchange
+
+    def bind_native(self, profile_id: str, *, approved: bool = False) -> dict[str, Any]:
+        """Explicitly select native storage without moving BrowserSkill data."""
+
+        if approved is not True:
+            raise WebChatRuntimeError("binding native transport requires explicit approval")
+        with self._occupancy_lock:
+            profile = self._profile(profile_id)
+            if self._closed or profile.get("archived_at"):
+                raise WebChatRuntimeError("web-chat runtime closed or profile archived")
+            if self._native.selected(profile):
+                return self._public_profile(profile)
+            peers = self._native.profiles(profile)
+            if self._native.blocked(profile) or any(
+                row["id"] in self.sessions or row["id"] in self._profile_attempts
+                or row["id"] in self._agent_occupancy for row in peers
+            ):
+                raise WebChatRuntimeError("close active account sessions before binding native transport")
+            config = dict(profile.get("config") or {})
+            config["transport"] = NATIVE_TRANSPORT
+            updated = self.storage.update_web_chat_profile(
+                profile_id, config=config, status="needs-auth", auth_state="unknown"
+            ) or profile
+        return self._public_profile(updated)
+
+    def _native_control(self, operation: str, profile: Mapping[str, Any]) -> dict[str, Any]:
+        if self._closed or (profile.get("archived_at") and operation != "close"):
+            raise WebChatRuntimeError("web-chat runtime closed or profile archived")
+        result = self._native.operate(operation, profile, self._spec(profile))
+        if operation in {"check", "authorize"}:
+            auth = result.get("auth_state", "unknown")
+            page_ready = result.get("page_ready") is True
+            status = "ready" if auth == "authorized" and page_ready else (
+                "needs-auth" if auth != "authorized" else "unavailable"
+            )
+            profile = self.storage.update_web_chat_profile(
+                profile["id"], status=status, auth_state=auth, last_checked=True
+            ) or profile
+        supported = self._native.supported(profile)
+        ready = bool(result.get("ok") and result.get("auth_state") == "authorized"
+                     and result.get("page_ready") and supported and not self._native.blocked(profile))
+        return {
+            **self._public_profile(profile), **result, "ready": ready,
+            "credentials_excluded": True, "isolated_window": False,
+            "focused": operation == "focus" and result["status"] == "focused",
+            "window_state": result["status"],
+        }
+
+    def takeover_profile(self, profile_id: str, *, enabled: bool = True, approved: bool = False) -> dict[str, Any]:
+        """Pause native writes or explicitly release manual control, never replay."""
+
+        if approved is not True or type(enabled) is not bool:
+            raise WebChatRuntimeError("native takeover requires explicit approval")
+        profile = self._profile(profile_id)
+        if not self._native.selected(profile):
+            raise WebChatRuntimeError("native takeover requires native transport")
+        if enabled:
+            with self._occupancy_lock:
+                peers = {row["id"] for row in self._native.profiles(profile)}
+                for attempt in self._attempts.values():
+                    if attempt["profile_id"] in peers and not self._attempt_terminal(attempt["status"]):
+                        self.cancel_message(attempt["attempt_id"])
+        return self._native_control("takeover" if enabled else "resume", profile)
 
     def set_session_invalidated_callback(self, callback: Callable[[str], Any] | None) -> None:
         """Register a compatibility hook for clearing stale route occupancy.
@@ -1529,6 +1605,8 @@ class WebChatRuntime:
         profile = self._profile(profile_id)
         spec = self._spec(profile)
         status = "available" if profile["status"] == "ready" and profile["auth_state"] == "authorized" and profile["auto_chat_enabled"] else "unconfigured"
+        if self._native.selected(profile):
+            status = "available" if self.health(profile_id).get("ok") else "unconfigured"
         return ProviderInfo(
             id=f"web-chat:{profile['id']}",
             name=f"{profile['name']} · {spec.name}",
@@ -1565,6 +1643,8 @@ class WebChatRuntime:
             raise WebChatRuntimeError("browser instance id is invalid")
         raw_config = dict(config or {})
         self._reject_secrets(raw_config)
+        if raw_config.get("transport", "browser-skill") != "browser-skill":
+            raise WebChatRuntimeError("select native transport with bind_native")
         spec = self.registry.resolve(adapter_id, raw_config)
         profile_id = f"web-chat-{uuid4().hex[:12]}"
         persisted_config = spec.public_config()
@@ -1617,6 +1697,9 @@ class WebChatRuntime:
         profile = self._profile(profile_id)
         if profile.get("archived_at"):
             raise WebChatRuntimeError("web-chat profile is archived")
+        if self._native.selected(profile):
+            return {**self._native_control("authorize", profile), "requires_human": True,
+                    "human_action": "在内置标签页手动登录；不会迁移原 BrowserSkill Cookie"}
         session = self._ensure_session(profile, allow_auto=True)
         tab_id = self._ensure_chat_tab(profile, session["id"])
         updated = self.storage.update_web_chat_profile(
@@ -1639,6 +1722,8 @@ class WebChatRuntime:
         profile = self._profile(profile_id)
         if profile.get("archived_at"):
             raise WebChatRuntimeError("web-chat profile is archived")
+        if self._native.selected(profile):
+            return self._native_control("open", profile)
         session = self._ensure_session(profile, allow_auto=True)
         tab_id = self._ensure_chat_tab(profile, session["id"])
         return {
@@ -1654,6 +1739,9 @@ class WebChatRuntime:
 
         if not approved:
             raise WebChatRuntimeError("focusing a web-chat profile requires explicit approval")
+        profile = self._profile(profile_id)
+        if self._native.selected(profile):
+            return self._native_control("focus", profile)
         opened = self.open_profile(profile_id, approved=True)
         session_id = str(opened.get("session_id") or "")
         try:
@@ -1668,6 +1756,13 @@ class WebChatRuntime:
         if not approved:
             raise WebChatRuntimeError("closing a web-chat profile requires explicit approval")
         profile = self._profile(profile_id)
+        if self._native.selected(profile):
+            with self._occupancy_lock:
+                active_id = self._profile_attempts.get(profile_id)
+                if active_id:
+                    self.cancel_message(active_id)
+            result = self._native_control("close", profile)
+            return {**result, "closed": result["status"] == "closed"}
         session_id = self.sessions.get(str(profile.get("id")))
         if session_id:
             self._close_profile_binding(str(profile.get("id")), close_tab=True)
@@ -1741,6 +1836,8 @@ class WebChatRuntime:
             raise WebChatRuntimeError("web-chat profile is archived")
         if not approved and not profile.get("auto_chat_enabled"):
             raise WebChatRuntimeError("checking an unapproved web-chat profile requires explicit approval")
+        if self._native.selected(profile):
+            return self._native_control("check", profile)
         try:
             session = self._ensure_session(profile, allow_auto=True)
             tab_id = self._ensure_chat_tab(profile, session["id"])
@@ -1859,6 +1956,8 @@ class WebChatRuntime:
             raise WebChatRuntimeError("changing automatic web-chat consent requires explicit approval")
         profile = self._profile(profile_id)
         actions = set(allowed_actions or WEB_CHAT_ACTIONS)
+        if enabled and self._native.selected(profile) and not self._native.supported(profile):
+            raise WebChatRuntimeError("native site supports manual use only")
         if not actions.issubset(WEB_CHAT_ACTIONS):
             raise WebChatRuntimeError("web-chat consent may only include chat.read and chat.send")
         if enabled and "chat.send" not in actions:
@@ -1937,6 +2036,11 @@ class WebChatRuntime:
             raise WebChatRuntimeError("cannot edit a web-chat profile with an active session")
         raw_config = dict(config) if isinstance(config, Mapping) else dict(profile.get("config") or {})
         self._reject_secrets(raw_config)
+        current_transport = (profile.get("config") or {}).get("transport", "browser-skill")
+        if raw_config.get("transport", current_transport) != current_transport:
+            raise WebChatRuntimeError("transport cannot be changed through profile config")
+        if self._native.selected(profile) and self._native.blocked(profile):
+            raise WebChatRuntimeError("cannot edit an occupied or unresolved native account")
         selected_adapter = str(adapter_id or profile.get("adapter_id") or "").strip().lower()
         if not selected_adapter:
             raise WebChatRuntimeError("web-chat adapter is required")
@@ -1963,6 +2067,9 @@ class WebChatRuntime:
         if spec.custom:
             persisted_config["name"] = spec.name
         next_draft = bool(draft) if draft is not None else profile.get("status") == "draft"
+        if self._native.selected(profile):
+            persisted_config["transport"] = NATIVE_TRANSPORT
+            self._native.invalidate(profile_id)
         updated = self.storage.update_web_chat_profile(
             profile_id,
             name=normalized_name,
@@ -1986,6 +2093,10 @@ class WebChatRuntime:
         if not approved:
             raise WebChatRuntimeError("archiving a web-chat profile requires explicit approval")
         profile = self._profile(profile_id)
+        if self._native.selected(profile):
+            result = self.close_profile(profile_id, approved=True)
+            if not result.get("closed"):
+                raise WebChatRuntimeError("native tab close is unconfirmed")
         if profile_id in self.sessions:
             self._close_profile_binding(profile_id, close_tab=True)
         updated = self.storage.update_web_chat_profile(profile_id, archived=True)
@@ -2070,6 +2181,8 @@ class WebChatRuntime:
                 self._profile_attempts.pop(profile_id, None)
             if attempt.get("owner") == "agent":
                 self._agent_occupancy.discard(profile_id)
+            if attempt.get("transport") == NATIVE_TRANSPORT:
+                self._native.release(self._profile(profile_id), attempt_id)
         if attempt.get("owner") == "agent":
             self._schedule_worker_idle_close(profile_id)
 
@@ -2088,6 +2201,8 @@ class WebChatRuntime:
                 response = {"ok": False, "status": "failed", "error_code": type(error).__name__.lower().replace("_", "-")[:120], "reason": "web-chat attempt failed"}
             if response.get("ok") is True and isinstance(response.get("text"), str):
                 status = "completed"
+            elif attempt.get("transport") == NATIVE_TRANSPORT and response.get("status") == "unknown":
+                status = "unknown"
             elif response.get("requires_human") or response.get("status") == "waiting-human":
                 status = "waiting-human"
             elif response.get("possibly_sent") or response.get("pending") or response.get("status") in {"possibly-sent", "unknown"}:
@@ -2102,6 +2217,8 @@ class WebChatRuntime:
             attempt["updated_at"] = now
             attempt["completed_at"] = now
             attempt["possibly_sent"] = bool(attempt.get("possibly_sent") or response.get("possibly_sent") or status == "possibly-sent")
+            if attempt.get("transport") == NATIVE_TRANSPORT:
+                attempt["sent"] = bool(attempt.get("sent") or response.get("sent"))
             attempt["error_code"] = response.get("error_code") or ("possibly-sent" if status == "possibly-sent" else None)
             attempt["reason"] = response.get("reason")
 
@@ -2111,6 +2228,9 @@ class WebChatRuntime:
             if attempt is None:
                 return {"status": "failed", "error_code": "unknown-attempt"}
             if self._attempt_terminal(attempt.get("status")):
+                if attempt.get("transport") == NATIVE_TRANSPORT:
+                    attempt["done_event"].set()
+                    self._release_attempt(attempt)
                 return self._attempt_public(attempt)
             attempt["status"] = "running"
             attempt["started_at"] = utc_now()
@@ -2197,6 +2317,12 @@ class WebChatRuntime:
         attempt_id = f"web-attempt-{uuid4().hex[:16]}"
         now = utc_now()
         with self._occupancy_lock:
+            blocked = self._native.blocked(profile)
+            if self._native.selected(profile) and not self._native.supported(profile):
+                blocked = "native-manual-only"
+            if blocked:
+                return {**self._native.failure("waiting-human", blocked), "accepted": False,
+                        "profile_id": profile_key, "schema": WEB_CHAT_SCHEMA}
             active_id = self._profile_attempts.get(profile_key)
             active = self._attempts.get(active_id) if active_id else None
             if active is not None and (
@@ -2213,6 +2339,17 @@ class WebChatRuntime:
                     "error_code": "profile-occupied",
                     "reason": "该网页 Profile 当前已有消息回合；请等待其结束或请求接管",
                 }
+            if self._native.selected(profile):
+                peers = self._native.profiles(profile)
+                if any(row["id"] != profile_key and (
+                    row["id"] in self._profile_attempts or row["id"] in self._agent_occupancy
+                ) or row["id"] in self.sessions for row in peers):
+                    blocked = "account-occupied"
+                else:
+                    blocked = self._native.reserve(profile, attempt_id)
+                if blocked:
+                    return {**self._native.failure("waiting-human", blocked), "accepted": False,
+                            "profile_id": profile_key, "schema": WEB_CHAT_SCHEMA}
             attempt = {
                 "attempt_id": attempt_id,
                 "profile_id": profile_key,
@@ -2234,6 +2371,7 @@ class WebChatRuntime:
                 "cancel_event": threading.Event(),
                 "done_event": threading.Event(),
                 "thread": None,
+                "transport": NATIVE_TRANSPORT if self._native.selected(profile) else "browser-skill",
             }
             self._attempts[attempt_id] = attempt
             self._profile_attempts[profile_key] = attempt_id
@@ -2387,6 +2525,14 @@ class WebChatRuntime:
         early = cancelled()
         if early:
             return early
+        if self._native.selected(profile):
+            result = self._native.send(profile, spec, message, attempt_id=attempt_id or "",
+                                       cancelled=cancel_event or threading.Event())
+            mark_attempt(sent=result.get("sent", False), possibly_sent=result.get("possibly_sent", False),
+                         tab_id=result.get("tab_id"))
+            if result.get("ok") and not (cancel_event and cancel_event.is_set()):
+                self.mark_used(profile_id)
+            return {**result, "profile_id": profile_id}
         try:
             session = self._ensure_session(profile, allow_auto=True, no_focus=owner == "agent")
             tab_id = self._ensure_chat_tab(profile, session["id"], no_focus=owner == "agent")
@@ -2928,6 +3074,16 @@ class WebChatRuntime:
 
     def health(self, profile_id: str) -> dict[str, Any]:
         profile = self._profile(profile_id)
+        if self.native_required and not self._native.selected(profile):
+            return {"ok": False, "profile_id": profile_id, "status": "needs-auth", "auth_state": "unknown",
+                    "page_ready": False, "auto_chat_enabled": bool(profile.get("auto_chat_enabled")),
+                    "quota_state": "unknown", "reason": "select-native-profile-and-check-login"}
+        if self._native.selected(profile):
+            result = self._native_control("health", profile)
+            ready = bool(result["ready"] and profile.get("auto_chat_enabled")
+                         and "chat.send" in (profile.get("allowed_actions") or []))
+            return {**result, "ok": ready, "profile_id": profile_id, "quota_state": "unknown",
+                    "reason": None if ready else "native profile is not consented, supported and page-ready"}
         page_ready = bool(profile.get("status") == "ready")
         ready = bool(page_ready and profile["auth_state"] == "authorized" and profile["auto_chat_enabled"])
         return {
@@ -2961,6 +3117,7 @@ class WebChatRuntime:
                 attempt["completed_at"] = utc_now()
                 attempt["updated_at"] = attempt["completed_at"]
                 self._release_attempt(attempt)
+        self._native.close()
         with self._session_lock:
             for timer in list(self._idle_close_timers.values()):
                 timer.cancel()
@@ -2996,6 +3153,8 @@ class WebChatRuntime:
         profile = self.storage.get_web_chat_profile(normalized)
         if profile is None:
             raise WebChatRuntimeError("unknown web-chat profile")
+        if (profile.get("config") or {}).get("transport", "browser-skill") not in {"browser-skill", NATIVE_TRANSPORT}:
+            raise WebChatRuntimeError("unknown web-chat transport")
         return profile
 
     def _spec(self, profile: Mapping[str, Any]) -> WebChatAdapterSpec:
@@ -3161,6 +3320,10 @@ class WebChatRuntime:
             return self._ensure_session_locked(profile, allow_auto=allow_auto, no_focus=no_focus)
 
     def _ensure_session_locked(self, profile: Mapping[str, Any], *, allow_auto: bool, no_focus: bool = False) -> dict[str, Any]:
+        if self.native_required:
+            raise WebChatRuntimeError("select the native tab and check its login; external windows are disabled in the desktop client")
+        if self._native.selected(profile):
+            raise WebChatRuntimeError("native profiles cannot fall back to BrowserSkill")
         profile_id = str(profile["id"])
         existing_id = self.sessions.get(profile_id)
         if existing_id:
@@ -3322,7 +3485,7 @@ class WebChatRuntime:
         browser_lease_owner = "none"
         browser_profile_id = str(profile.get("browser_profile_id") or "")
         try:
-            browser_profiles = self.browser.list_profiles(include_archived=True)
+            browser_profiles = [] if self._native.selected(profile) else self.browser.list_profiles(include_archived=True)
             browser_profile = next((item for item in browser_profiles if str(item.get("id")) == browser_profile_id), None)
             if browser_profile and browser_profile.get("leased"):
                 browser_lease = browser_profile.get("lease_expires_at")
@@ -3359,8 +3522,15 @@ class WebChatRuntime:
             "browser_profile_lease_owner": browser_lease_owner,
             "browser_profile_lease_expires_at": browser_lease,
             "agent_occupied": self.agent_occupancy(str(profile.get("id") or "")),
-            "credentials_stored_in": "BrowserSkill 专用浏览器 Profile（Sumika 不读取 Cookie）",
+            "transport": NATIVE_TRANSPORT if self._native.selected(profile) else "browser-skill",
+            "automation_supported": not self._native.selected(profile) or self._native.supported(profile),
+            "native_account_id": self._native.account_id(profile) if self._native.selected(profile) else None,
+            "native_pending_attempt": stored_config.get("native_pending_attempt"),
+            "native_takeover": bool(stored_config.get("native_takeover")),
+            "credentials_stored_in": ("Sumika 内置浏览器独立档案（不迁移 BrowserSkill Cookie）"
+                                      if self._native.selected(profile) else "BrowserSkill 专用浏览器 Profile（Sumika 不读取 Cookie）"),
             "config": {
+                "transport": NATIVE_TRANSPORT if self._native.selected(profile) else "browser-skill",
                 "domains": list(spec.domains),
                 "chat_url": spec.chat_url,
                 "selectors": {key: list(value) for key, value in spec.selectors.items()},

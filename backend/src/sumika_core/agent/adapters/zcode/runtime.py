@@ -999,13 +999,17 @@ class ZCodeAgentRuntime(AgentRuntime):
             model_ref = self._modern_model_ref(raw_model, params)
             if model_ref is None:
                 raise AgentRuntimeError("model provider and model id are required")
+            request = {
+                "sessionId": session_id,
+                "model": model_ref,
+                "persistAsWorkspaceLastUsed": bool(params.get("persistAsWorkspaceLastUsed", True)),
+            }
+            reasoning_effort = params.get("reasoningEffort") or params.get("reasoning_effort")
+            if reasoning_effort is not None and str(reasoning_effort).strip():
+                request["reasoningEffort"] = str(reasoning_effort).strip().lower()
             value = self._transport.request(
                 "session/setModel",
-                {
-                    "sessionId": session_id,
-                    "model": model_ref,
-                    "persistAsWorkspaceLastUsed": bool(params.get("persistAsWorkspaceLastUsed", True)),
-                },
+                request,
             )
             return {"session_id": session_id, "selected": _compact_public(value), "model": model_ref["modelId"], "model_ref": model_ref}
         model = _safe_text(raw_model, 240)
@@ -1013,7 +1017,15 @@ class ZCodeAgentRuntime(AgentRuntime):
             raise AgentRuntimeError("model is required")
         value = self._call_variants(
             ("session/model", "model/select", "session.selectModel"),
-            {"sessionId": session_id, "model": model},
+            {
+                "sessionId": session_id,
+                "model": model,
+                **(
+                    {"reasoningEffort": str(params.get("reasoningEffort") or params.get("reasoning_effort")).strip().lower()}
+                    if params.get("reasoningEffort") or params.get("reasoning_effort")
+                    else {}
+                ),
+            },
         )
         return {"session_id": session_id, "selected": _compact_public(value), "model": model}
 

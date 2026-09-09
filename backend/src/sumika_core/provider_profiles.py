@@ -74,6 +74,8 @@ class ProviderProfileManager:
     def __init__(self, storage: Storage, credentials: CredentialStore) -> None:
         self.storage = storage
         self.credentials = credentials
+        self._chat_verified_models: set[tuple[str, str]] = set()
+        self.runtime_wrapper: Any = None
 
     def templates(self) -> list[dict[str, Any]]:
         return [dict(item) for item in PROVIDER_TEMPLATES]
@@ -190,6 +192,7 @@ class ProviderProfileManager:
             secret_fields=sorted(secrets),
             source=source,
         )
+        self._chat_verified_models = {item for item in self._chat_verified_models if item[0] != profile_id}
         return self.public(profile)
 
     def health(
@@ -209,6 +212,16 @@ class ProviderProfileManager:
             return {"ok": False, "profile": self.public(updated or profile), "error": "Profile is incomplete"}
         provider = self.runtime(profile_id, model_id=selected_model if model_id is not None else None)
         result = provider.health_check(allow_chat_probe=allow_chat_probe)
+        proof_key = (profile_id, selected_model)
+        if (not allow_chat_probe and result.get("error") == "model not found"
+                and proof_key in self._chat_verified_models and profile.get("status") == "available"):
+            return {**result, "ok": True, "status": "available", "error": None,
+                    "model_catalog": "incomplete", "health_evidence": "prior-explicit-chat-probe",
+                    "profile_id": profile_id, "profile": self.public(profile), "model": selected_model}
+        if result.get("ok") and result.get("health_probe") == "chat-completions":
+            self._chat_verified_models.add(proof_key)
+        elif not result.get("ok"):
+            self._chat_verified_models.discard(proof_key)
         available_models = result.get("available_models")
         if isinstance(available_models, list):
             updated_config = _merge_model_observations(
@@ -355,7 +368,7 @@ class ProviderProfileManager:
         for key, value in secrets.items():
             if key.startswith("header:"):
                 headers[key.removeprefix("header:")] = value
-        return OpenAICompatibleProvider(
+        provider = OpenAICompatibleProvider(
             base_url=str(config.get("active_base_url") or ""),
             model=model,
             api_key=secrets.get("api_key"),
@@ -363,6 +376,7 @@ class ProviderProfileManager:
             headers=headers,
             ollama=profile.get("template_id") == "ollama",
         )
+        return self.runtime_wrapper(provider, profile_id, model) if self.runtime_wrapper else provider
 
     def mark_used(self, profile_id: str) -> dict[str, Any]:
         profile = self.storage.update_provider_profile_state(profile_id, mark_used=True)
@@ -460,6 +474,23 @@ def provider_credential_revision(profile: dict[str, Any]) -> str:
     profile_id = str(profile.get("id") or "")
     created_at = str(profile.get("created_at") or "legacy")
     return hashlib.sha256(f"{profile_id}\0{created_at}".encode("utf-8")).hexdigest()[:32]
+
+
+def provider_account_revision(profile: dict[str, Any]) -> str:
+    config = profile.get("config") or {}
+    binding = {"profile_id": profile.get("id"), "adapter_id": profile.get("adapter_id"),
+               "template_id": profile.get("template_id"), "processing_location": profile.get("processing_location"),
+               "endpoint": config.get("active_base_url"), "headers": config.get("headers"),
+               "credential_revision": provider_credential_revision(profile)}
+    return hashlib.sha256(json.dumps(binding, sort_keys=True, allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def provider_execution_revision(profile: dict[str, Any], model_id: str) -> str:
+    model = next((item for item in configured_models(profile.get("config") or {}) if item["id"] == model_id), {})
+    model = {key: value for key, value in model.items()
+             if key not in {"name", "health_state", "last_tested_at", "discovered_at", "observed_at"}}
+    binding = {"account_revision": provider_account_revision(profile), "model_id": model_id, "model": model}
+    return hashlib.sha256(json.dumps(binding, sort_keys=True, allow_nan=False).encode("utf-8")).hexdigest()
 
 
 def _is_local_ollama_url(base_url: str) -> bool:
@@ -603,7 +634,11 @@ def _validate_usage_query(value: Any) -> dict[str, Any]:
     fields = value.get("fields") or {}
     if not isinstance(fields, dict) or not all(isinstance(key, str) and isinstance(item, str) for key, item in fields.items()):
         raise ProviderProfileError("usage_query fields must map labels to JSON paths")
-    return {"enabled": bool(value.get("enabled", False)), "method": method, "url": url, "fields": fields}
+    funding_kind = value.get("funding_kind", "unknown")
+    if funding_kind not in {"unknown", "cash", "grant", "purchased"}:
+        raise ProviderProfileError("usage_query funding_kind is invalid")
+    return {"enabled": bool(value.get("enabled", False)), "method": method, "url": url, "fields": fields,
+            "funding_kind": funding_kind}
 
 
 def _validate_pricing_config(value: Any) -> dict[str, Any]:
@@ -759,6 +794,12 @@ def _normalize_model_entries(raw: Any, *, fallback_model: str = "") -> list[dict
             "cost_class": cost,
             "health_state": health,
         }
+        if "reasoning_efforts" in row:
+            efforts = row["reasoning_efforts"]
+            if (not isinstance(efforts, (list, tuple)) or len(efforts) > 8
+                    or any(not isinstance(effort, str) or effort not in {"off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"} for effort in efforts)):
+                raise ProviderProfileError("invalid model reasoning_efforts")
+            normalized["reasoning_efforts"] = list(dict.fromkeys(efforts))
         for key in ("version", "discovered_at", "last_tested_at", "quota_ref"):
             value = row.get(key)
             if isinstance(value, str) and value.strip() and len(value) <= 240 and all(character not in value for character in "\r\n"):

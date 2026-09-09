@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sumika / A+ 和风留白</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+    {"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","@pixiv/three-vrm":"/vendor/vrm/three-vrm.module.js"}}
+  </script>
+  <script type="module" src="./preview.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="navigation">
+      <a class="brand" href="./">sumika <small>すみか</small></a>
+      <nav class="main-nav" aria-label="主要导航">
+        <button data-page="companion" aria-current="page">陪伴</button>
+        <button data-page="workbench">工作台</button>
+        <button data-page="capabilities">能力</button>
+        <button data-page="character">角色</button>
+        <button data-page="settings">设置</button>
+      </nav>
+      <div class="nav-actions"><button data-mode="pet">桌宠</button><button data-mode="wallpaper">壁纸预览</button></div>
+    </header>
+    <main id="companion" class="companion">
+      <section class="scene" aria-label="Sumika 的居所">
+        <div id="room" class="room"></div>
+        <div class="scene-caption"><span>SUMIKA / DAY 01</span><h1>今天，也在一起。</h1><p>おかえり。欢迎回来。</p></div>
+        <div class="scene-time"><time>14:32</time><span>午后 · 窗边</span></div>
+        <div class="scene-note"><i></i>Sumika <span>窗边小憩</span></div>
+        <button class="restore-chat" data-chat="open" aria-controls="chat" aria-expanded="false">展开聊天</button>
+        <div class="pet-bubble">我在这里，陪你慢慢来。</div>
+      </section>
+      <aside id="chat" class="chat" aria-label="与 Sumika 的聊天">
+        <header class="chat-heading"><div><span>WITH YOU / 01</span><h2>和 Sumika 聊聊</h2></div><button data-chat="close" aria-controls="chat" aria-expanded="true">收起</button></header>
+        <div class="chat-history" role="log" aria-label="示例会话"><p class="chat-date">今天 · 14:32</p><article><span>Sumika</span><p>回来啦。阳光刚好落在窗边，要一起坐一会儿吗？</p></article><article class="from-user"><span>你</span><p>先陪我待一会儿吧。</p></article><article><span>Sumika</span><p>好呀。不着急，我们慢慢来。</p></article></div>
+        <form class="composer"><textarea aria-label="聊天消息" placeholder="和 Sumika 说点什么…" rows="2"></textarea><footer><span>未连接服务</span><button type="submit" disabled>发送</button></footer></form>
+        <div class="chat-bottom"><span>示例会话</span><div class="swatches" aria-label="角色主题色"></div></div>
+      </aside>
+    </main>
+    <main id="capabilities" class="capabilities-page" hidden>
+      <header class="page-heading"><div><span>CAPABILITIES</span><h1>能力</h1></div><p>Sumika 的工具箱</p></header>
+      <div class="category-tabs" role="tablist" aria-label="能力分类"></div>
+      <div id="module-grid" class="module-grid" role="tabpanel" tabindex="0"></div>
+    </main>
+    <main id="secondary" class="secondary-page" hidden></main>
+    <div class="wallpaper-controls"><button data-chat="toggle" aria-controls="chat">展开聊天</button><span></span><button data-mode="client">返回客户端</button></div>
+    <div class="pet-controls"><button data-mode="client">打开客户端</button><button data-transparent>透明背景</button><button data-chat="toggle">收起聊天</button></div>
+    <span class="design-label">A+ · 设计示例</span>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><header><h2 id="dialog-title"></h2><button data-close>关闭</button></header><div id="dialog-content"></div></dialog>
+</body>
+</html>

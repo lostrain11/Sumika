@@ -13,11 +13,30 @@ API、协议、类名和代码标识保留 English identifier。
   三个动作；不替代状态矩阵。
 - [需求基线](requirements/README.md)：记录长期产品意图、历史取代关系和未来
   重构验收标准；不替代状态矩阵。
+- [需求总表：79项及出处索引](requirements/catalog.md)
+- [统一内置浏览器正式需求](requirements/embedded-browser.md)
 - [完整需求基线](requirements/baseline.md)
 - [模型策略契约](requirements/model-policy.md)：记录 ZCode、智谱、Ollama、额度、
   成本和自动路由的独立边界。
 - [脱敏原话摘录](requirements/original-excerpts.md)
 - [机器可读需求](requirements/requirements.json)
+
+## 重构记录
+
+- [2026-09-08执行记录归档](refactor/execution-history-20260908.md)
+- [社区组件边界](refactor/community-component-boundary.md)
+- [广泛福利发现与签到](refactor/free-benefits.md)
+- [正式免费模型刷新与路由](refactor/free-model-routing.md)
+- [统一路由报价与资金来源](refactor/unified-route-costs.md)
+- [主／角色启用与真实账户资金](refactor/model-activation-and-accounts.md)
+- [文章渠道核验总表](refactor/free-provider-audit.md)
+- [Codex成本协议](refactor/phase-3-cost-routing.md)
+
+- [质量优先协作 R0–R5 执行与验收](refactor/quality-routing.md)
+- [Phase 0 模块盘点](refactor/module-inventory.md)
+- [Phase 0 冗余与耦合报告](refactor/redundancy-report.md)
+- [Phase 0 需求覆盖与重构缺口](refactor/requirement-coverage.md)
+- [Phase 0 任务包](refactor/phase-0-inventory-task.yaml)
 
 ## 用户使用
 
@@ -28,6 +47,10 @@ API、协议、类名和代码标识保留 English identifier。
 - [桌面自动化工具包](architecture/desktop-automation.md)
 - [本地模型与 Ollama](architecture/local-model.md)
 - [入门指南与 UI 参考](ui/reference-map.md)
+- [温暖居所双模式设计预览](ui/concepts/warm-home-v1/README.md)
+- [五套风格与布局对照设计](ui/concepts/style-studies-v1/README.md)
+- [A+ 和风留白：聊天收放、壁纸构图与角色主题色](ui/concepts/a-plus-v1/README.md)
+- [A+ 正式客户端：阶段 0–2 与原生验收](ui/a-plus-client.md)
 - [Avatar 资产说明](../assets/avatars/README.md)
 
 ## 产品架构

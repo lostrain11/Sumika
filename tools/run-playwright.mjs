@@ -64,7 +64,7 @@ async function spawnCore(port) {
   ];
   const environment = {
     ...process.env,
-    PYTHONPATH: `${repoRoot}/backend/src`,
+    PYTHONPATH: [`${repoRoot}/backend/src`, `${repoRoot}/packages/quality-routing/src`].join(process.platform === "win32" ? ";" : ":"),
     SUMIKA_DATA_DIR: ":memory:",
     // Browser tests provide explicit Agent protocol fixtures. Never let the
     // throwaway Core attach to a developer's live DSH session roster.

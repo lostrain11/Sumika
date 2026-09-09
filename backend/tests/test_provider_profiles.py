@@ -6,11 +6,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sumika_core.credentials import MemoryCredentialStore
 from sumika_core.provider_imports import ProviderImportError, ProviderImportRegistry
-from sumika_core.provider_profiles import ProviderProfileManager
+from sumika_core.provider_profiles import ProviderProfileError, ProviderProfileManager
 from sumika_core.storage import Storage
 
 
 class ProviderProfileTests(unittest.TestCase):
+    def test_usage_funding_kind_is_explicit_and_validated(self):
+        for kind in ("cash", "grant", "purchased", "unknown"):
+            profile = self.profiles.save({"name": "Funding " + kind, "base_url": "https://example.invalid/v1", "model": "fixture",
+                "usage_query": {"enabled": True, "url": "{{baseUrl}}/balance", "fields": {"remaining": "balance", "unit": "CNY"}, "funding_kind": kind}})
+            self.assertEqual(self.storage.get_provider_profile(profile["id"])["config"]["usage_query"]["funding_kind"], kind)
+        with self.assertRaises(ProviderProfileError):
+            self.profiles.save({"name": "Invalid", "base_url": "https://example.invalid/v1", "model": "fixture",
+                               "usage_query": {"funding_kind": "assume-free"}})
+
     def setUp(self):
         self.storage = Storage()
         self.credentials = MemoryCredentialStore()
@@ -18,6 +27,16 @@ class ProviderProfileTests(unittest.TestCase):
 
     def tearDown(self):
         self.storage.close()
+
+    def test_model_reasoning_efforts_survive_profile_roundtrip(self):
+        profile = self.profiles.save({
+            "name": "Thinking capabilities", "base_url": "https://example.invalid/v1", "model": "fixture-model",
+            "models": [{"id": "fixture-model", "reasoning_efforts": ["off", "high", "off"]}],
+        })
+        row = self.storage.get_provider_profile(profile["id"])
+        self.assertEqual(row["config"]["models"][0]["reasoning_efforts"], ["off", "high"])
+        with self.assertRaises(ProviderProfileError):
+            self.profiles.save({**profile, "models": [{"id": "fixture-model", "reasoning_efforts": ["none"]}]})
 
     def test_profile_secrets_are_isolated_and_edit_requires_retest(self):
         profile = self.profiles.save({
@@ -360,6 +379,46 @@ class ProviderProfileTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_explicit_probe_of_omitted_model_survives_passive_refresh_until_edit(self):
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                calls.append("GET")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"other-model"}]}')
+
+            def do_POST(self):
+                calls.append("POST")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"choices":[{"message":{"content":"ok"}}]}')
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            profile = self.profiles.save({"name": "Partial catalog", "model": "omitted-model",
+                                          "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1"})
+            self.assertTrue(self.profiles.health(profile["id"], allow_chat_probe=True)["ok"])
+            result = self.profiles.health(profile["id"])
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["health_evidence"], "prior-explicit-chat-probe")
+            self.assertEqual(calls, ["GET", "POST", "GET"])
+            self.profiles.save({**profile, "api_key": "changed-fixture-key"})
+            self.assertFalse(self.profiles.health(profile["id"])["ok"])
+            self.assertEqual(calls.count("POST"), 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
     def test_explicit_chat_probe_keeps_catalog_less_profile_available(self):
         class Handler(BaseHTTPRequestHandler):

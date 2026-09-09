@@ -87,13 +87,17 @@ class ZCodeRuntimeTests(unittest.TestCase):
         runtime = self.make_modern_runtime()
         runtime.health()
         created = runtime.create_session({"title": "model ref"})
-        selected = runtime.select_model(
-            {
-                "sessionId": created["sessionId"],
-                "model": {"providerId": "fixture-provider", "modelId": "fixture-model"},
-            }
-        )
+        with patch.object(runtime._transport, "request", wraps=runtime._transport.request) as request:
+            selected = runtime.select_model(
+                {
+                    "sessionId": created["sessionId"],
+                    "model": {"providerId": "fixture-provider", "modelId": "fixture-model"},
+                    "reasoningEffort": "medium",
+                }
+            )
         self.assertEqual(selected["model_ref"], {"providerId": "fixture-provider", "modelId": "fixture-model"})
+        set_model = next(call.args[1] for call in request.call_args_list if call.args[0] == "session/setModel")
+        self.assertEqual(set_model["reasoningEffort"], "medium")
 
     def test_modern_complete_runtime_model_is_sanitized_and_forwarded(self):
         runtime = self.make_modern_runtime()

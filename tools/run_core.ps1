@@ -24,7 +24,7 @@ $dataPath = if ([string]::IsNullOrWhiteSpace($DataDir)) {
 } else {
     $DataDir
 }
-$env:PYTHONPATH = Join-Path $repoRoot 'backend/src'
+$env:PYTHONPATH = @((Join-Path $repoRoot 'backend/src'), (Join-Path $repoRoot 'packages/quality-routing/src')) -join [IO.Path]::PathSeparator
 # Keep BrowserSkill updates explicit and user-controlled for this process.
 $env:BSK_AUTO_UPDATE = 'off'
 if ([string]::IsNullOrWhiteSpace([string]$env:SUMIKA_BSK_EXECUTABLE)) {

@@ -1,0 +1,65 @@
+{
+  "protocol_version": "1",
+  "task_id": "sumika-phase-2-scene-ui-shell",
+  "title": "Extract scene shell, state projection and view without changing UI behavior",
+  "stage": "implementation",
+  "risk": "medium",
+  "recommended_tier": "L2",
+  "assignment_mode": "direct",
+  "requested_reasoning_effort": "medium",
+  "applied_reasoning_effort": "unknown",
+  "goal": ["Separate scene/drawer navigation metadata from the frontend monolith while preserving the existing shell"],
+  "dependencies": ["sumika-phase-1-domain-contracts"],
+  "workspace": {"root": ".", "worktree_required": false},
+  "allowed_paths": [
+    "frontend/src/scene-shell.js",
+    "frontend/src/scene-store.js",
+    "frontend/src/scene-view.js",
+    "frontend/main.js",
+    "frontend/tests/scene-shell.test.js",
+    "frontend/tests/scene-store.test.js",
+    "docs/refactor/phase-2-scene-ui-task.json",
+    "docs/architecture/README.md",
+    "docs/status-matrix.md"
+  ],
+  "forbidden_paths": [
+    "backend/src/sumika_core/server.py",
+    "backend/src/sumika_core/model_policy.py",
+    "backend/src/sumika_core/storage.py",
+    "frontend/styles.css",
+    "src-tauri/**",
+    "backend/src/sumika_core/domain/**",
+    ".sumika*/**",
+    ".zcode/**",
+    "deprecated/**"
+  ],
+  "acceptance": [
+    "All existing scene pages map to the same drawer as before",
+    "Unknown pages remain non-scene pages",
+    "Drawer metadata is immutable at the module boundary",
+    "main.js no longer owns duplicate navigation metadata or scene rendering",
+    "No RPC, storage, provider, avatar, portal or permission behavior changes"
+  ],
+  "verification": {
+    "commands": [
+      "node frontend/tests/scene-shell.test.js",
+      "node frontend/tests/scene-store.test.js",
+      "node --check frontend/main.js",
+      "npm --prefix frontend run build",
+      "npm --prefix frontend run test:e2e"
+    ],
+    "levels": ["L0", "L1", "L2", "L3"]
+  },
+  "escalate_when": ["Navigation behavior requires RPC changes", "Existing smoke test changes require visual redesign", "Build or focused test failure repeats twice"],
+  "budget": {"estimated_calls": 1, "retry_limit": 1, "allow_external_cost_boundary_change": false, "currency": "unknown"},
+  "result": {
+    "status": "completed",
+    "focused_contract_test": "passed",
+    "syntax_check": "passed",
+    "production_build": "passed",
+    "playwright_smoke": "50 passed",
+    "live_environment_verified": false,
+    "changed_scope": ["frontend/src/scene-shell.js", "frontend/src/scene-store.js", "frontend/src/scene-view.js", "frontend/main.js", "frontend/tests/scene-shell.test.js", "frontend/tests/scene-store.test.js"],
+    "next_phase": "Drawer business view split completed in phase-2c-ui-completion.json; continue with the model-picker advisory adapter"
+  }
+}

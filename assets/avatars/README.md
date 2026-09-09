@@ -30,6 +30,31 @@ The upstream sample repository README identifies `AvatarSample_A`, `B`, and
 are followed. Review the linked terms before making a separate distribution or
 derivative asset.
 
+### Distribution boundary (verified 2026-09-09)
+
+The official article explicitly says these models are **not CC0**. The
+copyright has not been waived. Use as an app Avatar, pictures/videos and
+for-profit or non-profit activities are permitted under the sample terms;
+attribution is not required. Do not relicense the asset as CC0, sell the
+unmodified sample or its embedded images, use its data in a character-creation
+service, or imply pixiv endorsement. The complete prohibited-conduct rules
+remain in the official terms. If a future paid distribution changes how the
+model is sold, review those terms before including it.
+
+`distribution.json` allowlists only the reviewed model and its thumbnail by
+SHA-256. `python tools/check_release_assets.py` runs before the frontend build;
+`--staged` checks exact Git index bytes before publication. The source archive
+retains this notice and the manifest. The asset does not inherit any source-code
+license from Sumika or its renderer dependencies.
+
+Personal models, including the owner's imported Awa Subaru, remain in local
+runtime storage or another user-selected directory. They are not bundled assets
+and must not be copied into `assets/avatars` or `frontend/public`. The existing
+import UI registers a local path; it does not grant redistribution rights.
+Runtime stores, browser profiles and user model files are excluded from Git and
+source archives. A new installation selects Sample A; an existing installation
+keeps its selection unless the user explicitly changes it.
+
 ## Archived reference: VRM1_Constraint_Twist_Sample
 
 The former sample is retained at

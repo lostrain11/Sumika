@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, ProxyHandler, build_opener, urlopen
+from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener, urlopen
 
 from ..protocol.models import ChatRequest, ProviderInfo
 from .base import LLMProvider
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -66,6 +72,8 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def _open(self, request: Request, *, timeout: float | None = None):
         """Open a request without proxying loopback traffic through a VPN."""
+        if getattr(self, "disallow_redirects", False):
+            return build_opener(_NoRedirect()).open(request, timeout=timeout or self.timeout)
         if self._is_local():
             return build_opener(ProxyHandler({})).open(request, timeout=timeout or self.timeout)
         return urlopen(request, timeout=timeout or self.timeout)
@@ -161,6 +169,11 @@ class OpenAICompatibleProvider(LLMProvider):
             if isinstance(item, dict) and item.get("id")
         }
         if self.model not in model_ids:
+            if allow_chat_probe:
+                result = self._health_chat_probe(headers)
+                result["model_catalog"] = "incomplete"
+                result["available_models"] = sorted(model_ids | ({self.model} if result.get("ok") else set()))
+                return result
             self.info.status = "unconfigured"
             return {
                 "ok": False,
@@ -238,6 +251,8 @@ class OpenAICompatibleProvider(LLMProvider):
             "max_tokens": 1,
             "stream": False,
         }
+        if self._supports_zhipu_thinking_switch():
+            payload["thinking"] = {"type": "disabled"}
         probe = Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -285,11 +300,31 @@ class OpenAICompatibleProvider(LLMProvider):
             "health_probe": "chat-completions",
         }
 
+    def _supports_zhipu_thinking_switch(self) -> bool:
+        parsed = urlparse(self.base_url)
+        return (parsed.scheme == "https" and parsed.hostname == "open.bigmodel.cn"
+                and parsed.path.rstrip("/") == "/api/paas/v4"
+                and self.model in {"glm-4.5-air", "glm-4.5-flash"})
+
+    def _is_spark_lite(self) -> bool:
+        return self.base_url == "https://spark-api-open.xf-yun.com/v1" and self.model == "lite"
+
     def stream(self, request: ChatRequest) -> Iterable[str]:
         self.last_usage = {}
+        self.last_response_model = None
+        self.last_response_model_mismatch = False
+        self.last_model_identity_basis = None
+        self.last_business_success = False
+        self.last_tool_calls = []
+        self.last_applied_reasoning_effort = None
+        self.last_finish_reason = None
+        self.last_reasoning_content_seen = False
+        self._tool_fragments = {}
         if self._is_ollama():
             yield from self._stream_ollama(request)
             return
+        thinking_filter = (_LeadingThinkFilter() if self.base_url == "https://api.moark.com/v1"
+                           and self.model.startswith(("DeepSeek-R1-Distill-", "Qwen3-")) else None)
         payload = {
             "model": self.model,
             "messages": [{"role": message.role, "content": message.content} for message in request.messages],
@@ -297,6 +332,15 @@ class OpenAICompatibleProvider(LLMProvider):
             "max_tokens": request.max_tokens,
             "stream": True,
         }
+        if request.reasoning_effort:
+            if self._supports_zhipu_thinking_switch():
+                if request.reasoning_effort != "off":
+                    raise ValueError("this GLM adapter supports only explicit off or provider-default thinking")
+                payload["thinking"] = {"type": "disabled"}
+            else:
+                payload["reasoning_effort"] = request.reasoning_effort
+        if request.tools:
+            payload["tools"] = request.tools
         headers = self._request_headers(accept="text/event-stream", content_type="application/json")
         http_request = Request(
             f"{self.base_url}/chat/completions",
@@ -310,22 +354,36 @@ class OpenAICompatibleProvider(LLMProvider):
                 if "text/event-stream" not in content_type:
                     body = json.loads(response.read().decode("utf-8"))
                     self._capture_usage(body)
+                    self._capture_tool_calls(body)
                     text = _extract_content(body)
                     if text:
-                        yield text
+                        if thinking_filter is None:
+                            yield text
+                        else:
+                            yield from thinking_filter.feed(text)
+                            yield from thinking_filter.finish()
                     return
                 for raw_line in response:
                     line = raw_line.decode("utf-8").strip()
                     if not line or line.startswith(":"):
                         continue
-                    if line == "data: [DONE]":
+                    if line.startswith("data:") and line[5:].strip() == "[DONE]":
+                        if self._is_spark_lite() and self.last_business_success:
+                            self.last_finish_reason = "stop"
+                            self.last_model_identity_basis = "spark-lite-request-and-completion"
                         break
                     if line.startswith("data:"):
                         value = json.loads(line[5:].strip())
                         self._capture_usage(value)
+                        self._capture_tool_calls(value)
                         text = _extract_content(value)
                         if text:
-                            yield text
+                            if thinking_filter is None:
+                                yield text
+                            else:
+                                yield from thinking_filter.feed(text)
+                if thinking_filter is not None:
+                    yield from thinking_filter.finish()
         except HTTPError as exc:
             code = exc.code
             try:
@@ -349,6 +407,10 @@ class OpenAICompatibleProvider(LLMProvider):
             "stream": True,
             "think": "low",
         }
+        if request.reasoning_effort:
+            payload["think"] = request.reasoning_effort
+        if request.tools:
+            payload["tools"] = request.tools
         headers = self._request_headers(accept="text/event-stream", content_type="application/json")
         native_request = Request(
             f"{self.base_url}/chat/completions",
@@ -363,6 +425,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 if "text/event-stream" not in content_type:
                     body = json.loads(response.read().decode("utf-8"))
                     self._capture_usage(body)
+                    self._capture_tool_calls(body)
                     content = _extract_content(body)
                     if content:
                         yield from visible.feed(content)
@@ -377,6 +440,7 @@ class OpenAICompatibleProvider(LLMProvider):
                     if line.startswith("data:"):
                         value = json.loads(line[5:].strip())
                         self._capture_usage(value)
+                        self._capture_tool_calls(value)
                         content = _extract_content(value)
                         if content:
                             yield from visible.feed(content)
@@ -391,7 +455,67 @@ class OpenAICompatibleProvider(LLMProvider):
         except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Ollama connection failed: {getattr(exc, 'reason', exc)}") from exc
 
+    def _capture_tool_calls(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            return
+        choice = choices[0]
+        delta = choice.get("delta") or choice.get("message") or {}
+        if not isinstance(delta, dict):
+            return
+        calls = delta.get("tool_calls") or []
+        if not isinstance(calls, list) or len(calls) > 4:
+            raise ValueError("invalid tool response")
+        for position, call in enumerate(calls):
+            if not isinstance(call, dict):
+                raise ValueError("invalid tool call")
+            index = call.get("index", position)
+            if type(index) is not int or not 0 <= index < 4:
+                raise ValueError("invalid tool call index")
+            function = call.get("function") or {}
+            fragment = self._tool_fragments.setdefault(index, {"name": "", "arguments": ""})
+            for key in ("name", "arguments"):
+                value = function.get(key, "")
+                if not isinstance(value, str):
+                    raise ValueError("invalid tool call fragment")
+                fragment[key] += value
+            if len(fragment["arguments"]) > 16000 or len(fragment["name"]) > 120:
+                raise ValueError("tool response too large")
+        self.last_tool_calls = [dict(self._tool_fragments[key]) for key in sorted(self._tool_fragments)]
+
+    def response_model_matches(self, response_model: object) -> bool:
+        if not isinstance(response_model, str):
+            return False
+        if self.base_url == "https://api.moark.com/v1":
+            if "/" in response_model:
+                namespace, separator, model = response_model.partition("/")
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", namespace):
+                    return False
+                response_model = model
+            return response_model.casefold() == self.model.casefold()
+        return response_model == self.model
+
     def _capture_usage(self, payload: object) -> None:
+        if isinstance(payload, dict):
+            if self._is_spark_lite():
+                if type(payload.get("code")) is not int or payload["code"] != 0:
+                    raise RuntimeError("Spark Lite business response rejected")
+                self.last_business_success = True
+            response_model = payload.get("model")
+            if isinstance(response_model, str) and response_model:
+                self.last_response_model = response_model
+                if not self.response_model_matches(response_model):
+                    self.last_response_model_mismatch = True
+            choices = payload.get("choices") or []
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                choice = choices[0]
+                if choice.get("finish_reason") in {"stop", "length", "tool_calls", "content_filter"}:
+                    self.last_finish_reason = choice["finish_reason"]
+                delta = choice.get("delta") or choice.get("message") or {}
+                if isinstance(delta, dict) and delta.get("reasoning_content"):
+                    self.last_reasoning_content_seen = True
         if not isinstance(payload, dict) or not isinstance(payload.get("usage"), dict):
             return
         usage = payload["usage"]
@@ -412,6 +536,10 @@ class OpenAICompatibleProvider(LLMProvider):
                 result[target] = raw
         if "total_tokens" not in result and ("input_tokens" in result or "output_tokens" in result):
             result["total_tokens"] = result.get("input_tokens", 0) + result.get("output_tokens", 0)
+        completion_details = usage.get("completion_tokens_details") or {}
+        reasoning_tokens = completion_details.get("reasoning_tokens") if isinstance(completion_details, dict) else None
+        if type(reasoning_tokens) is int and 0 <= reasoning_tokens <= 10_000_000_000:
+            result["reasoning_tokens"] = reasoning_tokens
         if result:
             self.last_usage = result
 
@@ -426,6 +554,47 @@ def _extract_content(payload: dict) -> str:
         return delta["content"]
     message = choice.get("message") or {}
     return message.get("content", "") if isinstance(message.get("content"), str) else ""
+
+
+class _LeadingThinkFilter:
+    def __init__(self):
+        self.buffer = ""
+        self.state = "prefix"
+
+    def feed(self, chunk):
+        if self.state == "answer":
+            yield chunk
+            return
+        self.buffer += chunk
+        if self.state == "prefix":
+            stripped = self.buffer.lstrip()
+            if "<think>".startswith(stripped):
+                return
+            if not stripped.startswith("<think>"):
+                self.state = "answer"
+                yield self.buffer
+                self.buffer = ""
+                return
+            self.buffer = stripped[len("<think>"):]
+            self.state = "thinking"
+        closing = self.buffer.find("</think>")
+        if closing >= 0:
+            answer = self.buffer[closing + len("</think>"):]
+            self.buffer = ""
+            self.state = "answer"
+            if answer:
+                yield answer
+        else:
+            self.buffer = self.buffer[-len("</think>"):]
+
+    def finish(self):
+        if self.state == "prefix" and self.buffer.strip() and "<think>".startswith(self.buffer.lstrip()):
+            raise ValueError("incomplete reasoning prefix")
+        if self.state == "thinking" or self.buffer.lstrip() == "<think>":
+            raise ValueError("incomplete reasoning block")
+        if self.buffer:
+            yield self.buffer
+        self.buffer = ""
 
 
 class _ThinkFilter:

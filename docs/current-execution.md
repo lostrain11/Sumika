@@ -1,147 +1,113 @@
 # Sumika 当前执行契约
 
-本页只用于恢复当前开发目标和下一步，不是功能状态或完整架构的事实源。
-功能状态以 [状态矩阵](status-matrix.md) 为准，接口和约束以对应专题文档为准。
+本页用于恢复开发目标和下一步；功能状态以[状态矩阵](status-matrix.md)为准，需求以[总表](requirements/catalog.md)和[机器记录](requirements/requirements.json)为准。
 
 ## 目标
 
-在当前 Windows 开发环境中，把 Sumika 完成到可以一键启动并承担日常代码仓库工作的程度，同时保留首版角色、Avatar、桌宠和本地数据能力。
+2026-09-09最新指令：使用设计稿中的Sample A作为默认Avatar，安和昴保留本地导入并排除上传/打包，调整后上传现有GitHub远程分支。先验证官方许可、默认与导入边界、资源/运行数据排除和待上传内容，再提交推送；保留前述工作包成果。本次新增需求AVATAR-004，原话见EX-AVATAR-DEFAULT-001。
+
+用户要求补完工作包2，然后完成3、4。已核对原计划：2是真实价格与额度接线，3是统一内置浏览器，4是复杂任务协作验收，不是长期Phase编号。普通小额付费测试、账户读取和明确免费签到已有授权；不充值。
+
+长期方向仍是质量优先动态路由与零成本刷新，保留A+双模式UI、旧源码、运行数据和登录档案。本轮不实施语音、设备、完整居所或多助手自主生活。
 
 ## Definition of Done
 
-- 从一个明确入口检查并启动 Agent Runtime、Python Core 和 Tauri 客户端；
-- 可选择真实仓库并使用 Plan、Execute、工具、审批、MCP、Skills 和 Subagents；Readonly 只在 Runtime 提供可验证策略 capability 后显示；
-- 每个 Execute 回合自动创建 checkpoint，之后可查看 diff 并精确恢复；
-- 隔离浏览器支持真实连接、人工接管、敏感动作审批和下载 quarantine；
-- DSH、Provider、工具或浏览器不可用时明确失败，不生成 Fake 结果；
-- 使用独立 worktree 由 Sumika 完成一次 Sumika 自身改动并通过完整回归；
-- 关闭客户端后不遗留由本次实例启动的受管进程。
+- 真实资金能够归属则对账；官方未公开的字段明确未知，不猜配或清空预留。
+- 网页门户、聊天、咨询、账户与福利统一可见入口和接管；不静默搬Cookie。
+- 复杂DAG有真实执行和验收证据；升级、重规划、网页咨询分别标明fixture或真实结果。
+- 本轮增量安全合回，必要测试和记录完成，不以部分成功宣称整个工作包完成。
 
 ## 当前基线
 
 - Branch: `codex/dsh-agent-runtime`
-- Baseline commit: `9cc76f1` (当前 `HEAD`；工作树干净，仅剩范围外未跟踪产物)
-- Last verified commit: working tree on 2026-09-03；固定 DSH `0.1.1-rc.2` 的 PowerShell/Tauri 双重版本校验、受管进程链、协议健康检查和隔离 Plan→Execute/Workspace 恢复冒烟均通过。A user-started ZCode Electron instance was read-only smoke-tested through its explicit loopback CDP endpoint on 2026-08-31; no message, form value, credential, target creation, or window close was performed.
-- Runtime: DSH `0.1.1-rc.2` through the runtime-neutral `AgentRuntime` adapter; optional ZCode adapter probes the installed public `app-server --stdio` wire (`session/list`, no `jsonrpc` member) and retains a legacy JSON-RPC compatibility path.
-- Status source: [status-matrix.md](status-matrix.md)
-- Runtime design: [Agent Runtime](architecture/agent-runtime.md)
-- DSH integration: [DSH Agent](integrations/dsh-agent.md)
-- Requirements: [baseline](requirements/README.md) and [model policy](requirements/model-policy.md)
+- Baseline commit: `28d5051`
+- Last verified commit: working tree on 2026-09-08，合回后1099项后端测试与构建通过。
 
-Existing untracked `example.txt`, `output/`, and `test-results/` are outside the approved development scope and must not be staged, moved, overwritten, or removed.
+- 原目录 `D:/Code/Sumika`，分支 `codex/dsh-agent-runtime`，基线commit `28d5051`；已有大量未提交修改。
+- 隔离树 `D:/Code/Sumika-model-activation` 为detached HEAD，复用原源码快照；未建新分支、未提交。
+- 42个本轮文件已按498文件起始哈希精准合回，覆盖前保存源码备份，未覆盖运行库或凭据。42文件语义一致，只有 `frontend/main.js` 的混合换行归一化。
+- 备份、清单和验收位于 `D:/Caches/sumika-workpacks-234-20260908/`；该目录含隔离运行库，不整目录公开。
+- 日用主/角色上轮已设auto：DeepSeek官方V4 Pro / Agnes2.5 Flash。本轮不替换该绑定，不将基础题评级提升为全领域能力。
 
 ## 当前里程碑
 
-**场景优先 UI 外壳重置（实现与回归完成，2026-09-04）**
+2026-09-09发布调整：pixiv官方文章API确认Sample A非CC0，按条件可免费分发；日用Avatar已显式切换Sample A，安和昴登记和文件哈希均保留。只调整Avatar，不改角色人格或主/角色模型。新增分发清单、构建/暂存校验及CI，排除个人模型、全部.sumika变体、浏览器档案和输出缓存。63项后端/资源测试、2项界面测试、前端及原生构建通过，日用实例16260已加载新界面。发布目标是既有origin/codex/dsh-agent-runtime，包含此前已授权且未提交的重构代码与文档，不发布安装器。
 
-Phase 0、1、2 和 3 均已完成；本轮完成客户端 UI 彻底重置第一期（场景优先外壳）与网页门户，Phase 4 仍不开始。客户端从 11 页签工作台改为「全屏场景视口 + 4 抽屉」：Avatar 占屏 60%+ 常驻（WebGL 跨导航不卸载）、气泡流 + galgame 对白框输入、工作台/角色/模块/设置四个全屏抽屉（Esc/✕ 回场景）、竖排 dock 常驻抽屉之上、桌宠浮窗同款对白框。配色开源中立（夜蓝 + Sumika 自有薄荷强调色，不绑定任何版权角色）；每角色 `theme.accent` 由角色卡导入自动读取（`extensions.theme_color`），`color-mix` 派生全套色调；模块页启用「＋ 添加模块」折叠网格；设置页做实（背景色板/本地背景图/真实数据目录/快照）；首用欢迎卡替代常驻指南页。**角色页重构**：新建角色与导入角色卡合并为单一「＋ 新建角色」内联面板（卡可选，卡内 theme_color 成为角色强调色）；Avatar 模型库从常驻页底移入编辑器第 4 折叠区「Avatar 模型」。**网页门户（当前为独立窗口形态）**：dock 第 5 图标（仅桌面版），Kimi/ChatGPT/智谱/DeepSeek/Qwen/豆包各开独立 Tauri WebviewWindow，登录存 `.sumika-desktop/portals/<站点>/`（重启持久、站点 Cookie 隔离），支持自定义站点；原始站点无 persona 注入，与 BrowserSkill 网页 Route 完全隔离。**一键启动**：仓库根 `启动Sumika.bat`（自动清理 3080/8771 残留进程 → 启动桌面版 → 打开受管 Edge Agent Window），桌面快捷方式 Sumika.lnk 指向它。**网页 Route 回复确认修复（`9cc76f1`）**：`WebChatProvider.stream` 遇 `pending+possibly_sent` 时轮询同一 attempt 直到完成（实测 Kimi 4 秒即报错、16 秒后台才提取到回复的时序问题），绝不重发。分层模型借鉴 amica、抽屉结构借鉴 Open-LLM-VTuber-Web、气泡借鉴 ChatVRM（三者 MIT，仅移植交互模式并全部以 Sumika token 重新表达，无文件复制，登记于 license-ledger）。Playwright 50/50、后端 576/576（web_chat 54/54）、cargo 8/8、build、check_docs 全绿。
+上传快照校验：646个Git暂存文件与源码tar归档均通过分发检查，唯一VRM是Sample A；安和昴文件与本地登记不入库。逐暂存blob密钥模式扫描无真实命中，两项显式测试假值已复核。源归档验证完成后已清理临时tar；文档与diff检查通过。发布是否同步以当前Git HEAD和origin/codex/dsh-agent-runtime一致性为准。
 
-**固定 DSH 主 Agent 启动闭环（实现与实机验收完成，2026-09-03）**
+2026-09-09续做检查点：工作包4三项欠验收已补齐：真实前端领取ChatGPT咨询并交回隔离主模型、目标变化复用事实并重新确认、两次宿主故障注入后Agnes切换到已评测Moark并完成终稿。使用原隔离库和原账本，不更改日用模型。Moark34笔trace正式对账，实际合计0.1390319元，37笔旧无trace不猜配。维护桥启动竞态及失败重连已修，重建后available=true，魔搭250魔粒与Moark71条回执正式刷新通过。Ollama本次missing-usage-section，绝对权益仍未知；不重跑已通过付费题。正常启动恢复结果见验证记录。
 
-Phase 0、1、2 和 3 均已完成；本轮完成固定 DSH 启动链的 fail-closed 校验和真实 Windows 进程闭环，Phase 4 仍不开始。
+### 工作包2
 
-固定版 DSH 没有独立 live `mcp.list`、Readonly policy、composition 写入、artifact 或 rollback RPC。Sumika 对这些边界明确返回 `not-exposed` 或由自身 WorkspaceRuntime 补足，不伪造能力，也不进入 Phase 4。
+- 赠送、已购、现金统一报价与并发预留已实现；发送固定价格，未知usage/提交继续保留上界。
+- Moark找到官方精确日志（37条、7位小数），新增trace哈希、账号/型号/资源包匹配对账；旧请求未留trace的不按时间/金额猜配。
+- 同一个账户包装器拒绝并发流，避免usage/trace串请求；不同包装器使用共享原子预留。
+- 魔搭API读取242魔粒及按次档位，但型号映射/网页API归属仍不齐；Ollama绝对Starter额度未公开；两者仍不可自动派发。
+- DeepSeek逐请求精确账单未取得；旧4.62元余额是上轮时点，不代表现在。工作包2剩余官方证据缺口不标完成。
+- 9月9日Moark官方71条账单与隔离库trace精确匹配34笔，实际合计0.1390319元；37笔旧记录不猜配。04:15 UTC观测已购包余额9.8541645元，仍保留0.00013元未决预留，不能当作实时余额。评测工具也接入AccountBoundProvider，已购额度纳入SmokeGuard成本，不能因现金新增扣款为0而忽略资源消耗。
 
-本轮启动闭环已验证：`tools/run-desktop.ps1 -NoBuild` 只接受固定或显式精确版本的 DSH，Tauri 在配置生成和 spawn 前再次核验；Core `8771`、DSH `3080`、`/api/health`、`/api/agent/status`、`/api/agent/diagnostics`、`host.describe` 和 `session/list` 均可用。
-隔离 `Plan→Execute`、审批、工具、checkpoint、diff 和精确恢复通过；真实 Provider 预检仍可能为 `needs-action`，本轮没有发送真实高价请求。
+### 工作包3
 
-本轮（2026-09-03）已提交 ChatGPT 网页适配器回归修复（`0aadb99`）：声明当前一代 ChatGPT composer/响应选择器（`textarea[data-composer-draft-react]`、`button[data-composer-submit]`、`[data-assistant-markdown]`、`[data-message-role='assistant']`，保留旧 `#prompt-textarea` 优先）；授权标记扩充无引号“打开个人资料菜单”“账户菜单”"Account menu"；HTML 投影属性白名单新增 `aria-label`、`placeholder`、`contenteditable` 等；`send_message` 在输入框裁剪基线之外新增独立页面级视觉基线 `visual_page_baseline_id`，超时诊断改为对比页面基线，避免输入框裁剪掩盖页面上可见的助手回复。相关 83 个测试（`test_web_chat`、`test_browser_runtime`、`test_web_chat_server`）通过。
+- 门户已改为主窗口child与统一标签，ChatGPT咨询保留独立档案；native网页聊天接入Core队列，ChatGPT/Kimi支持固定动作，其它站点明确手动。
+- WebView2实际存储目录核验、旧门户同账户绑定、单写入者、接管、桌宠停止、未知不重发与重启保护已实现；关闭历史不占32个活跃标签上限。
+- 修复桌面批处理在客户端退出后无条件启动旧BrowserSkill窗口；保留显式CLI兼容。维护桥初始化移到loadInitialData之后；首次连接失败及Core重启会重新绑定，桌宠不接受/重连自动网页任务。
+- 桌面模式旧账户/福利及网页聊天绑定不再自动开外窗；需要在内置页显式绑定并登录，不迁Cookie。非桌面兼容与通用BrowserSkill工具保留，后者不冒充已迁移。
+- 用户反馈ChatGPT点击登录后黑屏，其余三个账户已登录，不再将它们统称为等待用户登录。此前只读诊断已结束，当前按“开始修”授权进行修复；未放宽登录域名或凭据/权限边界。
+- 黑屏已证实是Google SSO跳转被旧白名单拒绝；code14为导航取消，不能提示为网络故障。导航补丁仅放行OpenAI登录链内精确Google登录路径，不放行账户管理域名或自动操作；网页展开布局由原约328px高增至1280×800下至少540px，仍有恢复布局入口。
+- ChatGPT原生单次收发及重启保持登录通过，后续生产前端到主模型闭环也已通过，见工作包4。魔搭只读取发放记录并按日期/金额确认；9月9日正式刷新余额250、登录200及绑定50，保守有效至北京时间9月10日00:00。Moark正式刷新71条回执。Ollama历史0%和六个Starter型号保留，本次missing-usage-section明确needs-review，不误报需要登录或新鲜权益。
 
-本轮（2026-09-03）已提交社区角色卡导入能力（`c5612aa`）：新增 `sumika_core/character_import.py`，对齐 SillyTavern 社区规范（`character-card-spec-v2`、CCv3/CHARX），支持 V1 扁平卡、`chara_card_v2`、`chara_card_v3` 与 JSON/PNG（tEXt `chara`/`ccv3`）/CHARX（zip `card.json`）容器，stdlib 实现、零依赖；通用字段映射（identity←description、traits←personality、relationship←scenario、system_prompt←system_prompt、greeting←first_mes，`mes_example` 在上限内以"示例对话"并入），`{{char}}`/`{{user}}` 占位符确定性替换，超限 fail-closed 不静默截断；原始卡与导入元数据保留在 `config.card_import`（世界书不注入运行时，条目保留）。新增 `character.import_card` RPC（同名需 `overwrite`、广播 `character.changed`）、角色页"导入角色卡"入口和 `tools/import_character_card.py` 离线 CLI。安和昴（GIRLS BAND CRY）角色卡已从 `D:\Code\安和昴角色卡项目\交付\安和昴_ST_V2.json` 导入 `.sumika-desktop`（9 条世界书保留未注入），随后并入默认 `sumika` 记录成为默认角色（见下段）；Agent/DSH 通道 persona 投影仍为后续目标，设计钩子已记录在 [characters.md](architecture/characters.md)（参照 `dsh-browser-policy` 的 `ctx.skills.register` 模式，须走社区插件隔离验证 + 用户批准流程）。
+### 工作包4
 
-随后（同日）应用户要求把默认角色切换为安和昴：默认锚点记录 `sumika`（`_ensure_defaults` 仅在角色表为空时播种，重启后保留）已改名并写入角色卡 persona 与 `card_import`；原默认角色"Saki"的配置备份在 `.sumika-desktop/saki-config-backup.json`（未跟踪）；独立的重复导入行已删除。486desu 免费配布的同人 VRM `awa subaru（增加校徽）.vrm`（16.5 MB）已复制到 `.sumika-desktop/avatar-models/`（本地数据目录，不进 git；作者条款见其发布帖 BV1if421B7MH，使用前需遵守）并经 `avatar.import`/`avatar.select` 绑定为 `driver=vrm`。旧默认 `AvatarSample_A.vrm` 已通过 `avatar.unregister` 注销并自动进入发现忽略清单；仓库内置文件保留（供全新数据目录首次播种），不影响本实例。运维记录：桌面窗口关闭后受管 DSH 可能残留监听 3080，导致再次启动 fail-closed 拒绝（版本无法从 `host.describe` 验证），需先结束残留 node 进程再启动。另：网页 Route 首次发送若报 `隔离浏览器不可用`，按顺序排查——① 浏览器扩展未连接（`bsk doctor` 应显示 browsers connected ≥1，否则运行 `tools/setup-browserskill.ps1 -LaunchAgentBrowser`）；② Core 重启前遗留的命名 Profile 租约（`browser_profile_leases` 表，TTL 30 分钟，旧 owner 进程已死时可手动清除）；③ `profile.open` 在 `awaiting-extension` 期间产生的 `awaiting-browser-backend` 占位会话需 close 后重开。2026-09-03 傍晚已按此链路恢复 Kimi 网页 Route（check: ready/page_ready/authorized）。
-
-## 接下来的三个动作
-
-1. 后续启动使用桌面快捷方式 Sumika.lnk（或 `启动Sumika.bat`，内含残留进程清理 + `run-desktop.ps1 -NoBuild` + 受管 Edge Agent Window）；手动方式仍可分别运行两个脚本；若预检显示 `provider=needs-action`，由用户单独授权并重新健康检查。
-2. 网页门户形态重构（用户已确认方向、待实施）：从「独立 WebviewWindow」改为「主窗口内嵌子 webview」——启用 Tauri `unstable` feature，门户 webview `set_bounds` 到聊天列右侧、每站独立 data_directory 不变、门户激活时隐藏 Avatar 视口；站点切换入口移到对白框发送按钮右侧（图标显示当前站点，点击弹出切换面板）；dock 第 5 图标与 portal 面板移除。技术调研已确认：多 webview 必须开 unstable（`Window::add_child`/`WebviewBuilder` 均 unstable 门控），per-webview `data_directory` 在 wry/WebView2 层可用，open/close 必须 async command（Windows 同步命令建 webview 会死锁）；iframe 与窗口嵌入路线已排除。
-3. 其余排期：聊天上下文装配（世界书关键词注入 + 记忆分层）、工作台项目分组的会话绑定后端、背景视频/网页壁纸层；Agent/DSH 通道 persona 投影仍为后续任务（见 characters.md 设计钩子）。网页 Route 优先复测 ChatGPT 回复定位（Kimi 已随 `9cc76f1` 修复提交确认链路）；五站 `3 + 2` 聚合验收继续按既有口径执行。
-
-## 固定决策
-
-- DSH 是默认 Harness，但不是 Core、UI、角色、Avatar、任务或 Workspace 的基类。
-- DSH Session、Plan、Skills、Subagents 和审批是活动状态的事实源。
-- MCP 使用用户 Preset 和 `dsh-mcp-client`；配置、凭据和启停仍由 Sumika 审批。
-- DSH 没有可靠 rollback RPC，因此 checkpoint、diff 和恢复由独立 `WorkspaceRuntime` 负责，并通过工具暴露给 Harness。
-- 社区插件必须在隔离 Profile 中验证许可证、API、权限和卸载恢复后才能启用。
-- 一键启动只复用和检查用户已安装的固定 Runtime，不自动安装或更新软件。
-- 模型策略使用 `model-policy/v1`；`difficulty=auto` 目前是保守规则，ZCode 额度只有在公开 app-server capability 存在时才读取，未知额度不得标为免费。ZCode adapter 默认 `SUMIKA_ZCODE_PROTOCOL=auto`，可用 `SUMIKA_ZCODE_NODE` + `SUMIKA_ZCODE_SCRIPT` 配置 Node 打包入口，或显式开启 `SUMIKA_ZCODE_AUTODISCOVER=1` 解析公开 bundle；不读取 ZCode 私有配置。
-- 路由默认推荐后确认；无候选、未确认、额度耗尽或健康失败时，Session、Provider 绑定和 Execute checkpoint 均不得先行创建。
-- 正式文件修改只发生在独立 worktree、分支或等价的可恢复 Workspace 中。
-- 完整客户端只能通过已验证的固定 DSH 启动链；Core-only 调试不继承 PATH 中的全局 DSH。
-
-## 明确暂缓
-
-- 音频、视觉、Live2D 新驱动；
-- 多角色自动互聊、VirtualWorld 和 LifeAgent；
-- RemoteRunner、Android、macOS/Linux 正式桌面发布；
-- 正式安装器、自动更新和代码签名；
-- 自动安装、升级或启用第三方插件；完整日用遥测采集器等 Agent 闭环稳定后再实现。
-
-## 当前阻塞
-
-- 隔离 Ollama（`127.0.0.1:11435`）现在可见 `qwen3:1.7b`（约 1.36 GB）和 `qwen3:4b`（约 2.50 GB）；1.7B 仅用于快速协议/UI 冒烟，4B 保持 DSH 默认。用户原有 `127.0.0.1:11434` 服务未停止，也没有被改写。
-- 1.7B 的直接 OpenAI-compatible 请求已通过，但在标准 DSH 工具目录下工具选择和长推理质量不足；不能把“能响应”当作 Codex 日用 Agent 验收通过。
-- 真实 Provider 若缺少凭据必须请用户重新输入，不得从 SQLite、日志或聊天恢复；安全启动注入已实现，模型质量仍待持续对照评估。
-- 上一次隔离验收中，BrowserSkill CLI `0.1.11`、受管 Edge Agent profile 和 `ext-v0.1.7` 的 protocol 1.1 检查均通过，自动读写 smoke 已通过；人工接管请求因本轮没有用户操作而超时。DeepSeek、ChatGPT、智谱、Qwen 与 Kimi 网页 Route 于 2026-09-02 完成人工登录、页面检查、`chat.read`/`chat.send` 长期普通文本授权，并在 Core 目录中验证为 `routable=true`。Kimi 单站真实咨询已完成；ChatGPT 已有页面提交证据，但回复 DOM 提取在 300 秒后以 `deadline-exceeded` 结束且未重发，因此五站整体验收仍未通过。测试后 Core `8771` 已停止且 BrowserSkill 活动 session 为 0；豆包和敏感写操作仍需用户在明确任务中授权。网页额度仍为 `unknown`。
-- 隔离 SSE stub 已验证 DSH 协议，但不会替代真实模型；真实模型复杂任务质量仍需用户主动配置 Provider 后单独评估，Sumika 不读取历史密钥或自动安装模型。
-- 真实 ZCode CDP 只读 smoke 已于 2026-08-31 通过：`http://127.0.0.1:9222` 返回 Electron 版本信息，发现 1 个 page target（标题 `ZCode`），页面 `readyState=complete`；观察请求关闭正文读取，仅保留标题、URL scheme 和控件计数。端口和用户实例在 smoke 后仍保持运行。尚未验证发送、填写、登录或任何敏感动作。
+- 真实 `complex-live-v7.json` 四节点DAG通过：Pro规划/推理/验收，Agnes独立提取；一次真实审核拒绝后由同候选修复通过。
+- 11次调用，上界预留1.463193元，实际扣费未知。严格格式保留原文，不声称此题还验收了角色引言；旧v1–v6失败保留。
+- 免费账户单并发/4秒间隔、中间节点自包含契约、长目标16000规划输出上界（含思考）已接入；截断不重发，不改变模型或推理强度。
+- fixture覆盖有界修复/升级/重规划、目标变化重新确认、保留未影响结果、取消及未知不重发；角色引言失败时交付已验证原文。
+- 9月9日实测v2：两次宿主注入失败后找不到满足原基准的替补，主模型重规划成功，revision2等待确认且保留boundaries结果；整体升级验收未通过。10次调用，上界预留1.585980元，非实际扣费。v1为超时取消，上界1.590003元，保留其证据及未知usage预留，不重跑。
+- 修正SDK换执行者的错误证据方向：替补必须自己满足原任务基准，无需失败模型证明自己与替补等价。Sumika优先尝试主模型，再选择原授权池中独立达标的替补；不凭主模型身份伪造bounded-text证据。离线覆盖通过，缺少达标替补时仍按重规划处理。
+- 早期网页验收relay仅证明单次收发，目标变更曾零调用被资金/候选门槛拒绝；这些历史失败保留，后续通过记录如下，不用新结果覆盖旧失败。
+- 后续已补齐上述验收：Moark qwen3.8-flash先通过三项leader及三项bounded真实评测，仅隔离验收指定；`collaboration-moark-funded-v3.json`目标9→10、复用facts、revision2重新确认并交付通过，8调用上界0.0968416元；`collaboration-native-frontend-v1.json`真实前端poll/原生收发/complete至隔离Core及主模型规划通过，网页领取1次、完成1次、无未知，8 API调用上界0.0964112元。仅浏览器RPC定向到隔离Core，未替换网页回复或模型结果。
+- `complex-upgrade-moark-v1.json`13调用、上界0.1342880元：Agnes原候选修复一次后按已验证相同bounded基准切到Moark，同revision完成四节点和终稿审核；两次故障为宿主注入，不冒称模型实际能力失败。修正规划/审核把JSON-only擅自收紧成禁止空白的提示，合法JSON换行不再导致无谓重试。
 
 ## 验证记录
 
-当前工作树已通过：
+- 最新收尾：正常Close临时实例23876，关闭前ready、possibly_sent=false、无attempt；新版单实例21924无CDP参数启动，Core8771健康、受管DSH3080 ready/event_bridge running，维护桥available=true，58991不再监听。DSH精确版本标记为unverified，未冒称本次重新做版本认证。文档、目标diff与工具语法检查通过。
+- 本轮137项Python专项、13项JS、3项咨询Playwright及桌面启动离线检查通过；前端及custom-protocol原生构建通过。新增零调用清理验收：claimed/completed均0、possibly_sent=false、daily_bridge_restored=true，验收relay退出后恢复日用连接。
+- 9月9日收尾：`cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol`成功，正常关闭验收实例后以无CDP参数启动新版，恢复受管DSH与固定BrowserSkill环境。单实例PID27504，Core8771及DSH3080健康检查通过，临时61813调试端口已关闭。关闭前咨询状态completed、possibly_sent=false；未重发消息或新增模型调用。文档、目标文件diff、JS语法与验收工具Python编译检查通过。
+- 9月9日增量：178项后端专项、66项SDK（2可选MCP跳过）、15项复杂验收工具、2项协作输出oracle、26项JS DOM及36项Rust通过。保留日用自动模型绑定，未清空任何预留。
+- 最终修复回归：96项后端、35项JS（含15项真实HTML DOM夹具）、36项Rust和3项咨询Playwright通过，前端与原生构建通过。真实Google跳转放行与699px网页布局已核实，尚未冒充登录完成或网页咨询通过。无模型调用、无新增付费。
+- 旧客户端运行时新旧exe均曾隔离启动失败（setup无法接收webview消息），不是新补丁独有。正常关闭旧实例后日用启动成功；UIAutomation WindowPattern.Close可正常退出，CloseMainWindow未及时生效。不要强停用户正在登录的客户端，隔离测试失败不是登录验收通过。
 
-- Python unittest: 576 tests（含 web_chat 54：provider 轮询 pending attempt 新用例）；Tools unittest: 58 tests；Playwright: 50 tests（50 passed；UI 重置后选择器全面更新为场景壳导航，含角色创建/卡片导入合一流程、Avatar 模型折叠区、retry、worktree/commit、队列重绘草稿、Session 恢复、会话级控制重载、历史游标翻页、网页聊天配置抽屉、模型策略推荐/确认，以及 Plan Review 三种操作）；cargo test: 8 passed（门户 site-id/URL 校验）；
-- `node --check frontend/main.js`;
-- frontend production build;
-- `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml` (6 passed);
-- `python tools/check_docs.py`;
-- `tools/dsh-launch.ps1` and `tools/run-desktop.ps1` PowerShell parse checks；`tools/test_dsh_launch.ps1` passed；DSH route bridge、desktop automation 和 browser policy plugins passed 19 Node tests；Python `compileall` passed；
-- `git diff --check`；
-- 隔离 `python tools/agent_daily_acceptance.py --runtime-smoke`：Plan Review、批准、Execute、工具、checkpoint/diff/精确恢复均通过；整体预检为 `needs-action` 仅因真实 Provider 未授权。
-- `backend/tests/test_cdp_transport.py`: 4 项专项测试通过；
-- 真实 ZCode CDP smoke（2026-08-31）：`health`、已有 `ZCode` page `open`、`observe(include_text=false)` 和 runner 断开通过；端口仍监听且 page target 数量未增加。
-- BrowserSkill 实机：CLI `0.1.11` 与官方 `ext-v0.1.7` 的 SHA-256、daemon、扩展和 browser protocol 检查均通过；Sumika policy companion 已安装到受管 DSH profile，并完成 `browser-skill` 加载、隔离 session、只读导航、导航审批、ARIA snapshot、本地非敏感表单写入和 session stop；测试后无活动 BrowserSkill session，隔离 DSH 端口已释放。DeepSeek、ChatGPT、智谱、Qwen 与 Kimi 网页 Route 的人工登录、页面检查和普通文本授权已于 2026-09-02 验证为可路由；Kimi 单站真实咨询完成，ChatGPT 回复提取超时且未重发，五站聚合仍待完整通过。
-- `tools/agent_daily_acceptance.py` 与 `--plan-execute` smoke 已完成语法检查；新的隔离 DSH `127.0.0.1:3100` profile 在 2026-08-29 通过 `--runtime-smoke --mcp --skills-subagents` 组合验收，包含 Plan→Execute、MCP、审批、diff、恢复、Skills 和 Subagents；BrowserSkill 读写组合回合也已通过。真实 Provider 的既有 Session 可用 `--real-session` 只读纳入报告，复杂任务质量仍待对照。
-- WorkspaceRuntime 专项：checkpoint/恢复、状态截断、冲突/rename、worktree、patch 和精确 commit；独立 worktree 已由 DSH 完成受控文档自修改并通过 diff、恢复和本地 commit（`10ff976`）；Workspace UI：创建预览、双重确认、文本 patch、本地提交和归档路径脱敏。
-Windows launcher 另以真实进程验证三条分支：复用或监督固定版 DSH，以及 DSH 缺失时 Agent fail closed；各次退出后 `3080`、`3081`、`8770`、`8771` 均释放，用户的 Ollama `11434` 未被停止。
-Agent 命令闭环已验证：Session 创建后重新读取 command catalog；无 `plan` 命令的 Preset
-仍可普通 Execute，只有活动 Plan 显式切换到 Execute 才发送 `/plan off`。
-固定 DSH 协议 smoke 已验证 25 个工具 schema、流式请求、最终消息、完成状态和 WebSocket
-事件；隔离 Workspace 的 `read/question/pwsh/edit`、命令审批、文件级 diff、恢复预览和
-精确恢复均已通过。嵌套 `tool-result` 可按 `callId` 关联且丢弃原始正文；Agent Task 投影、
-retry 边界、正文过滤和 Workspace checkpoint 已通过后端与 Playwright。Provider 被动目录
-检查会在 Agent 状态、会话创建、模块启用、模块列表和发送前运行，端点停止会阻断请求。
-真实 `glm-4.5-air` 已通过只读、`workspace-write + ask` 权限审计和 Plan Review 批准前
-checkpoint 的单文件写入/精确恢复回合；统一报告验证 checkpoint 早于批准、回合完成、
-唯一文件 diff、恢复预览和精确恢复，且不包含 Session ID、路径或正文。模型在更复杂任务中的规划、工具选择和错误恢复质量仍待持续评估。
+- 隔离树后端全量1094项通过；后续质量91项、内置桥10项、账户27项通过。
+- 独立SDK65项（2项可选MCP跳过），Rust29项，前端9项和4项Playwright通过；构建通过。
+- `native-smoke-final/1788860821668/result.json`通过主窗口、实际UserDataFolder隔离、接管、桌宠停止与固定动作边界。截图仅主控件，不包含child画面。
+- 合回后原目录全量1099项、前端17项、Playwright4项通过，生产前端与原生构建、文档检查和目标文件diff检查通过；新增凭据模式扫描无命中，起始基线外文件未改。
+- 日用启动前3个SQLite库已备份；启动后原sessions/messages/characters/quality_tasks逐表哈希不变。实际Core仍选Pro为主、Agnes2.5为角色；只更新必要门户绑定及运行诊断。
+- 后端既有429 fixture有ResourceWarning，原前端能力页文案断言和bundle体积提示不扩范围修复。
 
-Preset mount validation 已通过固定 DSH 实机验证；无鉴权 stdio MCP smoke 完成
-`initialize`、工具发现、模型调用和结果回传，MCP 自定义凭据使用 Credential Manager、
-固定 `process.env` 表达式和重启门控。带真实第三方密钥的端到端 smoke 仍需用户明确配置。
+## 接下来的三个动作
 
-Provider 与 MCP 密钥只保存在 Windows Credential Manager；桌面 helper 通过私有 NUL v2 协议注入受管 DSH 启动环境。Python/Rust/UI 隔离和真实 Provider 只读回合曾通过隔离验收；当前 Provider 是否可用必须以最新 preflight/health 结果为准。
+1. 工作包4三项欠验收已完成；不重复已通过付费题，不把本次文本协作证据延伸到工作区工具、ZCode或中转渠道。
+2. 工作包2仅余外部证据：DeepSeek逐请求账单、魔搭账户/型号归属、Ollama绝对权益；新回执出现后按trace对账，不清空旧预留。Ollama当前解析失败需结合实际页面恢复，只读重试不能冒充额度证明。
+3. 工具复用：quality_collaboration_smoke支持--production-frontend及--leader-evaluation；quality_complex_smoke支持--executor-evaluation。报告必须来自当前执行身份下完整真实固定题；native_consultation_frontend仅转发三个本机浏览器RPC，退出清理恢复日用桥。
 
-ZCode app-server 适配器已通过隔离现代 wire fixture：工作区 session、Provider/`available` 模型目录、MCP 状态、子 Agent、事件归一化、运行时偏好应答、短模型选择和完整 `runtimeModel` 校验；现代能力不再宣称 `readonly`、附件或队列。现有标准 JSON-RPC fixture 仍通过 `auto` 探测回归；真实 ZCode 自动发现实测可读到 2 个模型（`glm-5.1`、`glm-4.7`），公开额度接口未提供，保持 `unknown`。
+## 固定决策
 
-Agent observability 已接入 Core RPC/DSH event 边界：`.sumika*/logs/agent-observability/` 只写 bounded JSONL receipt，按 UTC 日输出 p50/p95 与结果/资源汇总；不写提示词、模型输出、工具参数/结果、文件内容、凭据或 Cookie。`python tools/aggregate_agent_day.py --write` 可离线生成摘要；`agent.acceptance.evidence` 与 `--real-session` 可把既有真实闭环投影为布尔值、计数、枚举和耗时。模型策略基础 catalog、确定性难度推断、额度 TTL、固定评测任务集和推荐前确认已通过 2026-08-30 回归；长期样本质量判定、学习型分类器和自动路由仍未实现。
+质量优先；Sumika保留授权、额度、付费和派发权，model-picker仅建议。主/角色独立，用户固定选择优先。预算默认同时超过高估两倍且多5元才暂停新增付费，阈值可设置。维护用确定性脚本，关闭不联网；未知额度不等于免费，不静默现金回退。新注册、实名、验证码交用户完成。不会因模型渠道403认定所有渠道失效。
 
-Skills/Subagents 专项：隔离 `.agents/skills` fixture 已被 `skill.list` 发现，`/sumika-smoke` 正文注入已确认；DSH `subagent` 已创建 one-shot 子 Agent，`subagent.list/history` 可读其摘要。该专项只使用隔离 Profile 和测试 Provider，不改变生产会话；可由 `tools/agent_daily_acceptance.py --runtime-smoke --skills-subagents` 重复执行，报告仅保留布尔值和计数。
-未执行：`cargo fmt --check`，因为当前工具链没有 `rustfmt`；不得为此静默安装组件。
+详细实现和旧验收见[模型启用与账户](refactor/model-activation-and-accounts.md#工作包234续做2026-09-08)。最新需求总表80项，新增AVATAR-004与本次可见原话；历史79项来源不变。
+
+## 明确暂缓
+
+语音/设备/居所/多助手自主生活、发布与安装器不在本轮范围；不清理旧源码、运行数据或BrowserSkill档案。
+
+## 当前阻塞
+
+外部证据缺口：DeepSeek逐请求账单、魔搭型号/账户归属、Ollama绝对额度及本次页面缺少用量区域。隔离DeepSeek未对账预留仍阻断其新增调用，未充值或更改日用负责人。工作包4三项欠验收已通过，维护桥重建后实测连接与刷新通过；通用旧BrowserSkill工具只保留显式兼容，不能冒称任意网站自动化均已迁移。
 
 ## 恢复顺序
 
-1. 完整读取本页；
-2. 读取状态矩阵中当前里程碑涉及的条目；
-3. 检查 Git root、branch、HEAD、remote 和工作树；
-4. 读取当前里程碑链接的专题文档、需求基线和相邻测试；
-5. 从“接下来的三个动作”继续，并用仓库和运行时证据校验本页内容。
-
-若本页与 Git、测试、状态矩阵或真实运行时冲突，以可复现证据为准，并在继续实现前修正本页。
+先读本页，再核对代码、测试和运行证据；继续已授权工作，不重跑已通过基础题。
 
 ## 更新规则
 
-- 只在里程碑开始、完成、出现阻塞或切换分支时更新；
-- 保持在 150 行以内，不复制专题文档或聊天过程；
-- 不记录 API Key、Token、聊天正文、用户目录、临时日志或认证信息；
-- 每次更新都同步当前里程碑、三个动作、阻塞和验证记录；功能完成度只更新状态矩阵，本页不得创建第二套状态定义。
+先读本页再核对代码/测试/运行事实；已通过的基础模型题不重复收费重跑。里程碑、验证或阻碍变化时更新本页，保持150行以内，不保存Key、Cookie或聊天正文。

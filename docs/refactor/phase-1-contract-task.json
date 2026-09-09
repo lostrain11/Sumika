@@ -1,0 +1,92 @@
+{
+  "protocol_version": "1",
+  "task_id": "sumika-phase-1-domain-contracts",
+  "title": "Runtime-neutral Sumika product contracts and read-only legacy projections",
+  "stage": "implementation",
+  "risk": "high",
+  "recommended_tier": "L3",
+  "schema_change": true,
+  "assignment_mode": "direct",
+  "requested_reasoning_effort": "high",
+  "applied_reasoning_effort": "unknown",
+  "assigned_model": null,
+  "goal": ["Establish product contracts without changing current RPC, storage, authorization or routing behavior"],
+  "dependencies": ["sumika-phase-0-inventory"],
+  "workspace": {"root": ".", "worktree_required": false},
+  "isolation": "Parent-only serial edits to a new domain package, new tests and two initially clean docs; preserve all pre-existing edits and runtime data",
+  "allowed_paths": [
+    "backend/src/sumika_core/domain/**",
+    "backend/tests/test_domain_contracts.py",
+    "backend/tests/test_domain_projections.py",
+    "docs/architecture/README.md",
+    "docs/status-matrix.md",
+    "docs/refactor/phase-1-contract-task.json"
+  ],
+  "forbidden_paths": [
+    "backend/src/sumika_core/server.py",
+    "backend/src/sumika_core/model_policy.py",
+    "backend/src/sumika_core/storage.py",
+    "backend/src/sumika_core/credentials.py",
+    "backend/src/sumika_core/agent/**",
+    "docs/current-execution.md",
+    "docs/README.md",
+    "frontend/**",
+    "src-tauri/**",
+    ".sumika*/**",
+    ".zcode/**",
+    "deprecated/**"
+  ],
+  "inputs": ["docs/requirements/requirements.json", "docs/requirements/baseline.md", "docs/requirements/model-policy.md", "docs/refactor/module-inventory.md"],
+  "outputs": ["Versioned value contracts", "Pure legacy projections", "Regression tests", "Ownership and continuation map"],
+  "required_capabilities": ["python", "domain-contract-design", "unit-testing"],
+  "constraints": {"allow_external_cost_boundary_change": false},
+  "acceptance": [
+    "Assistant identity and memory ownership remain isolated; no implicit sharing",
+    "Scene membership and versioned resources validate without a renderer or world simulation",
+    "Unconfigured and disabled modules stay out of the active projection",
+    "Permission snapshots never authorize operations; devices remain LAN read-only declarations",
+    "Existing ModelPolicy, TaskRecord and EvaluationRecord remain authoritative",
+    "Legacy projections preserve IDs and do not copy raw persona, credentials, paths or mutate input",
+    "No RPC changes, database migration, network requests or real device access"
+  ],
+  "dag": [
+    {"id": "requirements", "depends_on": [], "tier": "L3"},
+    {"id": "contracts", "depends_on": ["requirements"], "tier": "L3"},
+    {"id": "projections", "depends_on": ["contracts"], "tier": "L3"},
+    {"id": "checks", "depends_on": ["projections"], "tier": "L0"},
+    {"id": "review", "depends_on": ["checks"], "tier": "L3"}
+  ],
+  "verification": {
+    "environment": {"PYTHONPATH": "backend/src;backend/tests", "PYTHONDONTWRITEBYTECODE": "1"},
+    "commands": [
+      "python -m unittest backend.tests.test_domain_contracts backend.tests.test_domain_projections -v",
+      "python -m unittest discover -s backend/tests -q",
+      "python tools/check_docs.py",
+      "git diff --check -- docs/architecture/README.md docs/status-matrix.md"
+    ],
+    "levels": ["L0", "L1", "L2"]
+  },
+  "escalate_when": ["Existing RPC or storage changes needed", "Protected or pre-existing files need edits", "Two failed repairs", "Need real provider or device access"],
+  "budget": {
+    "estimated_calls": 1,
+    "retry_limit": 1,
+    "allow_external_cost_boundary_change": false,
+    "normalized_estimate": {"minimum": 178.2, "typical": 206.27, "maximum": 258.39},
+    "currency": "unknown",
+    "actual_tokens": null,
+    "note": "Uncalibrated workload units only, not relay billing. No extra model call to estimate; no subagent dispatch with the unverified default registry."
+  },
+  "result": {
+    "stage_status": "contracts-and-projections-complete",
+    "focused_tests_passed": 19,
+    "backend_regression_tests_passed": 599,
+    "docs_checker_tests_passed": 14,
+    "docs_check": "passed",
+    "subagent_dispatch": "blocked-by-unverified-registry-parent-implemented-serially",
+    "subagent_calls": 0,
+    "local_test_repairs": 1,
+    "live_environment_verified": false,
+    "not_enabled": ["new RPC", "UI projection wiring", "model-picker adapter", "real audio/vision", "virtual world simulation", "multi-assistant runtime", "LAN devices"],
+    "next_phase": "Scene UI modularization completed in phase-2c-ui-completion.json; read-only domain application-service wiring remains independent future work"
+  }
+}

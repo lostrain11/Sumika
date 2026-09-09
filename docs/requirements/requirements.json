@@ -1,15 +1,36 @@
 {
   "schema": "sumika-requirements/v1",
-  "captured_at": "2026-08-29",
+  "captured_at": "2026-09-09",
   "coverage": {
     "sources": [
       "visible-conversation-context",
       "repository-docs",
-      "git-history-and-current-worktree"
+      "git-history-and-current-worktree",
+      "local-user-message-events-verified-2026-09-08"
     ],
-    "limitations": "This baseline does not claim to reconstruct messages that are not present in the repository or visible context."
+    "limitations": "Recent user excerpts are verified against local role=user events and indexed by UTC timestamp. Older excerpt IDs retained from Git summaries are explicitly not verified verbatim. Missing history is not reconstructed. Requirements confirmation does not establish implementation completion."
   },
   "requirements": [
+    {
+      "id": "AVATAR-004",
+      "category": "avatar",
+      "statement": "默认使用经许可核验的AvatarSample_A；安和昴及其他用户导入模型只保留本地，不上传或打包。",
+      "acceptance": [
+        "新安装选中Sample A，已有选择不被自动覆盖；本次按用户明确要求切换日用Avatar",
+        "Sample A不是CC0，分发保留来源、条件与哈希；不冒称无版权或pixiv背书",
+        "用户模型与运行数据排除于Git、源码归档及构建输入，发布前校验分发白名单",
+        "安和昴原文件与登记保留，用户可以再次手动绑定"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context:2026-09-09"],
+      "excerpt_refs": ["EX-AVATAR-DEFAULT-001"],
+      "implementation_refs": ["../../assets/avatars/distribution.json", "../../tools/check_release_assets.py", "../../frontend/src/characters-view.js"],
+      "test_refs": ["../../tools/test_check_release_assets.py", "../../backend/tests/test_server.py"],
+      "status_ref": "status-matrix:avatar-vrm-desktop",
+      "supersedes": [],
+      "superseded_by": []
+    },
     {
       "id": "HISTORY-OLLAMA-DEFAULT",
       "category": "history",
@@ -92,7 +113,7 @@
         "Status items have keyboard focus and no misleading success state"
       ],
       "provenance": "normalized",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -104,7 +125,10 @@
       "test_refs": [
         "../../frontend/tests/smoke.spec.js"
       ],
-      "status_ref": "status-matrix:chat"
+      "status_ref": "status-matrix:chat",
+      "superseded_by": [
+        "UX-002"
+      ]
     },
     {
       "id": "CHAT-001",
@@ -215,7 +239,7 @@
         "Model drag and chat input remain independently usable"
       ],
       "provenance": "confirmed",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -230,7 +254,10 @@
       "test_refs": [
         "../../frontend/tests/smoke.spec.js"
       ],
-      "status_ref": "status-matrix:avatar-vrm-desktop"
+      "status_ref": "status-matrix:avatar-vrm-desktop",
+      "superseded_by": [
+        "AVATAR-003"
+      ]
     },
     {
       "id": "PROVIDER-001",
@@ -638,7 +665,7 @@
         "Downloads remain quarantined until confirmation"
       ],
       "provenance": "confirmed",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -651,7 +678,10 @@
         "../../backend/tests/test_browser_policy.py",
         "../../frontend/tests/smoke.spec.js"
       ],
-      "status_ref": "status-matrix:browser-runtime"
+      "status_ref": "status-matrix:browser-runtime",
+      "superseded_by": [
+        "BROWSER-003"
+      ]
     },
     {
       "id": "BROWSER-002",
@@ -662,7 +692,7 @@
         "Partial and total failure, lease conflicts, and human takeover remain explicit without reading personal browser tabs or credentials"
       ],
       "provenance": "confirmed",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -680,7 +710,10 @@
         "../../backend/tests/test_dynamic_route_supervisor.py",
         "../../frontend/tests/smoke.spec.js"
       ],
-      "status_ref": "status-matrix:web-chat-runtime"
+      "status_ref": "status-matrix:web-chat-runtime",
+      "superseded_by": [
+        "BROWSER-004"
+      ]
     },
     {
       "id": "SEC-001",
@@ -997,7 +1030,7 @@
         "Full-auto cannot bypass security, quality, or budget gates"
       ],
       "provenance": "confirmed",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -1015,7 +1048,10 @@
         "../../backend/tests/test_agent_server.py",
         "../../frontend/tests/smoke.spec.js"
       ],
-      "status_ref": "status-matrix:model-policy"
+      "status_ref": "status-matrix:model-policy",
+      "superseded_by": [
+        "MODEL-018"
+      ]
     },
     {
       "id": "MODEL-008",
@@ -1053,7 +1089,7 @@
         "Protected actions pause with a clear handoff"
       ],
       "provenance": "confirmed",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -1068,7 +1104,11 @@
         "../../backend/tests/test_model_policy.py",
         "../../backend/tests/test_zcode_runtime.py"
       ],
-      "status_ref": "status-matrix:model-policy"
+      "status_ref": "status-matrix:model-policy",
+      "superseded_by": [
+        "MODEL-015",
+        "BENEFIT-002"
+      ]
     },
     {
       "id": "MODEL-010",
@@ -1183,7 +1223,9 @@
         "visible-conversation-context"
       ],
       "excerpt_refs": [
-        "EX-PROCESS-001"
+        "EX-PROCESS-001",
+        "EX-PROCESS-002",
+        "EX-BROWSER-004"
       ],
       "implementation_refs": [
         "../../docs/requirements/README.md",
@@ -1304,7 +1346,7 @@
         "Background image stays local and never uploads"
       ],
       "provenance": "confirmed",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "visible-conversation-context"
       ],
@@ -1316,7 +1358,860 @@
       "test_refs": [
         "../../frontend/tests/smoke.spec.js"
       ],
-      "status_ref": "status-matrix:web-portals"
+      "status_ref": "status-matrix:web-portals",
+      "supersedes": [
+        "UX-001"
+      ],
+      "superseded_by": [
+        "UX-003"
+      ]
+    },
+    {
+      "id": "UX-003",
+      "category": "ui",
+      "statement": "采用选定的 A+ 和风留白布局：五个文字入口、可收放右侧聊天、温暖日式二次元氛围与角色主题色扩展。",
+      "acceptance": [
+        "主入口为陪伴、工作台、能力、角色、设置，不要求依靠图标辨认",
+        "陪伴页角色面部可见，聊天收放不丢草稿和历史",
+        "中性基础色可配角色强调色和背景，保持可读性；不强制旧深夜蓝或四抽屉",
+        "客户端验证1440×900、1280×800；保留旧稿和运行数据"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-UI-003",
+        "EX-UI-004"
+      ],
+      "implementation_refs": [
+        "../../frontend/src/a-plus-scene-view.js",
+        "../../frontend/src/a-plus-layout.css"
+      ],
+      "test_refs": [
+        "../../frontend/tests/a-plus.spec.js"
+      ],
+      "status_ref": "status-matrix:scene-ui-shell",
+      "supersedes": [
+        "UX-002"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "UX-004",
+      "category": "ui",
+      "statement": "能力页突出感知与交互、效率工具、生活与陪伴；页面模块独立添加、排序和移除。",
+      "acceptance": [
+        "语音、屏幕观察、OCR、截屏翻译属于能力目录；音乐、待办为可选扩展",
+        "已添加模块末尾为同尺寸虚线块，中央只有＋；悬停和焦点提示添加模块",
+        "防止重复添加；添加卡片、启用能力、授予权限是不同动作",
+        "未配置/未授权/待实现如实显示；移除卡片不删除数据或停用其他页面使用的能力"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-UI-001",
+        "EX-UI-002",
+        "EX-UI-003"
+      ],
+      "implementation_refs": [
+        "../../frontend/src/capability-page.js",
+        "../../frontend/src/capability-layout.js"
+      ],
+      "test_refs": [
+        "../../frontend/tests/capability-layout.test.js"
+      ],
+      "status_ref": "status-matrix:modules",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "UX-005",
+      "category": "desktop",
+      "statement": "完整客户端可全屏固定在 Windows 桌面最底部，作为陪伴壁纸，并能恢复普通客户端。",
+      "acceptance": [
+        "置于桌面图标和普通窗口后方；普通全屏预览不能冒充壁纸层",
+        "实现前验证Explorer重启、Win+D、多屏/DPI、锁屏、退出恢复与焦点",
+        "保留进入普通客户端及聊天接管入口，不丢失会话"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-UI-004"
+      ],
+      "implementation_refs": [],
+      "test_refs": [],
+      "status_ref": "status-matrix:desktop-wallpaper",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "AVATAR-003",
+      "category": "avatar",
+      "statement": "完整客户端与桌宠共享助手、会话和生活状态；桌宠只保留场景、角色和紧凑聊天，可关闭场景变透明。",
+      "acceptance": [
+        "默认互相切换，一个活跃视口；隐藏视口停止持续渲染且不重复启动后台",
+        "切换保留草稿、角色活动、当前会话；480×420下可读可输入",
+        "必要控制悬停或键盘聚焦显示；拖动排除输入框和按钮",
+        "默认不抢焦点、不启用鼠标穿透；完整历史在客户端查看"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-UI-001",
+        "EX-VISION-001"
+      ],
+      "implementation_refs": [
+        "../../frontend/src/display-state.js",
+        "../../src-tauri/src/main.rs"
+      ],
+      "test_refs": [
+        "../../frontend/tests/display-state.test.js",
+        "../../tools/native-ui-smoke.mjs"
+      ],
+      "status_ref": "status-matrix:avatar-vrm-desktop",
+      "supersedes": [
+        "AVATAR-002"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "BROWSER-003",
+      "category": "browser",
+      "statement": "网页交互统一到 Sumika 自己的内置浏览器，覆盖聊天咨询、登录接管、价格额度查看、福利领取与签到。",
+      "acceptance": [
+        "在Sumika内提供统一入口、标签页、状态和人工接管；不默认弹多个独立窗口",
+        "按站点与账户管理持久登录档案，不合并不同账户、不读取或导出Cookie、不迁移用户个人浏览器数据",
+        "复用已授权普通操作；新站登录、OTP、验证码及新增付费/权限动作按既有授权边界交接",
+        "自动任务与用户接管互斥；失败/取消/提交未知可恢复，未知提交不重发",
+        "不支持内嵌的站点明确说明兼容限制和可见替代路径，不静默打开外部窗口",
+        "官方API/RSS后台采集仍可直接运行；不强制转成网页点击",
+        "关闭及重启保留可恢复状态并释放本实例资源；不把Codex内嵌浏览器视为产品能力"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-BROWSER-003",
+        "EX-BROWSER-004",
+        "EX-PLAN-001"
+      ],
+      "implementation_refs": [
+        "../../src-tauri/src/embedded_browser.rs",
+        "../../frontend/src/embedded-browser-view.js",
+        "../../backend/src/sumika_core/embedded_browser.py",
+        "../../backend/src/sumika_core/browser/native_web_chat.py",
+        "../../src-tauri/src/consultation.rs",
+        "../../backend/src/sumika_core/browser/runtime.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_embedded_browser.py",
+        "../../backend/tests/test_native_web_chat.py",
+        "../../frontend/tests/embedded-browser.test.js",
+        "../../src-tauri/scripts/embedded-browser-smoke.mjs",
+        "../../backend/tests/test_browser_runtime.py"
+      ],
+      "status_ref": "status-matrix:unified-browser",
+      "supersedes": [
+        "BROWSER-001"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "BROWSER-004",
+      "category": "browser",
+      "statement": "复杂任务按收益选择已登录网页进行辅助咨询，默认最多2–3来源，结果经主模型审查。",
+      "acceptance": [
+        "只发送脱敏任务摘要，不发送密钥、Cookie、屏幕或无关文件",
+        "网页建议不直接执行或覆盖本地任务契约",
+        "额度未知不假定免费；提交不明不重发；登录和验证码可人工接管",
+        "浏览器产品入口遵循BROWSER-003，旧五来源3+2能力不再定义默认策略"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-004",
+        "EX-ROUTING-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/quality/service.py",
+        "../../src-tauri/src/consultation.rs"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:native-consultation",
+      "supersedes": [
+        "BROWSER-002"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-012",
+      "category": "model-policy",
+      "statement": "模型候选身份同时包含Provider Profile、Route、Model、Transport、Harness和推理强度。",
+      "acceptance": [
+        "同名模型在官方API、中转、网页和客户端分别记录能力/价格/额度/健康",
+        "推理强度分别评测，只有已声明且Runtime实际支持和应用的值可执行",
+        "区分请求强度与实际应用值，未知不猜测；reasoning token不重复计费"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-COST-001",
+        "EX-COST-002",
+        "EX-ROUTING-003"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/quality/selection.py",
+        "../../packages/quality-routing/src/quality_routing/costs.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_quality_selection.py",
+        "../../backend/tests/test_route_cost_consistency.py",
+        "../../packages/quality-routing/tests/test_costs.py"
+      ],
+      "status_ref": "status-matrix:quality-selection",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-013",
+      "category": "model-policy",
+      "statement": "质量以版本化多源榜单先验、官方能力、固定任务及真实使用证据逐步校准。",
+      "acceptance": [
+        "新模型至少健康检查与三次固定任务通过后进入对应任务候选",
+        "基础小题不证明复杂规划、视觉、角色或任意任务质量等同",
+        "区分observed、pending-evaluation、routable、degraded、retired、needs-review",
+        "限流、超时、格式失败和质量失败分别记录；状态变化可恢复，不将单次失败判永久不可用",
+        "目录和免费声明变化触发复核；旧模型停止新任务，替代只提建议，不自动换主模型"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-003",
+        "EX-REFRESH-001",
+        "EX-MODEL-012"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/quality/selection.py",
+        "../../backend/src/sumika_core/free_model_routing.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_quality_selection.py",
+        "../../backend/tests/test_free_model_routing.py"
+      ],
+      "status_ref": "status-matrix:quality-selection",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-014",
+      "category": "model-policy",
+      "statement": "主模型质量优先，执行者在满足任务质量门槛后按成本选择，角色模型独立按合格且便宜稳定选择。",
+      "acceptance": [
+        "主模型负责理解、规划、重新规划和最终审查，允许用户固定",
+        "自动模式只从真实可执行且有证据的授权池选主模型，失效给出推荐而非静默替换",
+        "执行者满足任务能力与质量契约后再比总成本；不为省钱牺牲质量",
+        "角色模型仅润色交付，不承担复杂规划或最终验收，也不改写已验证事实"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-001",
+        "EX-ROUTING-003"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/quality/selection.py",
+        "../../backend/src/sumika_core/account_routing.py",
+        "../../tools/activate_model_roles.py",
+        "../../backend/src/sumika_core/quality/service.py",
+        "../refactor/model-activation-and-accounts.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_quality_selection.py",
+        "../../backend/tests/test_quality_routing.py",
+        "../../backend/tests/test_account_routing.py",
+        "../../tools/test_activate_model_roles.py",
+        "../../tools/smoke_model_roles.py"
+      ],
+      "status_ref": "status-matrix:quality-selection",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-015",
+      "category": "model-policy",
+      "statement": "用确定性脚本分别刷新资源包、价格和目录，维护最新证据并保留过期历史。",
+      "acceptance": [
+        "默认资源每日一次，价格目录每12小时一次；允许更保守的逐渠道间隔",
+        "路由前数据过期受控补查，首次/状态变化的健康与评测独立触发",
+        "普通刷新不调用AI、不读取API Key或导出Cookie、不自动登录、购买或充值",
+        "公开API优先，其次已登录官方DOM、本地OCR；解析不确定返回needs-review，不猜默认值",
+        "应用关闭不联网，启动或路由前补查；系统定时入口也必须遵守存活门控"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-REFRESH-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_refresh.py",
+        "../../tools/refresh_model_catalog.py",
+        "../../tools/refresh_model_catalog.ps1",
+        "../../tools/register_model_refresh_tasks.ps1"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_refresh.py",
+        "../../tools/test_refresh_model_catalog.py"
+      ],
+      "status_ref": "status-matrix:model-refresh",
+      "supersedes": [
+        "MODEL-009"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-016",
+      "category": "model-policy",
+      "statement": "资源包作为账户级共享池记账，保留适用范围、余量、真实到期、来源、可信度和在途预留。",
+      "acceptance": [
+        "按真实账户/执行版本及适用模型匹配；多模型共享额度，不重复记独立余额",
+        "最早到期且适用的包优先，在途预留防并发超支",
+        "单位、观察时间、到期时间与stale分开；过期/未知不能当新鲜免费额度",
+        "免费耗尽、价格撤回、提交未知时失败关闭；未经已有付费策略放行不得回退现金",
+        "零单价、赠金、已购余额、活动额度和网页权益分别记录"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-REFRESH-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_refresh.py",
+        "../../backend/src/sumika_core/providers/resource_bound.py",
+        "../../backend/src/sumika_core/funding_ledger.py",
+        "../../backend/src/sumika_core/account_routing.py",
+        "../../backend/src/sumika_core/integrations/account_portals.py",
+        "../../packages/quality-routing/src/quality_routing/costs.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_resource_bound_provider.py",
+        "../../backend/tests/test_funding_ledger.py",
+        "../../backend/tests/test_account_routing.py",
+        "../../backend/tests/test_account_portals.py",
+        "../../backend/tests/test_quality_routing.py",
+        "../../backend/tests/test_route_cost_consistency.py",
+        "../../packages/quality-routing/tests/test_costs.py"
+      ],
+      "status_ref": "status-matrix:model-refresh",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-017",
+      "category": "model-policy",
+      "statement": "成本按规划、执行、验证、咨询、重试和升级估算；预算阈值默认两倍且超出5元，用户可调整。",
+      "acceptance": [
+        "确定性预算估算不额外调用模型，输出区间和关键假设",
+        "累计预测同时大于偏高估算两倍且大于偏高估算加5元时暂停新增付费调用",
+        "分别显示Provider扣费、现金折算、资源消耗与未知价格，纳入推理消耗",
+        "预算不降低质量门槛，授权和付费限制继续约束每次派发"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-002",
+        "EX-ROUTING-003",
+        "EX-COST-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/quality/selection.py",
+        "../../packages/quality-routing/README.md",
+        "../../packages/quality-routing/src/quality_routing/costs.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_quality_routing.py",
+        "../../backend/tests/test_route_cost_consistency.py",
+        "../../packages/quality-routing/tests/test_costs.py"
+      ],
+      "status_ref": "status-matrix:quality-routing-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-018",
+      "category": "model-policy",
+      "statement": "普通任务可在已授权渠道的可用余额与预算内使用付费模型；同名跨渠道按任务质量和实际报价比较。",
+      "acceptance": [
+        "沿用用户明确授权，不反复要求同范围小额确认；不自动充值或扩大权限",
+        "对齐真实版本、推理强度、上下文及工具能力，各Route分别验质量、健康、余额、价格和期限",
+        "满足质量后按本任务输入/输出/缓存/推理消耗及渠道现金折算、抵扣规则比较，不能套官方价或按余额大小选",
+        "未知余额/价格不假装可用；未授权的免费到付费切换仍受MODEL-006约束",
+        "普通任务付费许可不用于高频维护；原推荐确认行为保留于未授权或用户固定的场景"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-COST-003",
+        "EX-ROUTING-001",
+        "EX-COST-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/model_policy.py",
+        "../../backend/src/sumika_core/route_pricing.py",
+        "../../backend/src/sumika_core/quality/selection.py",
+        "../../backend/src/sumika_core/account_routing.py",
+        "../../backend/src/sumika_core/integrations/account_sources.py",
+        "../../backend/src/sumika_core/integrations/account_portals.py",
+        "../../packages/quality-routing/src/quality_routing/costs.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_route_pricing.py",
+        "../../backend/tests/test_quality_selection.py",
+        "../../backend/tests/test_account_routing.py",
+        "../../backend/tests/test_account_portals.py",
+        "../../backend/tests/test_quality_routing.py",
+        "../../backend/tests/test_route_cost_consistency.py",
+        "../../packages/quality-routing/tests/test_costs.py"
+      ],
+      "status_ref": "status-matrix:model-policy",
+      "supersedes": [
+        "MODEL-007"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-019",
+      "category": "ui",
+      "statement": "模型能力页展示刷新状态、免费证据、额度到期、主模型和角色模型及选择依据，并提供手动刷新、固定模型和预算设置。",
+      "acceptance": [
+        "状态与真实Profile及执行版本绑定，不将健康通过等同正式准入",
+        "API、网页、专属客户端和模型池保持模块化",
+        "报价未知、证据过期、未配置、需授权均有明确状态",
+        "主模型固定和预算设置可由用户调整"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-003",
+        "EX-REFRESH-001",
+        "EX-ROUTING-002"
+      ],
+      "implementation_refs": [
+        "../../frontend/src/quality-routing-view.js"
+      ],
+      "test_refs": [
+        "../../frontend/tests/quality-routing.test.js"
+      ],
+      "status_ref": "status-matrix:quality-routing-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-020",
+      "category": "model-policy",
+      "statement": "model-picker只提供目录、价格和评测建议，Sumika保留最终授权、额度、付费与执行决策。",
+      "acceptance": [
+        "远端ID明确映射，重复身份隔离；timeout/stale/unknown不生成Fake数据或免费额度",
+        "外部推荐必须在本地重验健康、质量、Profile权限和费用",
+        "结果回写不得包含凭据或私人正文；不能由picker启用Provider或切生产路由"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-003",
+        "EX-PLAN-001"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/integrations/model_picker/adapter.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_model_picker_adapter.py"
+      ],
+      "status_ref": "status-matrix:model-picker-adapter",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "TASK-002",
+      "category": "task",
+      "statement": "复杂任务使用可修订DAG，在执行、验证、重试、升级和重新规划中维护任务契约。",
+      "acceptance": [
+        "节点包含目标、依赖、能力、质量门槛、允许/禁止文件、预算、验收、候选和推理强度",
+        "独立节点可并行，共享核心文件串行；代码变更使用隔离worktree或等价可恢复工作区",
+        "目标、价格额度、上下文、权限或候选变化及验收失败触发重新规划",
+        "同候选修复一次，再升级合适候选或主模型；安全、凭据、公共协议、迁移、设备交高能力主模型",
+        "先验证再交付，保留取消、失败和提交未知恢复状态"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-004",
+        "EX-PLAN-001"
+      ],
+      "implementation_refs": [
+        "../../packages/quality-routing/README.md",
+        "../../backend/src/sumika_core/quality"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_quality_routing.py"
+      ],
+      "status_ref": "status-matrix:quality-routing-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "BENEFIT-001",
+      "category": "benefits",
+      "statement": "广泛发现免费和限免模型权益，覆盖未注册新站，聚合官方与资讯来源并核验。",
+      "acceptance": [
+        "不限定已登录站点或单篇文章；支持官方API/公告、RSS和公开资讯",
+        "按模型、渠道、活动去重，区分公开线索、官方证据、账户权益、期限与实际可路由资格",
+        "RSS是可选采集手段，允许更有效方案，不要求额外付费AI搜索",
+        "新站需要注册、实名、登录、Key或验证时向用户列出明确操作；未验证不入执行池"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-BENEFIT-001",
+        "EX-BENEFIT-002",
+        "EX-BENEFIT-003",
+        "EX-BENEFIT-004"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/benefit_sources.py",
+        "../../backend/src/sumika_core/benefits.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_benefit_sources.py",
+        "../../backend/tests/test_benefits.py"
+      ],
+      "status_ref": "status-matrix:free-benefits",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "BENEFIT-002",
+      "category": "benefits",
+      "statement": "在已授权站点与明确免费范围内自动领取权益和签到，并核验实际到账。",
+      "acceptance": [
+        "复用既有登录与授权，可撤销、每日去重、重启恢复；不为每次相同签到重复询问",
+        "跳过付费、充值、需实名/验证码/登录或新增权限的步骤并提示具体阻碍",
+        "提交未知不重复领，页面成功提示不替代账户到账核验；余量和期限未知如实保留",
+        "网页操作归入BROWSER-003；未支持站点只列待处理，不冒充通用签到已完成",
+        "取代MODEL-009中所有领取必须用户手动的旧限制，其登录和安全边界保留"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-BENEFIT-001",
+        "EX-BROWSER-004"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/integrations/modelscope_benefits.py",
+        "../../backend/src/sumika_core/benefits.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_modelscope_benefits.py",
+        "../../backend/tests/test_benefits.py"
+      ],
+      "status_ref": "status-matrix:free-benefits",
+      "supersedes": [
+        "MODEL-009"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "BENEFIT-003",
+      "category": "benefits",
+      "statement": "高频发现、刷新、签到默认使用零模型成本的固定流程，必要语义处理只用合格免费或本地模型。",
+      "acceptance": [
+        "脚本、API/RSS/DOM和本地解析优先，普通维护不调用模型",
+        "免费/本地语义辅助须满足适用质量要求；免费证据失效或不可用就延后、跳过或请求处理，不升级付费",
+        "不把普通任务付费余额授权用于高频维护",
+        "记录任务耗时、是否调用模型和费用状态；Sumika关闭不执行网络维护"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-COST-003",
+        "EX-REFRESH-001",
+        "EX-BENEFIT-004"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/benefits.py",
+        "../../backend/src/sumika_core/model_refresh.py"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_benefits.py",
+        "../../backend/tests/test_model_refresh.py"
+      ],
+      "status_ref": "status-matrix:free-benefits",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "PLUGIN-002",
+      "category": "architecture",
+      "statement": "质量路由抽成运行时中立核心与宿主适配器，可面向社区复用；Codex Skill不直接作为Sumika Runtime。",
+      "acceptance": [
+        "核心提供候选、证据、估算、规划、验证和升级规则，宿主掌握授权与派发",
+        "保留SDK/MCP及Sumika、DSH、外部API适配边界，不强制合并仓库或新建HTTP服务",
+        "社区接口不暴露密钥、任意Shell、删除、设备控制或自动启用付费Provider",
+        "发布到社区仍是独立动作，本需求不意味着已发布"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-ROUTING-001",
+        "EX-ROUTING-003",
+        "EX-PLAN-001"
+      ],
+      "implementation_refs": [
+        "../../packages/quality-routing/README.md"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_quality_routing.py"
+      ],
+      "status_ref": "status-matrix:quality-routing-core",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "COST-001",
+      "category": "tooling",
+      "statement": "Codex成本Skill先独立服务当前Codex，用任务协议、能力注册、确定性估算和共享脱敏账本辅助有收益的委派。",
+      "acceptance": [
+        "默认保留当前主模型与推理设置；Skill不能凭模板虚构可用子Agent",
+        "L0工具优先；L1/L2执行明确任务，L3负责规划/契约/安全/整合",
+        "记录允许文件、DAG依赖、验收与升级条件；不为估价额外调用模型",
+        "账本只保存任务类型、层级、token/调用/耗时、失败与估算差异，不含正文、密钥或完整路径"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-001",
+        "EX-COST-001",
+        "EX-COST-002"
+      ],
+      "implementation_refs": [
+        "../refactor/phase-3-cost-routing.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:cost-routing-protocol",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "INPUT-001",
+      "category": "audio",
+      "statement": "语音先实现点击或按住说话与TTS，后续才考虑持续监听。",
+      "acceptance": [
+        "麦克风启用需权限与明确状态，添加模块不自动录音",
+        "可停止/取消并清楚显示输入输出失败",
+        "持续环境录音不属于首期交付"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "deferred",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-001",
+        "EX-VISION-001"
+      ],
+      "implementation_refs": [],
+      "test_refs": [],
+      "status_ref": "status-matrix:audio",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "INPUT-002",
+      "category": "vision",
+      "statement": "视觉先实现单次屏幕/摄像头观察及OCR、截屏翻译；视频游戏陪伴先只读观察和评论。",
+      "acceptance": [
+        "观察须明确授权与状态，可取消，不默认持续抓取屏幕或摄像头",
+        "敏感内容不进入无关模型或日志；OCR/翻译须独立能力与评测",
+        "后续实时观察、反馈和玩家接入保留扩展点；首期不自动代打或控制游戏"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "deferred",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-001",
+        "EX-VISION-001",
+        "EX-UI-003"
+      ],
+      "implementation_refs": [],
+      "test_refs": [],
+      "status_ref": "status-matrix:vision",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "WORLD-001",
+      "category": "world",
+      "statement": "虚拟居所分步实现固定房间、活动点、摄像头与用户日程加有限主动性。",
+      "acceptance": [
+        "交流用近乎平视的轻微侧角、工作用书桌侧前方；家具为固定场景资源",
+        "支持工作/休息/吃饭/睡觉状态；不把静态画面或待机动画当自主生活",
+        "Sumika关闭暂停，重启仅有限时间补算",
+        "复杂接触动作、自由行走、多角色互聊和独立接入游戏留后续"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "deferred",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-VISION-001",
+        "EX-PLAN-001",
+        "EX-UI-001"
+      ],
+      "implementation_refs": [],
+      "test_refs": [],
+      "status_ref": "status-matrix:virtual-world",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "RESOURCE-001",
+      "category": "assets",
+      "statement": "角色、Avatar、声音与场景使用版本化本地资源包。",
+      "acceptance": [
+        "身份、人格、建模、声音、场景资源独立绑定并可更换",
+        "记录资源来源、版本和许可证，不因更换运行时丢失资源与配置",
+        "初版示例资产和用户私有资源分开，不擅自发布用户角色素材"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-001",
+        "EX-VISION-001"
+      ],
+      "implementation_refs": [],
+      "test_refs": [],
+      "status_ref": "status-matrix:domain-contracts",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "DEVICE-001",
+      "category": "device",
+      "statement": "现实身体能力先局域网发现与只读摄像头/传感器，安全网关完成后再做设备控制。",
+      "acceptance": [
+        "远程访问默认关闭；设备登记、权限和风险分级明确",
+        "后续米家和运动设备/遥控小车单独验收，不直接暴露任意设备控制",
+        "只读阶段不实施游戏代打、真实设备写入或运动控制"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "deferred",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-001",
+        "EX-VISION-001"
+      ],
+      "implementation_refs": [],
+      "test_refs": [],
+      "status_ref": "status-matrix:real-devices",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MULTI-002",
+      "category": "character",
+      "statement": "当前预留assistant_id、独立模型绑定与记忆命名空间；多助手同屏及交流分阶段实现。",
+      "acceptance": [
+        "每助手身份、状态、会话、记忆与模型绑定隔离；默认不共享记忆",
+        "后续先同屏与独立状态，再显式共享场景/记忆、互聊和发言调度",
+        "当前预留不表示多角色自主生活或交流已完成"
+      ],
+      "provenance": "normalized",
+      "intent_state": "active",
+      "source_refs": [
+        "sanitized-user-message-index:original-excerpts.md"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-001",
+        "EX-ROUTING-002"
+      ],
+      "implementation_refs": [
+        "../../backend/src/sumika_core/domain",
+        "../../backend/src/sumika_core/quality"
+      ],
+      "test_refs": [
+        "../../backend/tests/test_domain_contracts.py"
+      ],
+      "status_ref": "status-matrix:domain-contracts",
+      "supersedes": [],
+      "superseded_by": []
     }
   ]
 }

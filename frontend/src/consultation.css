@@ -1,0 +1,15 @@
+.consultation-panel { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; }
+.consultation-heading, .consultation-actions, .consultation-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.consultation-heading strong, .consultation-heading small { display: block; }
+.consultation-heading strong { margin-top: 4px; font-size: 13px; }
+.consultation-heading small, .consultation-notice { color: var(--faint); font-size: 11px; }
+.consultation-actions, .consultation-controls { justify-content: flex-start; flex-wrap: wrap; }
+.consultation-webview-rect { position: relative; height: clamp(240px, 38vh, 480px); border: 1px solid var(--accent-border); background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.consultation-webview-rect > span { position: absolute; left: 10px; top: 8px; color: var(--faint); font-size: 10px; pointer-events: none; }
+.consultation-manual-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+.consultation-manual-form label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.consultation-manual-form textarea { min-width: 0; }
+.consultation-notice { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 8px 10px; line-height: 1.5; }
+.embedded-workspace .consultation-panel.is-focused { position: fixed; inset: 12px; z-index: 100; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface, #fffdf8); grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.consultation-panel.is-focused .consultation-manual-form { display: none; }
+@media (max-width: 720px) { .consultation-manual-form { grid-template-columns: 1fr; }.consultation-webview-rect { height: 300px; } }

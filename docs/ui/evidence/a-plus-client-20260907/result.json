@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "scope": "native UI only; no DSH or model calls",
+  "checks": [
+    "one native window, same canvas and draft, borderless 480x420 pet",
+    "native opaque and transparent canvas pixels verified",
+    "workspace bounds and moved pet bounds restored independently",
+    "hidden pet minimizes to workspace, rendering pauses and resumes",
+    "maximized workspace restored after pet mode",
+    "capability library accessible in native WebView2",
+    "native process and managed Core exit cleanly; isolated runtime removed"
+  ]
+}

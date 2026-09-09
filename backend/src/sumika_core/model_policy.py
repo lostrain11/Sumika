@@ -8,6 +8,7 @@ quality, privacy, cost, and confirmation rules to every source.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import threading
 import time
@@ -15,11 +16,15 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 from urllib.parse import urlparse
 
-from .provider_profiles import configured_models
+from quality_routing.costs import FundingLot, RouteQuote, cost_order
+
+from .model_refresh import RefreshCoordinator
+from .provider_profiles import ProviderProfileError, configured_models, provider_account_revision, provider_execution_revision
 from .route_pricing import CostEstimate, RoutePricingService
 
 
@@ -55,6 +60,7 @@ VALID_HEALTH_STATES = {"healthy", "ready", "available", "unknown", "unavailable"
 VALID_AUTH_STATES = {"authorized", "not-required", "needs-auth", "unknown", "blocked"}
 VALID_CONFIRMATION_MODES = {"recommendation-then-confirmation", "automatic", "manual"}
 VALID_BUDGET_POLICIES = {"prefer-free", "free-only", "allow-paid", "no-paid"}
+VALID_REASONING_EFFORTS = {"off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 
 
 class ModelPolicyError(ValueError):
@@ -107,6 +113,36 @@ def _safe_tuple(value: Any, *, limit: int = 32) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _safe_reasoning_efforts(value: Any) -> tuple[str, ...]:
+    values = tuple(item.lower() for item in _safe_tuple(value, limit=8))
+    invalid = [item for item in values if item not in VALID_REASONING_EFFORTS]
+    if invalid:
+        raise ModelPolicyError(f"reasoning_efforts contains invalid effort: {invalid[0]}")
+    return values
+
+
+def _reasoning_projection(value: Any) -> tuple[tuple[str, ...], str]:
+    raw = value.get("reasoning") if isinstance(value, Mapping) else None
+    raw_efforts = raw.get("efforts") if isinstance(raw, Mapping) else None
+    if not isinstance(raw_efforts, (list, tuple)):
+        raw_efforts = value.get("reasoning_efforts") if isinstance(value, Mapping) else None
+    efforts: list[str] = []
+    for item in raw_efforts if isinstance(raw_efforts, (list, tuple)) else ():
+        identifier = item.get("id") if isinstance(item, Mapping) else item
+        normalized = str(identifier or "").strip().lower()
+        if normalized in VALID_REASONING_EFFORTS and normalized not in efforts:
+            efforts.append(normalized)
+    default = raw.get("default_effort") if isinstance(raw, Mapping) else None
+    if default is None and isinstance(raw, Mapping):
+        default = raw.get("defaultEffort")
+    if default is None and isinstance(value, Mapping):
+        default = value.get("default_reasoning_effort") or value.get("defaultReasoningEffort")
+    default = str(default or "").strip().lower()
+    if default not in VALID_REASONING_EFFORTS or (efforts and default not in efforts):
+        default = "unknown"
+    return tuple(efforts), default
+
+
 def _safe_metadata(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -136,6 +172,8 @@ class ModelCatalogEntry:
     harness_id: str | None = None
     capabilities: tuple[str, ...] = ("chat",)
     quality_tier: str = "unknown"
+    reasoning_efforts: tuple[str, ...] = ()
+    default_reasoning_effort: str = "unknown"
     cost_class: str = "unknown"
     processing_location: str = "cloud"
     auth_state: str = "unknown"
@@ -160,6 +198,12 @@ class ModelCatalogEntry:
         capabilities = _safe_tuple(self.capabilities)
         object.__setattr__(self, "capabilities", capabilities or ("chat",))
         quality = _safe_text(self.quality_tier, 40).lower() or "unknown"
+        reasoning_efforts = _safe_reasoning_efforts(self.reasoning_efforts)
+        default_reasoning_effort = _safe_text(self.default_reasoning_effort, 40).lower() or "unknown"
+        if default_reasoning_effort != "unknown" and default_reasoning_effort not in VALID_REASONING_EFFORTS:
+            raise ModelPolicyError(f"invalid default_reasoning_effort: {default_reasoning_effort}")
+        if default_reasoning_effort != "unknown" and reasoning_efforts and default_reasoning_effort not in reasoning_efforts:
+            raise ModelPolicyError("default_reasoning_effort is not supported by reasoning_efforts")
         cost = _safe_text(self.cost_class, 40).lower() or "unknown"
         location = _safe_text(self.processing_location, 40).lower() or "cloud"
         auth = _safe_text(self.auth_state, 40).lower() or "unknown"
@@ -176,6 +220,8 @@ class ModelCatalogEntry:
         if health not in VALID_HEALTH_STATES:
             raise ModelPolicyError(f"invalid health_state: {health}")
         object.__setattr__(self, "quality_tier", quality)
+        object.__setattr__(self, "reasoning_efforts", reasoning_efforts)
+        object.__setattr__(self, "default_reasoning_effort", default_reasoning_effort)
         object.__setattr__(self, "cost_class", cost)
         object.__setattr__(self, "processing_location", location)
         object.__setattr__(self, "auth_state", auth)
@@ -223,8 +269,14 @@ class QuotaSnapshot:
     confidence: str = "unknown"
     requires_auth: bool = False
     detail: str = ""
+    funding_kind: str = "unknown"
+    account_revision: str | None = None
 
     def __post_init__(self) -> None:
+        if self.funding_kind not in {"unknown", "cash", "grant", "purchased"}:
+            raise ModelPolicyError("invalid quota funding kind")
+        if self.account_revision is not None and (len(self.account_revision) != 64 or any(char not in "0123456789abcdef" for char in self.account_revision)):
+            raise ModelPolicyError("invalid quota account revision")
         route_id = _safe_text(self.route_id, 240)
         if not route_id:
             raise ModelPolicyError("quota route_id is required")
@@ -265,6 +317,7 @@ class RoutingRequest:
     confirmation_mode: str = "recommendation-then-confirmation"
     preferred_route: str | None = None
     min_quality_tier: str | None = None
+    reasoning_effort: str = "auto"
     character_id: str | None = None
     agent_preset_id: str | None = None
     task_text: str = ""
@@ -307,6 +360,10 @@ class RoutingRequest:
         object.__setattr__(self, "privacy_constraints", _safe_tuple(self.privacy_constraints))
         object.__setattr__(self, "preferred_route", _safe_text(self.preferred_route, 240) if self.preferred_route else None)
         object.__setattr__(self, "min_quality_tier", quality)
+        reasoning_effort = _safe_text(self.reasoning_effort, 40).lower() or "auto"
+        if reasoning_effort != "auto" and reasoning_effort not in VALID_REASONING_EFFORTS:
+            raise ModelPolicyError(f"invalid reasoning_effort: {reasoning_effort}")
+        object.__setattr__(self, "reasoning_effort", reasoning_effort)
         object.__setattr__(self, "character_id", _safe_text(self.character_id, 120) if self.character_id else None)
         object.__setattr__(self, "agent_preset_id", _safe_text(self.agent_preset_id, 160) if self.agent_preset_id else None)
         object.__setattr__(self, "task_text", _safe_text(self.task_text, 4000))
@@ -349,6 +406,8 @@ class RoutingDecision:
     cost_estimate: dict[str, Any] = field(default_factory=lambda: {"schema": "route-pricing/v1", "status": "unknown"})
     policy_version: str = MODEL_POLICY_VERSION
     valid_until: str | None = None
+    requested_reasoning_effort: str = "auto"
+    applied_reasoning_effort: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -444,6 +503,7 @@ class ModelRouter:
         quality_rank = QUALITY_RANK[required_quality]
         rejected: dict[str, int] = {}
         candidates: list[ModelCatalogEntry] = []
+        quotes: dict[str, RouteQuote] = {}
 
         def reject(code: str) -> None:
             rejected[code] = rejected.get(code, 0) + 1
@@ -451,12 +511,24 @@ class ModelRouter:
         for entry in entries:
             if not isinstance(entry, ModelCatalogEntry):
                 continue
+            if entry.metadata.get("free_model_policy"):
+                from .free_model_routing import TASK_KINDS
+                if request.task_kind not in TASK_KINDS or len(request.task_text.encode("utf-8")) > 12000:
+                    reject("outside_verified_free_task_scope")
+                    continue
             if not _privacy_allows(entry, request.privacy_constraints):
                 reject("privacy_constraint")
                 continue
             if not set(request.required_capabilities).issubset(set(entry.capabilities)):
                 reject("missing_capability")
                 continue
+            if request.reasoning_effort != "auto":
+                if not entry.reasoning_efforts:
+                    reject("reasoning_effort_unknown")
+                    continue
+                if request.reasoning_effort not in entry.reasoning_efforts:
+                    reject("reasoning_effort_unavailable")
+                    continue
             if entry.auth_state not in {"authorized", "not-required"}:
                 reject("auth_not_ready")
                 continue
@@ -465,6 +537,13 @@ class ModelRouter:
                 continue
             quota = quota_map.get(entry.route_id)
             quota_state = quota.state if quota else entry.quota_state
+            if quota and quota_state in {"available", "low"} and not _quota_is_fresh(quota.expires_at):
+                quota_state = "unknown"
+            if quota_state == "unknown" and entry.cost_class == "free-limited":
+                if request.budget_policy in {"free-only", "no-paid"}:
+                    reject("free_quota_unknown")
+                    continue
+                entry = replace(entry, quota_state="unknown", cost_class="unknown")
             if quota_state in {"exhausted", "expired", "blocked", "needs-auth"}:
                 reject(f"quota_{quota_state}")
                 continue
@@ -474,6 +553,20 @@ class ModelRouter:
             if entry.metadata.get("routable", True) is False:
                 reject("adapter_not_routable")
                 continue
+            estimate = estimate_map.get(entry.route_id)
+            if estimate and estimate.route_quote:
+                quote = RouteQuote.from_dict(estimate.route_quote)
+            elif estimate and estimate.status == "known" and estimate.cash_currency == "CNY" and estimate.cash_max is not None:
+                charge = Decimal(str(estimate.cash_max))
+                quote = RouteQuote(charge, Decimal(0), charge, "free" if charge == 0 else "cash", reason="quoted")
+            elif entry.cost_class == "local" and entry.processing_location == "local":
+                quote = RouteQuote(Decimal(0), Decimal(0), Decimal(0), "local", reason="local-no-model-charge")
+            else:
+                quote = RouteQuote()
+            if not quote.available:
+                reject("funding_unavailable")
+                continue
+            quotes[entry.route_id] = quote
             candidates.append(entry)
 
         if not candidates:
@@ -491,6 +584,7 @@ class ModelRouter:
                 confidence=0.2,
                 requires_confirmation=True,
                 valid_until=_expiry(5),
+                requested_reasoning_effort=request.reasoning_effort,
             )
 
         preferred = None
@@ -501,28 +595,16 @@ class ModelRouter:
 
         def sort_key(entry: ModelCatalogEntry) -> tuple[Any, ...]:
             preference = 0 if preferred is entry else 1
-            quota_state = quota_map.get(entry.route_id).state if entry.route_id in quota_map else entry.quota_state
-            quota_rank = {"available": 0, "low": 1, "not-applicable": 1, "unknown": 2}.get(quota_state, 3)
-            estimate = estimate_map.get(entry.route_id)
-            cash_known = bool(estimate and estimate.status == "known" and estimate.cash_max is not None)
-            provider_known = bool(estimate and estimate.status == "known" and estimate.provider_charge_max is not None)
-            price_rank = (
-                0 if cash_known else 1 if provider_known else 2,
-                float(estimate.cash_max) if cash_known else float(estimate.provider_charge_max) if provider_known else math.inf,
-            )
-            latency = entry.metadata.get("p95_latency_ms", 10_000)
-            if not isinstance(latency, (int, float)) or isinstance(latency, bool):
-                latency = 10_000
-            return (preference, COST_RANK[entry.cost_class], price_rank, quota_rank, -QUALITY_RANK[entry.quality_tier], latency, entry.route_id)
+            return (preference, *cost_order(quotes[entry.route_id]), entry.route_id)
 
         candidates.sort(key=sort_key)
         selected = candidates[0]
-        # An unknown price is not treated as free.  It may remain a candidate
-        # under the default preference policy, but it must be confirmed and
-        # is rejected by an explicit free-only/no-paid policy.
-        cost_requires_confirmation = selected.cost_class in {"paid-low", "paid-high", "unknown"}
+        quota = quota_map.get(selected.route_id)
+        quota_state = quota.state if quota else selected.quota_state
+        cost_requires_confirmation = not quotes[selected.route_id].free
+        free_quota_requires_confirmation = selected.cost_class == "free-limited" and quota_state == "unknown"
         if request.budget_policy in {"free-only", "no-paid"} and cost_requires_confirmation:
-            free = next((item for item in candidates if item.cost_class in {"free-limited", "local"}), None)
+            free = next((item for item in candidates if quotes[item.route_id].free), None)
             if free is None:
                 return RoutingDecision(
                     status="no-compatible-route",
@@ -536,27 +618,34 @@ class ModelRouter:
                     confidence=0.7,
                     requires_confirmation=True,
                     valid_until=_expiry(5),
+                    requested_reasoning_effort=request.reasoning_effort,
                 )
             selected = free
             cost_requires_confirmation = False
+            quota = quota_map.get(selected.route_id)
+            quota_state = quota.state if quota else selected.quota_state
+            free_quota_requires_confirmation = False
 
-        requires_confirmation = request.confirmation_mode != "automatic" or cost_requires_confirmation
+        requires_confirmation = request.confirmation_mode != "automatic" or cost_requires_confirmation or free_quota_requires_confirmation
         status = "needs-confirmation" if requires_confirmation else "selected"
         reasons = [
             "privacy_and_permissions_passed",
             "quality_gate_passed",
+            "lowest_qualified_cost",
             "free_or_local_preferred" if not cost_requires_confirmation else "cost_or_quota_confirmation_required",
         ]
+        if free_quota_requires_confirmation:
+            reasons.append("free_quota_unknown")
         if request.preferred_route and preferred is selected:
             reasons.append("user_preference")
         if selected.requires_browser:
             reasons.append("browser_authorization_required")
-        quota = quota_map.get(selected.route_id)
-        quota_state = quota.state if quota else selected.quota_state
         quota_impact = {
             "state": quota_state,
             "source": quota.source if quota else "catalog",
             "estimated": "unknown" if quota_state in {"unknown", "needs-auth"} else "within-observed-budget",
+            "funding_kind": quotes[selected.route_id].funding_kind,
+            "cash_balance_cny": str(quotes[selected.route_id].cash_balance_cny) if quotes[selected.route_id].cash_balance_cny is not None else None,
         }
         confidence = 0.85
         if selected.quota_state == "unknown" or selected.health_state == "unknown":
@@ -565,7 +654,7 @@ class ModelRouter:
             status=status,
             selected_route=selected.route_id,
             selected_entry=selected.to_dict(),
-            alternatives=[item.to_dict() for item in candidates[1:8]],
+            alternatives=[item.to_dict() for item in candidates if item.route_id != selected.route_id][:7],
             quality_gate={"required": required_quality, "selected": selected.quality_tier, "passed": True},
             reason_codes=reasons,
             estimated_cost=selected.cost_class,
@@ -574,6 +663,8 @@ class ModelRouter:
             requires_confirmation=requires_confirmation,
             cost_estimate=(estimate_map.get(selected.route_id) or CostEstimate(selected.route_id, "unknown", unknown_reasons=("pricing-not-observed",))).to_dict(),
             valid_until=_expiry(5),
+            requested_reasoning_effort=request.reasoning_effort,
+            applied_reasoning_effort="unknown",
         )
 
 
@@ -701,11 +792,20 @@ class ModelPolicyService:
         self.web_chat = web_chat
         self._route_sources: dict[str, Any] = {}
         self.store = ModelCatalogStore(data_dir)
+        self.refresh = RefreshCoordinator(data_dir)
         self.pricing = RoutePricingService(provider_profiles, data_dir, logger=logger)
+        from .free_model_routing import FreeModelRouting
+        self.free_models = FreeModelRouting(provider_profiles, data_dir)
+        from .account_routing import AccountRouting
+        self.accounts = AccountRouting(provider_profiles, self.pricing, data_dir)
         self.router = ModelRouter()
         self._quota_lock = threading.RLock()
         self._runtime_quota_cache: dict[str, Any] | None = None
         self._runtime_quota_checked_at = 0.0
+        self._refresh_lock = threading.Lock()
+        self._resource_readers: dict[str, Any] = {}
+        self._refresh_closed = threading.Event()
+        self._refresh_thread: threading.Thread | None = None
         # ``route_sources`` is a compatibility spelling for callers that use
         # the shorter name.  Keep one registry so a source cannot be listed
         # twice when both aliases are supplied.
@@ -761,6 +861,9 @@ class ModelPolicyService:
         entries.extend(self._runtime_entries(session_id, runtime_quota=runtime_quota))
         entries.extend(self._external_entries(refresh=refresh, session_id=session_id))
         entries.extend(self._web_entries())
+        entries.extend(self._observed_model_entries())
+        entries = self._apply_resource_quota(entries)
+        entries = self._apply_free_models(entries)
         self.store.upsert_entries(entries)
         self.store.save()
         source_ids = list(self._route_sources)
@@ -779,6 +882,10 @@ class ModelPolicyService:
                 "errors": dict(self.pricing.errors),
                 "refresh_performed": pricing_refreshed,
             },
+            "refresh": self.refresh.status(),
+            "free_models": self.free_models.status(),
+            "resource_packs": [item.to_dict() for item in self.refresh.resources()],
+            "model_observations": [item.to_dict() for item in self.refresh.observations()],
             "sources": ["provider-profiles", "agent-runtime", "external-route-sources", *source_ids, "browser-web-chat"],
         }
 
@@ -812,6 +919,8 @@ class ModelPolicyService:
         """
 
         request = params if isinstance(params, RoutingRequest) else routing_request_from_dict(params)
+        self.free_models.refresh()
+        self.accounts.refresh()
         if session_id is not None:
             session_id = _safe_text(session_id, 240)
             if not session_id:
@@ -819,7 +928,8 @@ class ModelPolicyService:
         catalog = self.catalog(refresh=refresh, session_id=session_id)
         entries = [ModelCatalogEntry(**self._entry_constructor(item)) for item in catalog["entries"]]
         estimates = {
-            entry.route_id: self.pricing.estimate(entry.to_dict(), request.to_dict())
+            entry.route_id: self.pricing.estimate(entry.to_dict(), request.to_dict(),
+                                                quote_provider=self.candidate_pricing(entry.to_dict())["quote_provider"])
             for entry in entries
         }
         decision = self.router.decide(request, entries, self.store.quotas(), estimates)
@@ -878,7 +988,243 @@ class ModelPolicyService:
             "refresh_performed": refreshed,
             "runtime": runtime_quota,
             "external": external,
+            "resource_packs": [item.to_dict() for item in self.refresh.resources()],
+            "refresh": self.refresh.status(),
         }
+
+    def refresh_observations(
+        self,
+        *,
+        kind: str = "all",
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Read configured sources; callers cannot supply authorization evidence."""
+
+        normalized_kind = str(kind or "all").strip().lower()
+        if normalized_kind not in {"all", "resources", "catalog", "pricing"}:
+            raise ModelPolicyError("refresh kind is invalid")
+        if type(force) is not bool:
+            raise ModelPolicyError("force must be a boolean")
+        if self._refresh_closed.is_set():
+            raise ModelPolicyError("model refresh host is closed")
+        changed: dict[str, int] = {}
+        self.accounts.refresh(force=force)
+        self.pricing.refresh_profiles(force=force)
+        if normalized_kind in {"all", "pricing", "catalog"}:
+            self.free_models.refresh(force=force)
+        with self._refresh_lock:
+            jobs = self.refresh.status()["jobs"]
+            if normalized_kind in {"all", "pricing", "catalog"} and (force or jobs["pricing"]["due"]):
+                if self._official_profile_ids():
+                    try:
+                        from .integrations.zhipu_pricing import PricingNeedsReview, fetch_pricing_observations, fetch_rendered_pricing_observations
+                        try:
+                            rows = fetch_pricing_observations()
+                        except PricingNeedsReview:
+                            if self._refresh_closed.is_set():
+                                raise
+                            rows = fetch_rendered_pricing_observations()
+                        changed["pricing"] = len(self.refresh.ingest_models(rows, reconcile_source="https://bigmodel.cn/pricing"))
+                        changed["catalog"] = changed["pricing"]
+                    except Exception as error:
+                        self.refresh.mark_failure("pricing", error)
+                        self.refresh.mark_failure("catalog", error)
+            if normalized_kind in {"all", "resources"} and (force or jobs["resources"]["due"]):
+                if not self._resource_readers:
+                    self.refresh.mark_failure("resources", "authenticated-reader-required")
+                for profile_id, reader in tuple(self._resource_readers.items()):
+                    if self._refresh_closed.is_set():
+                        break
+                    if profile_id not in self._official_profile_ids():
+                        continue
+                    try:
+                        profile = self.provider_profiles.get(profile_id)
+                        revisions = {model["id"].lower(): provider_account_revision(profile)
+                                     for model in configured_models(profile.get("config") or {})}
+                        observation = reader()
+                        current = self.provider_profiles.get(profile_id)
+                        current_revisions = {model["id"].lower(): provider_account_revision(current)
+                                             for model in configured_models(current.get("config") or {})}
+                        if revisions != current_revisions:
+                            raise ModelPolicyError("provider changed during resource refresh")
+                        changed["resources"] = changed.get("resources", 0) + len(self.refresh.ingest_resources(
+                            observation, profile_id, account_revisions=revisions))
+                    except Exception as error:
+                        self.refresh.mark_failure("resources", error)
+            return {"policy_version": MODEL_POLICY_VERSION, "kind": normalized_kind, "force": force,
+                    "changed": changed, "refresh": self.refresh.status()}
+
+    def register_resource_reader(self, provider_profile_id: str, reader: Any) -> None:
+        if provider_profile_id not in self._official_profile_ids() or not callable(reader):
+            raise ModelPolicyError("resource reader requires an existing official profile")
+        self._resource_readers[provider_profile_id] = reader
+
+    def _quote_inputs(self, entry: Mapping[str, Any]) -> tuple[dict[str, Any], tuple[FundingLot, ...], bool, Decimal | None]:
+        profile_id = entry.get("provider_profile_id")
+        model_id = entry.get("model_id")
+        try:
+            profile = self.provider_profiles.get(profile_id) if self.provider_profiles and profile_id else None
+        except ProviderProfileError:
+            profile = None
+        verified_free = bool(profile and self.official_free_projection(profile_id, model_id))
+        prepared = {**entry, "metadata": {**(entry.get("metadata") or {}), "verified_zero_price": verified_free}}
+        required = bool(profile_id and model_id and self.refresh.resource_bound(model_id, profile_id))
+        projection = self._resource_projection(profile_id, model_id) if profile and model_id else None
+        lots = tuple(FundingLot(**row) for row in projection.get("funding_lots", ())) if projection and projection.get("state") == "available" else ()
+        quota = self.store.quota(str(entry.get("route_id") or ""))
+        balance = None
+        if (quota and profile and quota.funding_kind == "cash" and quota.unit == "CNY"
+                and quota.account_revision == provider_account_revision(profile)
+                and quota.state in {"available", "low", "exhausted"} and _quota_is_fresh(quota.expires_at)
+                and quota.remaining_min is not None):
+            balance = Decimal(str(quota.remaining_min))
+        return prepared, lots, required, balance
+
+    def candidate_pricing(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+        prepared, lots, required, balance = self._quote_inputs(entry)
+        snapshots = self.pricing.store.list(provider_profile_id=entry.get("provider_profile_id"), model_id=entry.get("model_id"))
+        signature = {"snapshots": [item.to_dict() for item in snapshots], "required": required,
+                     "verified_free": prepared["metadata"]["verified_zero_price"],
+                     "funding": [{key: value for key, value in asdict(lot).items() if key != "remaining"} for lot in lots]}
+        managed = self.accounts.manages(entry.get("provider_profile_id"), entry.get("model_id"))
+        if managed:
+            signature["account_binding"] = self.accounts.signature(entry["provider_profile_id"])
+
+        def quote(input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> RouteQuote:
+            if managed:
+                return self.accounts.quote(entry, input_tokens, output_tokens, cached_tokens)
+            current, resources, bound, current_balance = self._quote_inputs(entry)
+            return self.pricing.quote(current, input_tokens, output_tokens, cached_tokens,
+                                      lots=resources, funding_required=bound, cash_balance_cny=current_balance)
+
+        return {"quote_provider": quote, "pricing_source": "unified-route-quote",
+                "billing_group": str(prepared["metadata"].get("billing_group") or "default"),
+                "pricing_revision": hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode()).hexdigest()}
+
+    def prepaid_projection(self, provider_profile_id: str, model_id: str) -> dict[str, Any]:
+        projection = self._resource_projection(provider_profile_id, model_id)
+        if not projection or projection.get("state") != "available" or projection.get("unit") != "tokens":
+            return {}
+        kinds = {row["kind"] for row in projection.get("funding_lots", ())}
+        return {"prepaid_tokens": projection["remaining"],
+                "prepaid_until": datetime.fromisoformat(projection["expires_at"]).timestamp(),
+                "funding_kind": next(iter(kinds)) if len(kinds) == 1 else "unknown"}
+
+    def _resource_projection(self, provider_profile_id: str, model_id: str) -> dict[str, Any] | None:
+        official = provider_profile_id in self._official_profile_ids()
+        if self.refresh.resource_bound(model_id, provider_profile_id):
+            profile = self.provider_profiles.get(provider_profile_id)
+            revision = provider_account_revision(profile)
+            if not official or not self.refresh.resource_binding_matches(model_id, provider_profile_id, revision):
+                return {"state": "unknown", "source": "resource-pack-unverified", "detail": "execution-binding-required"}
+        return self.refresh.quota_projection(model_id, provider_profile_id) if official else None
+
+    def official_free_projection(self, provider_profile_id: str, model_id: str) -> bool:
+        managed = self.free_models.projection(provider_profile_id, model_id)
+        if managed is not None:
+            return bool(managed["routable"] and managed["zero_cash"])
+        profiles = self.provider_profiles.list(include_archived=False) if self.provider_profiles else []
+        profile = next((item for item in profiles if item.get("id") == provider_profile_id), None)
+        if profile is None or not self._official_profile(profile):
+            return False
+        pricing = (profile.get("config") or {}).get("pricing") or {}
+        if pricing and pricing.get("source_type") != "direct-official":
+            return False
+        observation = self._model_observation(profile, model_id)
+        jobs = self.refresh.status()["jobs"]
+        return bool(observation and observation.fresh and observation.free_claim
+                    and observation.availability_state in {"observed", "pending-evaluation"}
+                    and jobs["pricing"]["state"] == "ready" and jobs["catalog"]["state"] == "ready")
+
+    def wrap_provider(self, provider: Any, provider_profile_id: str, model_id: str) -> Any:
+        if self.accounts.manages(provider_profile_id, model_id):
+            return self.accounts.wrap(provider, provider_profile_id, model_id)
+        if self.free_models.manages(provider_profile_id):
+            return self.free_models.wrap(provider, provider_profile_id, model_id)
+        if not self.refresh.resource_bound(model_id, provider_profile_id):
+            return provider
+        from .providers.resource_bound import ResourceBoundProvider
+        from .providers.guard import RequestNotSent
+        initial = self.provider_profiles.get(provider_profile_id)
+        revision = provider_execution_revision(initial, model_id)
+        def recheck() -> None:
+            current = self.provider_profiles.get(provider_profile_id)
+            if (current.get("archived_at") or not self._official_profile(initial) or not self._official_profile(current)
+                    or revision != provider_execution_revision(current, model_id)
+                    or not self.refresh.resource_binding_matches(model_id, provider_profile_id, provider_account_revision(current))):
+                raise RequestNotSent("resource route binding changed; explicit rebinding required")
+            if self.refresh.status()["jobs"]["resources"]["due"]:
+                self.refresh_observations(kind="resources")
+        return ResourceBoundProvider(provider, self.refresh, provider_profile_id, model_id, recheck)
+
+    @staticmethod
+    def _official_profile(profile: Mapping[str, Any]) -> bool:
+        config = profile.get("config") or {}
+        parsed = urlparse(str(config.get("active_base_url") or ""))
+        return (parsed.scheme == "https" and parsed.hostname == "open.bigmodel.cn"
+                and parsed.port in {None, 443} and not parsed.username and not parsed.password
+                and not parsed.query and not parsed.fragment and parsed.path.rstrip("/") == "/api/paas/v4")
+
+    def _official_profile_ids(self) -> set[str]:
+        profiles = self.provider_profiles.list(include_archived=False) if self.provider_profiles else []
+        return {profile["id"] for profile in profiles if self._official_profile(profile)}
+
+    def start_refresh_worker(self) -> None:
+        if self._refresh_thread is not None:
+            return
+        def maintain() -> None:
+            while not self._refresh_closed.wait(60):
+                try:
+                    self.free_models.refresh()
+                    self.accounts.refresh()
+                    self.pricing.refresh_profiles()
+                    jobs = self.refresh.status()["jobs"]
+                    for kind in ("pricing", "resources"):
+                        last = jobs[kind].get("last_attempt_at")
+                        if jobs[kind]["due"] and (not last or time.time() - datetime.fromisoformat(last).timestamp() >= 900):
+                            if self._refresh_closed.is_set():
+                                break
+                            self.refresh_observations(kind=kind)
+                except Exception as error:
+                    if self.logger:
+                        self.logger.info("model refresh failed error_type=%s", type(error).__name__)
+        self._refresh_thread = threading.Thread(target=maintain, daemon=True, name="sumika-model-refresh")
+        self._refresh_thread.start()
+
+    def close(self) -> None:
+        self._refresh_closed.set()
+        self.accounts.closed.set()
+        if self._refresh_thread:
+            self._refresh_thread.join(timeout=80)
+        self.free_models.close()
+        self.accounts.close()
+
+    def refresh_status(self) -> dict[str, Any]:
+        return {**self.refresh.status(), "free_models": self.free_models.status(), "accounts": self.accounts.status()}
+
+    def _apply_free_models(self, entries: list[ModelCatalogEntry]) -> list[ModelCatalogEntry]:
+        result = []
+        for entry in entries:
+            if self.accounts.manages(entry.provider_profile_id, entry.model_id):
+                quoted = self.accounts.quote(entry.to_dict(), 4000, 1000)
+                result.append(replace(entry, quota_state="available" if quoted.available else "blocked",
+                    metadata={**entry.metadata, "account_funding": True, "funding_reason": quoted.reason}))
+                continue
+            projection = self.free_models.projection(entry.provider_profile_id, entry.model_id)
+            if projection is None:
+                result.append(entry)
+                continue
+            ready = projection["routable"] and entry.auth_state == "authorized"
+            metadata = {**entry.metadata, "routable": ready, "evaluation_gate": False,
+                        "configured_routable": ready, "free_model_policy": True,
+                        "free_model_zero_cash": projection["zero_cash"], "free_model_reason": projection["reason"],
+                        "free_model_remaining": None, "free_model_quality_until": projection.get("quality_until"),
+                        "pricing_status": "known" if projection["zero_cash"] else "unknown"}
+            result.append(replace(entry, quality_tier="basic" if ready else "unknown", capabilities=("chat", "text"),
+                health_state="healthy" if ready else "unavailable", quota_state="available" if ready else "unknown",
+                cost_class="free-limited" if projection["zero_cash"] else "unknown", reasoning_efforts=(),
+                default_reasoning_effort=None, metadata=metadata))
+        return result
 
     def _entry_constructor(self, value: dict[str, Any]) -> dict[str, Any]:
         # ``to_dict`` adds presentation-only fields that the dataclass ignores.
@@ -908,6 +1254,8 @@ class ModelPolicyService:
             profiles = self.provider_profiles.list(include_archived=False)
         except Exception:
             return []
+        storage = getattr(self.provider_profiles, "storage", None)
+        identities = json.loads(storage.get_meta("model-policy/evaluated-model-identities/v1") or "{}") if storage else {}
         entries: list[ModelCatalogEntry] = []
         for profile in profiles:
             if not isinstance(profile, dict):
@@ -953,12 +1301,44 @@ class ModelPolicyService:
                 pricing = self.pricing.projection(profile_id, model, billing_group or None)
                 if location != "local" and pricing.get("cost_class") in COST_RANK:
                     model_cost = str(pricing["cost_class"])
+                observation = self._model_observation(profile, model)
                 capabilities = model_row.get("capabilities")
                 if isinstance(capabilities, str):
                     capabilities = (capabilities,)
                 if not isinstance(capabilities, (list, tuple, set)):
                     capabilities = ("chat",)
                 route_id = f"profile:{profile_id}:{model}"
+                identity = identities.get(route_id, {})
+                evaluated_version = identity.get("model_version") if identity.get("execution_revision") == provider_execution_revision(profile, model) else None
+                reasoning_efforts, default_reasoning_effort = _reasoning_projection(model_row)
+                metadata = {
+                    "template_id": template,
+                    "model_enabled": model_enabled,
+                    "model_config": model_row,
+                    "model_version": model_row.get("version") or evaluated_version,
+                    "pricing_ref": pricing.get("pricing_ref"),
+                    "pricing_status": pricing.get("pricing_status", "unknown"),
+                    "billing_group": pricing.get("billing_group") or billing_group,
+                    "pricing_currency": pricing.get("pricing_currency"),
+                    "pricing_source": pricing.get("pricing_source"),
+                    "routable": bool(model_enabled and status == "available" and effective_health in {"healthy", "ready", "available"}),
+                }
+                if observation is not None:
+                    metadata.update({
+                        "observation_status": observation.availability_state,
+                        "observation_fresh": observation.fresh,
+                        "official_free_claim": observation.free_claim,
+                        "evaluation_count": observation.evaluation_count,
+                        "observation_source": observation.source_url,
+                    })
+                    requires_evaluation = model.lower() in {"glm-4.7-flash", "glm-4.6v-flash"} or not (
+                        model_health in {"healthy", "ready", "available"} and model_row.get("last_tested_at"))
+                    if requires_evaluation:
+                        metadata["evaluation_gate"] = True
+                        metadata["configured_routable"] = metadata["routable"]
+                        metadata["routable"] = False
+                    if observation.availability_state in {"needs-review", "retired", "degraded"}:
+                        metadata["routable"] = False
                 entries.append(
                     ModelCatalogEntry(
                         route_id=route_id,
@@ -968,6 +1348,8 @@ class ModelPolicyService:
                         provider_profile_id=profile_id,
                         capabilities=tuple(str(item) for item in capabilities),
                         quality_tier=model_quality,
+                        reasoning_efforts=reasoning_efforts,
+                        default_reasoning_effort=default_reasoning_effort,
                         cost_class=model_cost,
                         processing_location=location,
                         auth_state=auth,
@@ -975,20 +1357,59 @@ class ModelPolicyService:
                         health_state=effective_health,
                         source_kind="local" if location == "local" else "provider",
                         transport="http",
-                        metadata={
-                            "template_id": template,
-                            "model_enabled": model_enabled,
-                            "model_config": model_row,
-                            "pricing_ref": pricing.get("pricing_ref"),
-                            "pricing_status": pricing.get("pricing_status", "unknown"),
-                            "billing_group": pricing.get("billing_group") or billing_group,
-                            "pricing_currency": pricing.get("pricing_currency"),
-                            "pricing_source": pricing.get("pricing_source"),
-                            "routable": bool(model_enabled and status == "available" and effective_health in {"healthy", "ready", "available"}),
-                        },
+                        metadata=metadata,
                     )
                 )
+        return self._apply_free_models(entries)
+
+    def _model_observation(self, profile: Mapping[str, Any], model_id: str) -> Any:
+        if not self._official_profile(profile):
+            return None
+        for observation in self.refresh.observations():
+            if observation.model_id == model_id.lower() and observation.provider_id == "zhipu-official":
+                return observation
+        return None
+
+    def _observed_model_entries(self) -> list[ModelCatalogEntry]:
+        official_ids = self._official_profile_ids()
+        configured_models = {item.model_id.lower() for item in self._profile_entries() if item.provider_profile_id in official_ids}
+        entries: list[ModelCatalogEntry] = []
+        for observation in self.refresh.observations():
+            if observation.model_id in configured_models:
+                continue
+            entries.append(ModelCatalogEntry(
+                route_id=f"observed:{observation.provider_id}:{observation.model_id}",
+                provider_id=observation.provider_id,
+                model_id=observation.model_id,
+                display_name=f"{observation.provider_id} · {observation.model_id}",
+                capabilities=("chat", "text"),
+                quality_tier=observation.quality_tier,
+                cost_class="unknown",
+                processing_location="cloud",
+                auth_state="needs-auth",
+                quota_state="unknown",
+                health_state=observation.health_state,
+                observed_at=observation.observed_at,
+                source_kind="model-catalog-observation",
+                transport="http",
+                metadata={"routable": False, "observation_status": observation.availability_state, "official_free_claim": observation.free_claim, "observation_fresh": observation.fresh, "evaluation_count": observation.evaluation_count, "observation_source": observation.source_url},
+            ))
         return entries
+
+    def _apply_resource_quota(self, entries: list[ModelCatalogEntry]) -> list[ModelCatalogEntry]:
+        result: list[ModelCatalogEntry] = []
+        for entry in entries:
+            projection = self._resource_projection(entry.provider_profile_id, entry.model_id) if entry.source_kind == "provider" else None
+            if projection is None:
+                result.append(entry)
+                continue
+            quota_state = str(projection.get("state") or "unknown")
+            metadata = {**entry.metadata, "resource_pool": projection.get("detail"), "resource_observed_at": projection.get("checked_at"), "resource_expires_at": projection.get("expires_at")}
+            if quota_state != "available" and self.refresh.resource_bound(entry.model_id, entry.provider_profile_id):
+                metadata.update(routable=False, configured_routable=False)
+            result.append(replace(entry, quota_state=quota_state, metadata=metadata))
+            self.store.upsert_quota(QuotaSnapshot(route_id=entry.route_id, state=quota_state, remaining_min=projection.get("remaining"), remaining_max=projection.get("remaining"), unit=str(projection.get("unit") or ""), source=str(projection.get("source") or "resource-pack"), checked_at=str(projection.get("checked_at") or _utc_now()), expires_at=projection.get("expires_at"), confidence=str(projection.get("confidence") or "unknown"), detail=str(projection.get("detail") or "")))
+        return result
 
     def _runtime_entries(
         self,
@@ -1037,6 +1458,8 @@ class ModelPolicyService:
                         display_name=f"{_safe_text(group.get('name') or provider, 160)} · {_safe_text(model.get('name') or model_id, 180)}",
                         harness_id=getattr(self.agent, "runtime_id", None),
                         quality_tier=_quality_from_model(model_id),
+                        reasoning_efforts=_reasoning_projection(model)[0],
+                        default_reasoning_effort=_reasoning_projection(model)[1],
                         cost_class="unknown",
                         processing_location="cloud",
                         auth_state="authorized",
@@ -1178,6 +1601,8 @@ class ModelPolicyService:
             harness_id=str(value.get("harness_id") or value.get("harnessId") or source_id),
             capabilities=tuple(str(item) for item in capabilities),
             quality_tier=str(value.get("quality_tier") or value.get("qualityTier") or "unknown"),
+            reasoning_efforts=_reasoning_projection(value)[0],
+            default_reasoning_effort=_reasoning_projection(value)[1],
             cost_class=str(value.get("cost_class") or value.get("costClass") or "unknown"),
             processing_location=str(value.get("processing_location") or value.get("processingLocation") or "cloud"),
             auth_state=str(value.get("auth_state") or value.get("authState") or "unknown"),
@@ -1553,6 +1978,8 @@ class ModelPolicyService:
                 expires_at=_expiry(max(1, QUOTA_TTL_SECONDS // 60)),
                 confidence="observed" if state != "unknown" else "low",
                 detail=str(query.get("_detail") or "官方声明式额度查询"),
+                funding_kind=str(query.get("funding_kind") or "unknown"),
+                account_revision=provider_account_revision(profile),
             )
         except urllib.error.HTTPError as error:
             code = error.code
@@ -1637,6 +2064,7 @@ def routing_request_from_dict(value: Mapping[str, Any]) -> RoutingRequest:
         confirmation_mode=value.get("confirmation_mode", value.get("confirmationMode", "recommendation-then-confirmation")),
         preferred_route=value.get("preferred_route", value.get("preferredRoute")),
         min_quality_tier=value.get("min_quality_tier", value.get("minQualityTier")),
+        reasoning_effort=value.get("reasoning_effort", value.get("reasoningEffort", "auto")),
         character_id=value.get("character_id", value.get("characterId")),
         agent_preset_id=value.get("agent_preset_id", value.get("agentPresetId")),
         task_text=value.get("task_text", value.get("taskText", value.get("text", ""))),

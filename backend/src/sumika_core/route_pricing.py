@@ -298,6 +298,7 @@ class CostEstimate:
     cash_max: float | None = None
     assumptions: dict[str, Any] = field(default_factory=dict)
     unknown_reasons: tuple[str, ...] = ()
+    route_quote: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -919,6 +920,7 @@ class RoutePricingService:
         self.logger = logger
         self.store = RoutePricingStore(data_dir)
         self.errors: dict[str, str] = {}
+        self.profile_readers = {}
         self.sources: dict[str, PricingSource] = {
             "direct-official": DirectOfficialPricingSource(),
             "new-api": NewApiPricingSource(),
@@ -945,7 +947,8 @@ class RoutePricingService:
             config = profile.get("config") if isinstance(profile.get("config"), Mapping) else {}
             pricing = config.get("pricing") if isinstance(config.get("pricing"), Mapping) else {}
             source_type = str(pricing.get("source_type") or "").strip().lower()
-            if source_type not in self.sources:
+            reader = self.profile_readers.get(profile_id)
+            if source_type not in self.sources and reader is None:
                 if self.store.list(provider_profile_id=profile_id):
                     self.store.replace_profile(profile_id, ())
                     changed = True
@@ -954,7 +957,7 @@ class RoutePricingService:
             if not force and existing and all(_fresh(item.expires_at) for item in existing):
                 continue
             try:
-                snapshots = self._read_profile(profile, source_type, pricing)
+                snapshots = reader(profile) if reader is not None else self._read_profile(profile, source_type, pricing)
             except Exception as error:
                 self.errors[profile_id] = type(error).__name__
                 if self.logger:
@@ -1054,12 +1057,59 @@ class RoutePricingService:
             "cost_class": cost_class,
         }
 
-    def estimate(self, entry: Mapping[str, Any], request: Mapping[str, Any]) -> CostEstimate:
+    def quote(self, entry: Mapping[str, Any], input_tokens: int, output_tokens: int, cached_tokens: int = 0,
+              *, lots=(), funding_required: bool = False, cash_balance_cny=None):
+        from decimal import Decimal
+        from quality_routing.costs import quote_cost
+
+        if any(type(value) is not int or value < 0 for value in (input_tokens, output_tokens, cached_tokens)) or cached_tokens > input_tokens:
+            raise RoutePricingError("invalid quote token counts")
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), Mapping) else {}
+        group = metadata.get("billing_group")
+        snapshots = [item for item in self.store.list(provider_profile_id=entry.get("provider_profile_id"), model_id=entry.get("model_id"))
+                     if _fresh(item.expires_at) and (not group or group == "range" or item.billing_group == group)]
+        charge = {}
+        if len(snapshots) == 1:
+            try:
+                charge = snapshots[0].estimate_charge(input_tokens=input_tokens - cached_tokens, output_tokens=output_tokens,
+                                                       cache_read_tokens=cached_tokens, context_tokens=input_tokens)
+            except RoutePricingError:
+                pass
+        cash = Decimal(str(charge["cash_amount"])) if charge.get("cash_currency") == "CNY" and charge.get("cash_amount") is not None else None
+        local = entry.get("processing_location") == "local" and entry.get("cost_class") == "local"
+        if metadata.get("verified_zero_price") is True:
+            cash = Decimal(0)
+        return quote_cost(input_tokens=input_tokens, output_tokens=output_tokens, cash_price_cny=cash,
+                          provider_charge=Decimal(str(charge["amount"])) if charge.get("amount") is not None else None,
+                          provider_currency=charge.get("currency"), lots=lots, funding_required=funding_required,
+                          cash_balance_cny=cash_balance_cny, local=local)
+
+    def estimate(self, entry: Mapping[str, Any], request: Mapping[str, Any], *, quote_provider=None) -> CostEstimate:
         route_id = str(entry.get("route_id") or "")
         profile_id = str(entry.get("provider_profile_id") or "")
         model_id = str(entry.get("model_id") or "")
         metadata = entry.get("metadata") if isinstance(entry.get("metadata"), Mapping) else {}
         group = str(metadata.get("billing_group") or "")
+        if quote_provider is not None:
+            context = request.get("context_size", 0)
+            context = context if type(context) is int and context >= 0 else 0
+            input_tokens = max(256, context, math.ceil(len(str(request.get("task_text") or "")) / 4))
+            output_tokens = {"trivial": 128, "basic": 256, "moderate": 1024, "complex": 2048, "critical": 4096}.get(request.get("difficulty"), 1024)
+            low_input, high_input = max(1, math.floor(input_tokens * 0.8)), math.ceil(input_tokens * 1.2)
+            low_output, high_output = max(1, math.floor(output_tokens * 0.5)), math.ceil(output_tokens * 1.5)
+            low = quote_provider(low_input, low_output, 0)
+            high = quote_provider(high_input, high_output, 0)
+            known = low.available and high.available and low.effective_cost_cny is not None and high.effective_cost_cny is not None
+            return CostEstimate(route_id, "known" if known else "unknown", billing_groups=(group,) if group else (),
+                                provider_currency=high.provider_currency,
+                                provider_charge_min=float(low.provider_charge) if low.provider_charge is not None else None,
+                                provider_charge_max=float(high.provider_charge) if high.provider_charge is not None else None,
+                                cash_currency="CNY", cash_min=float(low.cash_due_cny) if low.cash_due_cny is not None else None,
+                                cash_max=float(high.cash_due_cny) if high.cash_due_cny is not None else None,
+                                assumptions={"input_tokens": [low_input, high_input], "output_tokens": [low_output, high_output],
+                                             "effective_cost_min_cny": str(low.effective_cost_cny) if known else None,
+                                             "effective_cost_max_cny": str(high.effective_cost_cny) if known else None},
+                                unknown_reasons=() if known else (high.reason,), route_quote=high.to_dict())
         snapshots = [
             item
             for item in self.store.list(provider_profile_id=profile_id, model_id=model_id)

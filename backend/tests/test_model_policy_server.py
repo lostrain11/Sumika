@@ -37,6 +37,51 @@ class ModelPolicyServerTests(unittest.TestCase):
         self.assertIn("decision", result)
         self.assertNotIn("secrets", json.dumps(result, ensure_ascii=False))
 
+    def test_refresh_rpc_cannot_forge_price_or_quality_evidence(self):
+        with self.assertRaises(JsonRpcError):
+            self.application.rpc("model.policy.refresh", {
+                "kind": "catalog", "force": True,
+                "modelObservations": [{"model_id": "glm-4.7-flash", "free_claim": True}],
+            })
+        result = self.application.rpc("model.policy.refresh", {"kind": "catalog"})
+        self.assertEqual(result["changed"], {})
+        status = self.application.rpc("model.policy.refresh.status", {})
+        self.assertEqual(status["schema"], "model-refresh/v1")
+        self.assertTrue(any(item["model_id"] == "glm-4.7-flash" for item in status["observations"]))
+        self.assertEqual(status["jobs"]["pricing"]["state"], "never")
+
+    def test_policy_apply_forwards_reasoning_and_records_runtime_ack(self):
+        decision = {
+            "selected_route": "harness:fixture:model",
+            "selected_entry": {
+                "provider_id": "fixture-provider",
+                "model_id": "fixture-model",
+                "harness_id": self.application.agent.runtime_id,
+            },
+            "requires_confirmation": False,
+            "requested_reasoning_effort": "medium",
+            "applied_reasoning_effort": "unknown",
+        }
+        with patch.object(
+            self.application.agent,
+            "select_model",
+            return_value={"current": {"reasoning_effort": "medium"}},
+        ) as select_model:
+            result = self.application._apply_agent_route(
+                decision,
+                session_id="session-1",
+                approved=True,
+            )
+        select_model.assert_called_once_with(
+            {
+                "session_id": "session-1",
+                "provider": "fixture-provider",
+                "model": "fixture-model",
+                "reasoningEffort": "medium",
+            }
+        )
+        self.assertEqual(result["decision"]["applied_reasoning_effort"], "medium")
+
     def test_diagnostics_contains_model_policy_summary(self):
         diagnostics = self.application.rpc("core.diagnostics", {})
         self.assertEqual(diagnostics["model_policy"]["version"], "model-policy/v1")

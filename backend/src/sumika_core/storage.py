@@ -14,7 +14,7 @@ from typing import Any
 from .protocol.models import Message, utc_now
 
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 SNAPSHOT_FORMAT_VERSION = 1
 
@@ -278,6 +278,15 @@ class Storage:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS quality_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_quality_tasks_scope
+                    ON quality_tasks(owner_id, session_id);
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -633,6 +642,26 @@ class Storage:
         with self._lock:
             row = self._connection.execute("SELECT value FROM schema_meta WHERE key=?", (key,)).fetchone()
         return str(row["value"]) if row is not None else None
+
+    def save_quality_task(self, task_id: str, owner_id: str, session_id: str, payload: dict[str, Any]) -> None:
+        for value in (task_id, owner_id, session_id):
+            _bounded_identifier(value, "task scope")
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+        if len(encoded) > 4_000_000:
+            raise ValueError("quality task payload too large")
+        with self._lock, self._connection:
+            existing = self._connection.execute("SELECT owner_id, session_id FROM quality_tasks WHERE task_id=?", (task_id,)).fetchone()
+            if existing and (existing["owner_id"], existing["session_id"]) != (owner_id, session_id):
+                raise ValueError("task ownership cannot change")
+            self._connection.execute(
+                "INSERT INTO quality_tasks VALUES(?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+                (task_id, owner_id, session_id, encoded, utc_now()),
+            )
+
+    def load_quality_tasks(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute("SELECT payload_json FROM quality_tasks ORDER BY updated_at DESC LIMIT 1000").fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
 
     def set_meta(self, key: str, value: str) -> None:
         """Persist a small application-owned value outside user snapshot data."""

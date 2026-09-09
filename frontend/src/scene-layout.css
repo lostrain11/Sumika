@@ -1,0 +1,500 @@
+.scene-shell {
+  --scene-background: #14171e;
+  --faint: var(--muted);
+  --scene-gutter: clamp(12px, 2vw, 24px);
+  --scene-rail: 82px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.scene-backdrop::after {
+  background: none;
+}
+
+.scene-topbar {
+  position: relative;
+  inset: auto;
+  grid-area: 1 / 1;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px var(--scene-gutter);
+  pointer-events: auto;
+}
+
+.scene-topbar .scene-pill {
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+}
+
+.scene-topbar :is(.compact-field, select, .provider-summary) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.scene-topbar select {
+  width: min(180px, 48vw);
+  min-height: 36px;
+}
+
+.scene-topbar .provider-summary {
+  max-width: 250px;
+}
+
+.scene-topbar :is(.provider-summary-state, .provider-summary-name) {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.scene-topbar :is(.status-dot, .icon-button, .desktop-overlay-open) {
+  flex-shrink: 0;
+}
+
+.scene-topbar .icon-button {
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.scene-chat {
+  position: relative;
+  inset: auto;
+  grid-area: 2 / 1;
+  width: min(510px, 47%);
+  min-width: 0;
+  max-height: 100%;
+  padding: 4px 12px 20px var(--scene-rail);
+}
+
+.scene-chat .stage-toolbar {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.scene-chat :is(.live-label, .dialogue-nameplate, .message, .empty-chat) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.scene-chat :is(.live-label i, .dialogue-nameplate i) {
+  flex-shrink: 0;
+}
+
+.scene-chat .message-list {
+  margin: 0;
+  padding: 12px 4px;
+  gap: 16px;
+  overscroll-behavior: contain;
+}
+
+.scene-chat .message .message-body {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.scene-chat .message .message-meta {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+}
+
+.scene-chat .composer {
+  flex-shrink: 0;
+  margin: 10px 0 0;
+  padding: 12px;
+  background: var(--glass-strong);
+}
+
+.scene-chat .composer::before {
+  background: var(--accent);
+}
+
+.scene-chat .composer textarea {
+  min-width: 0;
+  min-height: 48px;
+  max-height: 24dvh;
+  font-size: 14px;
+}
+
+.scene-chat .composer-footer {
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.scene-chat .composer-tools {
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 6px;
+}
+
+.scene-chat :is(.round-button, [data-portal-panel]) {
+  flex-shrink: 0;
+  min-width: 34px;
+  min-height: 34px;
+}
+
+.scene-chat .composer-note {
+  flex: 1 1 130px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.scene-chat .send-button {
+  flex-shrink: 0;
+  min-width: 76px;
+  min-height: 38px;
+  font-size: 13px;
+}
+
+.scene-chat :is(.welcome-card, .session-notice, .voice-notice) {
+  min-height: 0;
+  max-height: 24dvh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+
+.scene-chat :is(.welcome-card p, .empty-chat p, .session-notice, .voice-notice) {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.scene-chat .welcome-actions {
+  flex-wrap: wrap;
+}
+
+.scene-shell .drawer {
+  inset: 12px 12px 12px var(--scene-rail);
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-deep);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.scene-shell .drawer-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  flex-shrink: 0;
+  gap: 12px 16px;
+  padding: 12px var(--scene-gutter);
+}
+
+.drawer-header .drawer-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.drawer-header .drawer-tabs {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+  scroll-padding-inline: 4px;
+  overscroll-behavior-x: contain;
+}
+
+.drawer-tabs .nav-item {
+  flex-shrink: 0;
+  min-height: 38px;
+  gap: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.drawer-header .drawer-close {
+  grid-column: 3;
+  width: 38px;
+  height: 38px;
+}
+
+.scene-shell .drawer-body {
+  min-width: 0;
+  padding: 20px var(--scene-gutter) 32px;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 16px;
+  overscroll-behavior: contain;
+}
+
+.drawer-body .page-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.drawer-body .page-heading h1 {
+  margin-top: 4px;
+  font-size: clamp(20px, 2vw, 24px);
+  line-height: 1.3;
+}
+
+.drawer-body :is(.page-heading p, .module-card p, .module-add-card p, .character-field, .module-field, .module-select-field, .module-notice, .empty-panel, .empty-column) {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.drawer-body :is(.panel-heading, .section-label, .character-card-body, .character-create-actions, .task-toolbar, .path-box, .appearance-swatches, .appearance-image-actions) {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.drawer-body :is(.page-heading, .panel-heading, .character-card-body) > div {
+  min-width: 0;
+}
+
+.drawer-body :is(.small-button, .outline-button, .ghost-button, .text-button) {
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.drawer-body :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.drawer-body :is(.module-grid, .character-grid, .task-board) {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.drawer-body .developer-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+
+.drawer-body :is(.character-settings-grid, .audio-runtime-grid, .vision-runtime-grid) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.drawer-body :is(.agent-capability-grid, .diagnostic-grid) {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+}
+
+.drawer-body :is(.module-card, .module-add-card, .character-card, .dev-panel, .agent-panel, .settings-section, .task-column, .character-field) {
+  min-width: 0;
+}
+
+.drawer-body .llm-module-card {
+  grid-column: 1 / -1;
+}
+
+.drawer-body :is(.module-card, .module-add-card) {
+  padding: 16px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.drawer-body .module-card-top {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.drawer-body .module-card > strong {
+  margin-top: 14px;
+  font-size: 15px;
+}
+
+.drawer-body :is(.module-status, .module-card-meta, .module-card-meta small, .module-add-summary small, .panel-heading small, .section-label small) {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.drawer-body .module-toggle {
+  min-width: 36px;
+  min-height: 32px;
+}
+
+.drawer-body .module-add-library {
+  margin-top: 20px;
+  border: 0;
+  background: none;
+}
+
+.drawer-body .module-add-library > .module-add-tile {
+  min-height: 116px;
+  width: min(100%, 360px);
+  gap: 12px;
+  padding: 16px;
+  border: 1px dashed var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.drawer-body .module-add-tile:hover {
+  border-color: var(--accent-strong);
+  background: var(--surface-2);
+}
+
+.drawer-body .module-add-tile strong {
+  font-size: 14px;
+}
+
+.drawer-body .module-add-grid {
+  padding: 16px 0 0;
+  align-items: stretch;
+}
+
+.drawer-body .module-add-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.drawer-body .module-add-card .small-button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.drawer-body .module-add-library .module-card {
+  opacity: 1;
+}
+
+.scene-shell .portal-panel {
+  left: var(--scene-rail);
+  bottom: 20px;
+  width: min(360px, calc(100% - var(--scene-rail) - 12px));
+  overscroll-behavior: contain;
+}
+
+.scene-shell .portal-add-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.scene-shell .portal-add-form input {
+  min-width: 0;
+  width: 100%;
+}
+
+.scene-shell :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1000px) {
+  .drawer-body :is(.agent-two-column, .agent-session-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .scene-topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .scene-topbar .scene-pill:first-child {
+    align-self: flex-start;
+  }
+
+  .scene-topbar .scene-pill:last-child {
+    flex-wrap: wrap;
+    border-radius: 18px;
+  }
+
+  .scene-topbar :is(.provider-summary, .status-chip, .privacy-chip) {
+    flex-shrink: 0;
+  }
+
+  .scene-topbar .provider-summary {
+    max-width: 200px;
+  }
+
+  .scene-shell .scene-dock {
+    top: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    grid-auto-flow: column;
+    max-width: calc(100% - 24px);
+  }
+
+  .scene-chat {
+    align-self: end;
+    width: 100%;
+    max-height: 62%;
+    padding: 4px 16px calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scene-chat .empty-chat {
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--glass-strong);
+  }
+
+  .scene-shell .drawer {
+    inset: 12px 12px calc(82px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scene-shell .drawer-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .drawer-header .drawer-tabs {
+    grid-area: 2 / 1 / auto / -1;
+  }
+
+  .drawer-header .drawer-close {
+    grid-area: 1 / 2;
+  }
+
+  .drawer-body :is(.character-settings-grid, .audio-runtime-grid, .vision-runtime-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drawer-body .character-settings-group > summary {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding-block: 10px;
+  }
+
+  .drawer-body .character-settings-group > summary > small {
+    white-space: normal;
+  }
+
+  .scene-shell .portal-panel {
+    left: 12px;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    width: calc(100% - 24px);
+    max-height: min(60dvh, 560px);
+  }
+}
+
+@media (max-width: 560px) {
+  .scene-chat {
+    align-self: end;
+    width: 100%;
+    max-height: 62%;
+  }
+
+  .drawer-body :is(.task-detail-grid, .task-detail-lists) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-viewport,
+  .scene-shell :is(button, input, textarea, select),
+  .scene-shell .provider-picker-chevron {
+    transition: none;
+    animation: none;
+  }
+
+  .scene-chat .message-list,
+  .scene-shell .drawer-body,
+  .drawer-header .drawer-tabs {
+    scroll-behavior: auto;
+  }
+}
