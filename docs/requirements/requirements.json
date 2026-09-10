@@ -1439,7 +1439,7 @@
         "保留进入普通客户端及聊天接管入口，不丢失会话"
       ],
       "provenance": "normalized",
-      "intent_state": "active",
+      "intent_state": "superseded",
       "source_refs": [
         "sanitized-user-message-index:original-excerpts.md"
       ],
@@ -1450,7 +1450,9 @@
       "test_refs": [],
       "status_ref": "status-matrix:desktop-wallpaper",
       "supersedes": [],
-      "superseded_by": []
+      "superseded_by": [
+        "WINDOW-001"
+      ]
     },
     {
       "id": "AVATAR-003",
@@ -2210,6 +2212,297 @@
         "../../backend/tests/test_domain_contracts.py"
       ],
       "status_ref": "status-matrix:domain-contracts",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "PLUGIN-003",
+      "category": "architecture",
+      "statement": "功能核心具有清晰、可提取、可测试的边界，通过明确适配器复用于其他 Harness 或 Agent 客户端；Sumika 使用同一核心实现。",
+      "acceptance": [
+        "核心不导入 Sumika 应用对象、Tauri、前端全局状态或 Sumika 私有数据库实现",
+        "适配器只依赖版本化核心契约，装配入口注入实际需要的宿主能力，不传递庞大全局上下文",
+        "标记为独立复用前，干净环境、生命周期、示例、行为测试、版本、许可证及至少一个独立宿主均通过验收",
+        "现有插件目录、manifest 或 RPC 桥接不单独构成独立核心证明，发布不在本需求授权范围内"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../architecture/reusable-components.md",
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:reusable-components",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "UX-006",
+      "category": "ui",
+      "statement": "客户端精简为统一工作台，提供项目、对话、定时工作、预算、进度、成果及独立附言的可扫描入口。",
+      "acceptance": [
+        "左侧项目、对话和定时入口，中央对话、预算、进度和成果，右侧文件、diff 和内置浏览器形成统一工作台",
+        "用户可新建项目、交办任务、确认预算并取得成果；草稿和用户标题不被重绘覆盖",
+        "历史支持最近三轮、加载更多和仅清除当前显示，清屏不删除记录",
+        "当前 A+ 实现状态保持原有事实，统一工作台完成前不得标为已实现"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:workbench-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MODEL-021",
+      "category": "model-policy",
+      "statement": "角色与工作模型分别支持自动和手动选择；主模型按质量证据优先，角色优先合格免费候选。",
+      "acceptance": [
+        "自动模式显示候选、渠道、实际应用的推理强度、选择原因、健康状态及免费或价格证据",
+        "主模型自动选择质量证据最强的可用候选，执行者先满足任务质量再比较实际成本",
+        "角色自动模式优先合格免费候选；没有合格免费候选时返回付费建议，等待确认",
+        "手动候选不可用时明确提示、不静默替换；修改默认绑定仅影响后续请求，运行任务保持原绑定"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../requirements/model-policy.md",
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:workbench-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "AUTH-001",
+      "category": "authorization",
+      "statement": "付费规划、执行、验证、咨询、重试和角色附言均须在有效预算与授权内；免费简单工作可直达，复杂工作仍须确认。",
+      "acceptance": [
+        "付费规划本身先确认；仅打开工作台或切回闲聊不触发未确认付费调用",
+        "复杂任务即使预计免费，也展示目标、范围、预算和资源使用后等待任务确认",
+        "一次确认只覆盖同一需求版本、范围内的规划、执行、验证和修复；目标、费用、权限或上限变化重新预检",
+        "模型工具不能生成或提交授权；宿主在每次执行前重新检查授权、价格、额度和消费上限"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../requirements/model-policy.md",
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:workbench-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "WORK-001",
+      "category": "workflow",
+      "statement": "统一工作入口持久化原话、需求版本、预检、预算、授权、派发和可恢复终态，兼容旧入口但不复制工作流。",
+      "acceptance": [
+        "统一入口提供预检、提交、查询、列表、取消和授权确认；旧 quality 与 agent 入口保持兼容",
+        "每次请求保存稳定 ID、来源原话引用、目标、交付形式、助手、会话、可选项目、复杂度依据、预算和执行来源",
+        "确定性任务、简单模型任务、复杂 DAG 与需要澄清的任务有不同且可解释的分流，不为单节点计划先调用付费主模型",
+        "重复事件、重连、提交未知和取消不会重复派发，未发送失败与已产生输出的恢复策略不同"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:workbench-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "CONTEXT-001",
+      "category": "context",
+      "statement": "项目、对话索引和服务端上下文按助手与项目隔离；仅在需要时查询项目正文，清屏不删除历史。",
+      "acceptance": [
+        "项目可关联目录，历史会话保留来源明确的引用、未归类状态、项目关联和搜索",
+        "服务端上下文不依赖前端显示数组，最近三轮与十轮追加使用稳定游标",
+        "未提及项目时不读取项目正文，跨助手或跨项目读取被拒绝",
+        "工具消息、多段回复和并发新消息下分页正确，清除当前显示不影响持久记录或上下文依据"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:project-context",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "ARTIFACT-001",
+      "category": "artifact",
+      "statement": "工作成果正文与角色附言分开保存、验证、复制、导出和引用，旧拼接格式保持可读。",
+      "acceptance": [
+        "成果具有独立正文、版本与校验，复制、笔记、导出和下游依赖只使用正文",
+        "角色附言不可用时成果仍交付，角色不得重写已验证成果",
+        "JSON、代码和 Markdown 正文不被角色引言污染",
+        "旧消息和旧拼接格式可正常显示，不批量重写历史"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:work-artifacts",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "MEMORY-002",
+      "category": "memory",
+      "statement": "本轮仅实现长期记忆的作用域、能力声明与适配契约，不启用自动抽取、召回、遗忘或共同经历。",
+      "acceptance": [
+        "通用记忆规则与 Sumika 模块、事件和存储适配分离，稳定身份、作用域和外部返回均校验",
+        "能力声明、更新、迁移扩展和上下文来源有明确契约，保留 SQLite 和 JSONL 手动功能",
+        "模块关闭时零后端调用，错误归属被拒绝，不支持能力明确返回不可用",
+        "无真实外部服务也可完成契约测试；本轮不把预留写成自动记忆或多人共同经历已实现"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:memory-adapters",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "VIEW-001",
+      "category": "view",
+      "statement": "场所成员与视图分组通过独立确定性逻辑生成合拆窗动作计划；不启用真实多人运行或共享记忆。",
+      "acceptance": [
+        "场所实例、房间、成员和视图绑定与 Tauri 分离；同房间活动点不同不拆分，不同公寓同名房间不合并",
+        "卧室分离、客厅会合和再次分离生成正确动作计划，模式变化不改变成员",
+        "过期事件和重复事件安全处理，稳定承载选择可预测",
+        "本轮只验证模拟分组；不实现多角色自主走动、群聊、互相交流或共享记忆"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:view-grouping",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "WINDOW-001",
+      "category": "desktop",
+      "statement": "工作台与陪伴使用两个真实原生窗口、一个 Core 和一个受管后台，支持紧凑、全景、全屏与透明背景。",
+      "acceptance": [
+        "展开陪伴窗口不更换房间、不重置助手或会话；输入不拖窗、不抢焦点，隐藏不取消已确认任务",
+        "恢复位置、尺寸、DPI 和多屏状态，托盘恢复与明确退出符合窗口职责授权",
+        "陪伴窗口不能调用工作台敏感浏览器命令；场景渲染生命周期与任务生命周期分离",
+        "原生多窗口在真实 Tauri 环境验证，不以浏览器标签替代；Windows 底层壁纸模式不属于本轮"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:native-dual-window",
+      "supersedes": [
+        "UX-005"
+      ],
+      "superseded_by": []
+    },
+    {
+      "id": "SCHEDULE-001",
+      "category": "schedule",
+      "statement": "定时工作支持一次性、每日、每周、时区、暂停、修改、立即执行与结果历史，并通过统一工作入口执行。",
+      "acceptance": [
+        "日程关联助手和可选项目，默认时区为 Asia/Shanghai；创建日程不调用模型",
+        "新日程默认零付费，持续付费授权明确限制每次或累计上限；目标、费用或权限扩大时重新确认",
+        "每个计划时点有持久化执行标识；运行中或提交未知时不重复派发，完全退出期间不联网",
+        "启动后补查维护任务，普通周期跳过错过时点，一次性错过后显示待补跑并由用户决定"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": [
+        "visible-conversation-context:2026-09-09"
+      ],
+      "excerpt_refs": [
+        "EX-PLAN-002"
+      ],
+      "implementation_refs": [
+        "../refactor/client-workflow-v2.md"
+      ],
+      "test_refs": [],
+      "status_ref": "status-matrix:schedules",
       "supersedes": [],
       "superseded_by": []
     }

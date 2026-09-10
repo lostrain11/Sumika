@@ -43,11 +43,40 @@ python -m pip install .
 
 ## Offline SDK example
 
-The SDK has no required runtime dependencies. The example uses a local fake executor and sanitized task data only:
+The SDK has no required runtime dependencies. The example uses a deterministic local
+fixture and sanitized task data only. It covers submit, host approval, execution,
+verification, cancellation, snapshot restore, re-approval, and resumed completion.
+It does not call or evaluate a real model:
 
 ```powershell
-python examples/offline_sdk.py
+python -m quality_routing.offline_example
 ```
+
+## Selection evidence boundary
+
+`SelectionCohort`, `QualityPrior`, `FixedEvaluationSample`,
+`SelectionEvidenceStore`, `qualify_candidate`, and `resolve_binding` are part of
+the host-neutral SDK. `SelectionEvidenceStore` accepts only the narrow
+`SelectionMetadataStore` protocol (`get_meta` and `set_meta`); it does not receive
+an application context or database implementation.
+
+Qualification still requires at least three successful, fresh samples from the
+same fixed cohort, exact model version, purpose, and applied reasoning effort.
+Health and route authorization remain host inputs. Leader auto-selection is
+quality-first. Role auto-selection uses the existing `cost_order` ranking after
+quality gates, so evidenced free funding sorts before paid candidates and a
+qualified paid candidate can still be returned. The result is advisory only:
+the host owns current-free-role stability and must block paid execution until
+user confirmation. Unknown cost is never treated as free.
+
+## Managed DSH helper
+
+`quality-routing-dsh-helper --data-dir <absolute-path>` starts the independent
+JSON-lines helper used by `plugins/dsh-quality-routing`. It exposes component
+capabilities and a deterministic offline fixture only. The DSH model tool surface
+contains no approval operation, and real model execution reports unavailable
+until a trusted host adapter is implemented. The helper does not read Sumika
+configuration or credentials.
 
 ## Optional MCP stdio adapter
 

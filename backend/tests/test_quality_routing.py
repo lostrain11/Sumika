@@ -118,10 +118,11 @@ class QualityHostTests(unittest.TestCase):
                 break
             time.sleep(0.01)
         self.assertEqual(result["status"], "completed")
-        self.assertTrue(result["final_message"]["content"].endswith("42"))
-        self.assertEqual(result["budget"]["calls"], 5)
-        role_request = next(request for request in self.provider.calls if "short in-character introduction" in request.messages[0].content)
-        self.assertEqual(role_request.max_tokens, 1024)
+        self.assertEqual(result["final_message"]["content"], "42")
+        self.assertEqual(result["artifacts"][0]["content"], "42")
+        self.assertEqual(result["commentary"]["status"], "template")
+        self.assertEqual(result["budget"]["calls"], 3)
+        self.assertFalse(any("short in-character introduction" in request.messages[0].content for request in self.provider.calls))
         self.assertEqual(self.storage.list_messages("session-two"), [])
         self.service._metadata[task["task_id"]]["final_message"] = None
         prior_calls = len(self.provider.calls)
@@ -200,13 +201,13 @@ class QualityHostTests(unittest.TestCase):
         with self.assertRaises(RoutingError):
             self.service.plan({**self.params, "goal": "Compute", "allowed_candidate_ids": ["local-model"]})
 
-    def test_cancel_during_persona_delivery_never_appends_late_answer(self):
+    def test_cancel_during_verification_never_appends_late_answer(self):
         started = threading.Event()
         release = threading.Event()
         original = self.provider.stream
 
         def stream(request):
-            if "short in-character introduction" in request.messages[0].content:
+            if "Verify the task result" in request.messages[0].content:
                 started.set()
                 release.wait(3)
             yield from original(request)

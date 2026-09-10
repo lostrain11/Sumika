@@ -104,13 +104,15 @@ class SelectionTests(unittest.TestCase):
     def reason(self, resolution, candidate_id, purpose="leader"):
         return next(row["reason"] for row in resolution["bindings"][purpose]["candidates"] if row["candidate_id"] == candidate_id)
 
-    def test_defaults_remain_fixed_without_invented_evidence(self):
+    def test_defaults_are_auto_and_without_evidence_cannot_call(self):
         settings = self.service.settings("one")
-        self.assertEqual(settings["selection_mode"], {"leader": "fixed", "role": "fixed"})
+        self.assertEqual(settings["selection_mode"], {"leader": "auto", "role": "auto"})
         self.assertEqual(settings["candidate_pool"], [])
         result = self.service.select_bindings("one")
         self.assertIsNone(result["leader_candidate_id"])
-        self.assertEqual(result["bindings"]["leader"]["reason"], "fixed-unset")
+        self.assertEqual(result["bindings"]["leader"]["reason"], "candidate-pool-empty")
+        with self.assertRaisesRegex(RoutingError, "leader selection blocked: candidate-pool-empty"):
+            self.service.plan({**self.params, "allowed_candidate_ids": ["strong"], "planning_confirmed": True})
         self.assertIsNone(self.storage.get_meta(SELECTION_SCHEMA + ":one"))
         self.assertEqual(self.calls, [])
 
@@ -149,7 +151,8 @@ class SelectionTests(unittest.TestCase):
                 runtime.assert_not_called()
 
     def test_unsent_auxiliary_call_releases_budget_but_timeout_does_not(self):
-        self.service.update_settings({"assistant_id": "one", "leader_candidate_id": "strong"})
+        self.service.update_settings({"assistant_id": "one", "leader_candidate_id": "strong",
+                                      "selection_mode": {"leader": "fixed", "role": "fixed"}})
         task = self.service.plan(self.params)
         scope = Scope("one", "session-one")
         self.service.engine.approve(task["task_id"], scope, 1)
@@ -395,7 +398,7 @@ class SelectionTests(unittest.TestCase):
     def test_assistant_settings_samples_and_priors_are_isolated(self):
         self.configure()
         self.qualify()
-        self.assertEqual(self.service.settings("two")["selection_mode"], {"leader": "fixed", "role": "fixed"})
+        self.assertEqual(self.service.settings("two")["selection_mode"], {"leader": "auto", "role": "auto"})
         self.configure("two")
         for purpose in ("leader", "role"):
             self.service.register_selection_cohort("two", self.cohort(purpose))

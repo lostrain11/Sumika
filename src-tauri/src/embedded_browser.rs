@@ -253,9 +253,7 @@ impl EmbeddedBrowserState {
 
 fn workspace_visible(app: &AppHandle) -> bool {
     let Some(window) = app.get_window("main") else { return false; };
-    let state = app.state::<super::DisplayModeState>();
-    let workspace = state.0.try_lock().is_ok_and(|state| state.mode == super::DisplayMode::Workspace && !state.needs_recovery);
-    workspace && window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true)
+    window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true)
 }
 
 pub fn hide_children(app: &AppHandle) -> Result<(), String> {

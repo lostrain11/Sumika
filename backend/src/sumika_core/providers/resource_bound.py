@@ -28,7 +28,7 @@ class ResourceBoundProvider:
                 raise ValueError("resource bound requires a text-only request")
             if type(request.max_tokens) is not int or not 0 < request.max_tokens <= 1000000:
                 raise ValueError("resource bound requires an explicit output limit")
-            payload = [{"role": message.role, "content": message.content} for message in request.messages]
+            payload = [message.wire_dict() if hasattr(message, "wire_dict") else {"role": message.role, "content": message.content} for message in request.messages]
             input_bound = len(json.dumps({"messages": payload, "tools": request.tools}, ensure_ascii=False, allow_nan=False).encode("utf-8")) + 1024
             deadline = datetime.now(timezone.utc) + timedelta(seconds=max(120, float(self.provider.timeout) + 30))
             attempt_id = "resource-" + uuid4().hex

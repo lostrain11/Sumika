@@ -2,10 +2,17 @@ import hashlib
 import json
 import unittest
 
-from tools.check_release_assets import AVATAR_ROOT, MANIFEST, check_files
+from tools.check_release_assets import AVATAR_ROOT, MANIFEST, SKILL_PATHS, check_files
 
 
 class ReleaseAssetsTests(unittest.TestCase):
+    def test_personal_skill_paths_cannot_ship(self):
+        files = self.assets()
+        files[SKILL_PATHS] = json.dumps({'tool_directories': [], 'download_cache_directory': ''}).encode()
+        self.assertEqual(check_files(set(files), files.__getitem__), [])
+        files[SKILL_PATHS] = json.dumps({'tool_directories': ['D:/personal-tools'], 'download_cache_directory': ''}).encode()
+        self.assertIn('Official tool-registry configuration must contain empty paths.', check_files(set(files), files.__getitem__))
+
     def assets(self):
         model = b'glTF fixture'
         return {

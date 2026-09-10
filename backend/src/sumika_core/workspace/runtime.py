@@ -102,6 +102,13 @@ class WorkspaceRuntime:
         self._log("workspace checkpoint diff", workspace, started, checkpoint_id=checkpoint_id, changed=result["counts"]["changed_total"])
         return self._public_diff(result)
 
+    def patch_checkpoint(self, checkpoint_id: str, *, path: str | Path) -> dict[str, Any]:
+        manifest = self._get_manifest(checkpoint_id)
+        root, workspace = self._resolve_manifest_workspace(manifest, path)
+        result = self._diff_manifest(manifest, root, workspace)
+        patch, truncated, omitted = self._checkpoint_patch(manifest, root, result["changed_paths"], result["current_files"])
+        return {**self._public_diff(result), "patch": patch, "patch_truncated": truncated, "patch_omitted_files": omitted}
+
     def restore_preview(self, checkpoint_id: str, *, path: str | Path | None = None) -> dict[str, Any]:
         manifest = self._get_manifest(checkpoint_id)
         root, workspace = self._resolve_manifest_workspace(manifest, path)

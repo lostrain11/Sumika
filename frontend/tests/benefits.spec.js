@@ -26,7 +26,7 @@ test("免费资源入口区分资讯与账户证据，配置和签到均需显�
   });
   await page.addInitScript(() => localStorage.setItem("sumika.onboarded.v1", "1"));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.locator('.scene-primary-nav [data-page="Settings"]').click();
+  await page.locator('.wv2-topbar [data-wv2-view="settings"]').click();
   const panel = page.locator("[data-benefits]");
   await expect(panel).toBeVisible();
   await panel.locator(":scope > summary").click();

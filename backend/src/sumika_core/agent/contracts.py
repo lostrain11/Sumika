@@ -116,6 +116,11 @@ class AgentRuntime(ABC):
     runtime_id: ClassVar[str] = "unknown"
     capability_ids: ClassVar[frozenset[AgentCapability]] = frozenset()
 
+    def execution_quote(self, params: dict[str, Any]) -> dict[str, Any]:
+        return {"candidate_id": f"agent:{self.runtime_id}", "identity": [self.runtime_id, "unpriced"],
+                "high_cny": None, "limit_enforced": False, "free": False, "funding": "unknown",
+                "reason": "当前 Harness 未提供逐调用预算控制，宿主无法承诺硬上限；费用未知，未派发"}
+
     @abstractmethod
     def status(self) -> dict[str, Any]:
         raise NotImplementedError

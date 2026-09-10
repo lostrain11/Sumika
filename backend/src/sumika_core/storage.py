@@ -14,7 +14,7 @@ from typing import Any
 from .protocol.models import Message, utc_now
 
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 SNAPSHOT_FORMAT_VERSION = 1
 
@@ -268,6 +268,20 @@ class Storage:
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.RLock()
+        existing = self._connection.execute("SELECT name FROM sqlite_master WHERE name='schema_meta'").fetchone()
+        if existing:
+            version = self._connection.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
+            if version and int(version[0]) > SCHEMA_VERSION:
+                self._connection.close()
+                raise ValueError("database requires a newer Sumika version")
+            if version and int(version[0]) < SCHEMA_VERSION and self.path != ":memory:":
+                backup_path = Path(self.path + f".before-v{SCHEMA_VERSION}.sqlite")
+                if not backup_path.exists():
+                    backup = sqlite3.connect(str(backup_path))
+                    try:
+                        self._connection.backup(backup)
+                    finally:
+                        backup.close()
         self._migrate()
 
     def _migrate(self) -> None:
@@ -278,6 +292,16 @@ class Storage:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workflow_records (
+                    namespace TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    assistant_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(namespace, record_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_scope
+                    ON workflow_records(namespace, assistant_id);
                 CREATE TABLE IF NOT EXISTS quality_tasks (
                     task_id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -634,6 +658,73 @@ class Storage:
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('version', ?)",
                 (str(SCHEMA_VERSION),),
             )
+
+    def save_record(self, namespace: str, record_id: str, assistant_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(namespace, str) or not re.fullmatch(r"[A-Za-z0-9._:-]+/v[0-9]+", namespace):
+            raise ValueError("invalid record namespace")
+        for value in (record_id, assistant_id):
+            _bounded_identifier(value, "record scope")
+        if not isinstance(payload, dict) or payload.get("assistant_id", assistant_id) != assistant_id:
+            raise ValueError("record scope mismatch")
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+        with self._lock, self._connection:
+            prior = self._connection.execute(
+                "SELECT assistant_id FROM workflow_records WHERE namespace=? AND record_id=?",
+                (namespace, record_id),
+            ).fetchone()
+            if prior and prior[0] != assistant_id:
+                raise ValueError("record belongs to another assistant")
+            self._connection.execute(
+                "INSERT INTO workflow_records VALUES(?,?,?,?,?) ON CONFLICT(namespace,record_id) "
+                "DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at",
+                (namespace, record_id, assistant_id, encoded, utc_now()),
+            )
+        return json.loads(encoded)
+
+    def get_record(self, namespace: str, record_id: str, assistant_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM workflow_records WHERE namespace=? AND record_id=? AND assistant_id=?",
+                (namespace, record_id, assistant_id),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_record_group(self, namespace: str, assistant_id: str, updates: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
+        if not updates or len({new["request_id"] for _, new in updates}) != len(updates):
+            raise ValueError("record group must contain distinct records")
+        encoded = []
+        for previous, value in updates:
+            if value.get("assistant_id") != assistant_id or previous.get("assistant_id") != assistant_id:
+                raise ValueError("record group scope mismatch")
+            if previous.get("request_id") != value["request_id"]:
+                raise ValueError("record group identity mismatch")
+            encoded.append(json.dumps(value, ensure_ascii=False, allow_nan=False))
+        with self._lock, self._connection:
+            for (previous, value), payload in zip(updates, encoded):
+                cursor = self._connection.execute(
+                    "UPDATE workflow_records SET payload_json=?,updated_at=? "
+                    "WHERE namespace=? AND record_id=? AND assistant_id=? AND payload_json=?",
+                    (payload, utc_now(), namespace, value["request_id"], assistant_id,
+                     json.dumps(previous, ensure_ascii=False, allow_nan=False)),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("record changed concurrently; no grouped updates were saved")
+
+    def list_records(self, namespace: str, assistant_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT payload_json FROM workflow_records WHERE namespace=? AND assistant_id=? ORDER BY updated_at DESC,record_id",
+                (namespace, assistant_id),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def delete_record(self, namespace: str, record_id: str, assistant_id: str) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM workflow_records WHERE namespace=? AND record_id=? AND assistant_id=?",
+                (namespace, record_id, assistant_id),
+            )
+        return cursor.rowcount == 1
 
     def get_meta(self, key: str) -> str | None:
         """Read a small application-owned value outside user snapshot data."""

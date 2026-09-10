@@ -26,7 +26,7 @@
 - `supersedes` / `superseded_by`：被新决定取代时的双向关系；
 - `status_ref`：指向状态矩阵，不在这里复制完成度。
 
-`catalog.md` 是全部需求的索引，`baseline.md` 面向人阅读，`original-excerpts.md` 只保留必要的非敏感原话片段。2026-09-08补录后共79项；22条新消息、61段引文已逐字核实，旧摘要和待补出处单独标明。
+`catalog.md` 是全部需求的索引，`baseline.md` 面向人阅读，`original-excerpts.md` 只保留必要的非敏感原话片段。当前共91项；22条历史消息、61段引文已逐字核实，另有本轮用户显式计划以`visible-conversation-context:2026-09-09`作为可核实来源，不编造消息ID或时间。旧摘要和待补出处单独标明。
 无法从现有仓库和可见对话恢复的历史内容必须标明缺失，不得猜写。
 
 ## 冲突和更新规则

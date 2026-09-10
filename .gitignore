@@ -7,6 +7,8 @@ __pycache__/
 *.sqlite3
 .pytest_cache/
 backend/.venv/
+backend/build/
+backend/src/*.egg-info/
 packages/quality-routing/src/*.egg-info/
 packages/quality-routing/build/
 packages/quality-routing/dist/
@@ -25,6 +27,7 @@ frontend/test-results/
 /%SystemDrive%/
 /output/
 /test-results/
+/artifacts/native-smoke/
 /example.txt
 /output.txt
 *.db-*

@@ -1,8 +1,8 @@
 # Sumika 需求总表
 
-更新：2026-09-09。共 **80项**：当前有效66项、长期延期6项、被后续决定取代8项。这里的“有效”是产品意图，**不是已实现**；正式验收条件在[机器总表](requirements.json)，功能事实只看[状态矩阵](../status-matrix.md)。
+更新：2026-09-09。共 **91项**：当前有效76项、长期延期6项、被后续决定取代9项。这里的“有效”是产品意图，**不是已实现**；正式验收条件在[机器总表](requirements.json)，功能事实只看[状态矩阵](../status-matrix.md)。
 
-本轮将“统一到 Sumika 内置浏览器”确认为 `BROWSER-003`，详见[浏览器正式需求](embedded-browser.md)。同时补齐近期A+界面、质量路由、广泛福利发现、自动签到、高频维护零成本、付费授权及长期能力边界。
+本轮新增可复用组件、统一工作流、双窗口与定时工作计划；新需求均为规划中，已有功能仍以状态矩阵中的既有实现事实为准。`WINDOW-001`取代尚未实现的 `UX-005`：本轮交付真实双窗口，不承诺 Windows 底层壁纸模式。
 
 ## 原话与证据如何读
 
@@ -70,7 +70,7 @@
 | `UX-002` | 旧深夜蓝场景与四抽屉 | 已被取代 / `confirmed` | 待补逐字出处；见旧基线 | `web-portals` |
 | `UX-003` | 采用选定的 A+ 和风留白布局：五个文字入口、可收放右侧聊天、温暖日式二次元氛围与角色主题色扩展。 | 当前有效 / `confirmed` | 新 `EX-UI-003`、新 `EX-UI-004` | `scene-ui-shell` |
 | `UX-004` | 能力页突出感知与交互、效率工具、生活与陪伴；页面模块独立添加、排序和移除。 | 当前有效 / `confirmed` | 新 `EX-UI-001`、新 `EX-UI-002`、新 `EX-UI-003` | `modules` |
-| `UX-005` | 完整客户端可全屏固定在 Windows 桌面最底部，作为陪伴壁纸，并能恢复普通客户端。 | 当前有效 / `normalized` | 新 `EX-UI-004` | `desktop-wallpaper` |
+| `UX-005` | 旧 Windows 桌面底层壁纸模式。 | 已被后续决定取代 / `normalized` | 新 `EX-UI-004` | `desktop-wallpaper` |
 | `AVATAR-003` | 完整客户端与桌宠共享助手、会话和生活状态；桌宠只保留场景、角色和紧凑聊天，可关闭场景变透明。 | 当前有效 / `confirmed` | 新 `EX-UI-001`、新 `EX-VISION-001` | `avatar-vrm-desktop` |
 | `BROWSER-003` | 网页交互统一到 Sumika 自己的内置浏览器，覆盖聊天咨询、登录接管、价格额度查看、福利领取与签到。 | 当前有效 / `confirmed` | 新 `EX-BROWSER-003`、新 `EX-BROWSER-004`、新 `EX-PLAN-001` | `unified-browser` |
 | `BROWSER-004` | 复杂任务按收益选择已登录网页进行辅助咨询，默认最多2–3来源，结果经主模型审查。 | 当前有效 / `confirmed` | 新 `EX-ROUTING-004`、新 `EX-ROUTING-001` | `native-consultation` |
@@ -88,6 +88,17 @@
 | `BENEFIT-002` | 在已授权站点与明确免费范围内自动领取权益和签到，并核验实际到账。 | 当前有效 / `confirmed` | 新 `EX-BENEFIT-001`、新 `EX-BROWSER-004` | `free-benefits` |
 | `BENEFIT-003` | 高频发现、刷新、签到默认使用零模型成本的固定流程，必要语义处理只用合格免费或本地模型。 | 当前有效 / `normalized` | 新 `EX-COST-003`、新 `EX-REFRESH-001`、新 `EX-BENEFIT-004` | `free-benefits` |
 | `PLUGIN-002` | 质量路由抽成运行时中立核心与宿主适配器，可面向社区复用；Codex Skill不直接作为Sumika Runtime。 | 当前有效 / `confirmed` | 新 `EX-ROUTING-001`、新 `EX-ROUTING-003`、新 `EX-PLAN-001` | `quality-routing-core` |
+| `PLUGIN-003` | 功能核心具有清晰、可提取、可测试边界，通过明确适配器复用于其他 Harness 或 Agent 客户端，Sumika 使用同一核心实现。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `reusable-components` |
+| `UX-006` | 客户端精简为统一工作台，提供项目、对话、定时工作、预算、进度、成果及独立附言的可扫描入口。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |
+| `MODEL-021` | 角色与工作模型分别支持自动和手动选择；主模型按质量证据优先，角色优先合格免费候选。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |
+| `AUTH-001` | 付费规划、执行、验证、咨询、重试和角色附言均须在有效预算与授权内；免费简单工作可直达，复杂工作仍须确认。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |
+| `WORK-001` | 统一工作入口持久化原话、需求版本、预检、预算、授权、派发和可恢复终态，兼容旧入口但不复制工作流。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |
+| `CONTEXT-001` | 项目、对话索引和服务端上下文按助手与项目隔离；仅在需要时查询项目正文，清屏不删除历史。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `project-context` |
+| `ARTIFACT-001` | 工作成果正文与角色附言分开保存、验证、复制、导出和引用，旧拼接格式保持可读。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `work-artifacts` |
+| `MEMORY-002` | 本轮仅实现长期记忆的作用域、能力声明与适配契约，不启用自动抽取、召回、遗忘或共同经历。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `memory-adapters` |
+| `VIEW-001` | 场所成员与视图分组通过独立确定性逻辑生成合拆窗动作计划；不启用真实多人运行或共享记忆。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `view-grouping` |
+| `WINDOW-001` | 工作台与陪伴使用两个真实原生窗口、一个 Core 和一个受管后台，支持紧凑、全景、全屏与透明背景。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `native-dual-window` |
+| `SCHEDULE-001` | 定时工作支持一次性、每日、每周、时区、暂停、修改、立即执行与结果历史，并通过统一工作入口执行。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `schedules` |
 | `COST-001` | Codex成本Skill先独立服务当前Codex，用任务协议、能力注册、确定性估算和共享脱敏账本辅助有收益的委派。 | 当前有效 / `confirmed` | 新 `EX-PLAN-001`、新 `EX-COST-001`、新 `EX-COST-002` | `cost-routing-protocol` |
 | `INPUT-001` | 语音先实现点击或按住说话与TTS，后续才考虑持续监听。 | 长期延期 / `confirmed` | 新 `EX-PLAN-001`、新 `EX-VISION-001` | `audio` |
 | `INPUT-002` | 视觉先实现单次屏幕/摄像头观察及OCR、截屏翻译；视频游戏陪伴先只读观察和评论。 | 长期延期 / `confirmed` | 新 `EX-PLAN-001`、新 `EX-VISION-001`、新 `EX-UI-003` | `vision` |
@@ -98,6 +109,6 @@
 
 ## 交给下一位实现者
 
-先读本表及 `active`/`deferred` 需求，再读对应原话和[执行契约](../current-execution.md)，最后核对代码、测试、当前运行证据。旧计划保留历史价值，不能覆盖更新后的A+导航、普通任务付费授权或内置浏览器需求。
+先读本表及 `active`/`deferred` 需求，再读对应原话和[执行契约](../current-execution.md)，最后核对代码、测试、当前运行证据。本轮详细设计见[客户端工作流 v2](../refactor/client-workflow-v2.md)与[可复用组件](../architecture/reusable-components.md)；不得把其规划状态写成代码已实现。
 
 本轮完成的是需求整理。浏览器统一、桌面壁纸、全部渠道报价/额度对账、真实跨渠道协作及延期能力仍有各自缺口；单个免费模型可用不代表所有已登记模型可路由。

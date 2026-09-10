@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openPage } from "./helpers/navigation.js";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -76,35 +77,6 @@ async function openCharacterSection(page, section) {
   return details;
 }
 
-/* Scene-first shell navigation: pages live inside four fullscreen drawers.
-   Dock buttons open the drawer; multi-page drawers expose tabs. */
-const pageDrawer = {
-  Capabilities: "Capabilities",
-  Chat: null,
-  Agent: "Agent",
-  WebWorkbench: "Agent",
-  Tasks: "Agent",
-  History: "Agent",
-  Notifications: "Agent",
-  Characters: "Characters",
-  Modules: "Settings",
-  Developer: "Settings",
-  Settings: "Settings",
-  Guide: "Settings",
-};
-
-async function openPage(page, target) {
-  const dock = pageDrawer[target];
-  if (!dock) {
-    await page.keyboard.press("Escape");
-    return;
-  }
-  await page.locator(`.scene-primary-nav .nav-item[data-page="${dock}"]`).click();
-  if (dock !== target) {
-    await page.locator(`.drawer-tabs .nav-item[data-page="${target}"]`).click();
-  }
-}
-
 test.describe("Sumika UI shell", () => {
   test.beforeAll(async () => {
     providerStub = createServer((request, response) => {
@@ -144,32 +116,29 @@ test.describe("Sumika UI shell", () => {
 
   test("chat, navigation, and Avatar visibility", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await expect(page.locator(".wv2-topbar")).toBeVisible();
+    await openPage(page, "Chat");
     await expect(page.locator("body")).toContainText("Sumika 默认 Avatar");
-
+    await page.route("**/api/chat", route => route.fulfill({ json: { message: { role: "assistant", content: "Playwright stub reply" } } }));
     await page.locator("#chat-input").fill("Playwright smoke message");
     await page.locator("#chat-form button[type=submit]").click();
-    await expect(page.locator(".message.assistant").last()).toContainText("Playwright stub reply");
-    const messages = await page.locator(".message").allTextContents();
-    await page.locator("#chat-input").fill("next draft");
-    await page.locator("[data-overlay-open]").click();
     await expect(page.locator(".pet-bubble")).toContainText("Playwright stub reply");
-    await page.locator("[data-overlay-open-main]").focus();
-    await page.locator("[data-overlay-open-main]").click();
+    await page.locator("#chat-input").fill("next draft");
+    await page.locator("[data-pet-chat]").focus();
+    await page.locator("[data-pet-chat]").click();
+    await expect(page.locator("#chat-form")).toBeHidden();
+    await page.locator("[data-pet-chat]").click();
     await expect(page.locator("#chat-input")).toHaveValue("next draft");
-    expect(await page.locator(".message").allTextContents()).toEqual(messages);
-
+    await expect(page.locator(".pet-bubble")).toContainText("Playwright stub reply");
+    await page.locator("[data-avatar-toggle]").click();
+    await expect(page.locator(".avatar-hidden-state")).toBeVisible();
+    await page.locator("[data-avatar-toggle]").click();
+    await expect(page.locator('[data-vrm-status="ready"]')).toBeVisible();
     await openPage(page, "Modules");
     await expect(page.locator("body")).toContainText("语音识别");
     await openPage(page, "Tasks");
-    await expect(page.locator("body")).toContainText("任务中心");
-
-    await openPage(page, "Chat");
-    await page.locator("[data-avatar-toggle]").click();
-    await expect(page.locator("body")).toContainText("Avatar 已隐藏");
-    await page.locator("[data-avatar-toggle]").click();
-    await expect(page.locator("body")).toContainText("Sumika 默认 Avatar");
+    await expect(page.locator("#quality-plan-form")).toBeVisible();
   });
-
   test("unconfigured chat directs the user to Provider setup", async ({ page }) => {
     const llmModule = {
       id: "llm",
@@ -204,10 +173,16 @@ test.describe("Sumika UI shell", () => {
       body: "[]",
     }));
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await openPage(page, "Chat");
     await expect(page.locator(".empty-chat")).toContainText("先配置 Provider");
     await expect(page.locator("#chat-form .send-button")).toBeDisabled();
+    const opened = page.waitForEvent("popup");
     await page.locator('.empty-chat [data-page="Modules"]').click();
-    await expect(page.locator("body")).toContainText("自定义 API 连接");
+    const settings = await opened;
+    await expect(settings.locator(".wv2-settings")).toBeVisible();
+    await openPage(settings, "Modules");
+    if (!(await settings.locator(".provider-picker").isVisible())) await settings.locator(".module-add-tile").click();
+    await expect(settings.locator(".provider-picker")).toBeVisible();
   });
 
   test("Developer manages metadata-only Skills and shows the MCP catalog", async ({ page }) => {
@@ -276,42 +251,25 @@ test.describe("Sumika UI shell", () => {
 
   test("A+ 文字导航和聊天状态无重复入口且不遮挡输入", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    const metrics = await page.evaluate(() => {
-      const selectors = [".provider-summary-name", ".provider-summary-state"];
-      return selectors.map((selector) => {
-        const element = document.querySelector(selector);
-        if (!element) return null;
-        const style = getComputedStyle(element);
-        return {
-          selector,
-          height: element.getBoundingClientRect().height,
-          center: element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2,
-        };
-      });
-    });
-    expect(metrics.every(Boolean)).toBe(true);
-    const centers = metrics.map((item) => item.center);
-    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
-    await expect(page.locator(".provider-summary")).toHaveCSS("white-space", "nowrap");
-    await expect(page.locator(".provider-summary-name")).toBeVisible();
-    await expect(page.locator(".provider-summary-state")).toHaveCSS("white-space", "nowrap");
-    const palette = await page.evaluate(() => {
+    await expect(page.locator(".wv2-primary-nav button")).toHaveCount(4);
+    await expect(page.locator(".scene-dock, .status-chip, .scene-primary-nav")).toHaveCount(0);
+    const palette = await page.locator(".wv2-primary-nav button").nth(1).evaluate(element => {
       const probe = document.createElement("span");
-      probe.style.color = "var(--muted)";
-      document.body.append(probe);
-      const muted = getComputedStyle(probe).color;
+      probe.style.color = "var(--wv2-muted)";
+      element.append(probe);
+      const result = { actual: getComputedStyle(element).color, muted: getComputedStyle(probe).color };
       probe.remove();
-      const dockItem = document.querySelector('.scene-primary-nav .nav-item[data-page="Agent"]');
-      return { dock: dockItem ? getComputedStyle(dockItem).color : null, muted };
+      return result;
     });
-    expect(palette.dock).toBe(palette.muted);
-    await expect(page.locator(".scene-primary-nav .nav-item")).toHaveCount(5);
-    await expect(page.locator(".scene-dock, .status-chip")).toHaveCount(0);
-    const composer = await page.locator(".composer").boundingBox();
-    const status = await page.locator(".provider-summary").boundingBox();
-    expect(status.y).toBeGreaterThanOrEqual(composer.y + composer.height - 1);
+    expect(palette.actual).toBe(palette.muted);
+    await openPage(page, "Chat");
+    await expect(page.locator(".pet-bubble")).toHaveCount(1);
+    await expect(page.locator(".provider-summary, .status-chip")).toHaveCount(0);
+    const composer = await page.locator(".overlay-composer").boundingBox();
+    const status = await page.locator(".pet-bubble").boundingBox();
+    expect(status.y + status.height).toBeLessThanOrEqual(composer.y + 1);
+    expect(composer.y + composer.height).toBeLessThanOrEqual(720);
   });
-
   test("能力目录展示真实实现、网页登录边界并适配窄窗口", async ({ page }) => {
     await page.route("**/api/capabilities*", async (route) => {
       await route.fulfill({
@@ -397,7 +355,7 @@ test.describe("Sumika UI shell", () => {
     if (await toggle.getAttribute("aria-checked") === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await openPage(page, "Chat");
-    await expect(page.locator(".provider-summary")).toContainText("已关闭");
+    await expect(page.locator(".empty-chat")).toContainText("LLM 已关闭");
     const send = page.locator("#chat-form .send-button");
     await expect(send).toBeDisabled();
     await expect(send).toHaveCSS("cursor", "not-allowed");
@@ -414,7 +372,7 @@ test.describe("Sumika UI shell", () => {
   });
 
   test("bundled VRM renders into a live canvas", async ({ page }) => {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.goto(baseUrl + "?view=companion", { waitUntil: "networkidle" });
     const renderer = page.locator('[data-vrm-source][data-vrm-status="ready"]');
     await expect(renderer).toBeVisible({ timeout: 15000 });
     const canvas = renderer.locator("canvas");
@@ -433,8 +391,8 @@ test.describe("Sumika UI shell", () => {
   });
 
   test("中心舞台默认启用待机动作且不自动旋转", async ({ page }) => {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    const stage = page.locator(".avatar-stage .avatar-placeholder");
+    await page.goto(baseUrl + "?view=companion", { waitUntil: "networkidle" });
+    const stage = page.locator(".desktop-overlay-avatar .avatar-placeholder");
     await expect(stage).toHaveClass(/avatar-position-center/);
     const renderer = page.locator('[data-vrm-source][data-vrm-status="ready"]');
     await expect(renderer).toHaveAttribute("data-vrm-idle-motion", "true");
@@ -496,9 +454,9 @@ test.describe("Sumika UI shell", () => {
   });
 
   test("Avatar 信息层与模型画布分离", async ({ page }) => {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    const placeholder = page.locator(".avatar-stage .avatar-placeholder");
-    const copy = page.locator(".avatar-stage .avatar-preview-copy");
+    await page.goto(baseUrl + "?view=companion", { waitUntil: "networkidle" });
+    const placeholder = page.locator(".desktop-overlay-avatar .avatar-placeholder");
+    const copy = page.locator(".desktop-overlay-avatar .avatar-preview-copy");
     await expect(copy).toHaveCount(1);
     expect(await copy.evaluate((element) => element.parentElement?.classList.contains("avatar-presenter"))).toBe(true);
     expect(await copy.evaluate((element) => element.parentElement?.classList.contains("avatar-placeholder"))).toBe(false);
@@ -506,7 +464,8 @@ test.describe("Sumika UI shell", () => {
     expect(placeholderBox).not.toBeNull();
     await expect(page.locator('[data-vrm-status="ready"]')).toBeVisible();
     await expect(copy).toBeHidden();
-    await expect(page.locator(".scene-note")).toBeVisible();
+    await expect(page.locator(".pet-bubble")).toBeVisible();
+    await page.locator("[data-avatar-toggle]").focus();
     await page.locator("[data-avatar-toggle]").click();
     await expect(page.locator(".avatar-hidden-state")).toBeVisible();
   });
@@ -538,7 +497,7 @@ test.describe("Sumika UI shell", () => {
   });
 
   test("desktop overlay route keeps Avatar and high-frequency controls", async ({ page }) => {
-    await page.goto(baseUrl + "?mode=overlay", { waitUntil: "networkidle" });
+    await page.goto(baseUrl + "?view=companion", { waitUntil: "networkidle" });
     await expect(page.locator(".desktop-overlay-shell")).toBeVisible();
     await expect(page.locator(".desktop-overlay-toolbar")).toHaveCount(0);
     await expect(page.locator(".desktop-overlay-status")).toHaveCount(0);
@@ -567,7 +526,9 @@ test.describe("Sumika UI shell", () => {
 
   test("桌宠浮窗提供可拖动模型区域和聊天输入", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 460 });
-    await page.goto(baseUrl + "?mode=overlay", { waitUntil: "networkidle" });
+    await page.goto(baseUrl + "?view=companion", { waitUntil: "networkidle" });
+    await page.locator("[data-pet-chat]").focus();
+    await page.locator("[data-pet-chat]").click();
     await expect(page.locator(".overlay-composer")).toBeVisible();
     await expect(page.locator(".desktop-overlay-avatar")).toHaveAttribute("data-overlay-drag-surface", "");
     await expect(page.locator(".overlay-composer")).toHaveAttribute("data-no-drag", "");
@@ -579,9 +540,9 @@ test.describe("Sumika UI shell", () => {
 
   test("入门指南 covers the workspace and links to controls", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await expect(page.locator(".scene-primary-nav .nav-item")).toHaveCount(5);
+    await expect(page.locator(".wv2-primary-nav button")).toHaveCount(4);
     await openPage(page, "Guide");
-    await expect(page.locator(".drawer-body h1")).toHaveText("入门指南");
+    await expect(page.locator(".guide-intro")).toContainText("建议第一次");
     await expect(page.locator("body")).toContainText("界面地图");
     await expect(page.locator("body")).toContainText("完整基本使用流程");
     await expect(page.locator(".guide-map-item")).toHaveCount(11);
@@ -594,16 +555,16 @@ test.describe("Sumika UI shell", () => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await expect(page.locator("[data-audio-record]")).toHaveCount(0);
     await openPage(page, "Capabilities");
-    await page.locator(".capability-add-tile").click();
-    await expect(page.locator('[data-capability-library-card][data-module-id="asr"]')).toContainText("语音识别");
+    await page.locator("[data-capability-library-open]").click();
+    await expect(page.locator('.wv2-module-library article').filter({ has: page.locator('[data-capability-add="asr"]') })).toContainText("语音识别");
   });
 
   test("聊天草稿在工作区重绘后仍保留", async ({ page }) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator("#chat-input").fill("等待确认的草稿");
+    await page.locator('[data-task-preflight] [name="goal"]').fill("等待确认的草稿");
     await openPage(page, "Modules");
-    await openPage(page, "Chat");
-    await expect(page.locator("#chat-input")).toHaveValue("等待确认的草稿");
+    await openPage(page, "Workspace");
+    await expect(page.locator('[data-task-preflight] [name="goal"]')).toHaveValue("等待确认的草稿");
   });
 
   test("开发者页 exposes safe runtime diagnostics", async ({ page }) => {
@@ -632,7 +593,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
-    await expect(page.locator(".page-layout h1")).toContainText("Agent 工作区");
+    await expect(page.locator('h1').filter({ hasText: /^Agent 工作区$/ })).toContainText("Agent 工作区");
     await expect(page.locator(".agent-status-line")).toContainText(/未连接|已关闭/);
     await expect(page.locator("#agent-send")).toBeDisabled();
     await expect(page.locator(".agent-panel").last()).toContainText("BrowserSkill");
@@ -690,6 +651,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const snapshot = {
         session_id: sessionId,
         state: "completed",
@@ -761,7 +723,7 @@ test.describe("Sumika UI shell", () => {
     await expect(card).toContainText("回合 1");
     await expect(card.locator("[data-task-run], [data-task-status]")).toHaveCount(0);
     await card.locator("[data-agent-task-session]").click();
-    await expect(page.locator(".page-layout h1")).toContainText("Agent 工作区");
+    await expect(page.locator('h1').filter({ hasText: /^Agent 工作区$/ })).toContainText("Agent 工作区");
     await expect(page.locator(".agent-session-panel")).toContainText(sessionId);
   });
 
@@ -777,6 +739,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "agent.session.prompt") submittedPrompt = body.params;
       const result = {
         "browser.profiles": { profiles: [] },
@@ -855,6 +818,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       if (body?.method === "agent.commands") {
         if (body.params?.sessionId === "playwright-agent-session") sessionCapabilityRefreshes += 1;
@@ -958,6 +922,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
       let result;
       if (method === "agent.sessions") {
@@ -1089,6 +1054,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       let result;
       if (body?.method === "workspace.inspect") {
         result = { workspace, checkpoint_count: checkpointCreated ? 1 : 0 };
@@ -1232,6 +1198,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const path = body?.params?.path;
       let result;
       if (body?.method === "workspace.inspect") {
@@ -1346,6 +1313,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       let result;
       if (body?.method === "agent.workspace.create") {
         registered = true;
@@ -1429,6 +1397,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
       calls.push(body);
       let result;
@@ -1686,6 +1655,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const sessionId = forked ? "agent-child" : "agent-parent";
       let result;
       if (body?.method === "agent.workspace.create") {
@@ -1763,6 +1733,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
       if (["agent.skills", "agent.commands", "agent.interactions", "agent.session.snapshot"].includes(method)) {
         scopedCalls.push({ method, params: body.params });
@@ -1857,6 +1828,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       const result = {
         "browser.profiles": { profiles: [] },
@@ -1934,6 +1906,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "agent.interactions") {
         const interactions = answered ? [] : [{
           id: "question-playwright",
@@ -1999,6 +1972,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "agent.interactions") {
         const interactions = answered ? [] : [{
           id: "plan-review-playwright",
@@ -2102,6 +2076,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
       if (method === "agent.sessions.search") {
         searchQuery = body.params.query;
@@ -2172,6 +2147,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
       if (method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       if (method === "agent.session.prompt") {
@@ -2243,6 +2219,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
       if (method === "agent.session.retry") {
         retryParams = body.params;
@@ -2283,6 +2260,9 @@ test.describe("Sumika UI shell", () => {
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#agent-retry-turn").click();
     await expect.poll(() => retryParams).toEqual({
+      assistant_id: "sumika",
+      client_request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      core_session_id: await page.locator("[data-conversation-select].active").getAttribute("data-conversation-select"),
       sessionId,
       approved: true,
       confirmSessionId: sessionId,
@@ -2303,6 +2283,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "browser.navigate") {
         navigationApproved = Boolean(body.params.approved);
         const result = navigationApproved
@@ -2440,7 +2421,7 @@ test.describe("Sumika UI shell", () => {
   });
 
   test("舞台鼠标跟随会回中且可以按角色关闭", async ({ page }) => {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.goto(baseUrl + "?view=companion", { waitUntil: "networkidle" });
     const renderer = page.locator('[data-vrm-source][data-vrm-status="ready"]');
     await expect(renderer).toHaveAttribute("data-vrm-look-at-status", "active");
     await expect(renderer).toHaveAttribute("data-vrm-head-follow-status", "active");
@@ -2449,7 +2430,7 @@ test.describe("Sumika UI shell", () => {
     await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.35);
     await expect.poll(async () => Number(await renderer.getAttribute("data-vrm-head-yaw"))).toBeGreaterThan(0.01);
     await expect(renderer).toHaveAttribute("data-vrm-pointer-state", "active");
-    await page.mouse.move(1, 1);
+    await page.mouse.move(-10, -10);
     await expect(renderer).toHaveAttribute("data-vrm-pointer-state", "centered");
     await expect.poll(async () => Math.abs(Number(await renderer.getAttribute("data-vrm-head-yaw")))).toBeLessThan(0.02);
 
@@ -2520,7 +2501,7 @@ test.describe("Sumika UI shell", () => {
     await expect(rows.nth(0)).toContainText("最近云端");
     await expect(rows.nth(1)).toContainText("较早本地");
     await expect(rows.nth(2)).toContainText("待配置连接");
-    await expect(page.locator(".scene-chat .composer-note")).toContainText("混合处理");
+    await expect(page.locator(".wv2-connection-location")).toContainText("混合处理");
     await page.locator("[data-provider-new]").click();
     await expect(page.locator(".provider-drawer")).toBeVisible();
     await expect(page.locator("#provider-profile-form")).toContainText("当前 Base URL");
@@ -2590,6 +2571,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "provider.profile.save") {
         savedProfiles.push(body.params.profile);
         await route.fulfill({
@@ -2708,6 +2690,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       let result;
       if (body?.method === "sumika.route.catalog") {
         result = { schema: "agent-route/v1", routes, count: routes.length, routable_count: routes.length, quota_state: "unknown" };
@@ -2819,6 +2802,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method !== "browser.profiles") {
         await route.continue();
         return;
@@ -2859,6 +2843,7 @@ test.describe("Sumika UI shell", () => {
     await page.route("**/api/browser/web-chat/profiles*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ profiles: restored ? [{ ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null }] : [archived] }) }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method === "browser.web_chat.profile.restore") {
         restored = true;
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null } }) });
@@ -2896,6 +2881,7 @@ test.describe("Sumika UI shell", () => {
     };
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method !== "provider.import.preview") {
         await route.continue();
         return;
@@ -2972,6 +2958,7 @@ test.describe("Sumika UI shell", () => {
     });
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       if (body?.method !== "provider.profile.restore") {
         await route.continue();
         return;
@@ -3048,6 +3035,7 @@ test.describe("Sumika UI shell", () => {
     }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       calls.push(body);
       if (body?.method === "model.policy.preflight") {
         await route.fulfill({
@@ -3134,6 +3122,7 @@ test.describe("Sumika UI shell", () => {
     await page.route("**/api/agent/provider", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ state: "ready", ready: true, profile_id: "local-auto", model: "auto-model" }) }));
     await page.route("**/rpc", async (route) => {
       const body = route.request().postDataJSON();
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       calls.push(body);
       if (body?.method === "model.policy.preflight") {
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { decision: { status: "selected", selected_route: policyEntry.route_id, selected_entry: policyEntry, alternatives: [], quality_gate: { required: "basic", passed: true }, reason_codes: ["free_or_local_preferred"], estimated_cost: "local", quota_impact: { state: "not-applicable" }, confidence: 0.9, requires_confirmation: false } } }) });

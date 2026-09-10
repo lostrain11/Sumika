@@ -26,9 +26,9 @@ test("登录故障显示原因，恢复可用后自动连接但不自动重发",
     await route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result } });
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.locator('.scene-primary-nav [data-page="Agent"]').click();
-  await page.locator('.drawer-tabs [data-page="Tasks"]').click();
-  await page.getByRole("button", { name: "打开网页咨询", exact: true }).click();
+  await page.locator('[data-inspector-open="files"]').click();
+  await page.locator('[data-inspector-open="browser"]').click();
+  await page.locator('[data-embedded-tab="native-consultation"]').click();
   await expect(page.locator(".consultation-panel")).toHaveClass(/is-focused/);
   expect((await page.locator("[data-consultation-rect]").boundingBox()).height).toBeGreaterThan(540);
   await page.getByRole("button", { name: "恢复布局", exact: true }).click();
@@ -77,9 +77,9 @@ test("嵌入式咨询只发送一次，未知结果不重试且接管可见", as
   await page.addInitScript(() => localStorage.setItem("sumika.onboarded.v1", "1"));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.locator('.scene-primary-nav [data-page="Agent"]').click();
-  await page.locator('.drawer-tabs [data-page="Tasks"]').click();
-  await page.getByRole("button", { name: "打开网页咨询" }).click();
+  await page.locator('[data-inspector-open="files"]').click();
+  await page.locator('[data-inspector-open="browser"]').click();
+  await page.locator('[data-embedded-tab="native-consultation"]').click();
   await expect(page.locator("[data-consultation-rect]")).toBeVisible();
   await expect.poll(() => bridgeCalls.filter((call) => call.method === "quality.browser.complete").length).toBe(1);
   await page.screenshot({ path: testInfo.outputPath("consultation-workbench-1440x900.png") });
@@ -91,8 +91,8 @@ test("嵌入式咨询只发送一次，未知结果不重试且接管可见", as
   await expect(page.getByRole("button", { name: "释放" })).toBeVisible();
   await page.getByRole("button", { name: "隐藏" }).click();
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.locator('.scene-primary-nav [data-page="Settings"]').click();
-  await expect(page.locator("#quality-settings-form")).toBeVisible();
+  await page.locator('.wv2-topbar [data-wv2-view="settings"]').click();
+  await expect(page.locator('[data-model-binding="work"]')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("consultation-settings-1280x800.png") });
 });
 
@@ -111,16 +111,16 @@ test("离开咨询页后，迟到的填写结果不能继续提交", async ({ pa
     } };
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.locator('.scene-primary-nav [data-page="Agent"]').click();
-  await page.locator('.drawer-tabs [data-page="Tasks"]').click();
-  await page.getByRole("button", { name: "打开网页咨询", exact: true }).click();
+  await page.locator('[data-inspector-open="files"]').click();
+  await page.locator('[data-inspector-open="browser"]').click();
+  await page.locator('[data-embedded-tab="native-consultation"]').click();
   await page.getByRole("button", { name: "恢复布局", exact: true }).click();
   await page.locator("#consultation-manual-form textarea").fill("Local fixture only");
   await page.locator("#consultation-manual-form").getByRole("button", { name: "提交", exact: true }).click();
   await expect.poll(() => page.evaluate(() => typeof window.releaseFill)).toBe("function");
-  await page.locator('.scene-primary-nav [data-page="Settings"]').click();
+  await page.locator('.wv2-topbar [data-wv2-view="settings"]').click();
   await page.evaluate(() => window.releaseFill());
-  await expect(page.locator("#quality-settings-form")).toBeVisible();
+  await expect(page.locator('[data-model-binding="work"]')).toBeVisible();
   expect(await page.evaluate(() => window.nativeCalls.filter((call) => call.payload?.operation === "submit").length)).toBe(0);
   expect(await page.evaluate(() => window.nativeCalls.some((call) => call.command === "consultation_hide"))).toBe(true);
 });

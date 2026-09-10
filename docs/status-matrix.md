@@ -4,8 +4,13 @@
 `部分实现` 表示协议或参考实现存在但默认能力、真实后端或隔离边界仍缺失，
 `规划中` 表示只保留架构位置或设计方向。
 
+剩余工作的差量、顺序和验收见[执行计划v2](refactor/remaining-execution-plan-v2.md)。计划覆盖本表66个模块，但计划落盘不升级功能状态；旧版入口/历史验收不等于当前所有路径均完成。
+
 | ID | 状态 | 当前入口 | 主文档 | 验证证据 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
+| `builtin-skills` | 部分实现 | 设置中的三个独立Skill开关；API开发load_skill/run_skill_helper | [Skill迁移](refactor/skill-migration.md) | [契约测试](../backend/tests/test_builtin_skills.py)、[持久Core](../backend/tests/test_builtin_skill_server.py)12项通过；开发循环与工作台E2E通过；Codex源20文件hash一致 | DSH/ZCode/普通闲聊未挂接这三个开关；本轮不扩展R01–R07，用户路径只保存在本地Skill配置 |
+| `community-office` | 部分实现 | 默认安装清单与DSH普通插件配置，四用途默认关闭 | [Skill迁移](refactor/skill-migration.md)、[第三方适配器](../plugins/dsh-community-documents/README.md) | [真实DSH探针](../tools/dsh-community-smoke.mjs)：固定DSH真实加载、Office基础读写更新、PDF文本读取、独立开关、未授权零注册、UNKNOWN_TOOL、幂等安装及卸载保留产物通过；无模型调用 | 高级排版、PDF编辑、公式重算和模板仅找到候选；PDF Windows字体警告与中文复杂PDF未验；未安装到日用profile |
+| `development-workflow` | 部分实现 | 工作台项目目录、开发模式、预算确认、测试记录和diff | [剩余执行计划v2](refactor/remaining-execution-plan-v2.md) | [开发专项](../backend/tests/test_development.py)：2026-09-10后端专项102、工作台E2E14、前端单测78通过；模型离线fixture，文件和测试进程真实 | R01–R07：执行边界/真实工具质量/恢复/合入/自修改；源码副本不是OS沙箱，首次自改与稳定日用分开验收 |
 | `free-model-routing` | 部分实现 | ModelPolicy自动选择、质量协作候选池、设置/能力中的刷新状态 | [正式免费路由](refactor/free-model-routing.md) | 阶段说明：三项正式接入并启用日用。讯飞4B、Agnes2.5、Moark Qwen3-8B均通过新固定任务及隔离Core真实自动选择/执行；日用已启用，估计现金0。负责人/角色/预算及产品数据保持。968项后端全量通过，最后适配后153项专项；已有前端/构建证据保留；依据：[正式免费路由](refactor/free-model-routing.md) | 逐Profile六小时价格刷新、账号与执行版本绑定、冷却、免费撤回及到期阻断已实现；额度型服务尚待账户对账，不承诺全部模型自动可用。Spark Lite接通但质量契约未过 |
 | `moark-candidates` | 部分实现 | 日用`moark-free-candidates`；刷新状态与协作池 | [模型启用与账户](refactor/model-activation-and-accounts.md)、[目录实测](refactor/free-model-routing.md) | 免费Qwen3-8B保留，qwen3.8-flash已有角色专项，9月9日新增leader/bounded各三题及隔离协作通过，不改日用绑定。71条官方回执中34笔trace精确对账，合计0.1390319元；04:15 UTC已购包余额9.8541645元；[续验收](refactor/model-activation-and-accounts.md#9月9日闭环与精确对账) | 不将已购包算免费；37笔无trace旧回执不猜配，0.00013元未决预留保留。专项证据不代表全领域等质，GLM-5.3-Flash旧契约未过 |
 | `free-benefits` | 部分实现 | 设置/能力 > 免费资源与签到；`benefits.*` RPC；进程内维护 | [实现与运行](refactor/free-benefits.md) | 阶段说明：广泛发现与魔搭每日核验首版完成。12个公开来源，实采10个成功；23项官网证据含20个模型声明及3家新渠道权益。Bing/V2EX此次无合格资讯；Groq/LD待核对。魔搭真实核验250发放、242余额；本实例已启用，下次正常启动维护。858项后端基线与最终109项专项、35项前端、11项DOM、3项浏览器验收及构建通过；依据：[实现与运行](refactor/free-benefits.md) | 新站只观察，不自动注册或放行路由；自动领取适配仅魔搭。关闭Sumika后不联网，无AI刷新调用；前端全量45/46，旧能力页文案断言未修。预览8882为无凭据隔离副本 |
@@ -59,6 +64,14 @@
 | `evolution-registry` | 已实现 | Developer > Evolution Knowledge Registry | [Registry](integrations/evolution-registry.md) | [registry data](integrations/evolution-knowledge-registry.json)、[registry tests](../backend/tests/test_evolution_registry.py) | 增加隔离评测报告和用户批准工作流 |
 | `unified-browser` | 部分实现 | 桌面内置浏览器工作区 | [正式需求](requirements/embedded-browser.md)、[工作包2–4](refactor/model-activation-and-accounts.md#工作包234续做2026-09-08) | 主窗口、存储隔离、接管、桌宠停止及生产前端咨询主模型闭环通过；启动不再无条件开旧BrowserSkill；维护桥初始化/重连修复后魔搭/Moark正式刷新通过；[续验收](refactor/model-activation-and-accounts.md#9月9日闭环与精确对账) | 全部站点自动化未完成；Ollama本次missing-usage-section，不能当作新鲜权益；通用BrowserSkill工具仍为明确兼容路径，不迁Cookie、不静默开外窗 |
 | `desktop-wallpaper` | 规划中 | A+原型壁纸构图 | [正式需求总表](requirements/catalog.md) | [原型与客户端边界](ui/a-plus-client.md) | 原生桌面置底、Explorer生命周期、多屏/DPI、焦点和恢复尚待实现与验收 |
+| `reusable-components` | 部分实现 | SDK独立安装与Sumika适配器 | [可复用组件](architecture/reusable-components.md) | [组件验收](architecture/quality-component.md) | P09独立离线生命周期通过；DSH薄适配保留明确fixture边界，其他模块不冒称独立发包 |
+| `workbench-workflow` | 部分实现 | work.task.*、原Agent/Web入口与新版工作台 | [本轮计划](refactor/client-workflow-v2.md) | [外部准入与限制](architecture/quality-component.md#外部工作入口准入) | 版本化确认、原入口恢复、来源校验和未知预留已接；真实DSH缺强制费用上限，显式外部子计划已支持范围冻结与原子共享预算；API文本DAG自动外部交办仍未实现 |
+| `project-context` | 部分实现 | project.*、conversation.* 与工作台项目/历史 | [本轮计划](refactor/client-workflow-v2.md) | [项目契约](architecture/projects.md) | 项目与三轮历史、十轮分页已接；仍按来源和助手隔离，不自动读取整个项目正文 |
+| `work-artifacts` | 部分实现 | WorkService成果与独立附言 | [本轮计划](refactor/client-workflow-v2.md) | [外部准入](architecture/quality-component.md) | 新成果独立复制；外部正文标记来源完成而非独立验证，不猜测拆分旧历史 |
+| `memory-adapters` | 部分实现 | 手动记忆Provider及版本化契约 | [本轮计划](refactor/client-workflow-v2.md) | [记忆适配](architecture/memory-adapters.md) | 作用域和能力声明测试通过；不启用自动召回或自动记忆 |
+| `view-grouping` | 部分实现 | places纯分组函数和动作计划 | [本轮计划](refactor/client-workflow-v2.md) | [场所契约](architecture/places.md) | 模拟合拆窗测试通过，日用单角色；不启用真实多人运行 |
+| `native-dual-window` | 部分实现 | 工作台与陪伴两个原生窗口，共享一个 Core | [本轮计划](refactor/client-workflow-v2.md) | [原生验收记录](refactor/client-workflow-v2-native-validation.md)；独立 smoke 全流程通过 | 多屏热插拔仍待硬件验收；托盘恢复路径经命令验证，托盘图标真实鼠标交互待查；Windows 壁纸模式延后 |
+| `schedules` | 部分实现 | ScheduleRuntime及工作台定时入口 | [本轮计划](refactor/client-workflow-v2.md) | [日程契约](architecture/schedules.md) | 一次性、每日、每周、时区、单飞与统一工作派发已接，真实长期运行另验 |
 | `real-devices` | 规划中 | 暂无设备运行入口 | [需求基线](requirements/baseline.md) | [已批准长期边界](requirements/original-excerpts.md) | 先局域网只读；控制、米家和运动设备等安全网关完成后单独实施 |
 | `cost-routing-protocol` | 部分实现 | 本地Codex Skill协议 | [成本协议](refactor/phase-3-cost-routing.md) | [历史验收及限制](refactor/phase-3-cost-routing.md) | 协议与估算已有，不能从模板证明当前宿主真实执行器的能力/价格，不能替代Sumika Runtime |
 
@@ -104,6 +117,9 @@
 | `avatar-vrm-desktop` | `AVATAR-001`, `AVATAR-002`, `AVATAR-003`, `AVATAR-004` |
 | `web-portals` | `PLATFORM-001`, `UX-002`, `BROWSER-003`, `UX-003` |
 | `plugins-manifest` | `PLUGIN-001` |
+| `builtin-skills` | `SKILL-001`, `PLUGIN-001`, `PLUGIN-003` |
+| `community-office` | `PLUGIN-001`, `PLUGIN-003`, `LICENSE-001` |
+| `development-workflow` | `WORK-001`, `AUTH-001`, `WORKSPACE-001` |
 | `audio` | `DEFERRED-001`, `INPUT-001` |
 | `memory` | `MEMORY-001`, `MULTI-001`, `DEFERRED-001`, `MULTI-002` |
 | `vision` | `DEFERRED-001`, `INPUT-002` |
@@ -121,6 +137,14 @@
 | `evolution-registry` | `EVOLUTION-001`, `LICENSE-001` |
 | `unified-browser` | `BROWSER-003` |
 | `desktop-wallpaper` | `UX-005` |
+| `reusable-components` | `PLUGIN-003` |
+| `workbench-workflow` | `UX-006`, `MODEL-021`, `AUTH-001`, `WORK-001` |
+| `project-context` | `CONTEXT-001` |
+| `work-artifacts` | `ARTIFACT-001` |
+| `memory-adapters` | `MEMORY-002` |
+| `view-grouping` | `VIEW-001` |
+| `native-dual-window` | `WINDOW-001` |
+| `schedules` | `SCHEDULE-001` |
 | `real-devices` | `DEVICE-001` |
 | `cost-routing-protocol` | `COST-001` |
 

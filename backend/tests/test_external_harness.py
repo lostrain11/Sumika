@@ -4,6 +4,13 @@ import threading
 import unittest
 from unittest.mock import patch
 
+from external_admission_fixture import (
+    confirm_and_resume_rpc,
+    confirmed_offline_rpc,
+    offline_execution_quote,
+    offline_network,
+)
+
 from sumika_core.agent.runtime_workers import (
     ExternalHarnessClientWorker,
     ExternalHarnessRouteSource,
@@ -268,6 +275,7 @@ class ExternalHarnessSupervisorTests(unittest.TestCase):
 
 class ExternalHarnessCoreTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(offline_network())
         self.environment = patch.dict("os.environ", {"SUMIKA_DSH_ENABLED": "0"})
         self.environment.start()
 
@@ -280,7 +288,8 @@ class ExternalHarnessCoreTests(unittest.TestCase):
         try:
             catalog = application.rpc("sumika.route.catalog", {"refresh": True})
             route = next(item for item in catalog["routes"] if item["runtime_id"] == "fixture-harness")
-            result = application.rpc(
+            result = confirmed_offline_rpc(
+                self, application,
                 "sumika.route.dispatch",
                 {
                     "route_id": route["route_id"],
@@ -320,7 +329,32 @@ class ExternalHarnessCoreTests(unittest.TestCase):
         try:
             application.rpc("sumika.route.catalog", {"refresh": True})
             route = next(item for item in application.route_supervisor.catalog()["routes"] if item["runtime_id"] == "fixture-harness")
-            armed = application.rpc(
+            with patch.object(application.route_supervisor, "dispatch", wraps=application.route_supervisor.dispatch) as dispatch:
+                for request_key in ("routing_request", "routingRequest", "route_request", "routeRequest"):
+                    with self.subTest(request_key=request_key):
+                        rejected = application._handle_route_boundary_event({
+                            "event_type": "turn.started",
+                            "event_id": f"unarmed-{request_key}",
+                            "session_id": "event-session",
+                            "turn_id": "event-turn",
+                            "dispatch_selected": True,
+                            "dispatchSelected": True,
+                            request_key: {
+                                "parent_session_id": "event-session",
+                                "parent_turn_id": "event-turn",
+                                "route_id": route["route_id"],
+                                "question": "must not dispatch from event payload",
+                                "auto_dispatch": True,
+                                "confirmed": True,
+                                "quota_consent": True,
+                            },
+                        })
+                        self.assertEqual(rejected["reason"], "no-routing-request")
+                        dispatch.assert_not_called()
+            self.assertEqual([name for name, _ in client.calls if name in {"create", "prompt"}], [])
+            self.enterContext(offline_execution_quote(application, "sumika.route.arm"))
+            armed = confirm_and_resume_rpc(
+                self, application,
                 "sumika.route.arm",
                 {
                     "parent_session_id": "event-session",
@@ -334,6 +368,7 @@ class ExternalHarnessCoreTests(unittest.TestCase):
                 },
             )
             self.assertTrue(armed["armed"])
+            self.assertEqual([name for name, _ in client.calls if name in {"create", "prompt"}], [])
             first = application._handle_route_boundary_event(
                 {
                     "event_type": "turn.started",
@@ -353,6 +388,7 @@ class ExternalHarnessCoreTests(unittest.TestCase):
                 }
             )
             self.assertEqual(duplicate["reason"], "no-routing-request")
+            self.assertEqual(sum(name == "prompt" for name, _ in client.calls), 1)
         finally:
             application.close()
 

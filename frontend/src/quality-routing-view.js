@@ -30,7 +30,7 @@ export function formatFundingQuote(quote) {
   return quote.free === true ? `${label} · 预计费用 ¥0` : `${label} · 费用待核对`;
 }
 
-export function createQualityRoutingView({ escapeHtml, renderConsultation, renderPageFrame, state }) {
+export function createQualityRoutingView({ escapeHtml, renderConsultation, renderPageFrame, state, includeBenefits = true }) {
   const quality = () => state.qualityRouting;
   const catalog = () => quality().catalog || { candidates: [], capabilities: {} };
   const candidates = () => Array.isArray(catalog().candidates) ? catalog().candidates : [];
@@ -54,7 +54,7 @@ export function createQualityRoutingView({ escapeHtml, renderConsultation, rende
     const accounts = (refresh?.accounts?.funding?.projections || []).map((account) => `<div><strong>${escapeHtml(account.provider)}</strong><span>${escapeHtml(({ grant: "赠送额度", purchased: "已购资源包", cash: "现金余额", unknown: "来源待核对" })[account.source] || "来源待核对")} · ${account.fresh && account.entitlement_active ? "观测有效" : "待刷新或已到期"}</span><small>余额 ${escapeHtml(decimal(account.balance))} ${escapeHtml(account.unit)} · 可预留 ${escapeHtml(decimal(account.available))}</small><small>在途及待对账 ${escapeHtml(decimal(account.inflight_and_unsettled))} · 未取得逐请求账单时保留费用估算</small><small>观察：${escapeHtml(date(account.observed_at))} · 数据有效至：${escapeHtml(date(account.expires_at))}</small></div>`).join("");
     const portalReason = (reason) => ({ "account-binding-unverified": "尚未验证网页与 API 为同一账户", "model-cost-category-unverified": "尚未核实每个型号的额度消耗", "absolute-free-usage-quota-not-displayed": "官网未提供可计算的剩余额度", "login-required": "请先登录账户", "browser-not-connected": "账户浏览器尚未连接" })[reason] || "账户、计价与扣费证据未齐全，暂不自动路由";
     const portals = (refresh?.accounts?.portals || []).map((portal) => `<div><strong>${escapeHtml(portal.provider_profile_id)}</strong><span>账户权益 · ${portal.fresh ? "观测有效" : "待刷新"} · 仅观察</span><small>可见余额 ${escapeHtml(decimal(portal.available_balance))} ${escapeHtml(portal.unit || "")}</small>${portal.used_percent != null ? `<small>已用 ${escapeHtml(decimal(portal.used_percent))}% · 精确剩余额度未知</small>` : ""}<small>${escapeHtml(portalReason(portal.reason))}</small><small>观察：${escapeHtml(date(portal.observed_at))}</small></div>`).join("");
-    return `<details class="quality-refresh"><summary>模型资源与刷新状态</summary><p>刷新不调用 AI；健康检查与评测另行授权。应用关闭时不刷新上游。</p>${resolution}<button type="button" class="ghost-button" data-model-refresh ${quality().refreshBusy ? "disabled" : ""}>${quality().refreshBusy ? "正在刷新…" : "检查价格与额度"}</button><p role="status">${escapeHtml(quality().refreshNotice || "")}</p><div class="quality-refresh-grid">${jobs || "尚未读取刷新状态。"}${accounts}${portals}${freeProfiles}${resources}${observations}</div></details>${renderBenefitsSection(state.benefits)}`;
+    return `<details class="quality-refresh"><summary>模型资源与刷新状态</summary><p>刷新不调用 AI；健康检查与评测另行授权。应用关闭时不刷新上游。</p>${resolution}<button type="button" class="ghost-button" data-model-refresh ${quality().refreshBusy ? "disabled" : ""}>${quality().refreshBusy ? "正在刷新…" : "检查价格与额度"}</button><p role="status">${escapeHtml(quality().refreshNotice || "")}</p><div class="quality-refresh-grid">${jobs || "尚未读取刷新状态。"}${accounts}${portals}${freeProfiles}${resources}${observations}</div></details>${includeBenefits ? renderBenefitsSection(state.benefits) : ""}`;
   }
 
   function renderQualitySettings() {

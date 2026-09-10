@@ -36,6 +36,7 @@ class ServerTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.port = self.server.server_address[1]
+        self.application.quality.role_runtime = lambda assistant_id: None
 
     def tearDown(self):
         self.server.shutdown()
@@ -164,7 +165,8 @@ class ServerTests(unittest.TestCase):
             },
         )
         second_request = provider.requests[-1]
-        self.assertEqual([message.role for message in second_request.messages], ["system", "user"])
+        self.assertEqual([message.role for message in second_request.messages], ["system", "user", "assistant", "user"])
+        self.assertEqual(second_request.messages[-1].content, "继续")
 
     def test_tauri_cross_origin_preflight_is_allowed(self):
         status, headers, body = self.request_bytes("OPTIONS", "/rpc", {"Origin": "http://tauri.localhost"})

@@ -34,6 +34,7 @@ OpenAI-compatible / external-process providers
 - [Security](security.md)：本地服务、凭据、权限和数据边界。
 - [Debugging](debugging.md)：日志、诊断、事件和恢复信号。
 - [Agent observability](agent-observability.md)：日用遥测、插件对比和自进化评估闸门。
+- [可复用组件](reusable-components.md)：本轮规划的核心、适配器、装配入口边界及独立验收；不表示已提取或发布。
 - [需求基线](../requirements/README.md)：长期产品意图、重构验收标准和模型策略契约。
 
 DSH 是当前 [Agent Runtime](agent-runtime.md) 的生产 adapter；其固定协议、隔离

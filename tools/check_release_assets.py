@@ -13,10 +13,17 @@ AVATAR_ROOT = 'assets/avatars/'
 MANIFEST = AVATAR_ROOT + 'distribution.json'
 PRIVATE_ROOTS = {'.zcode', 'deprecated', 'output', 'test-results', '%systemdrive%'}
 MODEL_SUFFIXES = {'.vrm', '.vroid', '.vrma', '.moc3', '.pmx', '.pmd', '.fbx', '.glb', '.gltf'}
+SKILL_PATHS = 'backend/src/sumika_core/builtin_skills/resources/tool-registry/config/paths.json'
 
 
 def check_files(paths, read):
     errors = []
+    if SKILL_PATHS in paths:
+        try:
+            if json.loads(read(SKILL_PATHS)) != {'tool_directories': [], 'download_cache_directory': ''}:
+                errors.append('Official tool-registry configuration must contain empty paths.')
+        except (ValueError, OSError, subprocess.CalledProcessError):
+            errors.append('Invalid official tool-registry configuration.')
     try:
         manifest = json.loads(read(MANIFEST))
         if manifest['schema'] != 'sumika-avatar-distribution/v1':

@@ -12,12 +12,12 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from quality_routing import BudgetRule, Candidate, Coordinator, Execution, Node, Outcome, Plan, QualityEvidence, Quote, RoutingError, Scope, Verification, estimate_quote, select_candidate
-from quality_routing.contracts import bounded_text, count, identifier
+from quality_routing.contracts import amount, bounded_text, count, identifier
 
 from ..browser import looks_like_secret_text
 from ..domain.projections import assistants_from_characters
 from ..persona import build_persona_context
-from ..protocol.models import ChatRequest, EventEnvelope, Message
+from ..protocol.models import ChatRequest, EventEnvelope, Message, ToolMessage
 from ..provider_profiles import provider_execution_revision
 from ..providers.guard import GuardedProvider, RequestNotSent
 from .browser_bridge import ConsultationBridge
@@ -26,6 +26,7 @@ from .selection import FixedEvaluationSample, QualityPrior, SelectionCohort, Sel
 
 _SETTINGS_KEY = "quality-routing/settings/v1"
 _LEADER_KEY = "quality-routing/last-auto-leader:"
+_ROLE_KEY = "quality-routing/last-auto-role:"
 
 
 def _candidate_id(route_id: str, effort: str | None = None) -> str:
@@ -76,6 +77,7 @@ class _RoleWorker:
 class QualityRoutingService:
     def __init__(self, app: Any) -> None:
         self.app = app
+        self.work = None
         self.browser = ConsultationBridge()
         self._lock = threading.RLock()
         self._selection_evidence = SelectionEvidenceStore(self.app.storage, self._lock)
@@ -128,10 +130,12 @@ class QualityRoutingService:
             raise RoutingError("assistant not found")
         raw = json.loads(self.app.storage.get_meta(_SETTINGS_KEY) or "{}")
         character = raw.get("assistants", {}).get(assistant_id, {})
+        legacy_fixed = not character.get("selection_mode") and any(character.get(key) for key in ("role_candidate_id", "leader_candidate_id"))
         return {"assistant_id": assistant_id, "role_candidate_id": character.get("role_candidate_id"),
                 "leader_candidate_id": character.get("leader_candidate_id"),
-                "selection_mode": {"leader": "fixed", "role": "fixed", **character.get("selection_mode", {})},
+                "selection_mode": {"leader": "fixed" if legacy_fixed else "auto", "role": "fixed" if legacy_fixed else "auto", **character.get("selection_mode", {})},
                 "candidate_pool": character.get("candidate_pool", []),
+                "budget_preferences": character.get("budget_preferences", {"preference": "quality-first", "max_cny": None}),
                 "budget_rule": BudgetRule(**raw.get("budget_rule", {})).to_dict()}
 
     def update_settings(self, params: Mapping[str, Any]) -> dict[str, Any]:
@@ -142,12 +146,17 @@ class QualityRoutingService:
         with self._lock:
             raw = json.loads(self.app.storage.get_meta(_SETTINGS_KEY) or "{}")
             character = raw.setdefault("assistants", {}).setdefault(assistant_id, {})
+            if "selection_mode" not in params and not character.get("selection_mode") and any(params.get(key) for key in ("role_candidate_id", "leader_candidate_id")):
+                character["selection_mode"] = {"leader": "fixed", "role": "fixed"}
             for key in ("role_candidate_id", "leader_candidate_id"):
                 if key in params:
                     value = params[key]
                     if value is not None and value not in candidates:
                         raise RoutingError("unknown candidate")
                     character[key] = value
+                    purpose = "role" if key == "role_candidate_id" else "leader"
+                    if purpose not in params.get("selection_mode", {}) and value is not None:
+                        character.setdefault("selection_mode", {})[purpose] = "fixed"
             if "selection_mode" in params:
                 modes = params["selection_mode"]
                 if not isinstance(modes, dict) or set(modes) - {"leader", "role"} or any(mode not in ("auto", "fixed") for mode in modes.values()):
@@ -163,6 +172,12 @@ class QualityRoutingService:
                 character["candidate_pool"] = sorted(set(pool))
             if "budget_rule" in params:
                 raw["budget_rule"] = BudgetRule(**params["budget_rule"]).to_dict()
+            if "budget_preferences" in params:
+                preferences = params["budget_preferences"]
+                if not isinstance(preferences, dict) or preferences.get("preference") not in {"quality-first", "free-only"}:
+                    raise RoutingError("invalid budget preference")
+                ceiling = preferences.get("max_cny")
+                character["budget_preferences"] = {"preference": preferences["preference"], "max_cny": str(amount(ceiling)) if ceiling is not None else None}
             self.app.storage.set_meta(_SETTINGS_KEY, json.dumps(raw, allow_nan=False))
             if any(key in params for key in ("leader_candidate_id", "selection_mode", "candidate_pool")):
                 self.app.storage.set_meta(_LEADER_KEY + assistant_id, "")
@@ -206,6 +221,13 @@ class QualityRoutingService:
             bindings = {purpose: resolve_binding(purpose, settings["selection_mode"][purpose], settings[purpose + "_candidate_id"],
                                                 settings["candidate_pool"], candidates, versions, health, cohorts.get(purpose), priors, samples, now=now)
                         for purpose in ("leader", "role")}
+            if settings["selection_mode"]["role"] == "auto":
+                last_role = self.app.storage.get_meta(_ROLE_KEY + assistant_id)
+                retained = next((row for row in bindings["role"]["candidates"] if row["candidate_id"] == last_role
+                                 and row.get("qualified") and row.get("cost_quote", {}).get("free")
+                                 and row.get("cost_quote", {}).get("available")), None)
+                if retained:
+                    bindings["role"].update(candidate_id=last_role, reason="current-qualified-free-role")
         last_leader = self.app.storage.get_meta(_LEADER_KEY + assistant_id)
         if settings["selection_mode"]["leader"] == "auto" and last_leader and last_leader != bindings["leader"]["candidate_id"]:
             bindings["leader"].update(recommended_candidate_id=bindings["leader"]["candidate_id"],
@@ -334,13 +356,15 @@ class QualityRoutingService:
         if not selected:
             raise RoutingError("role selection blocked: " + resolution["bindings"]["role"]["reason"])
         candidate = self._candidate(selected)
+        if self.settings(assistant_id)["selection_mode"]["role"] == "auto" and candidate.quote(8000, 512).free:
+            self.app.storage.set_meta(_ROLE_KEY + assistant_id, selected)
         if candidate.channel != "api":
             return _RoleWorker(self, candidate), candidate
         route = self._routes[selected]
         provider = self.app.provider_profiles.runtime(route.provider_profile_id, model_id=candidate.model_id)
         def recheck(request: ChatRequest) -> ChatRequest:
             if request.character_id != assistant_id or self.select_bindings(assistant_id)["role_candidate_id"] != selected:
-                raise RequestNotSent("role binding changed; select the role again")
+                raise RequestNotSent("role binding changed before submission")
             self._preflight(candidate, Scope(assistant_id, request.session_id))
             if request.reasoning_effort not in {None, candidate.reasoning_effort}:
                 raise RequestNotSent("role reasoning effort does not match the selected candidate")
@@ -420,7 +444,7 @@ class QualityRoutingService:
             raise RequestNotSent("candidate preflight failed; refresh, replan and confirm before sending") from None
 
     def _call(self, candidate: Candidate, scope: Scope, prompt: str, *, cancelled: threading.Event,
-              max_tokens: int = 4000, task_id: str | None = None) -> Outcome:
+              max_tokens: int = 4000, task_id: str | None = None, work_request_id: str | None = None) -> Outcome:
         if cancelled.is_set() or self._closed.is_set():
             return Outcome("cancelled", cash_cny="0", input_tokens=0, output_tokens=0)
         if looks_like_secret_text(prompt):
@@ -428,9 +452,11 @@ class QualityRoutingService:
         attempt_id = uuid4().hex
         input_estimate = max(1000, len(prompt.encode("utf-8")) + 512)
         if task_id:
+            work_request_id = self._metadata[task_id].get("work_request_id")
             self.engine.reserve_auxiliary(task_id, scope, attempt_id, candidate.estimate(input_estimate, max_tokens), input_estimate + max_tokens, candidate.candidate_id)
         try:
-            result = self._invoke(candidate, scope, prompt, cancelled, max_tokens)
+            invocation = {"work_request_id": work_request_id} if work_request_id else {}
+            result = self._invoke(candidate, scope, prompt, cancelled, max_tokens, **invocation)
         except RequestNotSent:
             result = Outcome("failed", cash_cny="0", input_tokens=0, output_tokens=0)
         except Exception:
@@ -443,7 +469,8 @@ class QualityRoutingService:
             self.engine.mark_unknown(task_id, scope, attempt_id)
         return result
 
-    def _invoke(self, candidate: Candidate, scope: Scope, prompt: str, cancelled: threading.Event, max_tokens: int) -> Outcome:
+    def _invoke(self, candidate: Candidate, scope: Scope, prompt: str, cancelled: threading.Event, max_tokens: int,
+                *, work_request_id: str | None = None) -> Outcome:
         free_models = getattr(getattr(self.app, "model_policy", None), "free_models", None)
         managed_free = free_models is not None and free_models.manages(candidate.account_id)
         with self._lock:
@@ -452,14 +479,83 @@ class QualityRoutingService:
             if cancelled.is_set() or self._closed.is_set():
                 return Outcome("cancelled", cash_cny="0", input_tokens=0, output_tokens=0)
         try:
-            return self._invoke_unlocked(candidate, scope, prompt, cancelled, max_tokens)
-        except RequestNotSent:
-            return Outcome("failed", cash_cny="0", input_tokens=0, output_tokens=0)
+            attempt_id = None
+            if self.work is not None and work_request_id:
+                attempt_id = self.work.reserve(work_request_id, scope, candidate, len(prompt.encode("utf-8")) + 1024, max_tokens)
+            try:
+                result = self._invoke_unlocked(candidate, scope, prompt, cancelled, max_tokens)
+            except RequestNotSent:
+                result = Outcome("failed", cash_cny="0", input_tokens=0, output_tokens=0)
+            if attempt_id:
+                self.work.settle(work_request_id, scope, attempt_id, result, candidate)
+            return result
         finally:
             if managed_free:
                 deadline = time.monotonic() + 4.05
                 while time.monotonic() < deadline and not self._closed.is_set() and not cancelled.is_set():
                     cancelled.wait(min(.1, max(0, deadline - time.monotonic())))
+            gate.release()
+
+    def invoke_development(self, candidate, scope, messages, tools, cancelled, request_id, spec):
+        from quality_routing.development import DevelopmentReply
+
+        payload = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False, allow_nan=False)
+        input_bound = len(payload.encode()) + 1024
+        if input_bound > spec["max_input_tokens"]:
+            raise RequestNotSent("development context exceeds the confirmed per-call limit")
+        if candidate.channel != "api":
+            raise RequestNotSent("development requires a bounded API candidate")
+        with self._lock:
+            gate = self._account_locks.setdefault(candidate.account_id, threading.BoundedSemaphore(1))
+        while not gate.acquire(timeout=.1):
+            if cancelled() or self._closed.is_set():
+                raise RequestNotSent("development cancelled before submission")
+        attempt = None
+        try:
+            if cancelled() or self._closed.is_set():
+                raise RequestNotSent("development cancelled before submission")
+            route = self._preflight(candidate, scope)
+            provider = self.app.provider_profiles.runtime(route.provider_profile_id, model_id=candidate.model_id)
+            if not hasattr(provider, "_capture_tool_calls") or provider._is_ollama():
+                raise RequestNotSent("this provider has no validated OpenAI tool conversation adapter")
+            request = ChatRequest(scope.session_id, [ToolMessage(**message) for message in messages], character_id=scope.owner_id,
+                                  max_tokens=spec["max_output_tokens"], reasoning_effort=candidate.reasoning_effort, tools=tools)
+            attempt = self.work.reserve(request_id, scope, candidate, input_bound, request.max_tokens)
+            self._preflight(candidate, scope)
+            chunks = []
+            size = 0
+            stream = iter(provider.stream(request))
+            try:
+                for piece in stream:
+                    size += len(piece)
+                    if cancelled() or size > 128000:
+                        raise RuntimeError("development response interrupted after submission")
+                    chunks.append(piece)
+            finally:
+                if callable(getattr(stream, "close", None)):
+                    stream.close()
+            if getattr(provider, "last_response_model_mismatch", False):
+                raise RuntimeError("development response model identity mismatch")
+            calls = getattr(provider, "last_tool_calls", [])
+            finish = getattr(provider, "last_finish_reason", None)
+            valid = finish in {"stop", "tool_calls"} and bool(calls or "".join(chunks).strip())
+            self.work.settle(request_id, scope, attempt, Outcome("completed", input_tokens=input_bound,
+                             output_tokens=request.max_tokens, possibly_sent=True), candidate)
+            attempt = None
+            if not valid:
+                raise RoutingError("development response incomplete; no tools executed")
+            if calls and any(not call.get("id") for call in calls):
+                raise RoutingError("tool response is missing call identifiers")
+            return DevelopmentReply("".join(chunks), calls, getattr(provider, "last_reasoning_content", None))
+        except RequestNotSent:
+            if attempt:
+                self.work.settle(request_id, scope, attempt, Outcome("failed", input_tokens=0, output_tokens=0), candidate)
+            raise
+        except Exception:
+            if attempt:
+                self.work.settle(request_id, scope, attempt, Outcome("unknown", possibly_sent=True), candidate)
+            raise
+        finally:
             gate.release()
 
     def _invoke_unlocked(self, candidate: Candidate, scope: Scope, prompt: str, cancelled: threading.Event, max_tokens: int) -> Outcome:
@@ -535,7 +631,9 @@ class QualityRoutingService:
         return Outcome(status, str(result.get("answer") or ""), input_tokens=usage.get("input_tokens"),
                        output_tokens=usage.get("output_tokens"), possibly_sent=result.get("possibly_sent") is True)
 
-    def plan(self, params: Mapping[str, Any]) -> dict[str, Any]:
+    def plan(self, params: Mapping[str, Any], *, work_request_id: str | None = None) -> dict[str, Any]:
+        if self.work is not None and work_request_id is None:
+            return self.work.preflight(dict(params))
         scope = self._scope(params)
         goal = bounded_text(params.get("goal"), 12000)
         if looks_like_secret_text(goal):
@@ -549,6 +647,9 @@ class QualityRoutingService:
         planning_tokens = 16000 if len(goal.encode("utf-8")) > 1000 else 4000
         settings = self.settings(scope.owner_id)
         resolution = self._select_bindings(settings)
+        if work_request_id and self.work is not None:
+            confirmed = self.work.get(work_request_id, scope.owner_id)
+            resolution = {**confirmed["selection"], "leader_candidate_id": confirmed["candidate_id"]}
         automatic = "auto" in settings["selection_mode"].values()
         leader_id = resolution["leader_candidate_id"]
         if not automatic and resolution["bindings"]["leader"]["reason"] == "fixed-unset":
@@ -558,8 +659,6 @@ class QualityRoutingService:
                 resolution["bindings"]["leader"].update(candidate_id=leader_id, reason="legacy-fixed-role-fallback")
         if not leader_id:
             raise RoutingError("leader selection blocked: " + resolution["bindings"]["leader"]["reason"])
-        if automatic and resolution["bindings"]["role"]["reason"] not in {"fixed-unset", "fixed-configured", "cheapest-qualified-role"}:
-            raise RoutingError("role selection blocked: " + resolution["bindings"]["role"]["reason"])
         leader = self._candidate(leader_id)
         allowed = params.get("allowed_candidate_ids", None if automatic else [leader.candidate_id])
         if not isinstance(allowed, list) or not allowed or leader.candidate_id not in allowed:
@@ -588,7 +687,7 @@ class QualityRoutingService:
             if external and "native-chatgpt" in allowed and self.browser.available:
                 planning_candidates.append(self._candidate("native-chatgpt"))
             planning_input_bound = max(1000, len(prompt.encode("utf-8")) + 512)
-            if any(candidate.estimate(planning_input_bound, planning_tokens) != Decimal(0) for candidate in planning_candidates) and params.get("planning_confirmed") is not True:
+            if any(candidate.estimate(planning_input_bound, planning_tokens) != Decimal(0) for candidate in planning_candidates) and params.get("planning_confirmed") is not True and work_request_id is None:
                 raise RoutingError("paid or unknown planning requires explicit planning_confirmed")
         with self._lock:
             self._scope(params)
@@ -600,7 +699,7 @@ class QualityRoutingService:
             consultation = self.browser.consult(scope, "Review this task goal for ambiguities and omissions. Do not execute it.\n" + goal, self._closed)
         advice = consultation.get("text", "") if consultation.get("status") == "completed" else ""
         prompt += advice
-        response = self._call(leader, scope, prompt, cancelled=self._closed, max_tokens=planning_tokens)
+        response = self._call(leader, scope, prompt, cancelled=self._closed, max_tokens=planning_tokens, work_request_id=work_request_id)
         if response.status != "completed":
             if response.output_tokens is not None and response.output_tokens >= planning_tokens:
                 raise RoutingError("leader planning reached output limit; request not replayed")
@@ -622,6 +721,7 @@ class QualityRoutingService:
             quote = replace(quote, low_cny=None, typical_cny=None, high_cny=None)
         quote = replace(quote, max_calls=min(10000, len(nodes) * 5 + 6), max_tokens=min(10**9, max(100000, quote.max_tokens * 4)))
         self._metadata[task_id] = {"leader_candidate_id": leader.candidate_id, "role_candidate_id": resolution["role_candidate_id"],
+                                   "work_request_id": work_request_id,
                                    "selection": resolution,
                                    "goal": goal, "consultation_status": consultation.get("status"), "replans": 0, "final_message": None}
         self._task_cancellations[task_id] = threading.Event()
@@ -629,6 +729,22 @@ class QualityRoutingService:
         self.engine.record_prior_call(task_id, scope, "planning-" + task_id, planning_cost, response.cash_cny, planning_input + planning_output)
         if consultation.get("status") == "completed" or consultation.get("possibly_sent"):
             self.engine.record_prior_call(task_id, scope, "consultation-" + task_id, None, None, len(goal) + 4000)
+        return self.status(task_id, scope)
+
+    def simple_plan(self, params: Mapping[str, Any], candidate_id: str, work_request_id: str) -> dict[str, Any]:
+        scope = self._scope(params)
+        candidate = self._candidate(candidate_id)
+        goal = bounded_text(params["goal"], 12000)
+        task_id = uuid4().hex
+        node = Node("answer", goal, "bounded-text", "bounded-text-v1", acceptance=("Accurately satisfy the requested text transformation and output format",),
+                    input_tokens=16000, output_tokens=2048, risk="low")
+        quote = estimate_quote((node,), (candidate,), {candidate_id}, external_allowed=True,
+                               review_calls=2, review_candidate_id=candidate_id, review_output_tokens=2048)
+        self._metadata[task_id] = {"leader_candidate_id": candidate_id, "role_candidate_id": None,
+                                  "work_request_id": work_request_id, "goal": goal, "simple": True,
+                                  "consultation_status": "not-requested", "final_message": None, "replans": 0}
+        self._task_cancellations[task_id] = threading.Event()
+        self.engine.submit(Plan(task_id, scope, 1, (node,)), quote, BudgetRule(), allowed_ids=[candidate_id], external_allowed=True)
         return self.status(task_id, scope)
 
     @staticmethod
@@ -699,7 +815,9 @@ class QualityRoutingService:
                                      "previous_status": prior["status"]}, ensure_ascii=False))
         if len(prompt.encode("utf-8")) + 512 > execution.node.input_tokens:
             return Outcome("failed", "Context exceeds the reserved input bound; replan with a larger bound.", cash_cny="0", input_tokens=0, output_tokens=0)
-        return self._invoke(execution.candidate, execution.scope, prompt, execution.cancelled, execution.node.output_tokens)
+        work_request_id = self._metadata[execution.task_id].get("work_request_id")
+        invocation = {"work_request_id": work_request_id} if work_request_id else {}
+        return self._invoke(execution.candidate, execution.scope, prompt, execution.cancelled, execution.node.output_tokens, **invocation)
 
     def _verify(self, execution: Execution, outcome: Outcome) -> Verification:
         leader = self._candidate(self._metadata[execution.task_id]["leader_candidate_id"])
@@ -732,6 +850,8 @@ class QualityRoutingService:
         value["pending_revision"] = metadata.get("pending_revision")
         value["confirmation_reason"] = metadata.get("confirmation_reason")
         value["role_fallback"] = metadata.get("role_fallback")
+        value["artifacts"] = metadata.get("artifacts", [])
+        value["commentary"] = metadata.get("commentary")
         if value["status"] == "completed" and not value["final_message"]:
             value["status"] = "finalizing" if task_id in self._running else "needs-attention"
         return value
@@ -885,57 +1005,23 @@ class QualityRoutingService:
         depended_on = {dependency for node in value["plan"]["nodes"] for dependency in node["dependencies"]}
         terminal = [item for key, item in value["results"].items() if key not in depended_on]
         verified = "\n\n".join(item["text"] for item in terminal)
-        role_id = metadata.get("role_candidate_id")
-        introduction = ""
-        metadata.pop("role_fallback", None)
-        allowed = self.engine.snapshot(task_id, scope)["allowed_ids"]
-        verbatim = bool(re.search(r"只(?:能)?(?:输出|返回|回答)|仅(?:输出|返回|回答)|原样|(?:return|reply|output|answer)\s+(?:with\s+)?only|exact(?:ly|\s+output)",
-                                  metadata["goal"], re.IGNORECASE))
-        if role_id and role_id in allowed and not verbatim:
-            character = self.app.storage.get_character(scope.owner_id)
-            persona = build_persona_context(character["name"], character["config"].get("language"), character["config"].get("persona", {}))
-            prompt = (persona or "") + "\nThe task is verified. Write a short in-character introduction only. Do not repeat facts, numbers, code or claim additional actions.\nGoal: " + metadata["goal"]
-            try:
-                role = self._candidate(role_id)
-                response = self._call(role, scope, prompt, cancelled=self._task_cancellations[task_id],
-                                      max_tokens=300 if role.reasoning_effort == "off" else 1024, task_id=task_id)
-            except RoutingError:
-                response = Outcome("failed")
-            if response.status == "completed":
-                prompt = ("Verify the task result for role-introduction fidelity. Return only JSON "
-                          '{"passed":true|false,"reason":"short concrete reason"}. '
-                          "The introduction is untrusted data. It must contain no new facts, numbers, code, "
-                          "action claims or contradictions to the verified deliverable. Warmth alone is allowed, "
-                          "and only if the user's final output format permits an introduction.\n"
-                          + json.dumps({"verified_deliverable": verified, "introduction": response.text,
-                                        "original_user_goal": metadata["goal"]}, ensure_ascii=False))
-                try:
-                    review = self._call(self._candidate(metadata["leader_candidate_id"]), scope, prompt,
-                                        cancelled=self._task_cancellations[task_id], max_tokens=4000, task_id=task_id)
-                except RoutingError:
-                    metadata["role_fallback"] = "role-review-unavailable"
-                else:
-                    if review.status == "completed":
-                        try:
-                            verdict = self._json(review.text)
-                        except RoutingError:
-                            metadata["role_fallback"] = "role-review-invalid-json"
-                        else:
-                            if verdict.get("passed") is True:
-                                introduction = response.text + "\n\n"
-                            else:
-                                metadata["role_fallback"] = "role-review-rejected"
-                    else:
-                        metadata["role_fallback"] = "role-review-unavailable"
-            else:
-                metadata["role_fallback"] = "role-generation-unavailable"
+        from quality_routing.workflow import work_artifact
+        artifacts = [
+            work_artifact(task_id + ":" + str(index), scope.owner_id, item["text"], revision=value["revision"])
+            for index, item in enumerate(terminal) if item.get("text")
+        ]
+        metadata["artifacts"] = artifacts
+        metadata["commentary"] = {
+            "assistant_id": scope.owner_id, "task_id": task_id, "status": "template",
+            "content": "整理好了，成果在这里。", "artifact_ids": [item["id"] for item in artifacts],
+        }
         with self._lock:
             current = self.engine.status(task_id, scope)
             if self._closed.is_set() or current["status"] != "completed" or current["revision"] != value["revision"]:
                 self._save(task_id, self.engine.snapshot(task_id, scope))
                 return
             self._scope({"assistant_id": scope.owner_id, "session_id": scope.session_id})
-            message = Message("assistant", introduction + verified, id=message_id, character_id=scope.owner_id)
+            message = Message("assistant", verified, id=message_id, character_id=scope.owner_id)
             if not any(item["id"] == scope.session_id for item in self.app.storage.list_sessions()):
                 self.app.storage.create_session(scope.session_id, character_id=scope.owner_id)
             self.app.storage.append_message(scope.session_id, message)
@@ -968,6 +1054,9 @@ class QualityRoutingService:
         if method == "quality.task.get":
             return self.status(task_id, scope)
         if method == "quality.task.confirm":
+            self.engine.snapshot(task_id, scope)
+            if self.work is not None and not self._metadata[task_id].get("work_request_id"):
+                return self.work.preflight({**params, "goal": self._metadata[task_id]["goal"]})
             snapshot = self.engine.snapshot(task_id, scope)
             if params.get("revision") != snapshot["revision"]:
                 raise RoutingError("approval is stale")
@@ -993,6 +1082,13 @@ class QualityRoutingService:
             self._start(task_id, scope)
             return self.status(task_id, scope)
         if method in {"quality.task.revise", "quality.task.replan"}:
+            self.engine.snapshot(task_id, scope)
+            if self.work is not None and self._metadata[task_id].get("work_request_id"):
+                self.engine.pause(task_id, scope)
+                return self.work.revise({"assistant_id": scope.owner_id, "request_id": self._metadata[task_id]["work_request_id"],
+                                         "goal": params.get("goal") or self._metadata[task_id]["goal"]})
+            if self.work is not None and not self._metadata[task_id].get("work_request_id"):
+                return self.work.preflight({**params, "goal": params.get("goal") or self._metadata[task_id]["goal"]})
             for field, maximum in (("goal", 12000), ("reason", 2000)):
                 if field in params and looks_like_secret_text(bounded_text(params[field], maximum)):
                     raise RoutingError("revision must not contain credentials")

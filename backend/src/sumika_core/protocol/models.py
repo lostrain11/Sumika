@@ -41,6 +41,25 @@ class ChatRequest:
 
 
 @dataclass(slots=True)
+class ToolMessage:
+    role: str
+    content: str
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    tool_call_id: str | None = None
+    reasoning_content: str | None = None
+
+    def wire_dict(self) -> dict[str, Any]:
+        result = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            result["tool_calls"] = self.tool_calls
+        if self.tool_call_id:
+            result["tool_call_id"] = self.tool_call_id
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
+        return result
+
+
+@dataclass(slots=True)
 class ProviderInfo:
     id: str
     name: str

@@ -320,6 +320,7 @@ class OpenAICompatibleProvider(LLMProvider):
         self.last_finish_reason = None
         self.last_reasoning_content_seen = False
         self._tool_fragments = {}
+        self.last_reasoning_content = ""
         if self._is_ollama():
             yield from self._stream_ollama(request)
             return
@@ -327,7 +328,7 @@ class OpenAICompatibleProvider(LLMProvider):
                            and self.model.startswith(("DeepSeek-R1-Distill-", "Qwen3-")) else None)
         payload = {
             "model": self.model,
-            "messages": [{"role": message.role, "content": message.content} for message in request.messages],
+            "messages": [message.wire_dict() if hasattr(message, "wire_dict") else {"role": message.role, "content": message.content} for message in request.messages],
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
             "stream": True,
@@ -398,7 +399,7 @@ class OpenAICompatibleProvider(LLMProvider):
         """Use Ollama's OpenAI endpoint and hide Qwen3 reasoning deltas."""
         payload = {
             "model": self.model,
-            "messages": [{"role": message.role, "content": message.content} for message in request.messages],
+            "messages": [message.wire_dict() if hasattr(message, "wire_dict") else {"role": message.role, "content": message.content} for message in request.messages],
             "temperature": request.temperature,
             # Qwen3 reasoning is returned separately with ``think=low``. Give
             # that hidden channel a modest floor so it cannot consume the
@@ -476,6 +477,10 @@ class OpenAICompatibleProvider(LLMProvider):
                 raise ValueError("invalid tool call index")
             function = call.get("function") or {}
             fragment = self._tool_fragments.setdefault(index, {"name": "", "arguments": ""})
+            if call.get("id"):
+                if not isinstance(call["id"], str) or len(call["id"]) > 200:
+                    raise ValueError("invalid tool call id")
+                fragment["id"] = call["id"]
             for key in ("name", "arguments"):
                 value = function.get(key, "")
                 if not isinstance(value, str):
@@ -516,6 +521,9 @@ class OpenAICompatibleProvider(LLMProvider):
                 delta = choice.get("delta") or choice.get("message") or {}
                 if isinstance(delta, dict) and delta.get("reasoning_content"):
                     self.last_reasoning_content_seen = True
+                    self.last_reasoning_content = getattr(self, "last_reasoning_content", "") + str(delta["reasoning_content"])
+                    if len(self.last_reasoning_content) > 128000:
+                        raise ValueError("reasoning response exceeds limit")
         if not isinstance(payload, dict) or not isinstance(payload.get("usage"), dict):
             return
         usage = payload["usage"]

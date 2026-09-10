@@ -47,7 +47,7 @@ export function createCapabilityPage({ state = {}, escapeHtml = fallbackEscapeHt
     const category = CAPABILITY_CATEGORIES.find((item) => item.id === activeCategory) || CAPABILITY_CATEGORIES[0];
     const cards = layout.groups.find((group) => group.id === category.id)?.added || [];
     const addTile = '<button type="button" class="capability-add-tile" data-capability-open-library title="添加模块" aria-label="添加模块" aria-haspopup="dialog"><span aria-hidden="true">＋</span></button>';
-    const dataNotice = layout.loading ? "正在读取模块目录。" : layout.failed ? "模块目录读取失败。" : "";
+    const dataNotice = layout.loading ? "正在读取模块目录。" : layout.failed ? "模块目录读取失败；未生成替代运行数据。" : "";
     return `<section class="capability-page" data-capability-page data-active-category="${encode(category.id)}">
       <header class="capability-page-header"><div><span class="capability-eyebrow">CAPABILITIES</span><h1>能力</h1></div></header>
       <nav class="capability-tabs" role="tablist" aria-label="能力分类">${CAPABILITY_CATEGORIES.map((item) => `<button type="button" role="tab" id="capability-tab-${encode(item.id)}" aria-controls="capability-panel" data-capability-tab="${encode(item.id)}" aria-selected="${item.id === category.id}" tabindex="${item.id === category.id ? 0 : -1}">${encode(item.label)}</button>`).join("")}</nav>

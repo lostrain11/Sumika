@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import threading
 import time
@@ -8,7 +9,6 @@ import unittest
 from unittest.mock import patch
 
 from quality_routing import Outcome, QualityEvidence, RoutingError, Scope
-from sumika_core.providers.guard import RequestNotSent
 import test_quality_routing as fixtures
 
 
@@ -16,7 +16,7 @@ class ComplexServiceTests(unittest.TestCase):
     setUp = fixtures.QualityHostTests.setUp
     tearDown = fixtures.QualityHostTests.tearDown
 
-    def configure(self, *, failures=0, unknown=None, bad_role=False):
+    def configure(self, *, failures=0, unknown=None, result_text="Fee: 12.50. Quota: unknown. Not executed."):
         cheap = replace(self.route, route_id="cheap", provider_profile_id="cheap-profile",
                         metadata={"model_entry": {"model_id": "synthetic-executor"}})
         self.app.route_supervisor.registered_routes = lambda: (self.route, cheap)
@@ -33,15 +33,12 @@ class ComplexServiceTests(unittest.TestCase):
             if "Return only a JSON object with nodes" in prompt:
                 text = json.dumps({"nodes": self.nodes})
             elif "Verify the task result" in prompt:
-                fail = ("Analyze synthetic constraints" in prompt and rejected < failures or
-                        bad_role and "role-introduction fidelity" in prompt)
+                fail = "Analyze synthetic constraints" in prompt and rejected < failures
                 if fail:
                     rejected += 1
                 text = json.dumps({"passed": not fail, "reason": "synthetic-injected-constraint-fault" if fail else "checked"})
-            elif "short in-character introduction" in prompt:
-                text = "It now costs 10 instead." if bad_role else "Here is the checked result."
             else:
-                text = "Fee: 12.50. Quota: unknown. Not executed."
+                text = result_text
             return Outcome("completed", text, cash_cny="0", input_tokens=100, output_tokens=40)
         self.addCleanup(patch.stopall)
         patch.object(self.service, "_invoke", side_effect=invoke).start()
@@ -150,8 +147,8 @@ class ComplexServiceTests(unittest.TestCase):
         self.assertEqual(result["goal"], "New goal")
         self.assertIsNone(result["pending_revision"])
 
-    def test_unknown_executor_reviewer_replanner_or_role_is_never_resent(self):
-        for location in ("Complete only this task", "Verify the task result", "short in-character introduction", "Revise only affected nodes"):
+    def test_unknown_executor_reviewer_or_replanner_is_never_resent(self):
+        for location in ("Complete only this task", "Verify the task result", "Revise only affected nodes"):
             with self.subTest(location=location):
                 task = self.configure(failures=3 if location == "Revise only affected nodes" else 0, unknown=location)
                 result = self.run_task(task)
@@ -164,77 +161,74 @@ class ComplexServiceTests(unittest.TestCase):
                 self.assertIsNone(result["final_message"])
                 patch.stopall()
 
-    def test_role_cannot_rewrite_checked_facts_and_only_correct_intro_is_kept(self):
-        task = self.configure(bad_role=True)
+    def test_artifact_hash_and_template_commentary_preserve_json_code_and_markdown(self):
+        for content in ('{"fee":"12.50","quota":null}', "```python\nfee = 12.50\n```", "# Checked\n\nFee: 12.50"):
+            with self.subTest(content=content):
+                task = self.configure(result_text=content)
+                result = self.run_task(task)
+                self.assertEqual(result["status"], "completed")
+                self.assertEqual(result["final_message"]["content"], content)
+                self.assertEqual(result["artifacts"], [{
+                    "schema_version": "quality-workflow/v1",
+                    "id": task["task_id"] + ":0:artifact:1",
+                    "task_id": task["task_id"] + ":0",
+                    "assistant_id": "one",
+                    "revision": 1,
+                    "content": content,
+                    "format": "markdown",
+                    "source": "quality",
+                    "sha256": hashlib.sha256(content.encode()).hexdigest(),
+                    "verification": "verified",
+                }])
+                self.assertEqual(result["commentary"], {
+                    "assistant_id": "one", "task_id": task["task_id"], "status": "template",
+                    "content": "整理好了，成果在这里。", "artifact_ids": [task["task_id"] + ":0:artifact:1"],
+                })
+                self.assertFalse(any("short in-character introduction" in prompt or "role-introduction fidelity" in prompt
+                                     for _candidate, prompt in self.calls))
+                patch.stopall()
+
+    def test_unavailable_role_reference_does_not_block_verified_delivery(self):
+        task = self.configure()
+        self.service._metadata[task["task_id"]]["role_candidate_id"] = "removed-role"
         result = self.run_task(task)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["final_message"]["content"], "Fee: 12.50. Quota: unknown. Not executed.")
-        self.assertNotIn("It now costs", result["final_message"]["content"])
-        self.assertTrue(any("role-introduction fidelity" in prompt for candidate, prompt in self.calls))
-        self.assertEqual(result["role_fallback"], "role-review-rejected")
+        self.assertEqual(result["commentary"]["status"], "template")
+        self.assertFalse(any("short in-character introduction" in prompt or "role-introduction fidelity" in prompt
+                             for _candidate, prompt in self.calls))
 
-    def test_role_review_invalid_json_preserves_and_delivers_verified_answer_once(self):
-        for content in ("truncated {", "[]", "private-non-json-review-text"):
-            with self.subTest(content=content):
-                task = self.configure()
-                invoke = self.service._invoke.side_effect
-                def invalid_review(candidate, scope, prompt, cancelled, max_tokens):
-                    if "role-introduction fidelity" in prompt:
-                        return Outcome("completed", content, cash_cny="0", input_tokens=50, output_tokens=20)
-                    return invoke(candidate, scope, prompt, cancelled, max_tokens)
-                self.service._invoke.side_effect = invalid_review
-                self.service._metadata[task["task_id"]]["workflow_error"] = "leader response must be a JSON object"
-                result = self.run_task(task)
-                self.assertEqual(result["status"], "completed")
-                self.assertEqual(result["final_message"]["content"], result["results"]["draft"]["text"])
-                self.assertEqual(result["role_fallback"], "role-review-invalid-json")
-                self.assertIsNone(result["workflow_error"])
-                self.assertEqual(result["budget"]["reservations"], {})
-                payload = next(payload for payload in self.storage.load_quality_tasks() if payload["snapshot"]["task_id"] == task["task_id"])
-                self.assertEqual(payload["metadata"]["role_fallback"], "role-review-invalid-json")
-                before = len(self.calls)
-                self.service._run(task["task_id"], Scope("one", "session-one"))
-                self.assertEqual(len(self.calls), before)
-                self.assertEqual(sum(message["id"] == result["final_message"]["id"] for message in self.storage.list_messages("session-one")), 1)
-                patch.stopall()
+    def test_role_generation_failure_cannot_block_template_delivery(self):
+        task = self.configure()
+        invoke = self.service._invoke.side_effect
 
-    def test_role_review_budget_rejection_or_known_failure_preserves_verified_answer(self):
-        for failure in ("budget", "not-sent", "failed", "malformed-verdict"):
-            with self.subTest(failure=failure):
-                task = self.configure()
-                call = self.service._call
-                def failed_review(candidate, scope, prompt, **kwargs):
-                    if "role-introduction fidelity" in prompt:
-                        if failure == "budget":
-                            raise RoutingError("budget-call-limit")
-                        if failure == "malformed-verdict":
-                            return Outcome("completed", '{"passed":"true"}', cash_cny="0", input_tokens=0, output_tokens=0)
-                        if failure == "not-sent":
-                            with patch.object(self.service, "_invoke", side_effect=RequestNotSent("preflight rejected")):
-                                return call(candidate, scope, prompt, **kwargs)
-                        return Outcome("failed", cash_cny="0", input_tokens=0, output_tokens=0)
-                    return call(candidate, scope, prompt, **kwargs)
-                with patch.object(self.service, "_call", side_effect=failed_review):
-                    result = self.run_task(task)
-                self.assertEqual(result["status"], "completed")
-                self.assertEqual(result["final_message"]["content"], result["results"]["draft"]["text"])
-                self.assertEqual(result["role_fallback"], "role-review-rejected" if failure == "malformed-verdict" else "role-review-unavailable")
-                self.assertEqual(result["budget"]["reservations"], {})
-                self.assertIsNone(result["workflow_error"])
-                patch.stopall()
+        def unavailable_role(candidate, scope, prompt, cancelled, max_tokens):
+            if "short in-character introduction" in prompt:
+                return Outcome("failed", cash_cny="0", input_tokens=0, output_tokens=0)
+            return invoke(candidate, scope, prompt, cancelled, max_tokens)
 
-    def test_role_review_unknown_does_not_replay_and_keeps_verified_results(self):
-        task = self.configure(unknown="role-introduction fidelity")
+        self.service._invoke.side_effect = unavailable_role
+        result = self.run_task(task)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["final_message"]["content"], result["artifacts"][0]["content"])
+        self.assertEqual(result["commentary"]["status"], "template")
+        self.assertFalse(any("short in-character introduction" in prompt for _candidate, prompt in self.calls))
+
+    def test_finalization_uses_no_role_call_or_reservation(self):
+        task = self.configure(unknown="short in-character introduction")
         result = self.run_task(task)
         self.assertEqual(set(result["states"].values()), {"completed"})
         self.assertEqual(result["results"]["draft"]["text"], "Fee: 12.50. Quota: unknown. Not executed.")
-        self.assertIsNone(result["final_message"])
-        self.assertEqual(result["role_fallback"], "role-review-unavailable")
-        self.assertTrue(result["unknown_attempts"])
-        self.assertTrue(result["budget"]["reservations"])
+        self.assertEqual(result["final_message"]["content"], result["results"]["draft"]["text"])
+        self.assertEqual(result["budget"]["reservations"], {})
+        self.assertFalse(result["unknown_attempts"])
+        self.assertFalse(any("short in-character introduction" in prompt or "role-introduction fidelity" in prompt
+                             for _candidate, prompt in self.calls))
         before = len(self.calls)
         self.service._run(task["task_id"], Scope("one", "session-one"))
         self.assertEqual(len(self.calls), before)
+        self.assertEqual(sum(message["id"] == result["final_message"]["id"]
+                             for message in self.storage.list_messages("session-one")), 1)
 
     def test_goal_change_drains_inflight_and_reuses_verified_result_without_dispatching_old_dependents(self):
         task = self.configure()

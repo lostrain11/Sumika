@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openPage } from "./helpers/navigation.js";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 
@@ -29,10 +30,12 @@ test("质量协作仅计划，确认后才执行，且 RPC 带固定角色会话
   });
   await page.addInitScript(() => localStorage.setItem("sumika.onboarded.v1", "1"));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await expect(page.locator(".scene-primary-nav")).toBeVisible();
+  await expect(page.locator(".wv2-topbar")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("quality-routing-initial.png") });
-  await page.locator('.scene-primary-nav [data-page="Agent"]').click();
-  await page.locator('.drawer-tabs [data-page="Tasks"]').click();
+  await openPage(page, "Tasks");
+  const sessionId = await page.locator("[data-conversation-select].active").getAttribute("data-conversation-select");
+  expect(sessionId).toBeTruthy();
+  task.scope.session_id = sessionId;
   await expect(page.locator("#quality-plan-form")).toBeVisible();
   await page.locator('#quality-plan-form [name="goal"]').fill("审阅发布说明");
   await page.locator("#quality-plan-form").getByRole("button", { name: "生成并报价计划" }).click();
@@ -41,15 +44,15 @@ test("质量协作仅计划，确认后才执行，且 RPC 带固定角色会话
   await page.screenshot({ path: testInfo.outputPath("quality-routing-plan.png") });
   expect(calls.filter((call) => call.method === "quality.task.confirm")).toHaveLength(0);
   const plan = calls.find((call) => call.method === "quality.task.plan");
-  expect(plan.params).toEqual({ assistant_id: "sumika", session_id: "default", goal: "审阅发布说明", allowed_candidate_ids: ["local-reviewer"], external_allowed: false });
+  expect(plan.params).toEqual({ assistant_id: "sumika", session_id: sessionId, goal: "审阅发布说明", allowed_candidate_ids: ["local-reviewer"], external_allowed: false });
   expect(JSON.stringify(plan.params)).not.toContain("messages");
   await page.getByRole("button", { name: "确认执行" }).click();
   await expect(page.locator("[data-quality-task]" )).toContainText("running");
   await expect(page.getByRole("button", { name: "取消" })).toBeVisible();
   await page.locator("[data-quality-task-budget-form] [name=multiplier]").fill("3");
   await page.getByRole("button", { name: "更新运行预算" }).click();
-  expect(calls.find((call) => call.method === "quality.task.budget").params).toEqual({ assistant_id: "sumika", session_id: "default", task_id: "quality-1", budget_rule: { multiplier: "3", extra_cny: "5" } });
-  expect(calls.find((call) => call.method === "quality.task.confirm").params).toEqual({ assistant_id: "sumika", session_id: "default", task_id: "quality-1", revision: 3 });
+  expect(calls.find((call) => call.method === "quality.task.budget").params).toEqual({ assistant_id: "sumika", session_id: sessionId, task_id: "quality-1", budget_rule: { multiplier: "3", extra_cny: "5" } });
+  expect(calls.find((call) => call.method === "quality.task.confirm").params).toEqual({ assistant_id: "sumika", session_id: sessionId, task_id: "quality-1", revision: 3 });
 });
 
 test("质量设置与能力页显示真实刷新状态，自动选择不暗含付费确认", async ({ page }, testInfo) => {
@@ -75,7 +78,7 @@ test("质量设置与能力页显示真实刷新状态，自动选择不暗含�
   });
   await page.addInitScript(() => localStorage.setItem("sumika.onboarded.v1", "1"));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  await page.locator('.scene-primary-nav [data-page="Settings"]').click();
+  await openPage(page, "Guide");
   await expect(page.locator('[name="leader_selection_mode"]')).toHaveValue("auto");
   await page.locator(".quality-refresh summary").click();
   await expect(page.locator(".quality-refresh")).toContainText("免费状态未确认");
@@ -90,8 +93,7 @@ test("质量设置与能力页显示真实刷新状态，自动选择不暗含�
   }
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: testInfo.outputPath("routing-refresh-settings.png"), fullPage: true });
-  await page.locator('.scene-primary-nav [data-page="Agent"]').click();
-  await page.locator('.drawer-tabs [data-page="Tasks"]').click();
+  await openPage(page, "Tasks");
   await expect(page.locator('[name="planning_confirmed"]')).not.toBeChecked();
   await page.locator('#quality-plan-form [name="goal"]').fill("比较三个方案");
   await page.locator('#quality-plan-form [name="candidate_id"]').check();

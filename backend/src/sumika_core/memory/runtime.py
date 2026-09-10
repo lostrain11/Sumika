@@ -1,4 +1,4 @@
-"""Auditable orchestration for character-scoped long-term memory."""
+"""Sumika host adapter for assistant-scoped long-term memory."""
 
 from __future__ import annotations
 
@@ -12,10 +12,11 @@ from ..modules.catalog import ModuleCatalog
 from ..providers.memory_registry import MemoryProviderRegistry
 from ..protocol.models import EventEnvelope
 from ..storage import Storage
+from .contracts import MemoryContractError, MemoryScope, safe_provider_error
 
 
 class MemoryRuntimeError(ValueError):
-    """Raised when memory is disabled or a record violates its module policy."""
+    """Raised when memory is disabled or violates its host policy."""
 
 
 class MemoryRuntime:
@@ -37,8 +38,11 @@ class MemoryRuntime:
         module = self.modules.get("memory")
         provider_id = str(module["implementation_id"])
         provider_status = "unconfigured"
-        if provider_id != "none" and self.providers.has(provider_id):
-            provider_status = self.providers.get(provider_id).info.status
+        capabilities: dict[str, Any] | None = None
+        if module["enabled"] and provider_id != "none" and self.providers.has(provider_id):
+            provider = self.providers.get(provider_id)
+            provider_status = provider.info.status
+            capabilities = self.providers.describe(provider_id)
         if not module["enabled"]:
             state = "disabled"
         elif provider_id == "none":
@@ -52,18 +56,20 @@ class MemoryRuntime:
             "state": state,
             "allowed_categories": list(self._allowed_categories(module["config"])),
             "permissions": list(module["permissions"]),
+            "contract": capabilities,
         }
 
     def list(
         self,
-        character_id: str,
+        assistant_id: str | None = None,
         *,
+        character_id: str | None = None,
         category: str | None = None,
         query: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        self._validate_character(character_id)
-        provider_id, module = self._ready()
+        scope = self._scope(assistant_id=assistant_id, character_id=character_id)
+        provider_id, module = self._ready("list")
         categories = self._allowed_categories(module["config"])
         if category is not None:
             self._validate_category(category)
@@ -72,32 +78,30 @@ class MemoryRuntime:
         if query is not None and len(query) > 200:
             raise MemoryRuntimeError("Memory query is too long")
         try:
-            records = self.providers.list_memories(
+            return self.providers.list_memories(
                 provider_id,
-                character_id,
+                scope,
                 category=category,
                 query=query,
                 limit=limit,
             )
+        except MemoryContractError as exc:
+            raise MemoryRuntimeError(str(exc)) from exc
         except Exception as exc:
-            raise MemoryRuntimeError(f"Memory provider failed: {exc}") from exc
-        return [
-            record
-            for record in records
-            if isinstance(record, dict) and record.get("category") in categories
-        ]
+            raise MemoryRuntimeError(safe_provider_error()) from exc
 
     def add(
         self,
         *,
-        character_id: str,
+        assistant_id: str | None = None,
+        character_id: str | None = None,
         category: str,
         content: str,
         source: str = "user",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._validate_character(character_id)
-        provider_id, module = self._ready()
+        scope = self._scope(assistant_id=assistant_id, character_id=character_id)
+        provider_id, module = self._ready("add")
         self._validate_category(category)
         if category not in self._allowed_categories(module["config"]):
             raise MemoryRuntimeError(f"Memory category is not enabled: {category}")
@@ -121,40 +125,66 @@ class MemoryRuntime:
         try:
             record = self.providers.add_memory(
                 provider_id,
+                scope=scope,
                 memory_id=memory_id,
-                character_id=character_id,
                 category=category,
                 content=content,
                 source=source.strip(),
                 metadata=metadata,
             )
+        except MemoryContractError as exc:
+            raise MemoryRuntimeError(str(exc)) from exc
         except Exception as exc:
-            raise MemoryRuntimeError(f"Memory provider failed: {exc}") from exc
-        if not isinstance(record, dict):
-            raise MemoryRuntimeError("Memory provider returned an invalid record")
+            raise MemoryRuntimeError(safe_provider_error()) from exc
         self._publish(
             "memory.created",
-            {
-                "memory": self._audit_record(record, content=content),
-            },
-            character_id=character_id,
+            {"memory": self._audit_record(record, content=content)},
+            character_id=scope.character_id,
         )
         return record
 
-    def delete(self, memory_id: str) -> bool:
-        provider_id, _ = self._ready()
+    def delete(
+        self,
+        memory_id: str,
+        *,
+        assistant_id: str | None = None,
+        character_id: str | None = None,
+    ) -> bool:
+        scope = self._scope(assistant_id=assistant_id, character_id=character_id)
+        provider_id, _ = self._ready("scoped_delete")
         if not isinstance(memory_id, str) or not memory_id.strip():
             raise MemoryRuntimeError("memory_id must not be empty")
         try:
-            deleted = self.providers.delete_memory(provider_id, memory_id)
+            deleted = self.providers.delete_memory(provider_id, scope=scope, memory_id=memory_id)
+        except MemoryContractError as exc:
+            raise MemoryRuntimeError(str(exc)) from exc
         except Exception as exc:
-            raise MemoryRuntimeError(f"Memory provider failed: {exc}") from exc
+            raise MemoryRuntimeError(safe_provider_error()) from exc
         if not deleted:
             raise MemoryRuntimeError(f"Unknown memory: {memory_id}")
-        self._publish("memory.deleted", {"memory_id": memory_id})
+        self._publish("memory.deleted", {"memory_id": memory_id}, character_id=scope.character_id)
         return True
 
-    def _ready(self) -> tuple[str, dict[str, Any]]:
+    def context_sources(
+        self,
+        *,
+        assistant_id: str | None = None,
+        character_id: str | None = None,
+        query: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        scope = self._scope(assistant_id=assistant_id, character_id=character_id)
+        provider_id, _ = self._ready("context_sources")
+        if query is not None and len(query) > 200:
+            raise MemoryRuntimeError("Memory query is too long")
+        try:
+            return self.providers.list_context_sources(provider_id, scope=scope, query=query, limit=limit)
+        except MemoryContractError as exc:
+            raise MemoryRuntimeError(str(exc)) from exc
+        except Exception as exc:
+            raise MemoryRuntimeError(safe_provider_error()) from exc
+
+    def _ready(self, capability: str) -> tuple[str, dict[str, Any]]:
         module = self.modules.get("memory")
         if not module["enabled"]:
             raise MemoryRuntimeError("Memory module is disabled")
@@ -166,25 +196,31 @@ class MemoryRuntime:
         provider = self.providers.get(provider_id)
         if provider.info.status != "available":
             raise MemoryRuntimeError(f"Memory provider is {provider.info.status}: {provider_id}")
+        try:
+            self.providers.require_capability(provider_id, capability)
+        except MemoryContractError as exc:
+            raise MemoryRuntimeError(str(exc)) from exc
         return provider_id, module
 
-    def _validate_character(self, character_id: str) -> None:
-        if not isinstance(character_id, str) or not character_id.strip():
-            raise MemoryRuntimeError("character_id must not be empty")
-        if self.storage.get_character(character_id) is None:
-            raise MemoryRuntimeError(f"Unknown character: {character_id}")
+    def _scope(self, *, assistant_id: str | None, character_id: str | None) -> MemoryScope:
+        try:
+            scope = MemoryScope.from_ids(assistant_id=assistant_id, character_id=character_id)
+        except MemoryContractError as exc:
+            raise MemoryRuntimeError(str(exc)) from exc
+        if self.storage.get_character(scope.character_id) is None:
+            raise MemoryRuntimeError(f"Unknown character: {scope.character_id}")
+        return scope
 
     @classmethod
     def _allowed_categories(cls, config: dict[str, Any]) -> tuple[str, ...]:
         raw = config.get("categories", cls.DEFAULT_CATEGORIES)
         if not isinstance(raw, list):
             return cls.DEFAULT_CATEGORIES
-        categories = tuple(
+        return tuple(
             str(item).strip()
             for item in raw
             if isinstance(item, str) and item.strip() and len(item.strip()) <= 64
         )
-        return categories
 
     @staticmethod
     def _validate_category(category: str) -> None:
@@ -195,9 +231,12 @@ class MemoryRuntime:
     def _audit_record(record: dict[str, Any], *, content: str) -> dict[str, Any]:
         return {
             "id": record.get("id"),
+            "assistant_id": record.get("assistant_id"),
             "character_id": record.get("character_id"),
             "category": record.get("category"),
             "source": record.get("source"),
+            "revision": record.get("revision"),
+            "status": record.get("status"),
             "content_length": len(content),
             "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
         }

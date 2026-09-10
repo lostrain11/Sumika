@@ -199,7 +199,7 @@ class ProviderTests(unittest.TestCase):
             self.assertFalse(passive["ok"])
             self.assertEqual(calls, ["GET"])
             active = provider.health_check(allow_chat_probe=True)
-            self.assertTrue(active["ok"])
+            self.assertTrue(active["ok"], active)
             self.assertEqual(calls, ["GET", "GET", "POST"])
             self.assertEqual(active["health_probe"], "chat-completions")
         finally:

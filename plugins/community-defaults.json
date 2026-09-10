@@ -1,0 +1,20 @@
+{
+  "schema": "sumika.community-defaults/v1",
+  "packages": [
+    {
+      "id": "sumika-community-documents",
+      "name": "@sumika/dsh-community-documents",
+      "path": "plugins/dsh-community-documents",
+      "version": "0.1.0",
+      "default_install": true,
+      "default_enabled": false,
+      "validation": "real-dsh-0.1.1-rc.2-basic-file-functions",
+      "evidence": "docs/refactor/skill-migration.md",
+      "groups": ["word", "excel", "powerpoint", "pdfRead"],
+      "sources": [
+        {"name": "dsh-office-tools", "version": "1.0.0", "author": "kw78", "license": "MIT", "url": "https://github.com/kw78/dsh-office-tools", "integrity": "sha512-mf+okeXBNwcP547NQIbDJfFAhNlHWL7ixvFyjYZr7nikEE1BjY5laBnM64ckwzNbnQk0mvgh67Cfn82G8XvNvQ=="},
+        {"name": "dsh-pdf", "version": "0.1.0", "author": "sunshine-lang", "license": "MIT", "url": "https://github.com/sunshine-lang/dsh-pdf", "integrity": "sha512-Di+lZz4+IQYk5yh7c6qmFTbOl6uyDt1J7O/hCXq1hiCkGKuxN3U5uiid75PDccI3l4LZn95d5p1C/j3VgvfaJg=="}
+      ]
+    }
+  ]
+}

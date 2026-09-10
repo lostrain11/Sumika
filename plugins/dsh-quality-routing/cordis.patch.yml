@@ -1,0 +1,10 @@
+- insert:
+    - id: sumika-quality-routing
+      name: "@sumika/dsh-quality-routing"
+      config:
+        enabled: false
+        pythonExecutable: ""
+        dataDirectory: ""
+        startupTimeoutMs: 5000
+        requestTimeoutMs: 10000
+

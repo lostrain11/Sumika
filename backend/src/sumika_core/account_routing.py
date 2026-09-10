@@ -460,7 +460,7 @@ class AccountBoundProvider:
                 raise RequestNotSent("bounded output required")
             if any(not isinstance(message.content, str) for message in request.messages):
                 raise RequestNotSent("account routing requires text requests")
-            payload = {"messages": [{"role": row.role, "content": row.content} for row in request.messages], "tools": request.tools}
+            payload = {"messages": [row.wire_dict() if hasattr(row, "wire_dict") else {"role": row.role, "content": row.content} for row in request.messages], "tools": request.tools}
             input_bound = len(json.dumps(payload, ensure_ascii=False).encode()) + 1024
             entry = {"provider_profile_id": self.profile_id, "model_id": self.model_id, "metadata": {"billing_group": "official"}}
             snapshot = self.accounts.price_snapshot(entry)

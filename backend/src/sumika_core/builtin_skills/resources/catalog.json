@@ -1,0 +1,61 @@
+{
+  "schema": "sumika.builtin-skills/v1",
+  "version": "1.0.0",
+  "publisher": "Sumika",
+  "skills": [
+    {
+      "id": "project-progress",
+      "title": "项目进度与交接",
+      "description": "恢复或交接持续项目时，维护目标、已完成、验证、剩余工作与恢复动作。",
+      "version": "1.0.0",
+      "origin": "project-continuity",
+      "default_enabled": false,
+      "kind": "instruction",
+      "runtimes": [
+        "api-development"
+      ],
+      "requires": [],
+      "path": "project-progress/SKILL.md",
+      "helpers": {}
+    },
+    {
+      "id": "troubleshooting-notes",
+      "title": "故障经验积累",
+      "description": "处理重复发生或定位成本高的问题，维护可复用的故障记录。",
+      "version": "1.0.0",
+      "origin": "project-continuity",
+      "default_enabled": false,
+      "kind": "instruction",
+      "runtimes": [
+        "api-development"
+      ],
+      "requires": [],
+      "path": "troubleshooting-notes/SKILL.md",
+      "helpers": {}
+    },
+    {
+      "id": "tool-registry",
+      "title": "工具复用目录",
+      "description": "任务需要重复使用工具或下载依赖时，查找已登记工具并记录经验证的复用方法。",
+      "version": "1.0.0",
+      "origin": "project-continuity",
+      "default_enabled": false,
+      "kind": "instruction",
+      "runtimes": [
+        "api-development"
+      ],
+      "requires": [],
+      "path": "tool-registry/SKILL.md",
+      "helpers": {
+        "check_paths": {
+          "script": "scripts/check_paths.py",
+          "operations": [
+            "reuse",
+            "cache"
+          ],
+          "configuration": "config/paths.json"
+        }
+      }
+    }
+  ]
+}

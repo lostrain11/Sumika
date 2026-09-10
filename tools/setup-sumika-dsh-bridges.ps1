@@ -60,6 +60,13 @@ $pluginDefinitions = @(
     @{ id = 'sumika-browser-policy'; name = '@sumika/dsh-browser-policy'; path = 'plugins\dsh-browser-policy' },
     @{ id = 'sumika-desktop-automation'; name = '@sumika/dsh-desktop-automation'; path = 'plugins\dsh-desktop-automation' }
 )
+$communityCatalog = Get-Content -LiteralPath (Join-Path $repoRoot 'plugins/community-defaults.json') -Raw | ConvertFrom-Json
+if ($communityCatalog.schema -ne 'sumika.community-defaults/v1') { throw 'Unsupported community catalog.' }
+foreach ($community in $communityCatalog.packages) {
+    if ($community.default_install -eq $true) {
+        $pluginDefinitions += @{ id = $community.id; name = $community.name; path = $community.path; thirdParty = $true }
+    }
+}
 
 function Get-PluginPackage {
     param([hashtable]$Definition)
@@ -119,7 +126,9 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Removing stale $($definition.name) failed with exit code $LASTEXITCODE." }
         }
         if ($existingSpec -ne $packageSpec) {
-            & $DshExecutable plugin --profile web add $packageSpec --save-exact
+            $installArguments = @('--save-exact')
+            if ($definition.thirdParty) { $installArguments += '--ignore-scripts' }
+            & $DshExecutable plugin --profile web add $packageSpec @installArguments
             if ($LASTEXITCODE -ne 0) { throw "Installing $($definition.name) failed with exit code $LASTEXITCODE." }
         }
         $installed += $package

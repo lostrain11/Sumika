@@ -1,4 +1,4 @@
-"""Memory provider contracts and reference implementations."""
+"""Memory provider contracts and explicit local adapter implementations."""
 
 from __future__ import annotations
 
@@ -8,13 +8,17 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from ..memory.contracts import MEMORY_BASE_CAPABILITIES, MemoryContractError, MemoryScope
 from ..protocol.models import ProviderInfo
 from ..storage import Storage
 
 
 class MemoryProvider(ABC):
-    """Capability contract for searchable, character-scoped memory."""
+    """Capability contract for searchable, assistant-scoped memory."""
 
+    contract_version = 1
+    capabilities = MEMORY_BASE_CAPABILITIES
+    legacy_record_compatibility = False
     info: ProviderInfo
 
     def health_check(self) -> dict[str, Any]:
@@ -26,20 +30,20 @@ class MemoryProvider(ABC):
     @abstractmethod
     def list_memories(
         self,
-        character_id: str,
+        assistant_id: str,
         *,
         category: str | None = None,
         query: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Return character-scoped records, optionally filtered by text."""
+        """Return assistant-scoped records, optionally filtered by text."""
 
     @abstractmethod
     def add_memory(
         self,
         *,
         memory_id: str,
-        character_id: str,
+        assistant_id: str,
         category: str,
         content: str,
         source: str,
@@ -48,8 +52,17 @@ class MemoryProvider(ABC):
         """Persist one record and return its serialisable representation."""
 
     @abstractmethod
-    def delete_memory(self, memory_id: str) -> bool:
-        """Delete one record and report whether it existed."""
+    def delete_memory(self, memory_id: str, *, assistant_id: str) -> dict[str, Any]:
+        """Delete one record only within the supplied assistant scope."""
+
+    def list_context_sources(
+        self,
+        assistant_id: str,
+        *,
+        query: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError("Memory provider does not support context_sources")
 
     def close(self) -> None:
         return None
@@ -71,6 +84,8 @@ _MEMORY_CONFIG_SCHEMA = {
 class SQLiteMemoryProvider(MemoryProvider):
     """Local reference implementation backed by the core's SQLite store."""
 
+    capabilities = MEMORY_BASE_CAPABILITIES | frozenset({"scoped_delete"})
+
     def __init__(self, storage: Storage) -> None:
         self.storage = storage
         self.info = ProviderInfo(
@@ -83,35 +98,62 @@ class SQLiteMemoryProvider(MemoryProvider):
 
     def list_memories(
         self,
-        character_id: str,
+        assistant_id: str,
         *,
         category: str | None = None,
         query: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        return self.storage.list_memories(character_id, category=category, query=query, limit=limit)
+        scope = MemoryScope.from_ids(assistant_id=assistant_id)
+        return [self._record(record, scope) for record in self.storage.list_memories(scope.assistant_id, category=category, query=query, limit=limit)]
 
     def add_memory(
         self,
         *,
         memory_id: str,
-        character_id: str,
+        assistant_id: str,
         category: str,
         content: str,
         source: str,
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
-        return self.storage.create_memory(
+        scope = MemoryScope.from_ids(assistant_id=assistant_id)
+        record = self.storage.create_memory(
             memory_id=memory_id,
-            character_id=character_id,
+            character_id=scope.character_id,
             category=category,
             content=content,
             source=source,
             metadata=metadata,
         )
+        return self._record(record, scope)
 
-    def delete_memory(self, memory_id: str) -> bool:
-        return self.storage.delete_memory(memory_id)
+    def delete_memory(self, memory_id: str, *, assistant_id: str) -> dict[str, Any]:
+        scope = MemoryScope.from_ids(assistant_id=assistant_id)
+        record = self.storage.get_memory(memory_id)
+        if record is None:
+            return {"deleted": False, "memory_id": memory_id, "assistant_id": scope.assistant_id, "status": "deleted"}
+        if record.get("character_id") != scope.character_id:
+            raise MemoryContractError("Memory record is outside the requested assistant scope")
+        return {
+            "deleted": self.storage.delete_memory(memory_id),
+            "memory_id": memory_id,
+            "assistant_id": scope.assistant_id,
+            "status": "deleted",
+        }
+
+    @staticmethod
+    def _record(record: dict[str, Any], scope: MemoryScope) -> dict[str, Any]:
+        value = dict(record)
+        value.update(
+            {
+                "assistant_id": scope.assistant_id,
+                "character_id": scope.character_id,
+                "revision": 1,
+                "status": "active",
+            }
+        )
+        return value
 
 
 _COMMAND_CONFIG_SCHEMA = {
@@ -127,7 +169,10 @@ _COMMAND_CONFIG_SCHEMA = {
 
 
 class CommandMemoryProvider(MemoryProvider):
-    """Non-shell JSONL adapter for an external memory application."""
+    """Explicit JSONL adapter for an external memory application."""
+
+    capabilities = MEMORY_BASE_CAPABILITIES | frozenset({"scoped_delete"})
+    legacy_record_compatibility = True
 
     def __init__(
         self,
@@ -167,16 +212,18 @@ class CommandMemoryProvider(MemoryProvider):
 
     def list_memories(
         self,
-        character_id: str,
+        assistant_id: str,
         *,
         category: str | None = None,
         query: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        scope = MemoryScope.from_ids(assistant_id=assistant_id)
         responses = self._run(
             {
                 "type": "memory.list",
-                "character_id": character_id,
+                "assistant_id": scope.assistant_id,
+                "character_id": scope.character_id,
                 "category": category,
                 "query": query,
                 "limit": limit,
@@ -194,18 +241,20 @@ class CommandMemoryProvider(MemoryProvider):
         self,
         *,
         memory_id: str,
-        character_id: str,
+        assistant_id: str,
         category: str,
         content: str,
         source: str,
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
+        scope = MemoryScope.from_ids(assistant_id=assistant_id)
         responses = self._run(
             {
                 "type": "memory.add",
                 "memory": {
                     "id": memory_id,
-                    "character_id": character_id,
+                    "assistant_id": scope.assistant_id,
+                    "character_id": scope.character_id,
                     "category": category,
                     "content": content,
                     "source": source,
@@ -219,13 +268,21 @@ class CommandMemoryProvider(MemoryProvider):
                 return response["memory"]
         raise RuntimeError("External memory provider returned no memory")
 
-    def delete_memory(self, memory_id: str) -> bool:
-        responses = self._run({"type": "memory.delete", "memory_id": memory_id})
+    def delete_memory(self, memory_id: str, *, assistant_id: str) -> dict[str, Any]:
+        scope = MemoryScope.from_ids(assistant_id=assistant_id)
+        responses = self._run(
+            {
+                "type": "memory.delete",
+                "memory_id": memory_id,
+                "assistant_id": scope.assistant_id,
+                "character_id": scope.character_id,
+            }
+        )
         for response in responses:
             self._raise_if_error(response)
             if isinstance(response.get("deleted"), bool):
-                return response["deleted"]
-        return False
+                return response
+        return {"deleted": False, "memory_id": memory_id, "assistant_id": scope.assistant_id, "status": "deleted"}
 
     def _refresh_status(self) -> None:
         self.info.status = "available" if self.executable.strip() and Path(self.executable).is_file() else "unconfigured"

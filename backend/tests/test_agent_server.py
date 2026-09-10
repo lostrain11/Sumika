@@ -3,6 +3,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from external_admission_fixture import confirmed_offline_rpc, offline_network
+
 from sumika_core.agent import AgentCapability, AgentRuntimeError
 from sumika_core.agent.supervisor import ProviderWorker, RuntimeRouteDescriptor
 from sumika_core.protocol.jsonrpc import JsonRpcError
@@ -12,6 +14,7 @@ from sumika_core.workspace import WorkspaceError
 
 class AgentServerTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(offline_network())
         self.environment = patch.dict("os.environ", {"SUMIKA_DSH_ENABLED": "0"})
         self.environment.start()
         self.application = CoreApplication(":memory:")
@@ -19,6 +22,9 @@ class AgentServerTests(unittest.TestCase):
     def tearDown(self):
         self.application.close()
         self.environment.stop()
+
+    def confirmed_rpc(self, method, params):
+        return confirmed_offline_rpc(self, self.application, method, params)
 
     def test_status_endpoints_are_explicit_when_dsh_is_not_running(self):
         agent = self.application.rpc("agent.status", {})
@@ -322,14 +328,22 @@ class AgentServerTests(unittest.TestCase):
         self.assertNotIn("private-password", str(events))
 
     def test_agent_prompt_does_not_fallback_when_dsh_is_unavailable(self):
+        with patch.object(self.application.agent, "prompt") as prompt:
+            pending = self.application.rpc("agent.session.prompt", {"session_id": "missing", "text": "hello"})
+            self.assertEqual(pending["status"], "awaiting-confirmation")
+            self.assertIsNone(pending["work_request"]["quote"]["high_cny"])
+            self.assertFalse(pending["work_request"]["external"]["limit_enforced"])
+            self.assertEqual(pending["work_request"]["attempts"], {})
+            prompt.assert_not_called()
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc("agent.session.prompt", {"session_id": "missing", "text": "hello"})
+            self.confirmed_rpc("agent.session.prompt", {"session_id": "missing", "text": "hello",
+                                                       "client_request_id": "offline-unavailable-runtime"})
         self.assertEqual(error.exception.code, -32030)
 
     def test_agent_prompt_rejection_is_audited_without_prompt_content(self):
         with patch.object(self.application.agent, "prompt", side_effect=AgentRuntimeError("commands/execute unavailable")):
             with self.assertRaises(JsonRpcError):
-                self.application.rpc("agent.session.prompt", {"session_id": "s1", "text": "private target"})
+                self.confirmed_rpc("agent.session.prompt", {"session_id": "s1", "text": "private target"})
         events = self.application.storage.list_events(5)
         serialized = str(events)
         self.assertIn("agent.turn.rejected", serialized)
@@ -362,17 +376,19 @@ class AgentServerTests(unittest.TestCase):
             "prompt": "must never cross the boundary",
         }) as retry:
             for params in (
-                {"sessionId": "s1", "confirmSessionId": "s1"},
-                {"sessionId": "s1", "approved": True, "confirmSessionId": "other"},
+                {"sessionId": "no-approval", "confirmSessionId": "no-approval"},
+                {"sessionId": "wrong-confirmation", "approved": True, "confirmSessionId": "other"},
             ):
-                with self.subTest(params=params), self.assertRaises(JsonRpcError) as error:
-                    self.application.rpc("agent.session.retry", params)
-                self.assertEqual(error.exception.code, -32031)
+                with self.subTest(params=params):
+                    with self.assertRaises(JsonRpcError) as error:
+                        self.confirmed_rpc("agent.session.retry", params)
+                    self.assertEqual(error.exception.code, -32031)
+                    retry.assert_not_called()
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc("agent.session.retry", {"sessionId": "bad\nid", "approved": True, "confirmSessionId": "bad\nid"})
+                self.confirmed_rpc("agent.session.retry", {"sessionId": "bad\nid", "approved": True, "confirmSessionId": "bad\nid"})
             self.assertEqual(error.exception.code, -32602)
 
-            result = self.application.rpc(
+            result = self.confirmed_rpc(
                 "agent.session.retry",
                 {"sessionId": "s1", "approved": True, "confirmSessionId": "s1", "mode": "execute"},
             )
@@ -415,7 +431,7 @@ class AgentServerTests(unittest.TestCase):
                 "raw_history": [{"content": "private target"}],
             },
         ) as retry:
-            result = self.application.rpc(
+            result = self.confirmed_rpc(
                 "agent.session.retry",
                 {
                     "sessionId": "s1",
@@ -451,7 +467,7 @@ class AgentServerTests(unittest.TestCase):
             "update_queue",
             return_value={"accepted": True, "session_id": "s1", "item_id": "item-1", "action": "edit"},
         ):
-            updated = self.application.rpc(
+            updated = self.confirmed_rpc(
                 "agent.session.update_queue",
                 {"session_id": "s1", "item_id": "item-1", "kind": "edit", "text": "private queue text"},
             )
@@ -678,7 +694,7 @@ class AgentServerTests(unittest.TestCase):
             patch.object(self.application.route_supervisor, "start_consultation", return_value=modern_result) as modern,
             patch.object(self.application.routes, "start_consultation") as legacy,
         ):
-            result = self.application.rpc(
+            result = self.confirmed_rpc(
                 "sumika.consultation.start",
                 {
                     "consultation_id": "consultation-modern",
@@ -725,8 +741,11 @@ class AgentServerTests(unittest.TestCase):
         with (
             patch.object(self.application.route_supervisor, "start_consultation") as modern,
             patch.object(self.application.routes, "start_consultation", return_value=legacy_result) as legacy,
+            patch.object(self.application.storage, "list_web_chat_profiles", return_value=[{
+                "id": "legacy-profile", "budget_policy": "free-only", "adapter_id": "fixture-web", "adapter_version": "1",
+            }]),
         ):
-            result = self.application.rpc(
+            result = self.confirmed_rpc(
                 "sumika.consultation.start",
                 {
                     "consultation_id": "consultation-legacy",
@@ -766,6 +785,7 @@ class AgentServerTests(unittest.TestCase):
         )
 
     def _install_modern_web_routes(self, routes, executor):
+        self.enterContext(patch.object(self.application, "_refresh_route_supervisor_catalog"))
         for route in routes:
             self.application.route_supervisor.register_route(
                 route,
@@ -786,7 +806,7 @@ class AgentServerTests(unittest.TestCase):
         ]
         self._install_modern_web_routes(routes, execute)
 
-        result = self.application.rpc(
+        result = self.confirmed_rpc(
             "sumika.consultation.start",
             {
                 "consultation_id": "consultation-rpc-panel",
@@ -801,7 +821,7 @@ class AgentServerTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["successful_count"], 2)
+        self.assertEqual(result["successful_count"], 2, result)
         self.assertEqual({item["route_id"] for item in result["members"]}, {"web:provider-a-1", "web:provider-b"})
         self.assertEqual(len(calls), 2)
         self.assertTrue(result["disagreement_detected"])
@@ -818,7 +838,7 @@ class AgentServerTests(unittest.TestCase):
             self._modern_web_route("web:rpc-fail", provider_key="rpc-fail", profile_id="rpc-fail"),
         ]
         self._install_modern_web_routes(partial_routes, execute)
-        partial = self.application.rpc(
+        partial = self.confirmed_rpc(
             "sumika.consultation.start",
             {
                 "consultation_id": "consultation-rpc-partial",
@@ -842,7 +862,7 @@ class AgentServerTests(unittest.TestCase):
             self._modern_web_route("web:rpc-total-fail-b", provider_key="rpc-total-b", profile_id="rpc-total-b"),
         ]
         self._install_modern_web_routes(total_routes, lambda dispatch, route, cancel_event: {"status": "failed", "error_code": "all-sites-down"})
-        total = self.application.rpc(
+        total = self.confirmed_rpc(
             "sumika.consultation.start",
             {
                 "consultation_id": "consultation-rpc-total",
@@ -888,7 +908,7 @@ class AgentServerTests(unittest.TestCase):
             [item["route_id"] for item in catalog["routes"] if item["route_id"] in {unknown.route_id, unavailable.route_id}],
             [unknown.route_id],
         )
-        gated = self.application.rpc(
+        gated = self.confirmed_rpc(
             "sumika.consultation.start",
             {
                 "consultation_id": "consultation-rpc-unknown-quota",
@@ -927,7 +947,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(projected["occupancy"], "manual")
         self.assertFalse(projected["available"])
 
-        blocked = self.application.rpc(
+        blocked = self.confirmed_rpc(
             "sumika.consultation.start",
             {
                 "consultation_id": "consultation-rpc-lease-blocked",
@@ -950,7 +970,7 @@ class AgentServerTests(unittest.TestCase):
             if item["route_id"] == route.route_id
         )
         self.assertTrue(projected["available"])
-        resumed = self.application.rpc(
+        resumed = self.confirmed_rpc(
             "sumika.consultation.start",
             {
                 "consultation_id": "consultation-rpc-lease-released",
@@ -1050,7 +1070,7 @@ class AgentServerTests(unittest.TestCase):
             patch.object(self.application.workspace, "create_checkpoint") as create_checkpoint,
             patch.object(self.application.agent, "prompt") as prompt,
         ):
-            result = self.application.rpc(
+            result = self.confirmed_rpc(
                 "agent.session.prompt",
                 {
                     "sessionId": "session-1",
@@ -1917,8 +1937,12 @@ class AgentServerTests(unittest.TestCase):
             implementation_id="openai-compatible",
             config={"profile_id": profile["id"]},
         )
-        with patch.object(self.application.agent, "provider_status") as provider_status:
+        with patch(
+            "sumika_core.providers.openai_compatible.OpenAICompatibleProvider.health_check",
+            return_value={"ok": False, "status": "unavailable", "error": "offline fixture connection failure"},
+        ) as health, patch.object(self.application.agent, "provider_status") as provider_status:
             result = self.application.rpc("agent.provider.status", {})
+        health.assert_called_once_with(allow_chat_probe=False)
         self.assertEqual(result["state"], "unavailable")
         self.assertFalse(result["ready"])
         self.assertEqual(result["profile_id"], profile["id"])
@@ -2127,18 +2151,20 @@ class AgentServerTests(unittest.TestCase):
             patch.object(self.application.agent, "prompt", side_effect=prompt),
         ):
             for params in (
-                {"sessionId": "session-1", "mode": "execute", "text": "edit"},
+                {"sessionId": "missing-workspace", "mode": "execute", "text": "edit"},
                 {
-                    "sessionId": "session-1",
+                    "sessionId": "unknown-workspace",
                     "workspaceId": "missing",
                     "mode": "execute",
                     "text": "edit",
                 },
             ):
                 with self.subTest(params=params), self.assertRaises(JsonRpcError):
-                    self.application.rpc("agent.session.prompt", params)
+                    self.confirmed_rpc("agent.session.prompt", params)
 
-            result = self.application.rpc(
+            self.assertEqual(call_order, [])
+
+            result = self.confirmed_rpc(
                 "agent.session.prompt",
                 {
                     "sessionId": "session-1",
@@ -2183,12 +2209,15 @@ class AgentServerTests(unittest.TestCase):
             ) as prompt,
         ):
             with self.assertRaises(JsonRpcError):
-                self.application.rpc(
+                self.confirmed_rpc(
                     "agent.session.prompt",
-                    {"sessionId": "session-1", "mode": "plan", "text": "plan"},
+                    {"sessionId": "missing-workspace", "mode": "plan", "text": "plan"},
                 )
 
-            result = self.application.rpc(
+            prompt.assert_not_called()
+            create_checkpoint.assert_not_called()
+
+            result = self.confirmed_rpc(
                 "agent.session.prompt",
                 {
                     "sessionId": "session-1",

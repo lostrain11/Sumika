@@ -1,0 +1,9 @@
+{
+  "identifier": "companion",
+  "description": "Core window APIs for the trusted Sumika companion webview; browser and dialog access stay on main.",
+  "webviews": ["companion"],
+  "permissions": [
+    "core:default"
+  ]
+}
+

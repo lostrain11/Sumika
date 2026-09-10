@@ -20,6 +20,22 @@
         "minHeight": 640,
         "transparent": true,
         "resizable": true
+      },
+      {
+        "label": "companion",
+        "title": "Sumika Companion",
+        "url": "index.html?view=companion&mode=pet",
+        "width": 480,
+        "height": 420,
+        "minWidth": 320,
+        "minHeight": 280,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {

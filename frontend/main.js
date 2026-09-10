@@ -14,18 +14,22 @@ import { createDeveloperView } from "./src/developer-view.js";
 import { createWebWorkbenchView } from "./src/web-workbench-view.js";
 import { createAgentView } from "./src/agent-view.js";
 import { createWorkbenchView } from "./src/workbench-view.js";
+import { createWorkAuthorizationClient } from "./src/work-authorization.js";
+import { createWorkbenchHost } from "./src/workbench-host.js";
 import { createSettingsView } from "./src/settings-view.js";
 import { createModulesView } from "./src/modules-view.js";
 import { createCharactersView } from "./src/characters-view.js";
 import { CHARACTER_THEMES, displayMode, readDisplayPreferences, writeDisplayPreferences } from "./src/display-state.js";
 import { createCapabilityPage } from "./src/capability-page.js";
 import { createQualityRoutingView, normalizeQualityRule } from "./src/quality-routing-view.js";
-import { createBenefitsController, createBenefitsState } from "./src/benefits-view.js";
+import { createBenefitsController, createBenefitsState, renderBenefitsSection } from "./src/benefits-view.js";
 import { createConsultationView, consultationNotice } from "./src/consultation-view.js";
 import { browserLinkSite, createEmbeddedBrowserController } from "./src/embedded-browser-view.js";
 
 const QUALITY_ROUTING_STYLESHEET = new URL("./src/quality-routing.css", import.meta.url).href;
 const CONSULTATION_STYLESHEET = new URL("./src/consultation.css", import.meta.url).href;
+const WORKBENCH_STYLESHEET = new URL("./src/workbench-v2.css", import.meta.url).href;
+const companionWindow = new URLSearchParams(window.location.search).get("view") === "companion";
 
 function ensureQualityRoutingStylesheet() {
   if (document.querySelector('link[data-quality-routing-styles]')) return;
@@ -49,12 +53,12 @@ const AGENT_SESSION_PREFERENCE_KEY = "sumika.agent.active-session.v1";
 const AGENT_ROUTING_PREFERENCE_KEY = "sumika.agent.routing-policy.v1";
 
 const state = {
-  activePage: "Chat",
+  activePage: companionWindow ? "Chat" : "Workspace",
   chatOpen: true,
-  petChatOpen: true,
+  petChatOpen: false,
   displayBusy: false,
   displayPreferences: readDisplayPreferences(localStorage),
-  overlayMode: ["overlay", "pet"].includes(new URLSearchParams(window.location.search).get("mode")),
+  overlayMode: companionWindow || ["overlay", "pet"].includes(new URLSearchParams(window.location.search).get("mode")),
   providerId: "",
   providers: [],
   providerProfiles: [],
@@ -615,7 +619,7 @@ function currentAvatarPresentation() {
 }
 
 function render() {
-  benefitsView.syncScope();
+  const benefitsScopeChanged = benefitsView.syncScope();
   viewState.capture();
   const scene = projectSceneState(state);
   rememberChatScrollPreference();
@@ -626,6 +630,29 @@ function render() {
     state.voiceRecording = false;
   }
   applyCharacterTheme();
+  if (state.connected && state.selectedCharacter !== sharedAssistantId) {
+    sharedAssistantId = state.selectedCharacter;
+    localStorage.setItem("sumika:active-assistant:v1", sharedAssistantId);
+  }
+  if (!state.overlayMode) {
+    disposeVrmViewer();
+    document.body.dataset.sumikaMode = "workspace";
+    app.innerHTML = workbenchHost.render();
+    if (workbenchHost.model.notice) {
+      const notice = document.createElement("div");
+      notice.className = "wv2-host-notice";
+      notice.setAttribute("role", "status");
+      notice.textContent = workbenchHost.model.notice;
+      app.prepend(notice);
+    }
+    bindEvents();
+    workbenchHost.bind(app);
+    if (benefitsScopeChanged && app.querySelector("[data-benefits]")) void benefitsView.loadStatus();
+    viewState.restore(`work:${state.selectedCharacter}:${currentSessionId()}`);
+    if (state.consultation.visible) requestAnimationFrame(() => void syncConsultationBounds());
+    requestAnimationFrame(() => void embeddedView.syncBounds().catch(() => {}));
+    return;
+  }
   const avatarSurfaceSelector = "[data-avatar-signature]";
   const previousAvatarSurface = avatarSurfaceSelector ? document.querySelector(avatarSurfaceSelector) : null;
   const preserveAvatarSurface = Boolean(
@@ -643,7 +670,7 @@ function render() {
   }
   document.body.dataset.sumikaMode = state.overlayMode ? "overlay" : "workspace";
   if (state.overlayMode) {
-    app.innerHTML = renderOverlay();
+    app.innerHTML = renderOverlay() + '<div class="cw-companion-controls"><button type="button" data-companion-size="compact">小窗</button><button type="button" data-companion-size="panorama">全景</button><button type="button" data-companion-size="fullscreen">全屏</button><button type="button" data-chat-clear>清屏</button><button type="button" data-chat-history>之前对话</button></div>';
     if (preserveAvatarSurface) {
       document.querySelector(".desktop-overlay-avatar")?.replaceWith(previousAvatarSurface);
       previousAvatarSurface.className = "desktop-overlay-avatar";
@@ -769,7 +796,7 @@ function renderPage() {
 function updateSceneVisibility() {
   const appearance = readAppearance();
   state.vrmViewer?.setRoomVisible?.(!(state.overlayMode ? state.displayPreferences.transparent : appearance.backgroundImage || appearance.backgroundColor));
-  state.vrmViewer?.setVisible?.(!document.hidden && (state.overlayMode || state.activePage === "Chat"));
+  state.vrmViewer?.setVisible?.(state.nativeRenderVisible !== false && !document.hidden && (state.overlayMode || state.activePage === "Chat"));
 }
 
 function renderEmptyChat() {
@@ -799,9 +826,10 @@ function renderEmptyChat() {
 
 function renderOverlay() {
   const reply = state.messages.filter((message) => message.role === "assistant").at(-1)?.content || (state.connected ? "我在这里。" : "核心未连接");
-  return `<main class="desktop-overlay-shell ${state.displayPreferences.transparent ? "pet-transparent" : ""} ${state.petChatOpen ? "" : "pet-chat-collapsed"}" aria-label="桌面 Avatar 浮窗">
+  return `<main class="desktop-overlay-shell ${state.displayPreferences.transparent ? "pet-transparent" : ""} ${state.petChatOpen ? "" : "pet-chat-collapsed"}" aria-label="桌面 Avatar 浮窗" style="background-color: ${state.displayPreferences.transparent ? "transparent" : escapeHtml(readAppearance().backgroundColor || "")}">
     <div class="desktop-overlay-controls" data-no-drag>
       <button class="text-button" type="button" data-no-drag data-overlay-open-main>返回客户端</button>
+      <button class="text-button" type="button" data-no-drag data-avatar-toggle>显示 / 隐藏角色</button>
       <button class="text-button" type="button" data-no-drag data-pet-chat aria-expanded="${state.petChatOpen}">${state.petChatOpen ? "收起聊天" : "展开聊天"}</button>
       <button class="text-button" type="button" data-no-drag data-pet-background aria-pressed="${state.displayPreferences.transparent}">${state.displayPreferences.transparent ? "显示场景" : "透明背景"}</button>
       ${isDesktopShell ? '<button class="text-button" type="button" data-no-drag data-overlay-hide title="恢复客户端并最小化，可从任务栏找回">隐藏</button>' : ""}
@@ -810,6 +838,7 @@ function renderOverlay() {
       ${state.avatarVisible ? renderAvatarPresenter() : `<div class="avatar-hidden-state" role="status"><span>Avatar 已隐藏</span></div>`}
     </div>
     ${state.sessionNotice ? `<div class="pet-notice" role="status">${escapeHtml(state.sessionNotice)}</div>` : `<div class="pet-bubble" role="status">${escapeHtml(state.sending ? "正在回复…" : String(reply).slice(0, 54))}${!state.sending && String(reply).length > 54 ? "…" : ""}</div>`}
+    ${!llmReady() ? renderEmptyChat() : ""}
     <form class="overlay-composer" id="chat-form" data-no-drag ${state.petChatOpen ? "" : "hidden inert"}>
       <textarea id="chat-input" aria-label="聊天消息" data-no-drag rows="1" placeholder="和 ${escapeHtml(currentCharacter().name)} 说点什么…" ${state.sending || !state.connected ? "disabled" : ""}>${escapeHtml(state.composerDraft)}</textarea>
       <button class="send-button" data-no-drag type="submit" ${state.sending || !llmReady() ? "disabled" : ""} aria-label="发送消息">${state.sending ? "处理中" : "发送"}</button>
@@ -2244,7 +2273,35 @@ function formatDuration(seconds) {
   return `${minutes} 分 ${Math.floor(value % 60)} 秒`;
 }
 
+function loadWorkbenchPage(page) {
+  state.activePage = page;
+  if (["Modules", "Capabilities", "Settings"].includes(page)) void loadModules(true);
+  if (["Modules", "Developer"].includes(page)) {
+    void loadCapabilityCatalog(true, false);
+    void loadRoutePricing(true, false);
+    void loadWebChatData(true, page === "Developer");
+  }
+  if (page === "Developer") {
+    void loadProviderProfiles(true, true);
+    void loadEvolutionRegistry(true);
+    void loadAgentDiagnostics(true);
+  }
+  if (["Developer", "Agent"].includes(page)) void loadAgentRuntime(true);
+  if (page === "Agent") void loadAgentModelPolicy(true, false);
+  if (page === "WebWorkbench") void loadWebWorkbenchData(true, false);
+  if (page === "Tasks") { void loadTasks(true); void loadQualityRoutingWorkbench(true); }
+  if (["Settings", "Capabilities"].includes(page)) void loadQualityRoutingSettings(true);
+}
+
 function bindEvents() {
+  document.querySelectorAll("[data-workbench-page]").forEach((element) => element.addEventListener("click", (event) => {
+    event.preventDefault();
+    element.parentElement.open = !element.parentElement.open;
+    if (element.parentElement.open) loadWorkbenchPage(element.dataset.workbenchPage);
+  }));
+  document.querySelectorAll("[data-chat-clear]").forEach((button) => button.addEventListener("click", workbenchHost.actions.onClearConversationDisplay));
+  document.querySelectorAll("[data-chat-history]").forEach((button) => button.addEventListener("click", workbenchHost.actions.onConversationPage));
+  document.querySelectorAll("[data-companion-size]").forEach((button) => button.addEventListener("click", () => void setCompanionSize(button.dataset.companionSize)));
   embeddedView.bind(document, portalDefinitions());
   benefitsView.bind(document);
   capabilityPage.bindCapabilities({ root: document.querySelector(".capability-page")?.parentElement, onConfigure: (moduleId) => {
@@ -2257,6 +2314,19 @@ function bindEvents() {
     toggle?.focus({ preventScroll: true });
   } });
   document.querySelectorAll("[data-page]").forEach((element) => element.addEventListener("click", () => {
+    if (state.overlayMode) {
+      window.open(location.origin + location.pathname + "?view=settings&connections=1", "sumika-workspace");
+      return;
+    }
+    if (!state.overlayMode) {
+      const target = element.dataset.page;
+      const view = { Characters: "characters", Capabilities: "capabilities", Modules: "settings", Developer: "settings", Settings: "settings", Guide: "settings" }[target] || "workspace";
+      workbenchHost.model.view = view;
+      if (target === "Modules") workbenchHost.model.connectionsOpen = true;
+      loadWorkbenchPage(target);
+      render();
+      return;
+    }
     if (state.portalPanelOpen) void embeddedView.hide();
     state.activePage = scenePageAfterNavigation(element.dataset.page);
     if (state.consultation.visible && state.activePage !== "Tasks") void changeConsultationVisibility("hide");
@@ -3103,7 +3173,11 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-async function rpc(method, params = {}) {
+function rpc(method, params = {}) {
+  return workAuthorizationRpc(method, params);
+}
+
+async function transportRpc(method, params = {}) {
   const response = await api("/rpc", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }) });
   if (response.error) throw new Error(response.error.message || "JSON-RPC request failed");
   return response.result;
@@ -3579,7 +3653,7 @@ async function switchDisplayMode(mode) {
   state.displayBusy = true;
   try {
     const applied = isDesktopShell ? await invokeDesktop("set_display_mode", { mode: displayMode(mode) }) : displayMode(mode);
-    state.overlayMode = displayMode(applied) === "pet";
+    state.overlayMode = isDesktopShell ? companionWindow : displayMode(applied) === "pet";
     if (state.overlayMode && state.consultation.visible) void changeConsultationVisibility("hide");
     if (state.sessionNotice.startsWith("切换显示模式失败：")) state.sessionNotice = "";
     state.portalPanelOpen = false;
@@ -3599,7 +3673,7 @@ async function switchDisplayMode(mode) {
 async function hideDesktopOverlay() {
   try {
     const applied = await invokeDesktop("hide_pet");
-    state.overlayMode = displayMode(applied) === "pet";
+    state.overlayMode = companionWindow || displayMode(applied) === "pet";
     render();
   } catch (error) {
     state.sessionNotice = `隐藏桌面 Avatar 失败：${error.message}`;
@@ -3608,7 +3682,17 @@ async function hideDesktopOverlay() {
 }
 
 async function openMainWindow() {
-  return switchDisplayMode("workspace");
+  if (isDesktopShell) return invokeDesktop("show_main_window");
+  return window.open(location.origin + location.pathname, "sumika-workspace");
+}
+
+async function setCompanionSize(mode) {
+  try {
+    if (isDesktopShell) await invokeDesktop("set_companion_mode", { mode });
+    else if (mode === "fullscreen") await document.documentElement.requestFullscreen();
+    document.body.dataset.companionSize = mode;
+    render();
+  } catch (error) { state.sessionNotice = error.message; render(); }
 }
 
 async function startOverlayDrag(event) {
@@ -3626,6 +3710,7 @@ async function loadProviders(shouldRender = true) {
   try {
     state.providers = await api("/api/providers");
     state.connected = true;
+    await workbenchHost.refresh();
     syncProviderSelection();
   } catch (error) {
     state.providers = [];
@@ -7374,6 +7459,8 @@ async function loadInitialData() {
     state.sessions = sessions;
     syncActiveSession();
     state.characters = characters;
+    const savedAssistant = localStorage.getItem("sumika:active-assistant:v1");
+    if (characters.some((row) => row.id === savedAssistant)) state.selectedCharacter = savedAssistant;
     state.events = events;
     await loadAgentRuntime(false);
     await loadAgentTaskProjections(false);
@@ -7451,7 +7538,10 @@ async function openAgentTask(sessionId) {
   const value = String(sessionId || "").trim();
   if (!value) return;
   state.activePage = "Agent";
+  workbenchHost.model.view = "workspace";
   render();
+  const summary = document.querySelector('[data-workbench-page="Agent"]');
+  if (summary) { summary.parentElement.open = true; summary.closest(".wv2-advanced").open = true; }
   await selectAgentSession(value);
 }
 
@@ -7893,8 +7983,7 @@ async function loadMessages() {
   state.chatAutoScroll = true;
   const sessionId = currentSessionId();
   try {
-    const messages = await api(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
-    if (currentSessionId() === sessionId) state.messages = messages;
+    await workbenchHost.loadHistory();
   } catch {
     if (currentSessionId() === sessionId) state.messages = [];
   }
@@ -7942,8 +8031,14 @@ async function sendMessage(event) {
   input.value = "";
   render();
   try {
-    const result = await api("/api/chat", { method: "POST", body: JSON.stringify({ session_id: sessionId, character_id: state.selectedCharacter, messages: [{ role: "user", content }] }) });
-    if (state.activeSessionId === sessionId) state.messages.push(result.message);
+    const result = await api("/api/chat", { method: "POST", body: JSON.stringify({ client_request_id: crypto.randomUUID(), session_id: sessionId, character_id: state.selectedCharacter, messages: [{ role: "user", content }] }) });
+    if (result.work_request) {
+      state.composerDraft = content;
+      workbenchHost.showRoleApproval(result.work_request, { session_id: sessionId, message: content });
+      state.activePage = "Workspace";
+      if (companionWindow) await openMainWindow();
+    } else if (result.message && state.activeSessionId === sessionId) state.messages.push(result.message);
+    else state.sessionNotice = result.reason || "请求等待处理";
     try {
       state.sessions = await api("/api/sessions");
       syncActiveSession();
@@ -7966,12 +8061,12 @@ async function createSession() {
   state.sessionNotice = "";
   render();
   try {
-    const session = await rpc("session.create", { character_id: state.selectedCharacter });
+    const session = await rpc("session.create", { character_id: state.selectedCharacter, purpose: companionWindow ? "chat" : "work" });
     state.sessions = [session, ...state.sessions.filter((item) => item.id !== session.id)];
     state.activeSessionId = session.id;
     invalidateQualityRoutingScope();
     state.messages = [];
-    state.activePage = "Chat";
+    state.activePage = companionWindow ? "Chat" : "Workspace";
   } catch (error) {
     state.sessionNotice = `新会话创建失败：${error.message}`;
   } finally {
@@ -7990,7 +8085,7 @@ async function selectSession(sessionId) {
     await Promise.all([loadAvatarState(false), loadMemories(false)]);
   }
   invalidateQualityRoutingScope();
-  state.activePage = "Chat";
+  state.activePage = companionWindow ? "Chat" : "Workspace";
   await loadMessages();
 }
 
@@ -8573,12 +8668,13 @@ document.addEventListener("click", (event) => {
 const benefitsView = createBenefitsController({
   state,
   rpc,
-  getScope: () => !state.overlayMode && !document.hidden && ["Settings", "Capabilities"].includes(state.activePage)
-    ? JSON.stringify([state.activePage, state.capabilityPageCategory || "perception", state.selectedCharacter, currentSessionId(), state.qualityRouting.requestGeneration]) : null,
+  getScope: () => !state.overlayMode && !document.hidden && workbenchHost.model.view === "settings"
+    ? JSON.stringify(["settings", state.selectedCharacter, currentSessionId(), state.qualityRouting.requestGeneration]) : null,
 });
 window.addEventListener("pagehide", () => benefitsView.dispose(), { once: true });
 
 const { renderQualitySettings, renderQualityWorkbench, renderRoutingEvidence } = createQualityRoutingView({
+  includeBenefits: false,
   escapeHtml: escapeHtml,
   renderConsultation: () => '<button class="outline-button" type="button" data-consultation-open>打开网页咨询</button>',
   renderPageFrame: (...args) => renderPageFrame(...args),
@@ -8706,6 +8802,84 @@ const pageView = createPageView({
   Developer: renderDeveloper,
 });
 
+let sharedAssistantId = "";
+window.addEventListener("storage", (event) => {
+  if (event.key !== "sumika:active-assistant:v1" || event.newValue === state.selectedCharacter || !state.characters.some((row) => row.id === event.newValue)) return;
+  sharedAssistantId = event.newValue;
+  state.selectedCharacter = event.newValue;
+  if (state.connected) void ensureConversationPurpose();
+});
+const workbenchHost = createWorkbenchHost({
+  state, rpc, render, selectSession, createSession, navigate: loadWorkbenchPage,
+  openResidence: async () => {
+    if (isDesktopShell) await invokeDesktop("set_display_mode", { mode: "pet" });
+    else window.open(`${location.origin}${location.pathname}?view=companion`, "sumika-companion", "width=480,height=420");
+  },
+  setInspector: async ({ open, active }) => {
+    if (!open || active !== "browser") { if (state.portalPanelOpen) await embeddedView.hide(); return; }
+    state.portalPanelOpen = true;
+    await embeddedView.list().catch(() => {});
+  },
+  sendRole: async (content, sessionId) => {
+    const result = await api("/api/chat", { method: "POST", body: JSON.stringify({ client_request_id: crypto.randomUUID(), session_id: sessionId || currentSessionId(), character_id: state.selectedCharacter, messages: [{ role: "user", content }] }) });
+    if (result.work_request) workbenchHost.showRoleApproval(result.work_request, { session_id: sessionId, message: content });
+    else if (result.message) { state.composerDraft = ""; workbenchHost.model.selectedTask = null; await loadMessages(); }
+  },
+  slots: {
+    benefits: () => renderBenefitsSection(state.benefits),
+    characters: () => renderCharacters(),
+    connections: () => '<p class="wv2-connection-location">' + escapeHtml(state.privacy) + "</p>" + renderModules(),
+    diagnostics: () => renderDeveloper(),
+    preferences: () => renderSettings() + renderGuide(),
+    agent: () => renderAgent(),
+    web: () => renderWebWorkbench(),
+    tasks: () => renderTasks(),
+    history: () => renderHistory() + renderNotifications(),
+    browser: () => renderPortalPanel(),
+    memory: () => workbenchHost.model.memoryOpen ? `<section><button type="button" id="add-memory">添加记忆</button>${state.memories.map((memory) => `<article><p>${escapeHtml(memory.content)}</p><button type="button" data-memory-delete="${escapeHtml(memory.id)}">删除</button></article>`).join("")}</section>` : "",
+  },
+});
+
+if (new URLSearchParams(location.search).get("view") === "settings") {
+  workbenchHost.model.view = "settings";
+  workbenchHost.model.connectionsOpen = new URLSearchParams(location.search).has("connections");
+}
+
+const workAuthorizationRpc = createWorkAuthorizationClient({
+  transport: transportRpc,
+  scope: () => ({ assistant_id: state.selectedCharacter, core_session_id: currentSessionId() }),
+  onPending: (request, continuation) => { const advanced = document.querySelector(".wv2-center > .wv2-advanced"); if (advanced) advanced.open = false; workbenchHost.showExternalApproval(request, continuation); render(); },
+  onResult: (request, continuation) => workbenchHost.observeExternalRequest(request, continuation),
+});
+
+const workbenchStyles = document.createElement("link");
+workbenchStyles.rel = "stylesheet";
+workbenchStyles.href = WORKBENCH_STYLESHEET;
+document.head.append(workbenchStyles);
+const companionStyles = document.createElement("style");
+companionStyles.textContent = '.cw-companion-controls{position:fixed;top:8px;left:8px;display:flex;gap:4px;z-index:90;opacity:0}.cw-companion-controls:hover,.cw-companion-controls:focus-within{opacity:1}.cw-companion-controls button{background:#fff8ef;border:1px solid #d8ccbb;border-radius:8px;padding:5px;color:#514437}.wv2-host-notice{position:fixed;bottom:8px;left:20px;z-index:99;background:#fff1d8;padding:8px 16px;border-radius:8px;max-width:80vw}.workbench-v2 .page-header{display:none}.workbench-v2 .embedded-browser-panel{position:relative;inset:auto;width:100%;height:calc(100vh - 170px)}';
+document.head.append(companionStyles);
+companionStyles.sheet.insertRule(".cw-companion-controls { top: 52px; }", companionStyles.sheet.cssRules.length);
+const workPoll = setInterval(() => {
+  if (state.connected && document.visibilityState === "visible") void workbenchHost.refresh().then(() => {
+    if (!state.overlayMode) render();
+  });
+}, 10000);
+window.addEventListener("beforeunload", () => { clearInterval(workPoll); workbenchHost.destroy(); });
+if (isDesktopShell) {
+  void import("@tauri-apps/api/event").then(async ({ listen }) => {
+    await listen("native-render-visibility-changed", ({ payload }) => {
+      state.nativeRenderVisible = payload.rendering;
+      updateSceneVisibility();
+    });
+    await listen("companion-window-changed", ({ payload }) => {
+      if (!companionWindow) return;
+      document.body.dataset.companionSize = payload.mode;
+      render();
+    });
+  }).catch((error) => { state.sessionNotice = `窗口事件连接失败：${error.message}`; });
+}
+
 const initialAgentRoutingPreference = readAgentRoutingPreference();
 state.agentRoutingMode = initialAgentRoutingPreference.mode;
 state.agentRoutingBudgetPolicy = initialAgentRoutingPreference.budget_policy;
@@ -8713,10 +8887,16 @@ state.agentRoutingBudgetPolicy = initialAgentRoutingPreference.budget_policy;
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || event.defaultPrevented) return;
   if (document.querySelector("dialog[open]")) return;
-  if (state.providerDrawerOpen) closeProviderDrawer();
+  if (state.providerDrawerOpen) { closeProviderDrawer(); document.querySelector(".provider-picker > summary")?.focus(); }
   else if (state.webChatDrawerOpen) closeWebChatDrawer();
-  else if (state.portalPanelOpen) {
+  else if (!state.overlayMode && workbenchHost.model.inspector.open) {
+    void workbenchHost.actions.onInspectorChange({ open: false, active: workbenchHost.model.inspector.active });
+  } else if (state.portalPanelOpen) {
     void embeddedView.hide();
+  } else if (!state.overlayMode && document.activeElement?.closest("details[open]")) {
+    const details = document.activeElement.closest("details[open]");
+    details.open = false;
+    details.querySelector("summary")?.focus();
   } else if (state.overlayMode) {
     void openMainWindow();
   } else if (projectSceneState(state).drawerOpen) {
@@ -8745,12 +8925,22 @@ document.head.appendChild(embeddedStylesheet);
 render();
 if (isDesktopShell) {
   void invokeDesktop("get_display_mode").then((mode) => {
-    state.overlayMode = displayMode(mode) === "pet";
+    state.overlayMode = companionWindow;
     render();
   }).catch((error) => { state.sessionNotice = `窗口模式读取失败：${error.message}`; render(); });
 }
 void loadInitialData().finally(() => {
-  if (isDesktopShell) void embeddedView.attach().catch(() => {});
+  if (isDesktopShell && !companionWindow) void embeddedView.attach().catch(() => {});
   scheduleAgentStateSync();
   connectEvents();
+  if (state.connected) void ensureConversationPurpose();
 });
+
+async function ensureConversationPurpose() {
+  const purpose = companionWindow ? "chat" : "work";
+  const session = state.sessions.find((row) => row.character_id === state.selectedCharacter && row.purpose === purpose && !row.archived);
+  if (session) await selectSession(session.id);
+  else await createSession();
+  await workbenchHost.refresh();
+  render();
+}

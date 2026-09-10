@@ -15,6 +15,7 @@ mcp = ["mcp>=1.12,<2"]
 
 [project.scripts]
 quality-routing-mcp = "quality_routing.mcp_server:main"
+quality-routing-dsh-helper = "quality_routing.dsh_helper:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

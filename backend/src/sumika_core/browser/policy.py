@@ -15,6 +15,8 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from quality_routing.privacy import looks_like_secret_text
+
 
 class BrowserPolicyError(ValueError):
     """Raised when a policy request is malformed."""
@@ -41,11 +43,6 @@ TARGET_KINDS = frozenset({"none", "snapshot_ref", "css_selector", "unknown"})
 POLICY_DECISIONS = frozenset({"allow", "ask", "deny"})
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9\u0080-\uffff](?:[A-Za-z0-9\u0080-\uffff-]{0,61}[A-Za-z0-9\u0080-\uffff])?$")
-_SECRET_TEXT_RE = re.compile(
-    r"(?i)(?:sk-[a-z0-9_-]{8,}|bearer\s+[a-z0-9._~+/=-]{8,}|"
-    r"(?:api[_ -]?key|token|password|secret|otp)\s*[:=]\s*[^\s,;]+)"
-)
-
 _ALLOWED_METADATA_KEYS = frozenset(
     {
         "tool_name",
@@ -170,10 +167,6 @@ def classify_target(value: Any) -> str:
     if target.startswith(("#", ".", "[", ":")):
         return "css_selector"
     return "unknown"
-
-
-def looks_like_secret_text(value: Any) -> bool:
-    return isinstance(value, str) and bool(_SECRET_TEXT_RE.search(value))
 
 
 def validate_metadata(metadata: Any) -> dict[str, Any]:

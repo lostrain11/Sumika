@@ -1,0 +1,13 @@
+- id: dsh-office-tools
+  disabled: true
+- id: dsh-pdf
+  disabled: true
+- insert:
+    - id: sumika-community-documents
+      name: "@sumika/dsh-community-documents"
+      config:
+        word: false
+        excel: false
+        powerpoint: false
+        pdfRead: false
+        fileAccessGranted: false

@@ -1,5 +1,18 @@
 # Sumika 文档
 
+- [客户端工作流完整重构计划](refactor/client-workflow-v2.md)
+- [剩余全部工作与低成本模型执行计划v2（当前交接入口）](refactor/remaining-execution-plan-v2.md)
+- [旧剩余执行计划（2026-09-10，历史保留）](refactor/remaining-execution-plan-20260910.md)
+- [Skill迁移、独立路径检查和社区办公验收](refactor/skill-migration.md)
+- [重构前执行基线](refactor/client-workflow-v2-baseline.md)
+- [双窗口原生验收](refactor/client-workflow-v2-native-validation.md)
+- [可独立复用组件标准](architecture/reusable-components.md)
+- [场所与视图分组](architecture/places.md)
+- [长期记忆适配](architecture/memory-adapters.md)
+- [项目与对话上下文](architecture/projects.md)
+- [定时工作](architecture/schedules.md)
+- [独立质量路由组件](architecture/quality-component.md)
+
 这里是 Sumika 文档的总入口。先看[项目状态矩阵](status-matrix.md)，再按
 使用、架构、开发接口或外部集成进入专题文档。文档使用中文说明产品行为，
 API、协议、类名和代码标识保留 English identifier。
@@ -13,7 +26,7 @@ API、协议、类名和代码标识保留 English identifier。
   三个动作；不替代状态矩阵。
 - [需求基线](requirements/README.md)：记录长期产品意图、历史取代关系和未来
   重构验收标准；不替代状态矩阵。
-- [需求总表：79项及出处索引](requirements/catalog.md)
+- [需求总表：91项及出处索引](requirements/catalog.md)
 - [统一内置浏览器正式需求](requirements/embedded-browser.md)
 - [完整需求基线](requirements/baseline.md)
 - [模型策略契约](requirements/model-policy.md)：记录 ZCode、智谱、Ollama、额度、

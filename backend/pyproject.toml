@@ -16,3 +16,6 @@ sumika-core = "sumika_core.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"sumika_core.builtin_skills" = ["resources/catalog.json", "resources/*/SKILL.md", "resources/*/config/*.json", "resources/*/scripts/*.py"]
