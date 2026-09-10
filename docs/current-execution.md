@@ -12,7 +12,7 @@
 
 - Branch: `codex/dsh-agent-runtime`
 - Baseline commit: `a2a5f68`
-- Last verified commit: HEAD为a2a5f68；既有功能与本次文档结果均在未提交工作区。本次只核对代码和文档，不为当前全部源码新增产品验证结论。重构前基线见[保留基线](refactor/client-workflow-v2-baseline.md)。
+- Last verified commit: 既有功能与计划文档已提交为`2843e27`并推送`origin/codex/dsh-agent-runtime`（143文件，含.gitignore补`backend/build/`与`backend/src/*.egg-info/`）。该提交只建立恢复点，不代表新增产品验证结论；本次只做只读核对与文档检查。重构前基线见[保留基线](refactor/client-workflow-v2-baseline.md)。
 
 ## 当前里程碑
 
