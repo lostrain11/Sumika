@@ -11,6 +11,7 @@ from sumika_core.quality.legacy_admission import LegacyWorkAdmission
 from sumika_core.quality.work import WorkService
 from sumika_core.server import create_server
 from sumika_core.storage import Storage
+from trusted_host_fixture import trusted_rpc
 
 
 class ExternalWorkTests(unittest.TestCase):
@@ -281,7 +282,7 @@ class LegacyAdmissionEntryTests(unittest.TestCase):
             pending = self.app.rpc("agent.session.prompt", params)
             self.assertEqual(received, [])
             self.assertEqual(pending["work_request"]["quote"]["high_cny"], "4")
-            self.app.rpc("work.authorization.confirm", {"request_id": "parent-work", "assistant_id": "sumika", "revision": 1, "max_cny": "4"})
+            trusted_rpc(self.app, "work.authorization.confirm", {"request_id": "parent-work", "assistant_id": "sumika", "revision": 1, "max_cny": "4"})
             parent = self.app.rpc("agent.session.prompt", params)["work_request"]
             step = parent["external_steps"][0]
             child_params = {**step["params"], "parent_work_request_id": "parent-work", "parent_revision": 1, "parent_step_id": "verify"}
@@ -322,7 +323,7 @@ class LegacyAdmissionEntryTests(unittest.TestCase):
         ), patch.object(self.app.agent, "prompt", side_effect=execute):
             pending = self.app.rpc("agent.session.prompt", params)
             self.assertEqual(order, [])
-            self.app.rpc("work.authorization.confirm", {"request_id": pending["work_request_id"],
+            trusted_rpc(self.app, "work.authorization.confirm", {"request_id": pending["work_request_id"],
                          "assistant_id": "sumika", "revision": 1, "max_cny": "2"})
             result = self.app.rpc("agent.session.prompt", params)
         self.assertEqual(order, ["checkpoint", "execute"])

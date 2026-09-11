@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import socket
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -20,6 +21,7 @@ from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .audio import AudioRuntime, AudioRuntimeError
+from .host_authorization import CallerContext, HostAuthorization, HostAuthorizationError, confirmation_digest, read_bootstrap
 from .agent import AgentCapability, AgentRuntime, AgentRuntimeError, SkillCatalog, SkillCatalogError, create_agent_runtime
 from .agent.adapters.zcode.config import config_from_env as zcode_config_from_env
 from .agent.adapters.zcode.runtime import ZCodeAgentRuntime
@@ -323,7 +325,9 @@ class CoreApplication:
         agent_runtime: AgentRuntime | None = None,
         external_route_sources: Iterable[Any] | None = None,
         route_sources: Iterable[Any] | None = None,
+        host_secret: str | None = None,
     ) -> None:
+        self.host_authorization = HostAuthorization(host_secret)
         configured_dir = data_dir or os.getenv("SUMIKA_DATA_DIR", str(ROOT_DIR / ".sumika"))
         self.data_dir = Path(configured_dir) if str(configured_dir) != ":memory:" else Path(".")
         self.configured_data_dir = None if str(configured_dir) == ":memory:" else self.data_dir
@@ -520,10 +524,11 @@ class CoreApplication:
         self._initialize_route_supervisor()
         self.quality = QualityRoutingService(self)
         from .development import DevelopmentWorkspace
+        from .development.executor import ApiDevelopmentExecutor
         self.work = WorkService(self.storage, self.quality, owner_ids=[row["id"] for row in self.storage.list_characters()],
                                 record_received=self._record_work_request,
                                 skill_library=self.builtin_skills, skill_data_root=self.configured_data_dir,
-                                development_factory=(lambda spec, cancelled: DevelopmentWorkspace(
+                                development_executor=ApiDevelopmentExecutor(lambda spec, cancelled: DevelopmentWorkspace(
                                     self.configured_data_dir / "development-workspaces", spec, self.workspace, cancelled))
                                 if self.configured_data_dir is not None else None)
         self.quality.work = self.work
@@ -2055,7 +2060,11 @@ class CoreApplication:
         if request.project_id:
             self.projects.attach_conversation(request.project_id, request.assistant_id, source="core", source_id=request.session_id)
 
-    def rpc(self, method: str, params: dict[str, Any]) -> Any:
+    def rpc(self, method: str, params: dict[str, Any], *, caller: CallerContext | None = None) -> Any:
+        try:
+            self.host_authorization.require(caller, method, params)
+        except HostAuthorizationError as error:
+            raise JsonRpcError(-32041, str(error)) from None
         started = time.monotonic()
         component, capability = classify_rpc_method(method)
         operation_id = None
@@ -2424,6 +2433,11 @@ class CoreApplication:
         return AccountPortalReader(self.browser.browser_skill).read_receipts(source, browser_id, cancelled)
 
     def _rpc(self, method: str, params: dict[str, Any]) -> Any:
+        if method == "host.confirmation.digest":
+            try:
+                return {"digest": confirmation_digest(params["method"], params["params"])}
+            except (KeyError, ValueError, TypeError) as error:
+                raise JsonRpcError(-32602, str(error)) from None
         if method.startswith("browser.embedded."):
             try:
                 if method == "browser.embedded.attach":
@@ -7469,6 +7483,16 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         payload: dict[str, Any] = {}
         try:
             payload = self._read_json()
+            if self.path == "/internal/host-confirm/v1":
+                if set(payload) != {"method", "params", "digest"} or not isinstance(payload["params"], dict):
+                    raise JsonRpcError(-32602, "invalid host confirmation envelope")
+                try:
+                    caller = self.application.host_authorization.authenticate(
+                        self.headers.get("X-Sumika-Host"), payload["method"], payload["params"], payload["digest"])
+                except HostAuthorizationError as error:
+                    raise JsonRpcError(-32041, str(error)) from None
+                self._send_json(success(None, self.application.rpc(payload["method"], payload["params"], caller=caller)))
+                return
             if self.path == "/rpc":
                 request = parse_request(payload)
                 self._send_json(success(request.request_id, self.application.rpc(request.method, request.params)))
@@ -7694,9 +7718,10 @@ def create_server(
     data_dir: str | Path | None = None,
     *,
     test_providers: dict[str, list[Any]] | None = None,
+    host_secret: str | None = None,
 ) -> tuple[SumikaHTTPServer, CoreApplication]:
     """Create an HTTP server; test doubles must be explicitly injected."""
-    application = CoreApplication(data_dir, test_providers=test_providers)
+    application = CoreApplication(data_dir, test_providers=test_providers, host_secret=host_secret)
 
     class Handler(SumikaRequestHandler):
         pass
@@ -7710,8 +7735,11 @@ def main() -> None:
     parser.add_argument("--host", default=os.getenv("SUMIKA_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("SUMIKA_PORT", "8765")))
     parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--host-bootstrap-stdin", action="store_true")
     args = parser.parse_args()
-    server, application = create_server(args.host, args.port, args.data_dir)
+    secret = read_bootstrap(sys.stdin) if args.host_bootstrap_stdin else None
+    server, application = create_server(args.host, args.port, args.data_dir, host_secret=secret)
+    secret = None
     print(f"Sumika core listening on http://{args.host}:{args.port}")
     try:
         server.serve_forever()

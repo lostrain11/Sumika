@@ -12,7 +12,9 @@ from uuid import uuid4
 
 from quality_routing import Node, Quote, RoutingError, Scope
 from quality_routing.contracts import amount
+from quality_routing.development_journal import append_event, recovery_state
 from quality_routing.workflow import ExternalQuote, WorkRequest, admission_state, authorize, check_authorization, check_delegation, classify_request, delegation_digest, work_artifact
+from ..development.contracts import DevelopmentExecutor, LEGACY_EXECUTOR_ID
 from ..providers.guard import RequestNotSent
 from .legacy_admission import external_payload_digest
 
@@ -21,11 +23,16 @@ class WorkService:
     namespace = "work-requests/v1"
 
     def __init__(self, repository, quality, *, owner_ids=(), record_received=None, development_factory=None,
-                 skill_library=None, skill_data_root=None) -> None:
+                 skill_library=None, skill_data_root=None, development_executor: DevelopmentExecutor | None = None) -> None:
         self.repository = repository
         self.quality = quality
         self.record_received = record_received
-        self.development_factory = development_factory
+        if development_executor is not None and development_factory is not None:
+            raise ValueError("configure one development executor, not two execution paths")
+        if development_factory is not None:
+            from ..development.executor import ApiDevelopmentExecutor
+            development_executor = ApiDevelopmentExecutor(development_factory)
+        self.development_executor = development_executor
         self.skill_library = skill_library
         self.skill_data_root = skill_data_root
         self._lock = threading.RLock()
@@ -34,8 +41,10 @@ class WorkService:
         self._owner_ids = set(owner_ids)
         for owner in self._owner_ids:
             for value in repository.list_records(self.namespace, owner):
-                if value.get("status") in {"planning", "executing"} and not value.get("task_id"):
+                if value.get("status") in {"planning", "executing", "cancel-requested"} and not value.get("task_id"):
                     value["status"] = "submission-unknown" if any(attempt["status"] == "reserved" for attempt in value.get("attempts", {}).values()) else "interrupted"
+                    if value.get("development"):
+                        self._development_recovery(value)
                     for attempt in value.get("attempts", {}).values():
                         if attempt["status"] == "reserved":
                             attempt["submission_unknown"] = True
@@ -46,6 +55,26 @@ class WorkService:
 
     def _save(self, value: dict[str, Any]) -> dict[str, Any]:
         return self.repository.save_record(self.namespace, value["request_id"], value["assistant_id"], value)
+
+    @staticmethod
+    def _development_unresolved(value):
+        if not value.get("development"):
+            return False
+        try:
+            return recovery_state(value.get("development_journal", []))["state"] == "submission-unknown"
+        except (RoutingError, KeyError, TypeError):
+            return True
+
+    @staticmethod
+    def _development_recovery(value):
+        try:
+            recovery = recovery_state(value.get("development_journal", []))
+        except (RoutingError, KeyError, TypeError):
+            recovery = {"state": "submission-unknown", "reason": "journal-invalid", "automatic_replay": False}
+        value["development_recovery"] = recovery
+        if recovery["state"] == "submission-unknown":
+            value["status"] = "submission-unknown"
+        value["status_detail"] = "开发执行已停止；请检查操作记录和源码副本，不会自动重发或重新运行工具。"
 
     def get(self, request_id: str, assistant_id: str) -> dict[str, Any]:
         value = self.repository.get_record(self.namespace, request_id, assistant_id)
@@ -60,6 +89,27 @@ class WorkService:
     def list(self, assistant_id: str) -> list[dict[str, Any]]:
         return [self.get(row["request_id"], assistant_id) for row in self.repository.list_records(self.namespace, assistant_id)]
 
+    def inspect_development(self, params):
+        with self._lock:
+            value = self.get(params["request_id"], params.get("assistant_id", "sumika"))
+            if not value.get("development") or not self.development_executor:
+                raise RoutingError("development inspection is unavailable")
+            self._check_development(value)
+            if value["status"] in {"planning", "executing", "verifying"}:
+                raise RoutingError("wait for development execution to stop before inspecting")
+            prepared = value.get("development_workspace")
+            if not prepared:
+                raise RoutingError("no completed development workspace preparation was recorded")
+            inspection = self.development_executor.inspect(value["development"], prepared)
+            result = value.get("development_result") or {}
+            evidence_current = (result.get("status") == "completed"
+                                and result.get("workspace_digest") == inspection["workspace_digest"])
+            return {"request_id": value["request_id"], "revision": value["revision"],
+                    "assistant_id": value["assistant_id"], "status": value["status"],
+                    "recovery": recovery_state(value.get("development_journal", [])),
+                    "test_evidence_current": evidence_current, "independently_verified": False,
+                    **inspection}
+
     def preflight(self, params: dict[str, Any]) -> dict[str, Any]:
         if params.get("external_steps"):
             raise RoutingError("external step plans must enter through their Agent/Web host, not the API text planner")
@@ -71,11 +121,10 @@ class WorkService:
             raise RoutingError("project is outside this assistant scope")
         development = None
         if params.get("development") is not None:
-            from ..development import development_spec
-            if not self.development_factory or not request.project_id or not isinstance(params["development"], dict):
+            if not self.development_executor or not request.project_id or not isinstance(params["development"], dict):
                 raise RoutingError("development requires a configured workspace and project")
             project = self.repository.get_record("projects/v1", request.project_id, request.assistant_id)
-            development = development_spec(project.get("directory"), params["development"])
+            development = self.development_executor.preflight(project.get("directory"), params["development"])
         with self._lock:
             previous = self.repository.get_record(self.namespace, request.request_id, scope.owner_id)
             if previous:
@@ -136,6 +185,7 @@ class WorkService:
                 value["authorization"] = authorize(request, quote, candidate_ids=tuple(allowed), max_cny="0")
             if development:
                 value["development"] = development
+                value["development_executor_id"] = self.development_executor.executor_id
                 value["skills"] = self.skill_library.snapshot(scope.owner_id) if self.skill_library else []
                 value["development_events"] = []
                 value["assumptions"] = ["在独立源码副本修改；不自动合入、提交、发布或安装依赖", "测试是本机进程，源码副本不构成操作系统沙箱；测试代码具备当前用户权限",
@@ -161,8 +211,10 @@ class WorkService:
             if value.get("external_steps"):
                 value["authorization"]["delegation_digest"] = delegation_digest(value["external_steps"])
             if value.get("development"):
+                self._check_development_executor(value)
                 value["authorization"]["development_digest"] = delegation_digest([value["development"]])
                 value["authorization"]["skills_digest"] = delegation_digest(value.get("skills", []))
+                value["authorization"]["development_executor_id"] = value.get("development_executor_id", LEGACY_EXECUTOR_ID)
             value["status"] = "ready"
             return self._save(value)
 
@@ -171,6 +223,8 @@ class WorkService:
             previous = self.get(params["request_id"], params.get("assistant_id", "sumika"))
             if any(attempt["status"] == "reserved" for attempt in previous["attempts"].values()):
                 raise RoutingError("resolve in-flight or unknown attempts before revising")
+            if self._development_unresolved(previous):
+                raise RoutingError("resolve unknown development operations before revising")
             if previous["status"] in {"planning", "executing", "running", "verifying"}:
                 raise RoutingError("pause or cancel current execution before revising")
             request = self._request(previous)
@@ -473,8 +527,15 @@ class WorkService:
                 raise RoutingError("resume this authorized request through chat.send")
             if self._closed:
                 raise RoutingError("work service is closed")
+            previous = deepcopy(value)
             value["status"] = "planning" if value["classification"]["complexity"] == "complex" else "executing"
-            self._save(value)
+            if value.get("development"):
+                try:
+                    self.repository.save_record_group(self.namespace, value["assistant_id"], [(previous, value)])
+                except ValueError:
+                    return self.get(value["request_id"], value["assistant_id"])
+            else:
+                self._save(value)
             self._pool.submit(self._run, value)
             return value
 
@@ -505,12 +566,14 @@ class WorkService:
                 current = self.repository.get_record(self.namespace, value["request_id"], value["assistant_id"])
                 if current and current["status"] != "cancelled":
                     current["status"] = "submission-unknown" if any(item["status"] == "reserved" for item in current["attempts"].values()) else "failed"
+                    if current.get("development"):
+                        self._development_recovery(current)
                     current["error"] = "需要检查执行状态；未自动重发" if current["status"] == "submission-unknown" else "工作未完成，请检查候选、预算或执行记录"
                     current["error_type"] = type(exc).__name__
                     self._save(current)
 
     def _run_development(self, value):
-        from quality_routing.development import run_development
+        from quality_routing.development import DevelopmentNotSent
 
         request = self._request(value)
         scope = Scope(request.assistant_id, request.session_id)
@@ -527,53 +590,63 @@ class WorkService:
         candidate = next((item for item in self.quality.engine.candidates() if item.candidate_id == value["candidate_id"]), None)
         if not candidate or list(candidate.identity()) != value["candidate_identities"].get(candidate.candidate_id):
             raise RoutingError("fixed development candidate unavailable or changed")
-        workspace = self.development_factory(value["development"], cancelled)
-        prepared = workspace.prepare()
-        with self._lock:
-            current = self.get(request.request_id, request.assistant_id)
-            current["development_workspace"] = prepared
-            self._save(current)
+        def prepared(item):
+            with self._lock:
+                current = self.get(request.request_id, request.assistant_id)
+                self._check_development(current)
+                current["development_workspace"] = item
+                self._save(current)
 
-        def event(item):
+        def event(item, difference):
             with self._lock:
                 current = self.get(request.request_id, request.assistant_id)
                 current["development_events"].append(item)
-                if item.get("name") in {"write_file", "run_test", "get_diff"}:
-                    current["development_diff"] = workspace.diff()
+                if difference is not None:
+                    current["development_diff"] = difference
                 self._save(current)
 
+        def journal(item):
+            with self._lock:
+                current = self.get(request.request_id, request.assistant_id)
+                self._check_development(current)
+                if item["phase"] == "started" and cancelled():
+                    raise RoutingError("development dispatch cancelled")
+                previous = deepcopy(current)
+                current["development_journal"] = append_event(current.get("development_journal", []), item)
+                self.repository.save_record_group(self.namespace, request.assistant_id, [(previous, current)])
+
         skills = value.get("skills", [])
-        extra_tools = []
-        if skills:
-            extra_tools.append({"type": "function", "function": {"name": "load_skill", "description": "Load an enabled Skill only when relevant to the current task.",
-                "parameters": {"type": "object", "properties": {"skill_id": {"type": "string", "enum": [row["id"] for row in skills]}}, "required": ["skill_id"], "additionalProperties": False}}})
-        if any(row.get("helpers") for row in skills):
-            extra_tools.append({"type": "function", "function": {"name": "run_skill_helper", "description": "Run an enabled Skill's read-only path check. Does not configure, download or execute tools.",
-                "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "helper": {"type": "string"}, "operation": {"type": "string", "enum": ["reuse", "cache"]}},
-                               "required": ["skill_id", "helper", "operation"], "additionalProperties": False}}})
+        def helper(skill_id, helper_id, operation):
+            with self._lock:
+                current = self.get(request.request_id, request.assistant_id)
+                self._check_development(current)
+                if cancelled() or self.skill_library is None:
+                    raise RoutingError("Skill helper is unavailable")
+            return self.skill_library.helper(request.assistant_id, skills, skill_id, helper_id, operation, data_root=self.skill_data_root)
 
-        def execute(name, arguments):
-            if cancelled():
-                raise RoutingError("work cancelled")
-            if name == "load_skill" and set(arguments) == {"skill_id"}:
-                row = next((item for item in skills if item["id"] == arguments["skill_id"]), None)
-                if not row:
-                    raise RoutingError("Skill is not enabled for this request")
-                return {key: row[key] for key in ("id", "content", "directory", "helpers")}
-            if name == "run_skill_helper" and set(arguments) == {"skill_id", "helper", "operation"} and self.skill_library:
-                return self.skill_library.helper(request.assistant_id, skills, arguments["skill_id"], arguments["helper"], arguments["operation"], data_root=self.skill_data_root)
-            return workspace.execute(name, arguments)
+        def invoke(messages, tools):
+            with self._lock:
+                self._check_development(self.get(request.request_id, request.assistant_id))
+                if cancelled():
+                    raise DevelopmentNotSent("development dispatch cancelled")
+            try:
+                return self.quality.invoke_development(candidate, scope, messages, tools, cancelled, request.request_id, value["development"])
+            except RequestNotSent as exc:
+                raise DevelopmentNotSent("development request was not sent") from exc
 
-        result = run_development(request.goal,
-            invoke=lambda messages, tools: self.quality.invoke_development(candidate, scope, messages, tools, cancelled, request.request_id, value["development"]),
-            execute=execute, cancelled=cancelled, context=json.dumps({"workspace": prepared, "authorization": value["development"],
-                "enabled_skills": [{"id": row["id"], "description": row["description"]} for row in skills]}, ensure_ascii=False),
-            max_calls=value["development"]["max_calls"], required_tests=len(value["development"]["test_commands"]), event=event, extra_tools=extra_tools)
+        execution = self.development_executor.run(request.goal, spec=value["development"], skills=skills,
+            invoke=invoke, helper=helper, cancelled=cancelled, prepared=prepared, journal=journal, event=event)
+        if (execution.get("schema_version") != "development-execution/v1"
+                or execution.get("executor_id") != self.development_executor.executor_id):
+            raise RoutingError("development executor returned an incompatible receipt")
+        result = execution["result"]
         with self._lock:
             current = self.get(request.request_id, request.assistant_id)
             if not cancelled():
                 current["status"] = result["status"]
-            current["development_diff"] = workspace.diff()
+            current["development_diff"] = execution["diff"]
+            if result["status"] == "submission-unknown":
+                self._development_recovery(current)
             current["development_result"] = result
             if result["text"]:
                 artifact = work_artifact(request.request_id, request.assistant_id, result["text"], source="development")
@@ -581,9 +654,18 @@ class WorkService:
                 current["artifacts"] = [artifact]
             self._save(current)
 
+    def _check_development_executor(self, value):
+        expected = value.get("development_executor_id", LEGACY_EXECUTOR_ID)
+        if self.development_executor is None or self.development_executor.executor_id != expected:
+            raise RoutingError("confirmed development executor is unavailable; no automatic replacement")
+        return expected
+
     def _check_development(self, value):
         if value.get("development"):
+            expected = self._check_development_executor(value)
             authorization = value.get("authorization") or {}
+            if authorization.get("development_executor_id", LEGACY_EXECUTOR_ID) != expected:
+                raise RoutingError("development executor differs from the confirmed version")
             if authorization.get("development_digest") != delegation_digest([value["development"]]):
                 raise RoutingError("development scope differs from the confirmed version")
             if value.get("skills") and authorization.get("skills_digest") != delegation_digest(value["skills"]):
@@ -595,12 +677,15 @@ class WorkService:
             value = self.repository.get_record(self.namespace, request_id, scope.owner_id)
             if not value or value["status"] in {"cancelled", "cancel-requested", "failed", "submission-unknown"}:
                 raise RoutingError("work request is not executable")
+            if value.get("development") and (self._closed or value["status"] != "executing"):
+                raise RoutingError("development request is not executing")
             request = self._request(value)
             if request.session_id != scope.session_id:
                 raise RoutingError("work session mismatch")
             quote = candidate.quote(input_tokens, output_tokens)
             if not quote.available or quote.effective_cost_cny is None:
                 raise RoutingError("current price or funding is unknown")
+            previous = deepcopy(value) if value.get("development") else None
             authorization = value["authorization"]
             if not authorization:
                 raise RoutingError("work requires confirmation")
@@ -613,9 +698,21 @@ class WorkService:
             if len(value["attempts"]) >= value["quote"]["max_calls"]:
                 raise RoutingError("authorized call limit exceeded")
             attempt_id = uuid4().hex
+            operation_id = None
+            if value.get("development"):
+                pending = recovery_state(value.get("development_journal", []))["pending_operations"]
+                if len(pending) != 1 or pending[0]["kind"] != "model":
+                    raise RoutingError("development model call requires a persisted intent")
+                operation_id = pending[0]["operation_id"]
+                if any(item.get("development_operation_id") == operation_id for item in value["attempts"].values()):
+                    raise RoutingError("development model operation already reserved")
             authorization["reserved_cny"] = str(amount(authorization["reserved_cny"]) + quote.effective_cost_cny)
             value["attempts"][attempt_id] = {"status": "reserved", "upper_cny": str(quote.effective_cost_cny)}
-            self._save(value)
+            if operation_id:
+                value["attempts"][attempt_id]["development_operation_id"] = operation_id
+                self.repository.save_record_group(self.namespace, scope.owner_id, [(previous, value)])
+            else:
+                self._save(value)
             return attempt_id
 
     def settle(self, request_id: str, scope: Scope, attempt_id: str, outcome, candidate) -> None:
@@ -642,7 +739,7 @@ class WorkService:
     def cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             value = self.get(params["request_id"], params.get("assistant_id", "sumika"))
-            unresolved = (value.get("external") or value.get("development")) and any(item.get("status") == "reserved" for item in value["attempts"].values())
+            unresolved = ((value.get("external") or value.get("development")) and any(item.get("status") == "reserved" for item in value["attempts"].values())) or self._development_unresolved(value)
             value["status"] = "cancel-requested" if unresolved else "cancelled"
             if unresolved:
                 value["cancel_requested"] = True
@@ -668,6 +765,8 @@ class WorkService:
             return self.confirm(params)
         if method == "work.task.get":
             return self.get(params["request_id"], params.get("assistant_id", "sumika"))
+        if method == "work.task.inspect":
+            return self.inspect_development(params)
         if method == "work.task.list":
             return {"tasks": self.list(params.get("assistant_id", "sumika"))}
         if method == "work.task.cancel":

@@ -15,6 +15,7 @@ import { createWebWorkbenchView } from "./src/web-workbench-view.js";
 import { createAgentView } from "./src/agent-view.js";
 import { createWorkbenchView } from "./src/workbench-view.js";
 import { createWorkAuthorizationClient } from "./src/work-authorization.js";
+import { confirmThroughHost, requiresHostConfirmation } from "./src/host-confirmation.js";
 import { createWorkbenchHost } from "./src/workbench-host.js";
 import { createSettingsView } from "./src/settings-view.js";
 import { createModulesView } from "./src/modules-view.js";
@@ -3178,6 +3179,10 @@ function rpc(method, params = {}) {
 }
 
 async function transportRpc(method, params = {}) {
+  if (requiresHostConfirmation(method)) {
+    return confirmThroughHost({ method, params, desktop: isDesktopShell, companion: companionWindow,
+      transport: transportRpc, invoke: invokeDesktop, openMain: openMainWindow });
+  }
   const response = await api("/rpc", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }) });
   if (response.error) throw new Error(response.error.message || "JSON-RPC request failed");
   return response.result;

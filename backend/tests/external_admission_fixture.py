@@ -68,7 +68,8 @@ def confirm_and_resume_rpc(test, application, method, params):
         test.assertEqual(work["funding"]["funding_kind"], "offline-test-fixture")
         for spy in spies:
             spy.assert_not_called()
-        confirmed = application.rpc("work.authorization.confirm", {
+        from trusted_host_fixture import trusted_rpc
+        confirmed = trusted_rpc(application, "work.authorization.confirm", {
             "request_id": pending["work_request_id"],
             "assistant_id": work["assistant_id"],
             "revision": work["revision"],

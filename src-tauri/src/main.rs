@@ -3,6 +3,7 @@
 mod consultation;
 mod embedded_browser;
 mod windowing;
+mod host_authorization;
 
 use std::env;
 use std::fs::OpenOptions;
@@ -31,6 +32,7 @@ struct CoreProcess {
 }
 
 struct CoreProcessInner {
+    host_secret: Mutex<String>,
     child: Mutex<Option<Child>>,
     log_path: PathBuf,
     host: String,
@@ -172,7 +174,8 @@ fn spawn_core(
     host: &str,
     port: u16,
     mcp_credential_refs: &[String],
-) -> Result<Child, String> {
+) -> Result<(Child, String), String> {
+    let secret = host_authorization::new_secret()?;
     let root = repository_root()?;
     let data_dir = desktop_data_dir(&root)?;
     std::fs::create_dir_all(&data_dir).map_err(|error| format!("创建桌面数据目录失败: {error}"))?;
@@ -194,12 +197,13 @@ fn spawn_core(
             "-u",
             "-m",
             "sumika_core",
+            "--host-bootstrap-stdin",
             "--host",
             host,
             "--port",
             &port.to_string(),
         ])
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(error_log));
     if let Some((executable, path_value)) = browser_skill_environment() {
@@ -213,9 +217,18 @@ fn spawn_core(
             mcp_credential_refs.join(","),
         );
     }
-    command
+    let mut child = command
         .spawn()
-        .map_err(|error| format!("启动 Sumika Python 核心失败（可设置 SUMIKA_PYTHON 指向 Python）: {error}"))
+        .map_err(|error| format!("启动 Sumika Python 核心失败（可设置 SUMIKA_PYTHON 指向 Python）: {error}"))?;
+    let bootstrap = serde_json::json!({"schema": "sumika-host/v1", "secret": secret}).to_string() + "\n";
+    let result = child.stdin.take().ok_or("host-bootstrap-pipe-unavailable".to_string())
+        .and_then(|mut pipe| pipe.write_all(bootstrap.as_bytes()).map_err(|_| "host-bootstrap-write-failed".to_string()));
+    if let Err(error) = result {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    Ok((child, secret))
 }
 
 fn resolve_address(host: &str, port: u16) -> Result<SocketAddr, String> {
@@ -914,10 +927,11 @@ fn supervise_core(state: CoreProcess) {
             state.inner.port,
             &state.inner.mcp_credential_refs,
         ) {
-            Ok(mut child) => match core_ready(&mut child, &state.inner.host, state.inner.port) {
+            Ok((mut child, secret)) => match core_ready(&mut child, &state.inner.host, state.inner.port) {
                 Ok(()) => {
                     let pid = child.id();
                     if let Ok(mut guard) = state.inner.child.lock() {
+                        if let Ok(mut current) = state.inner.host_secret.lock() { *current = secret; }
                         *guard = Some(child);
                         state.inner.restart_count.fetch_add(1, Ordering::SeqCst);
                         failed_restarts = 0;
@@ -1192,7 +1206,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             restart_count: AtomicU32::new(0),
         }),
     };
-    let mut child = match spawn_core(&log_path, &host, port, &mcp_credential_refs) {
+    let (mut child, host_secret) = match spawn_core(&log_path, &host, port, &mcp_credential_refs) {
         Ok(child) => child,
         Err(error) => {
             append_log(&log_path, &format!("core spawn failed: {error}"));
@@ -1209,6 +1223,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     append_log(&log_path, &format!("core health check passed on {host}:{port}"));
     let state = CoreProcess {
         inner: Arc::new(CoreProcessInner {
+            host_secret: Mutex::new(host_secret),
             child: Mutex::new(Some(child)),
             log_path,
             host,
@@ -1393,6 +1408,7 @@ mod tests {
 macro_rules! sumika_invoke_handler {
     () => {
         tauri::generate_handler![
+            host_authorization::host_confirm,
             windowing::set_display_mode,
             windowing::get_display_mode,
             windowing::start_pet_drag,
@@ -1437,6 +1453,7 @@ macro_rules! sumika_invoke_handler {
 macro_rules! sumika_invoke_handler {
     () => {
         tauri::generate_handler![
+            host_authorization::host_confirm,
             windowing::set_display_mode,
             windowing::get_display_mode,
             windowing::start_pet_drag,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import copy
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -12,6 +13,7 @@ from uuid import uuid4
 from .budget import Budget
 from .contracts import BudgetRule, Candidate, Node, Outcome, Plan, Quote, RoutingError, Scope, Verification, amount
 from .selection import select_candidate
+from .planning import handoff_errors, validate_planning
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class Execution:
     candidate: Candidate
     dependency_results: dict[str, str]
     cancelled: threading.Event
+    handoff: dict[str, Any] | None = None
 
 
 @dataclass
@@ -46,6 +49,8 @@ class _Task:
     upgrades: set[str] = field(default_factory=set)
     unknown_attempts: set[str] = field(default_factory=set)
     dispatch_paused: bool = False
+    planning: dict[str, Any] | None = None
+    planning_required: bool = False
 
 
 class Coordinator:
@@ -85,16 +90,30 @@ class Coordinator:
             self._balances[account_id] = amount(balance_cny) if balance_cny is not None else None
 
     def submit(self, plan: Plan, quote: Quote, rule: BudgetRule, *, allowed_ids: Iterable[str],
-               external_allowed: bool = False) -> dict[str, Any]:
+               external_allowed: bool = False, planning: dict[str, Any] | None = None,
+               planning_required: bool = False, file_grant: Iterable[str] | None = None) -> dict[str, Any]:
         if type(external_allowed) is not bool:
             raise RoutingError("external authorization must be boolean")
+        if type(planning_required) is not bool:
+            raise RoutingError("planning requirement must be boolean")
+        checked_planning = validate_planning(planning, plan)
         with self._lock:
             if self._closed or plan.task_id in self._tasks or plan.revision != 1:
                 raise RoutingError("task already exists, coordinator closed, or invalid initial revision")
             task = _Task(plan, Budget(quote, rule), frozenset(allowed_ids), external_allowed,
                          states={node.node_id: "pending" for node in plan.nodes})
             task.candidate_identities = {key: candidate.identity() for key, candidate in self._candidates.items() if key in task.allowed_ids}
-            task.file_grant = frozenset(path for node in plan.nodes for path in node.allowed_files)
+            task.file_grant = frozenset(file_grant if file_grant is not None else
+                                        (path for node in plan.nodes for path in node.allowed_files))
+            if any(not isinstance(path, str) or not path for path in task.file_grant):
+                raise RoutingError("invalid host file grant")
+            for node in plan.nodes:
+                for path in node.allowed_files:
+                    if path not in task.file_grant and (any(char in path for char in "*?[") or
+                            not any(fnmatch.fnmatchcase(path, grant) for grant in task.file_grant)):
+                        raise RoutingError("plan exceeds approved file scope")
+            task.planning = checked_planning
+            task.planning_required = planning_required or checked_planning is not None
             task.quality_baselines = frozenset(node.baseline_id for node in plan.nodes)
             self._tasks[plan.task_id] = task
             self._persist(task, "task.created")
@@ -131,13 +150,21 @@ class Coordinator:
             self._persist(task, "preflight.accounted")
 
     def revise(self, plan: Plan, *, quote: Quote | None = None, require_confirmation: bool = False,
-               invalidate_ids: Iterable[str] = ()) -> dict[str, Any]:
+               invalidate_ids: Iterable[str] = (), planning: dict[str, Any] | None = None) -> dict[str, Any]:
         with self._lock:
             task = self._task(plan.task_id, plan.scope)
             if plan.revision != task.plan.revision + 1 or task.cancelled:
                 raise RoutingError("invalid revision")
             if task.unknown_attempts or set(task.states.values()) & {"running", "verifying", "unknown"}:
                 raise RoutingError("recover the original attempt before replanning")
+            inherited_planning = copy.deepcopy(task.planning) if planning is None else planning
+            if planning is None and inherited_planning is not None:
+                inherited_planning["handoffs"] = {key: value for key, value in inherited_planning["handoffs"].items()
+                                                  if key in {node.node_id for node in plan.nodes}}
+            checked_planning = validate_planning(inherited_planning, plan)
+            if checked_planning is not None and task.planning is not None and (
+                    checked_planning["goal_contract_digest"] != task.planning["goal_contract_digest"]):
+                raise RoutingError("planning cannot change the authorized goal contract")
             previous = {node.node_id: node for node in task.plan.nodes}
             previous_dependencies = {dependency for node in task.plan.nodes for dependency in node.dependencies}
             next_dependencies = {dependency for node in plan.nodes for dependency in node.dependencies}
@@ -154,6 +181,14 @@ class Coordinator:
                                                        not any(fnmatch.fnmatchcase(path, grant) for grant in task.file_grant)):
                         raise RoutingError("revision exceeds approved file scope")
             invalid = {node.node_id for node in plan.nodes if previous.get(node.node_id) != node}
+            if checked_planning is not None and task.planning is not None:
+                for node in plan.nodes:
+                    before = task.planning["handoffs"].get(node.node_id, {})
+                    after = checked_planning["handoffs"].get(node.node_id, {})
+                    if not isinstance(before, dict) or not isinstance(after, dict) or (
+                            {key: value for key, value in before.items() if key != "review"} !=
+                            {key: value for key, value in after.items() if key != "review"}):
+                        invalid.add(node.node_id)
             invalid.update(invalidate_ids)
             invalid.update(key for key, state in task.states.items() if state != "completed")
             invalid.update(key for key, value in task.states.items() if value in {"running", "verifying"})
@@ -176,6 +211,8 @@ class Coordinator:
             task.results = {key: value for key, value in task.results.items() if states.get(key) == "completed"}
             task.states = states
             task.plan = plan
+            task.planning = checked_planning
+            task.planning_required = task.planning_required or checked_planning is not None
             task.dispatch_paused = False
             if quote is not None:
                 task.budget.quote = quote
@@ -227,6 +264,9 @@ class Coordinator:
                     break
                 if task.states[node.node_id] != "pending" or any(task.states[key] != "completed" for key in node.dependencies):
                     continue
+                if handoff_errors(node, task.planning, task.results, required=task.planning_required):
+                    task.reason = "handoff-required"
+                    continue
                 if any(self._conflicts(node, execution.node) for execution, _future in self._active.values()):
                     continue
                 try:
@@ -254,7 +294,8 @@ class Coordinator:
                     continue
                 attempt_id = uuid4().hex
                 execution = Execution(task_id, scope, task.plan.revision, attempt_id, node, candidate,
-                                      {key: task.results[key]["text"] for key in node.dependencies}, threading.Event())
+                                      {key: task.results[key]["text"] for key in node.dependencies}, threading.Event(),
+                                      copy.deepcopy(task.planning["handoffs"].get(node.node_id)) if task.planning else None)
                 if self._permission(execution) is not True:
                     task.reason = "host-permission-denied"
                     continue
@@ -430,6 +471,7 @@ class Coordinator:
             status = ("cancelled" if task.cancelled else "awaiting-confirmation" if not task.approved
                       else "needs-attention" if task.unknown_attempts or "unknown" in states
                       else "running" if "running" in states else "paused" if task.dispatch_paused
+                      else "needs-planning" if states == {"completed"} and task.planning is not None and not task.planning["horizon_complete"]
                       else "completed" if states == {"completed"}
                       else "needs-attention" if states & {"unknown", "needs-replan", "verification-failed", "failed"}
                       else "paused" if task.reason else "ready")
@@ -437,6 +479,10 @@ class Coordinator:
                     "revision": task.plan.revision, "status": status, "reason": task.reason,
                     "plan": task.plan.to_dict(), "states": dict(task.states), "results": dict(task.results),
                     "unknown_attempts": sorted(task.unknown_attempts),
+                    "planning": copy.deepcopy(task.planning),
+                    "handoff_issues": {node.node_id: list(issues) for node in task.plan.nodes
+                                       if task.states[node.node_id] == "pending" and
+                                       (issues := handoff_errors(node, task.planning, task.results, required=task.planning_required))},
                     "budget": task.budget.to_dict()}
 
     def list_tasks(self, scope: Scope) -> list[dict[str, Any]]:
@@ -451,7 +497,7 @@ class Coordinator:
                     "reservation_accounts": dict(task.reservation_accounts), "candidate_identities": dict(task.candidate_identities),
                     "file_grant": sorted(task.file_grant), "quality_baselines": sorted(task.quality_baselines),
                     "assignments": dict(task.assignments), "upgrades": sorted(task.upgrades),
-                    "dispatch_paused": task.dispatch_paused}
+                    "dispatch_paused": task.dispatch_paused, "planning_required": task.planning_required}
 
     def restore(self, value: dict[str, Any]) -> None:
         plan = Plan.from_dict(value["plan"])
@@ -468,7 +514,9 @@ class Coordinator:
                                            frozenset(value.get("quality_baselines", (node.baseline_id for node in plan.nodes))),
                                            dict(value.get("assignments", {})), set(value.get("upgrades", [])),
                                            set(value.get("unknown_attempts", [])) | set(value["budget"]["reservations"]),
-                                           value.get("dispatch_paused") is True)
+                                           value.get("dispatch_paused") is True,
+                                           validate_planning(value.get("planning"), plan),
+                                           value.get("planning_required") is True)
 
     def wait(self, task_id: str, scope: Scope, timeout: float = 30) -> dict[str, Any]:
         deadline = time.monotonic() + timeout

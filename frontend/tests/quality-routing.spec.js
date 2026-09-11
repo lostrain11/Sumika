@@ -3,7 +3,7 @@ import { openPage } from "./helpers/navigation.js";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 
-test("质量协作仅计划，确认后才执行，且 RPC 带固定角色会话作用域", async ({ page }, testInfo) => {
+test("质量协作通过原生确认夹具执行，且请求保持固定角色会话作用域", async ({ page }, testInfo) => {
   const calls = [];
   let task = {
     task_id: "quality-1",
@@ -16,8 +16,25 @@ test("质量协作仅计划，确认后才执行，且 RPC 带固定角色会话
     results: {},
     budget: { quote: { low_cny: null, typical_cny: 2, high_cny: 3, max_calls: 2, max_tokens: 900 }, rule: { multiplier: "2", extra_cny: "5" }, spent_cny: null, estimated_cny: null, unpriced_calls: 0 },
   };
+  await page.exposeFunction("fixtureHostConfirm", async ({ method, params }) => {
+    expect(["quality.task.confirm", "quality.task.budget"]).toContain(method);
+    calls.push({ method, params });
+    return method === "quality.task.confirm"
+      ? { ...task, revision: 4, status: "running", states: { review: "running" } }
+      : { ...task, revision: 5, status: "running", budget: { ...task.budget, rule: params.budget_rule } };
+  });
+  await page.addInitScript((endpoint) => {
+    window.__TAURI_INTERNALS__ = { invoke: async (command, params) => {
+      if (command === "host_confirm") return window.fixtureHostConfirm(params);
+      if (command === "get_display_mode") return "workspace";
+      if (command === "core_status") return { running: true, host: "127.0.0.1", port: Number(new URL(endpoint).port) };
+      return [];
+    } };
+  }, baseUrl);
   await page.route("**/rpc", async (route) => {
     const request = route.request().postDataJSON();
+    expect(["quality.task.confirm", "quality.task.budget"]).not.toContain(request.method);
+    if (request.method === "host.confirmation.digest") return route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result: { digest: "fixture-only" } } });
     if (!request.method.startsWith("quality.")) return route.continue();
     calls.push({ method: request.method, params: request.params });
     const result = request.method === "quality.catalog" ? {
@@ -51,6 +68,7 @@ test("质量协作仅计划，确认后才执行，且 RPC 带固定角色会话
   await expect(page.getByRole("button", { name: "取消" })).toBeVisible();
   await page.locator("[data-quality-task-budget-form] [name=multiplier]").fill("3");
   await page.getByRole("button", { name: "更新运行预算" }).click();
+  await expect.poll(() => calls.some(call => call.method === "quality.task.budget")).toBe(true);
   expect(calls.find((call) => call.method === "quality.task.budget").params).toEqual({ assistant_id: "sumika", session_id: sessionId, task_id: "quality-1", budget_rule: { multiplier: "3", extra_cny: "5" } });
   expect(calls.find((call) => call.method === "quality.task.confirm").params).toEqual({ assistant_id: "sumika", session_id: sessionId, task_id: "quality-1", revision: 3 });
 });

@@ -26,7 +26,8 @@
 - `supersedes` / `superseded_by`：被新决定取代时的双向关系；
 - `status_ref`：指向状态矩阵，不在这里复制完成度。
 
-`catalog.md` 是全部需求的索引，`baseline.md` 面向人阅读，`original-excerpts.md` 只保留必要的非敏感原话片段。当前共91项；22条历史消息、61段引文已逐字核实，另有本轮用户显式计划以`visible-conversation-context:2026-09-09`作为可核实来源，不编造消息ID或时间。旧摘要和待补出处单独标明。
+`catalog.md` 是全部需求的索引，`baseline.md` 面向人阅读，`original-excerpts.md` 只保留必要的非敏感原话片段。当前共92项；22条历史消息、61段引文已逐字核实，另有用户显式计划以`visible-conversation-context:2026-09-09`作为来源；本轮新增 `PLUGIN-004` 模块化上游优先复用，原话为 `EX-REUSE-001`。不编造消息ID或时间，旧摘要和待补出处单独标明。
+上述92项为上一阶段记录。本轮新增 `AGENT-003`、`WORK-002` 后共94项：79项active、6项deferred、9项superseded；来源为用户批准的[最终执行计划](../refactor/harness-portability-hard-tasks-v1.md)，不表示实现完成。
 无法从现有仓库和可见对话恢复的历史内容必须标明缺失，不得猜写。
 
 ## 冲突和更新规则

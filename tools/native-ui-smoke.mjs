@@ -140,6 +140,31 @@ try {
   assert.equal(await invoke(mainPage, "get_display_mode"), "workspace");
   record("trusted shell command channel and isolated Core are healthy");
 
+  const confirmationParams = { request_id: "smoke-nonexistent", assistant_id: "sumika", revision: 1, max_cny: "0" };
+  const confirmationMethod = "work.authorization.confirm";
+  async function coreRpc(method, params) {
+    return (await fetch(`http://127.0.0.1:${corePort}/rpc`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "host-boundary", method, params }),
+    })).json();
+  }
+  const denied = await coreRpc(confirmationMethod, { ...confirmationParams, approved: true, trusted: true });
+  assert.equal(denied.error.code, -32041);
+  const confirmationPreview = await coreRpc("host.confirmation.digest", { method: confirmationMethod, params: confirmationParams });
+  const confirmationArgs = { method: confirmationMethod, params: confirmationParams, digest: confirmationPreview.result.digest };
+  const nativeResult = await invoke(mainPage, "host_confirm", confirmationArgs).then(() => "", String);
+  assert.match(nativeResult, /not found/i);
+  assert.doesNotMatch(nativeResult, /trusted native host|invalid-host-response/i);
+  assert.match(await invoke(companionPage, "host_confirm", confirmationArgs).then(() => "", String), /restricted to the main webview/);
+  assert.match(await invoke(mainPage, "host_confirm", { ...confirmationArgs, method: "chat.send" }).then(() => "", String), /unsupported-host-confirmation/);
+  const questionMethod = "agent.question.respond";
+  const questionParams = { rpcId: "smoke-nonexistent", sessionId: "smoke-nonexistent", answer: { answers: [{ id: "plan-review", selected: ["Approve"] }] } };
+  assert.equal((await coreRpc(questionMethod, questionParams)).error.code, -32041);
+  const questionPreview = await coreRpc("host.confirmation.digest", { method: questionMethod, params: questionParams });
+  assert.match(await invoke(companionPage, "host_confirm", { method: questionMethod, params: questionParams, digest: questionPreview.result.digest }).then(() => "", String), /restricted to the main webview/);
+  record("private native bootstrap works; HTTP forgery, companion confirmation and arbitrary RPC are denied");
+  record("Plan Review cannot approve through ordinary HTTP or the companion window");
+
   const models = await (await fetch(`http://127.0.0.1:${corePort}/api/avatar/models`)).json();
   const sample = models.find((model) => model.kind === "vrm");
   assert(sample, "bundled sample VRM must exist");
@@ -169,7 +194,7 @@ try {
   assert.equal((await mainPage.evaluate(() => window.__TAURI__.window.getAllWindows())).length, 2);
   record("main and companion are two real native windows; tray is installed");
 
-  await mainPage.locator(".wv2-composer textarea").fill("Main isolated draft");
+  await mainPage.locator('.wv2-composer textarea[name="goal"]').fill("Main isolated draft");
   await mainPage.screenshot({ path: join(evidence, "native-workspace.png"), omitBackground: true });
   const foregroundBeforeCompanion = foregroundWindowHandle();
   assert.equal(await invoke(mainPage, "set_display_mode", { mode: "pet" }), "pet");
@@ -187,7 +212,7 @@ try {
   await companionPage.locator(".desktop-overlay-shell").hover({ position: { x: 10, y: 100 } });
   await companionPage.locator("[data-pet-chat]").click();
   await companionPage.locator("#chat-input").fill("Companion isolated draft");
-  assert.equal(await mainPage.locator(".wv2-composer textarea").inputValue(), "Main isolated draft");
+  assert.equal(await mainPage.locator('.wv2-composer textarea[name="goal"]').inputValue(), "Main isolated draft");
   const mainCore = await invoke(mainPage, "core_status");
   const companionCore = await invoke(companionPage, "core_status");
   assert(mainCore.running && companionCore.running);

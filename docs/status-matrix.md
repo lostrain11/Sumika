@@ -6,11 +6,15 @@
 
 剩余工作的差量、顺序和验收见[执行计划v2](refactor/remaining-execution-plan-v2.md)。计划覆盖本表66个模块，但计划落盘不升级功能状态；旧版入口/历史验收不等于当前所有路径均完成。
 
+本轮H00增量：`quality-routing-core`已增加交接就绪与滚动阶段状态，`quality-routing-workflow`的生产复杂Quality路径已接入（[字段及验证](architecture/task-planning.md)）；API开发/DSH及可信确认仍待H01–H06，原模块整体“部分实现”状态保持。`AGENT-003`目前只有固定契约，不冒称Harness升级和替换已验证。
+
+H01增量：work/quality预算确认、定时授权、Agent权限回复及问答/Plan Review已使用[可信原生确认](architecture/host-confirmation.md)，普通HTTP正文不能授权；真实原生smoke已有阶段证据。其余权限入口审计及中立Harness绑定尚未完成，整体状态保持部分实现。
+
 | ID | 状态 | 当前入口 | 主文档 | 验证证据 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
 | `builtin-skills` | 部分实现 | 设置中的三个独立Skill开关；API开发load_skill/run_skill_helper | [Skill迁移](refactor/skill-migration.md) | [契约测试](../backend/tests/test_builtin_skills.py)、[持久Core](../backend/tests/test_builtin_skill_server.py)12项通过；开发循环与工作台E2E通过；Codex源20文件hash一致 | DSH/ZCode/普通闲聊未挂接这三个开关；本轮不扩展R01–R07，用户路径只保存在本地Skill配置 |
 | `community-office` | 部分实现 | 默认安装清单与DSH普通插件配置，四用途默认关闭 | [Skill迁移](refactor/skill-migration.md)、[第三方适配器](../plugins/dsh-community-documents/README.md) | [真实DSH探针](../tools/dsh-community-smoke.mjs)：固定DSH真实加载、Office基础读写更新、PDF文本读取、独立开关、未授权零注册、UNKNOWN_TOOL、幂等安装及卸载保留产物通过；无模型调用 | 高级排版、PDF编辑、公式重算和模板仅找到候选；PDF Windows字体警告与中文复杂PDF未验；未安装到日用profile |
-| `development-workflow` | 部分实现 | 工作台项目目录、开发模式、预算确认、测试记录和diff | [剩余执行计划v2](refactor/remaining-execution-plan-v2.md) | [开发专项](../backend/tests/test_development.py)：2026-09-10后端专项102、工作台E2E14、前端单测78通过；模型离线fixture，文件和测试进程真实 | R01–R07：执行边界/真实工具质量/恢复/合入/自修改；源码副本不是OS沙箱，首次自改与稳定日用分开验收 |
+| `development-workflow` | 部分实现 | 工作台开发入口、独立API执行适配、WorkService授权与前后操作日志、只读检查 | [剩余执行计划v2](refactor/remaining-execution-plan-v2.md) | [开发恢复](architecture/development-recovery.md)；开发/适配器/Core重开/Windows Job专项31项通过，原目录保持；最终回归见当前执行记录 | R03有界上下文/安全续跑、R05合入、真实工具质量仍缺；不是OS沙箱或独立验收。DSH与直连API分支不混称，未标日用替代完成 |
 | `free-model-routing` | 部分实现 | ModelPolicy自动选择、质量协作候选池、设置/能力中的刷新状态 | [正式免费路由](refactor/free-model-routing.md) | 阶段说明：三项正式接入并启用日用。讯飞4B、Agnes2.5、Moark Qwen3-8B均通过新固定任务及隔离Core真实自动选择/执行；日用已启用，估计现金0。负责人/角色/预算及产品数据保持。968项后端全量通过，最后适配后153项专项；已有前端/构建证据保留；依据：[正式免费路由](refactor/free-model-routing.md) | 逐Profile六小时价格刷新、账号与执行版本绑定、冷却、免费撤回及到期阻断已实现；额度型服务尚待账户对账，不承诺全部模型自动可用。Spark Lite接通但质量契约未过 |
 | `moark-candidates` | 部分实现 | 日用`moark-free-candidates`；刷新状态与协作池 | [模型启用与账户](refactor/model-activation-and-accounts.md)、[目录实测](refactor/free-model-routing.md) | 免费Qwen3-8B保留，qwen3.8-flash已有角色专项，9月9日新增leader/bounded各三题及隔离协作通过，不改日用绑定。71条官方回执中34笔trace精确对账，合计0.1390319元；04:15 UTC已购包余额9.8541645元；[续验收](refactor/model-activation-and-accounts.md#9月9日闭环与精确对账) | 不将已购包算免费；37笔无trace旧回执不猜配，0.00013元未决预留保留。专项证据不代表全领域等质，GLM-5.3-Flash旧契约未过 |
 | `free-benefits` | 部分实现 | 设置/能力 > 免费资源与签到；`benefits.*` RPC；进程内维护 | [实现与运行](refactor/free-benefits.md) | 阶段说明：广泛发现与魔搭每日核验首版完成。12个公开来源，实采10个成功；23项官网证据含20个模型声明及3家新渠道权益。Bing/V2EX此次无合格资讯；Groq/LD待核对。魔搭真实核验250发放、242余额；本实例已启用，下次正常启动维护。858项后端基线与最终109项专项、35项前端、11项DOM、3项浏览器验收及构建通过；依据：[实现与运行](refactor/free-benefits.md) | 新站只观察，不自动注册或放行路由；自动领取适配仅魔搭。关闭Sumika后不联网，无AI刷新调用；前端全量45/46，旧能力页文案断言未修。预览8882为无凭据隔离副本 |
@@ -64,7 +68,7 @@
 | `evolution-registry` | 已实现 | Developer > Evolution Knowledge Registry | [Registry](integrations/evolution-registry.md) | [registry data](integrations/evolution-knowledge-registry.json)、[registry tests](../backend/tests/test_evolution_registry.py) | 增加隔离评测报告和用户批准工作流 |
 | `unified-browser` | 部分实现 | 桌面内置浏览器工作区 | [正式需求](requirements/embedded-browser.md)、[工作包2–4](refactor/model-activation-and-accounts.md#工作包234续做2026-09-08) | 主窗口、存储隔离、接管、桌宠停止及生产前端咨询主模型闭环通过；启动不再无条件开旧BrowserSkill；维护桥初始化/重连修复后魔搭/Moark正式刷新通过；[续验收](refactor/model-activation-and-accounts.md#9月9日闭环与精确对账) | 全部站点自动化未完成；Ollama本次missing-usage-section，不能当作新鲜权益；通用BrowserSkill工具仍为明确兼容路径，不迁Cookie、不静默开外窗 |
 | `desktop-wallpaper` | 规划中 | A+原型壁纸构图 | [正式需求总表](requirements/catalog.md) | [原型与客户端边界](ui/a-plus-client.md) | 原生桌面置底、Explorer生命周期、多屏/DPI、焦点和恢复尚待实现与验收 |
-| `reusable-components` | 部分实现 | SDK独立安装与Sumika适配器 | [可复用组件](architecture/reusable-components.md) | [组件验收](architecture/quality-component.md) | P09独立离线生命周期通过；DSH薄适配保留明确fixture边界，其他模块不冒称独立发包 |
+| `reusable-components` | 部分实现 | SDK独立安装、Sumika适配器与开发执行窄契约 | [可复用组件](architecture/reusable-components.md) | [组件验收](architecture/quality-component.md)；[上游源码核验](architecture/development-recovery.md#上游对照与复用决策) | PLUGIN-004正式约束DSH优先、独立增强层及差量实现；本轮SDK仓库外90项（2可选MCP跳过）。API适配器局部解耦不表示WorkService整体已独立发包或上游已完成真实集成 |
 | `workbench-workflow` | 部分实现 | work.task.*、原Agent/Web入口与新版工作台 | [本轮计划](refactor/client-workflow-v2.md) | [外部准入与限制](architecture/quality-component.md#外部工作入口准入) | 版本化确认、原入口恢复、来源校验和未知预留已接；真实DSH缺强制费用上限，显式外部子计划已支持范围冻结与原子共享预算；API文本DAG自动外部交办仍未实现 |
 | `project-context` | 部分实现 | project.*、conversation.* 与工作台项目/历史 | [本轮计划](refactor/client-workflow-v2.md) | [项目契约](architecture/projects.md) | 项目与三轮历史、十轮分页已接；仍按来源和助手隔离，不自动读取整个项目正文 |
 | `work-artifacts` | 部分实现 | WorkService成果与独立附言 | [本轮计划](refactor/client-workflow-v2.md) | [外部准入](architecture/quality-component.md) | 新成果独立复制；外部正文标记来源完成而非独立验证，不猜测拆分旧历史 |
@@ -97,7 +101,7 @@
 | `model-refresh` | `MODEL-015`, `MODEL-016` |
 | `unified-route-costs` | `MODEL-012`, `MODEL-016`, `MODEL-017`, `MODEL-018` |
 | `quality-selection` | `MODEL-012`, `MODEL-013`, `MODEL-014` |
-| `quality-routing-workflow` | `TASK-001`, `CHARACTER-001`, `MULTI-001`, `MODEL-005`, `MODEL-011`, `SEC-001`, `MODEL-017`, `MODEL-019`, `TASK-002` |
+| `quality-routing-workflow` | `TASK-001`, `CHARACTER-001`, `MULTI-001`, `MODEL-005`, `MODEL-011`, `SEC-001`, `MODEL-017`, `MODEL-019`, `TASK-002`, `WORK-002` |
 | `native-consultation` | `MODEL-009`, `BROWSER-002`, `SEC-001`, `BROWSER-004`, `BROWSER-003` |
 | `domain-contracts` | `CORE-001`, `UX-002`, `CHARACTER-001`, `AVATAR-001`, `CAPABILITY-001`, `MEMORY-001`, `MULTI-001`, `DEFERRED-001`, `MODEL-005`, `MODEL-006`, `MODEL-011`, `SEC-001`, `RESOURCE-001`, `MULTI-002` |
 | `a-plus-ui-concept` | `UX-002`, `AVATAR-001`, `CAPABILITY-001` |
@@ -119,7 +123,7 @@
 | `plugins-manifest` | `PLUGIN-001` |
 | `builtin-skills` | `SKILL-001`, `PLUGIN-001`, `PLUGIN-003` |
 | `community-office` | `PLUGIN-001`, `PLUGIN-003`, `LICENSE-001` |
-| `development-workflow` | `WORK-001`, `AUTH-001`, `WORKSPACE-001` |
+| `development-workflow` | `WORK-001`, `AUTH-001`, `WORKSPACE-001`, `PLUGIN-004` |
 | `audio` | `DEFERRED-001`, `INPUT-001` |
 | `memory` | `MEMORY-001`, `MULTI-001`, `DEFERRED-001`, `MULTI-002` |
 | `vision` | `DEFERRED-001`, `INPUT-002` |
@@ -129,7 +133,7 @@
 | `life-agent` | `DEFERRED-001`, `MULTI-001`, `WORLD-001` |
 | `remote-runner` | `DEFERRED-001` |
 | `android-client` | `DEFERRED-001` |
-| `agent-runtime-portability` | `AGENT-001`, `MODEL-002`, `MODEL-003` |
+| `agent-runtime-portability` | `AGENT-001`, `AGENT-003`, `MODEL-002`, `MODEL-003` |
 | `dsh-agent-runtime` | `AGENT-001`, `AGENT-002`, `MCP-001`, `SKILL-001`, `TASK-001`, `STARTUP-001`, `MODEL-002`, `MODEL-003`, `PROCESS-001`, `CORE-001` |
 | `agent-observability` | `OBS-001`, `OBS-002`, `EVOLUTION-001`, `MODEL-010` |
 | `browser-runtime` | `BROWSER-001`, `MODEL-009`, `TOOLING-001`, `BROWSER-003` |
@@ -137,7 +141,7 @@
 | `evolution-registry` | `EVOLUTION-001`, `LICENSE-001` |
 | `unified-browser` | `BROWSER-003` |
 | `desktop-wallpaper` | `UX-005` |
-| `reusable-components` | `PLUGIN-003` |
+| `reusable-components` | `PLUGIN-003`, `PLUGIN-004` |
 | `workbench-workflow` | `UX-006`, `MODEL-021`, `AUTH-001`, `WORK-001` |
 | `project-context` | `CONTEXT-001` |
 | `work-artifacts` | `ARTIFACT-001` |

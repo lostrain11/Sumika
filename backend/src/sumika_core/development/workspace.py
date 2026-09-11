@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 from quality_routing import RoutingError
 
+from .processes import ManagedTestProcess
+
 
 _EXCLUDED = {".git", ".sumika", ".env", ".ssh", ".aws", "node_modules", "target", "__pycache__",
              ".venv", "venv", "artifacts", "dist", "coverage", "deprecated"}
@@ -92,6 +94,7 @@ class DevelopmentWorkspace:
         self.root = None
         self.checkpoint_id = None
         self.skipped = []
+        self.source_paths = ()
 
     def prepare(self):
         source = Path(self.spec["directory"])
@@ -123,8 +126,9 @@ class DevelopmentWorkspace:
             _git(self.root, "add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul",
                  input=("\x00".join(copied) + "\x00").encode("utf-8"))
         self.checkpoint_id = self.checkpoints.create_checkpoint(self.root, name="Development source baseline")["checkpoint"]["id"]
+        self.source_paths = tuple(copied)
         return {"path": str(self.root), "checkpoint_id": self.checkpoint_id, "files": copied, "skipped": self.skipped,
-                "isolation": self.spec["isolation"]}
+                "isolation": self.spec["isolation"], "workspace_digest": self.source_digest()}
 
     def execute(self, name, arguments):
         if self.cancelled():
@@ -154,14 +158,59 @@ class DevelopmentWorkspace:
             return self.run_test(index)
         raise RoutingError("unknown tool or invalid arguments")
 
+    def inspect_saved(self, prepared):
+        root = Path(prepared["path"])
+        base = self.base.resolve(strict=True)
+        if not root.is_absolute() or root.parent.resolve(strict=True) != base or not root.name.startswith("development-"):
+            raise RoutingError("saved development workspace is outside its managed directory")
+        self.root = _checked(base, root.name)
+        self.source_paths = tuple(prepared["files"])
+        self.checkpoint_id = prepared["checkpoint_id"]
+        self.checkpoints.diff_checkpoint(self.checkpoint_id, path=self.root)
+        before = self.source_digest()
+        difference = self.diff()
+        after = self.source_digest()
+        if before != after:
+            raise RoutingError("development workspace changed during inspection")
+        return {"workspace_digest": after, "baseline_unchanged": after == prepared.get("workspace_digest"),
+                "diff": difference}
+
     def inventory(self):
         return sorted(path for path in set(_git(self.root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").decode().split("\x00")) if path)
+
+    def source_digest(self):
+        paths = set(self.source_paths)
+        for directory, directories, files in os.walk(self.root, followlinks=False):
+            relative = Path(directory).relative_to(self.root)
+            directories[:] = sorted(name for name in directories if name.lower() not in _EXCLUDED)
+            for name in directories:
+                _checked(self.root, (relative / name).as_posix())
+            for name in files:
+                path = (relative / name).as_posix()
+                paths.add(path)
+            if len(paths) > 10000:
+                raise RoutingError("source inventory exceeds 10000 files")
+        entries = []
+        total = 0
+        for path in sorted(paths):
+            target = _checked(self.root, path)
+            if not target.exists():
+                entries.append((path, "missing", None))
+                continue
+            raw, _ = _read(target)
+            total += len(raw)
+            if total > 64 * 1024 * 1024:
+                raise RoutingError("source inventory exceeds 64 MiB")
+            entries.append((path, hashlib.sha256(raw).hexdigest(), stat.S_IMODE(target.stat().st_mode)))
+        evidence = {"schema": "development-source/v1", "files": entries, "test_commands": self.spec["test_commands"]}
+        return hashlib.sha256(json.dumps(evidence, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
 
     def diff(self):
         return self.checkpoints.patch_checkpoint(self.checkpoint_id, path=self.root)
 
     def run_test(self, index):
         command = self.spec["test_commands"][index]
+        before_digest = self.source_digest()
         environment = {key: value for key, value in os.environ.items() if key.upper() in {
             "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LANG", "SYSTEMDRIVE"}}
         environment.update(PYTHONIOENCODING="utf-8", PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
@@ -169,24 +218,22 @@ class DevelopmentWorkspace:
         environment["SUMIKA_DATA_DIR"] = str(self.root / ".sumika")
         started = time.monotonic()
         with tempfile.TemporaryFile() as output:
-            process = subprocess.Popen(command, cwd=self.root, env=environment, stdin=subprocess.DEVNULL, stdout=output,
-                                       stderr=subprocess.STDOUT, shell=False, start_new_session=os.name != "nt",
-                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             reason = None
-            while process.poll() is None:
-                if self.cancelled() or time.monotonic() - started > self.spec["test_timeout_seconds"] or output.tell() > 1024 * 1024:
-                    reason = "cancelled" if self.cancelled() else "limit-reached"
-                    if os.name == "nt":
-                        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True,
-                                       creationflags=subprocess.CREATE_NO_WINDOW, timeout=10)
-                    else:
-                        import signal
-                        os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=10)
-                    break
-                time.sleep(.05)
+            with ManagedTestProcess(command, cwd=self.root, env=environment, output=output) as process:
+                while process.poll() is None:
+                    if self.cancelled() or time.monotonic() - started > self.spec["test_timeout_seconds"] or os.fstat(output.fileno()).st_size > 1024 * 1024:
+                        reason = "cancelled" if self.cancelled() else "limit-reached"
+                        break
+                    time.sleep(.05)
+            output_size = os.fstat(output.fileno()).st_size
+            if output_size > 1024 * 1024 and reason is None:
+                reason = "limit-reached"
             output.seek(0)
             text = output.read(16000).decode("utf-8", errors="replace")
         text = _SECRET.sub("[redacted]", text)
+        after_digest = self.source_digest()
         return {"index": index, "command": command, "exit_code": process.returncode, "status": reason or "finished",
-                "output": text, "duration_seconds": round(time.monotonic() - started, 3)}
+                "output": text, "duration_seconds": round(time.monotonic() - started, 3),
+                "output_truncated": output_size > 16000,
+                "workspace_digest": after_digest, "workspace_digest_before": before_digest,
+                "workspace_unchanged": before_digest == after_digest}

@@ -4,6 +4,12 @@
 
 ## Compatibility boundaries
 
+Optional rolling-planning metadata is documented in [the planning contract](../../docs/architecture/task-planning.md).
+`Coordinator.submit/revise` accept `planning`; submission additionally accepts host-controlled
+`planning_required` and task-level `file_grant`. Missing or stale handoffs block dispatch before
+selection and reservation. A completed graph with remaining phases reports `needs-planning`.
+Existing SDK callers that do not opt in retain legacy behavior. Readiness never grants authorization.
+
 The SDK relies on host-supplied verifier callback evidence; it does not provide a general proof of quality. It includes no built-in ZCode or workspace executor. Revisions retain the task's original approved quality baselines and allowed file grant, and cannot expand either boundary.
 
 Hosts can set `Candidate.execution_revision` to an opaque, non-secret revision of the endpoint, credential reference revision, model configuration, and price terms. It becomes part of the approved candidate identity, including auxiliary calls and persisted task snapshots. A changed revision cannot reuse an old approval. Candidates that omit it keep the original identity format; old unversioned approvals do not match newly versioned candidates. Create and confirm a new plan when its execution binding changes. Hosts must still recheck current authorization and resource reservations immediately before sending; the SDK does not read provider settings or guarantee account balances.
@@ -112,3 +118,9 @@ server.run(transport="stdio")
 The host owns approval. The MCP surface cannot approve tasks, choose a scope, set account balances, enable providers, read keys, run scripts, or call a provider directly. `quality_advance` calls `Coordinator.advance` only after the host has separately approved the task and the host policy callback accepts the action. The callback receives the current `Plan` for `advance`, while the Coordinator retains the task's original scope, candidate pool, external permission, and budget grant across revisions.
 
 The host-bound server exposes `quality_catalog`, `quality_status`, `quality_result`, `quality_submit`, `quality_revise`, and `quality_advance`.
+
+## Development evidence and interruption
+
+`run_development` accepts optional `workspace_digest` and `journal` callbacks. With a digest callback, passing tests must have identical before/after/current source digests; missing or invalid evidence fails closed. Without it, legacy write-revision checks remain and results explicitly report that weaker verification basis.
+
+`quality_routing.development_journal` provides versioned, metadata-only intent/receipt validation and conservative interruption classification. The host must commit each callback synchronously before returning: intents precede model/tool execution and receipts precede event publication. Failed persistence stops dispatch. `DevelopmentNotSent` is reserved for a host-proven unsent request; other missing receipts remain unknown. Operation identities are scoped to a host work-request revision. This is not an automatic resume API or permission to replay unknown operations; the host retains authorization, storage and process ownership. No Sumika imports are needed.

@@ -6,6 +6,21 @@ export async function installWorkbenchFixture(context) {
   if (process.env.SUMIKA_TEST_ISOLATED !== "1") throw new Error("Workbench E2E requires the isolated Core runner");
   const calls = [];
   const handlers = {};
+  await context.exposeFunction("fixtureNativeConfirmation", async ({ method, params }) => {
+    expect(["work.authorization.confirm", "quality.task.confirm", "quality.task.budget", "schedule.create", "schedule.update", "schedule.pause", "agent.approval.respond"]).toContain(method);
+    if (!handlers[method]) throw new Error("Missing native confirmation fixture: " + method);
+    calls.push({ method, params, transport: "native-fixture" });
+    return handlers[method](params);
+  });
+  await context.addInitScript((endpoint) => {
+    window.__TAURI_INTERNALS__ = { invoke: async (command, params) => {
+      if (command === "host_confirm") return window.fixtureNativeConfirmation(params);
+      if (command === "show_main_window") { window.open(endpoint, "sumika-main-fixture"); return {}; }
+      if (command === "get_display_mode") return location.search.includes("companion") ? "pet" : "workspace";
+      if (command === "core_status") return { running: true, host: "127.0.0.1", port: Number(new URL(endpoint).port) };
+      return [];
+    } };
+  }, baseUrl);
   const candidates = ["free-role", "paid-leader"].map((id, index) => ({
     candidate_id: id, label: "隔离模型 " + id, model_id: id, channel: "fixture",
     authorized: true, available: true, reasoning_effort: index ? "high" : "medium",
@@ -32,6 +47,8 @@ export async function installWorkbenchFixture(context) {
     const body = route.request().postDataJSON();
     calls.push(body);
     const { method, params = {} } = body;
+    if (method === "host.confirmation.digest") return route.fulfill({ json: { jsonrpc: "2.0", id: body.id, result: { digest: "fixture-only" } } });
+    expect(["work.authorization.confirm", "quality.task.confirm", "quality.task.budget"]).not.toContain(method);
     let result;
     if (handlers[method]) result = await handlers[method](params);
     else if (method === "quality.catalog") result = { candidates };

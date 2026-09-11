@@ -29,6 +29,10 @@ OpenAI-compatible / external-process providers
 - [Desktop automation](desktop-automation.md)：应用协议、Electron CDP、Windows UIA 和受控前台接管的通用适配器边界。
 - [Tasks](tasks.md)：预算、批准、生命周期和任务 HUD。
 - [Agent Runtime](agent-runtime.md)：稳定会话内核、可选能力、adapter registry 和进程边界。
+- [高难实施固定契约](../refactor/harness-portability-hard-tasks-v1.md)：滚动交接、Harness替换、可信确认、模型网关、恢复及合入。
+- [滚动规划与交接](task-planning.md)：H00实际字段、就绪检查、阶段状态及剩余边界。
+- [可信宿主确认](host-confirmation.md)：H01局部传输边界、私有引导、原生确认及未覆盖入口。
+- [开发恢复](development-recovery.md)：操作日志、只读检查、源码测试证据、进程回收及 DSH/Codex 上游复用核验。
 - [Audio](audio.md) / [Memory](memory.md) / [Vision](vision.md)：可选能力边界。
 - [Manifest](manifest.md) / [Tools](tools.md)：插件发现和外部软件调用。
 - [Security](security.md)：本地服务、凭据、权限和数据边界。

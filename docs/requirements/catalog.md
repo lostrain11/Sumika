@@ -1,6 +1,11 @@
 # Sumika 需求总表
 
-更新：2026-09-09。共 **91项**：当前有效76项、长期延期6项、被后续决定取代9项。这里的“有效”是产品意图，**不是已实现**；正式验收条件在[机器总表](requirements.json)，功能事实只看[状态矩阵](../status-matrix.md)。
+本轮增补Harness可替换与滚动交接要求。共 **94项**：当前有效79项、长期延期6项、被后续决定取代9项。这里的“有效”是产品意图，**不是已实现**；正式验收条件在[机器总表](requirements.json)，功能事实只看[状态矩阵](../status-matrix.md)。
+
+| 新增需求 | 内容 | 来源 | 状态关联 |
+| --- | --- | --- | --- |
+| `AGENT-003` | Harness替换隔离、稳定实例和尝试绑定 | `EX-HARNESS-003` | `agent-runtime-portability` |
+| `WORK-002` | 滚动规划、派发前就绪、授权分离 | `EX-WORK-002` | `quality-routing-workflow` |
 
 本轮新增可复用组件、统一工作流、双窗口与定时工作计划；新需求均为规划中，已有功能仍以状态矩阵中的既有实现事实为准。`WINDOW-001`取代尚未实现的 `UX-005`：本轮交付真实双窗口，不承诺 Windows 底层壁纸模式。
 
@@ -89,6 +94,7 @@
 | `BENEFIT-003` | 高频发现、刷新、签到默认使用零模型成本的固定流程，必要语义处理只用合格免费或本地模型。 | 当前有效 / `normalized` | 新 `EX-COST-003`、新 `EX-REFRESH-001`、新 `EX-BENEFIT-004` | `free-benefits` |
 | `PLUGIN-002` | 质量路由抽成运行时中立核心与宿主适配器，可面向社区复用；Codex Skill不直接作为Sumika Runtime。 | 当前有效 / `confirmed` | 新 `EX-ROUTING-001`、新 `EX-ROUTING-003`、新 `EX-PLAN-001` | `quality-routing-core` |
 | `PLUGIN-003` | 功能核心具有清晰、可提取、可测试边界，通过明确适配器复用于其他 Harness 或 Agent 客户端，Sumika 使用同一核心实现。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `reusable-components` |
+| `PLUGIN-004` | 新功能优先基于已有模块化实现扩展：DSH优先、Codex补充；独立增强层保留产品规则，薄适配器不复制Harness。 | 当前有效 / `confirmed` | 本轮 `EX-REUSE-001` | `reusable-components` |
 | `UX-006` | 客户端精简为统一工作台，提供项目、对话、定时工作、预算、进度、成果及独立附言的可扫描入口。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |
 | `MODEL-021` | 角色与工作模型分别支持自动和手动选择；主模型按质量证据优先，角色优先合格免费候选。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |
 | `AUTH-001` | 付费规划、执行、验证、咨询、重试和角色附言均须在有效预算与授权内；免费简单工作可直达，复杂工作仍须确认。 | 当前有效 / `confirmed` | 本轮 `EX-PLAN-002` | `workbench-workflow` |

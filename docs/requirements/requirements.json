@@ -12,6 +12,36 @@
   },
   "requirements": [
     {
+      "id": "AGENT-003",
+      "category": "runtime",
+      "statement": "DSH是当前默认适配器；隔离同一Harness版本变化及不同Harness实现差异，更换不要求重写角色、项目、预算、成果和工作台。",
+      "acceptance": ["产品与增强核心只依赖版本化窄接口，具体上游对象留在适配器", "默认变更仅影响后续请求，运行尝试绑定原实例和发行组合", "跨Harness接续重新预检，不迁移凭据、消费授权或完整私有会话", "最小非DSH适配器通过同组契约测试，实例和原始会话引用隔离"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-HARNESS-003"],
+      "implementation_refs": ["../refactor/harness-portability-hard-tasks-v1.md"],
+      "test_refs": [],
+      "status_ref": "status-matrix:agent-runtime-portability",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "WORK-002",
+      "category": "workflow",
+      "statement": "主Agent按证据滚动规划，每个实际派发的任务包具备明确输入、输出、约束、依赖和验收；就绪不等于授权，版本化交接不锁死未来分工。",
+      "acceptance": ["交接未就绪时零派发、零预留，宿主复杂路径不能由模型关闭检查", "当前图完成但horizon_complete为false时进入needs-planning而非完成", "需求授权版本与方案版本分离，范围内修订保留无关有效成果", "运行、验证和未知尝试不可无声改写；下一阶段规划仍遵守预算", "Codex通过显式plan-freeze形成完整交接，不自动切换模型或启动实施"],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context"],
+      "excerpt_refs": ["EX-WORK-002"],
+      "implementation_refs": ["../refactor/harness-portability-hard-tasks-v1.md"],
+      "test_refs": [],
+      "status_ref": "status-matrix:quality-routing-workflow",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
       "id": "AVATAR-004",
       "category": "avatar",
       "statement": "默认使用经许可核验的AvatarSample_A；安和昴及其他用户导入模型只保留本地，不上传或打包。",
@@ -2237,6 +2267,28 @@
         "../architecture/reusable-components.md",
         "../refactor/client-workflow-v2.md"
       ],
+      "test_refs": [],
+      "status_ref": "status-matrix:reusable-components",
+      "supersedes": [],
+      "superseded_by": []
+    },
+    {
+      "id": "PLUGIN-004",
+      "category": "architecture",
+      "statement": "新增功能优先在已有参考和可复用模块化代码上通过独立增强层与薄适配器实现；当前优先固定版DSH，Codex开源CLI/app-server补充对照，不重造完整Harness。",
+      "acceptance": [
+        "通用机制实现前核验既有模块及固定版DSH源码/API，再针对缺口参考Codex等来源；记录版本、接口、许可证、选择方式和未复用理由",
+        "优先直接调用、薄适配、合法提取，再做必要差量；只有参考或已有桥接不算已完成独立复用",
+        "可复用增强核心承载预算、授权、项目和成果规则；适配器只转换协议，宿主提供受控存储、凭据和确认，不修改上游内部或传庞大全局上下文",
+        "每条任务路径只保留一个会话、工具循环、压缩和执行所有者，保留上游来源ID，不重复存储全量历史；API直连路径不能假定继承DSH能力",
+        "复用不能削弱权限、预算或未知不重发规则；上游缺少必要控制能力时明确不可用，不以包装声称已能强制费用上限",
+        "改造现有实现前列出映射和替代验收，保留旧数据、运行配置与可恢复版本；替代通过后才退出重复职责，不自动升级日用依赖或发布"
+      ],
+      "provenance": "confirmed",
+      "intent_state": "active",
+      "source_refs": ["visible-conversation-context:upstream-modular-reuse"],
+      "excerpt_refs": ["EX-REUSE-001"],
+      "implementation_refs": ["../architecture/reusable-components.md", "../architecture/development-recovery.md", "../refactor/remaining-execution-plan-v2.md"],
       "test_refs": [],
       "status_ref": "status-matrix:reusable-components",
       "supersedes": [],

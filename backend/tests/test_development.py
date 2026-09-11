@@ -7,9 +7,11 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from quality_routing import Candidate, Outcome, RoutingError, Scope
 from quality_routing.development import DevelopmentReply, run_development
+from quality_routing.development_journal import SCHEMA, append_event, evidence_digest
 from sumika_core.development import DevelopmentWorkspace, development_spec
 from sumika_core.builtin_skills import BuiltinSkills
 from sumika_core.protocol.models import ToolMessage
@@ -36,6 +38,176 @@ class DevelopmentTests(unittest.TestCase):
         workspace.prepare()
         return workspace
 
+    def workflow(self):
+        storage = Storage(self.base / "recovery.sqlite")
+        self.addCleanup(storage.close)
+        storage.save_record("projects/v1", "project", "one", {"directory": str(self.source)})
+        candidate = Candidate("candidate", "account", "model", "api", authorized=True, available=True, fixed_cash=0)
+        quality = SimpleNamespace(_scope=lambda params: Scope("one", "session"),
+            settings=lambda owner: {"candidate_pool": ["candidate"]},
+            select_bindings=lambda owner: {"leader_candidate_id": "candidate", "role_candidate_id": "candidate"},
+            engine=SimpleNamespace(candidates=lambda: (candidate,)), invoke_development=Mock())
+        work = WorkService(storage, quality, development_factory=lambda spec, cancelled:
+                           DevelopmentWorkspace(self.base / "copies", spec, self.checkpoints, cancelled))
+        self.addCleanup(work.close)
+        work.preflight({"request_id": "dev", "goal": "fix", "project_id": "project", "development": {"test_commands": []}})
+        work.confirm({"request_id": "dev", "assistant_id": "one", "revision": 1, "max_cny": "0"})
+        return work, storage, quality
+
+    def intent(self, kind="tool"):
+        if kind == "model":
+            return {"schema_version": SCHEMA, "kind": "model", "turn": 1, "operation_id": "model-1",
+                    "phase": "started", "input_digest": evidence_digest("fixture")}
+        return {"schema_version": SCHEMA, "kind": "tool", "turn": 1, "slot": 0,
+                "operation_id": "tool-1-0", "name": "write_file", "phase": "started",
+                "input_digest": evidence_digest("fixture")}
+
+    def test_sqlite_restart_preserves_unknown_tool_and_blocks_revise_and_submit(self):
+        work, storage, quality = self.workflow()
+        value = work.get("dev", "one")
+        value.update(status="executing", development_journal=append_event([], self.intent()))
+        storage.save_record(work.namespace, "dev", "one", value)
+        work.close()
+        storage.close()
+        reopened = Storage(self.base / "recovery.sqlite")
+        self.addCleanup(reopened.close)
+        restored = WorkService(reopened, quality, owner_ids=("one",))
+        self.addCleanup(restored.close)
+        current = restored.get("dev", "one")
+        self.assertEqual(current["status"], "submission-unknown")
+        self.assertEqual(current["development_recovery"]["pending_operations"][0]["name"], "write_file")
+        self.assertFalse(current["development_recovery"]["automatic_replay"])
+        self.assertEqual(restored.submit({"request_id": "dev", "assistant_id": "one"})["status"], "submission-unknown")
+        self.assertEqual(restored.cancel({"request_id": "dev", "assistant_id": "one"})["status"], "cancel-requested")
+        with self.assertRaises(RoutingError):
+            restored.revise({"request_id": "dev", "assistant_id": "one"})
+        with self.assertRaises(RoutingError):
+            restored.confirm({"request_id": "dev", "assistant_id": "one", "revision": 1, "max_cny": "0"})
+        with self.assertRaises(RoutingError):
+            restored.get("dev", "two")
+        quality.invoke_development.assert_not_called()
+
+    def test_restart_retains_model_reservation_and_safe_boundary_is_interrupted(self):
+        work, storage, quality = self.workflow()
+        value = work.get("dev", "one")
+        value.update(status="executing", development_journal=append_event([], self.intent("model")))
+        value["attempts"] = {"attempt": {"status": "reserved", "upper_cny": "1"}}
+        value["authorization"]["reserved_cny"] = "1"
+        storage.save_record(work.namespace, "dev", "one", value)
+        work.close()
+        restored = WorkService(storage, quality, owner_ids=("one",))
+        self.addCleanup(restored.close)
+        self.assertEqual(restored.get("dev", "one")["authorization"]["reserved_cny"], "1")
+        self.assertTrue(restored.get("dev", "one")["attempts"]["attempt"]["submission_unknown"])
+        value.update(status="executing", development_journal=[])
+        value["attempts"] = {}
+        value["authorization"]["reserved_cny"] = "0"
+        storage.save_record(work.namespace, "dev", "one", value)
+        restored.close()
+        safe = WorkService(storage, quality, owner_ids=("one",))
+        self.addCleanup(safe.close)
+        self.assertEqual(safe.get("dev", "one")["status"], "interrupted")
+        self.assertEqual(safe.submit({"request_id": "dev", "assistant_id": "one"})["status"], "interrupted")
+        quality.invoke_development.assert_not_called()
+
+    def test_tool_write_then_exception_is_unknown_in_actual_work_service(self):
+        work, storage, quality = self.workflow()
+        quality.invoke_development.return_value = DevelopmentReply("", [{"name": "write_file", "arguments": json.dumps(
+            {"path": "answer.py", "content": "answer = 2\n", "expected_sha256": hashlib.sha256(b"answer = 1\n").hexdigest()})}])
+        original = DevelopmentWorkspace.execute
+        def broken_receipt(workspace, name, arguments):
+            original(workspace, name, arguments)
+            raise OSError("receipt lost after write")
+        value = work.get("dev", "one")
+        value["status"] = "planning"
+        storage.save_record(work.namespace, "dev", "one", value)
+        with patch.object(DevelopmentWorkspace, "execute", broken_receipt):
+            work._run(value)
+        result = work.get("dev", "one")
+        self.assertEqual(result["status"], "submission-unknown")
+        self.assertEqual((Path(result["development_workspace"]["path"]) / "answer.py").read_text(), "answer = 2\n")
+        self.assertEqual((self.source / "answer.py").read_text(), "answer = 1\n")
+        work.submit({"request_id": "dev", "assistant_id": "one"})
+        quality.invoke_development.assert_called_once()
+
+    def test_reserve_requires_executing_intent_and_rejects_duplicate_turn(self):
+        work, storage, quality = self.workflow()
+        candidate = quality.engine.candidates()[0]
+        with self.assertRaises(RoutingError):
+            work.reserve("dev", Scope("one", "session"), candidate, 1, 1)
+        value = work.get("dev", "one")
+        value.update(status="executing", development_journal=append_event([], self.intent("model")))
+        storage.save_record(work.namespace, "dev", "one", value)
+        attempt = work.reserve("dev", Scope("one", "session"), candidate, 1, 1)
+        self.assertEqual(work.get("dev", "one")["attempts"][attempt]["development_operation_id"], "model-1")
+        with self.assertRaises(RoutingError):
+            work.reserve("dev", Scope("one", "session"), candidate, 1, 1)
+
+    def test_submit_transaction_conflict_does_not_dispatch(self):
+        work, storage, quality = self.workflow()
+        with patch.object(storage, "save_record_group", side_effect=ValueError("concurrent request")), patch.object(work._pool, "submit") as dispatch:
+            work.submit({"request_id": "dev", "assistant_id": "one"})
+        dispatch.assert_not_called()
+        quality.invoke_development.assert_not_called()
+
+    def test_executor_binding_cannot_switch_after_confirmation(self):
+        work, storage, quality = self.workflow()
+        value = work.get("dev", "one")
+        self.assertEqual(value["development_executor_id"], "api-source-copy/v1")
+        self.assertEqual(value["authorization"]["development_executor_id"], value["development_executor_id"])
+        replacement = SimpleNamespace(executor_id="different/v1", run=Mock())
+        work.development_executor = replacement
+        work._run(value)
+        replacement.run.assert_not_called()
+        quality.invoke_development.assert_not_called()
+        self.assertEqual(work.get("dev", "one")["status"], "failed")
+        self.assertFalse((self.base / "copies").exists())
+
+    def test_legacy_executor_binding_is_only_compatible_with_original_adapter(self):
+        work, storage, quality = self.workflow()
+        value = work.get("dev", "one")
+        value.pop("development_executor_id")
+        value["authorization"].pop("development_executor_id")
+        work._check_development(value)
+        work.development_executor = SimpleNamespace(executor_id="different/v1")
+        with self.assertRaises(RoutingError):
+            work._check_development(value)
+        quality.invoke_development.assert_not_called()
+
+    def test_saved_inspection_is_read_only_scoped_and_detects_stale_evidence(self):
+        work, storage, quality = self.workflow()
+        workspace = self.workspace()
+        prepared = {"path": str(workspace.root), "checkpoint_id": workspace.checkpoint_id,
+                    "files": list(workspace.source_paths), "workspace_digest": workspace.source_digest()}
+        value = work.get("dev", "one")
+        value["development"] = self.spec
+        from quality_routing.workflow import delegation_digest
+        value["authorization"]["development_digest"] = delegation_digest([self.spec])
+        value.update(status="completed", development_workspace=prepared,
+                     development_result={"status": "completed", "workspace_digest": workspace.source_digest()})
+        storage.save_record(work.namespace, "dev", "one", value)
+        fresh = work.rpc("work.task.inspect", {"request_id": "dev", "assistant_id": "one"})
+        self.assertTrue(fresh["test_evidence_current"])
+        self.assertFalse(fresh["independently_verified"])
+        (workspace.root / "answer.py").write_bytes(b"answer = 3\n")
+        inspected = work.rpc("work.task.inspect", {"request_id": "dev", "assistant_id": "one"})
+        self.assertFalse(inspected["test_evidence_current"])
+        self.assertIn("+answer = 3", inspected["diff"]["patch"])
+        self.assertEqual(storage.get_record(work.namespace, "dev", "one"), value)
+        with self.assertRaises(RoutingError):
+            work.rpc("work.task.inspect", {"request_id": "dev", "assistant_id": "two"})
+        quality.invoke_development.assert_not_called()
+
+    def test_saved_inspection_rejects_another_workspace_checkpoint(self):
+        first = self.workspace()
+        other = self.workspace()
+        with self.assertRaises(ValueError):
+            first.inspect_saved({"path": str(other.root), "checkpoint_id": first.checkpoint_id,
+                                 "files": list(first.source_paths)})
+        with self.assertRaises(RoutingError):
+            first.inspect_saved({"path": str(self.source), "checkpoint_id": first.checkpoint_id,
+                                 "files": list(first.source_paths)})
+
     def test_source_preserved_test_failure_repair_and_real_diff(self):
         (self.source / ".env").write_text("private", encoding="utf-8")
         workspace = self.workspace()
@@ -47,6 +219,61 @@ class DevelopmentTests(unittest.TestCase):
         self.assertEqual(workspace.execute("run_test", {"index": 0})["exit_code"], 0)
         self.assertEqual((self.source / "answer.py").read_text(), "answer = 1\n")
         self.assertIn("+answer = 2", workspace.diff()["patch"])
+
+    def test_test_receipt_is_invalidated_by_external_source_change(self):
+        workspace = self.workspace()
+        first = workspace.execute("run_test", {"index": 0})
+        self.assertNotEqual(first["exit_code"], 0)
+        (workspace.root / "notes.py").write_text("note = True\n", encoding="utf-8")
+        second = workspace.execute("run_test", {"index": 0})
+        self.assertNotEqual(first["workspace_digest"], second["workspace_digest"])
+        self.assertEqual(len(second["workspace_digest"]), 64)
+
+    def test_source_digest_is_stable_and_changes_for_new_visible_file(self):
+        workspace = self.workspace()
+        original = workspace.source_digest()
+        self.assertEqual(original, workspace.source_digest())
+        (workspace.root / "notes.py").write_text("note = True\n", encoding="utf-8")
+        self.assertNotEqual(original, workspace.source_digest())
+
+    def test_digest_tracks_deleted_and_gitignored_source_but_not_runtime_cache(self):
+        (self.source / ".gitignore").write_bytes(b"extra.py\n")
+        workspace = self.workspace()
+        original = workspace.source_digest()
+        (workspace.root / "__pycache__").mkdir()
+        (workspace.root / "__pycache__" / "answer.pyc").write_bytes(b"cache")
+        self.assertEqual(original, workspace.source_digest())
+        (workspace.root / "extra.py").write_bytes(b"extra = 1\n")
+        self.assertNotEqual(original, workspace.source_digest())
+        added = workspace.source_digest()
+        (workspace.root / "answer.py").unlink()
+        self.assertNotEqual(added, workspace.source_digest())
+
+    def test_test_cannot_certify_the_tree_it_mutated(self):
+        command = [sys.executable, "-c", "from pathlib import Path; Path('answer.py').write_text('answer = 2\\n')"]
+        workspace = self.workspace({**self.spec, "test_commands": [command]})
+        reply = DevelopmentReply("", [{"name": "run_test", "arguments": '{"index":0}'}])
+        replies = iter([reply, DevelopmentReply("done")])
+        result = run_development("test", invoke=lambda messages, tools: next(replies), execute=workspace.execute,
+                                 cancelled=lambda: False, context="fixture", required_tests=1, max_calls=2,
+                                 workspace_digest=workspace.source_digest)
+        self.assertEqual(result["tests"][0]["exit_code"], 0)
+        self.assertFalse(result["tests"][0]["workspace_unchanged"])
+        self.assertEqual(result["status"], "limit-reached")
+
+    def test_external_edit_after_passing_test_prevents_completion(self):
+        workspace = self.workspace({**self.spec, "test_commands": [[sys.executable, "-c", "pass"]]})
+        calls = []
+        def invoke(messages, tools):
+            calls.append(True)
+            if len(calls) == 1:
+                return DevelopmentReply("", [{"name": "run_test", "arguments": '{"index":0}'}])
+            (workspace.root / "answer.py").write_bytes(b"answer = 9\n")
+            return DevelopmentReply("done")
+        result = run_development("test", invoke=invoke, execute=workspace.execute, cancelled=lambda: False,
+                                 context="fixture", required_tests=1, max_calls=2, workspace_digest=workspace.source_digest)
+        self.assertEqual(result["tests"][0]["exit_code"], 0)
+        self.assertEqual(result["status"], "limit-reached")
 
     def test_paths_hashes_unknown_tools_and_test_allowlist(self):
         workspace = self.workspace()
@@ -144,6 +371,13 @@ class DevelopmentTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed", result)
         self.assertEqual(len(calls), 5)
         self.assertEqual(len(result["attempts"]), 5)
+        records = result["development_journal"]
+        self.assertEqual(len(records), 18)
+        self.assertEqual(records[0]["phase"], "started")
+        self.assertEqual(records[-1]["phase"], "finished")
+        self.assertNotIn("Fixed answer", json.dumps(records))
+        self.assertNotIn("answer = 2", json.dumps(records))
+        self.assertFalse((Path(result["development_workspace"]["path"]) / ".sumika" / "journal.jsonl").exists())
         self.assertIn("+answer = 2", result["development_diff"]["patch"])
         self.assertEqual((self.source / "answer.py").read_text(), "answer = 1\n")
 

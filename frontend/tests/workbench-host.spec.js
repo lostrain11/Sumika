@@ -157,6 +157,8 @@ test("真实宿主：主模型和角色分别自动手动，固定失效不换�
     await form.getByText("固定", { exact: true }).click();
     await expect(form.locator("select")).toHaveValue(candidate);
     await form.locator('button[type="submit"]').click();
+    await expect.poll(() => fixture.settings.selection_mode[purpose]).toBe("fixed");
+    await expect(form.locator('button[type="submit"]')).toBeEnabled();
   }
   fixture.candidates.find(row => row.candidate_id === "paid-leader").available = false;
   await page.reload({ waitUntil: "networkidle" });

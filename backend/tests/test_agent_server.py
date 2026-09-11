@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from external_admission_fixture import confirmed_offline_rpc, offline_network
+from trusted_host_fixture import trusted_rpc
 
 from sumika_core.agent import AgentCapability, AgentRuntimeError
 from sumika_core.agent.supervisor import ProviderWorker, RuntimeRouteDescriptor
@@ -1562,7 +1563,7 @@ class AgentServerTests(unittest.TestCase):
         listed = self.application.rpc("agent.interactions", {"session_id": "session-1"})
         self.assertEqual(listed["interactions"][0]["id"], "question-1")
         with patch.object(self.application.agent, "respond_interaction", return_value={"accepted": True, "kind": "question"}):
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "agent.question.respond",
                 {
                     "rpcId": "question-1",
@@ -1616,7 +1617,7 @@ class AgentServerTests(unittest.TestCase):
             "respond_interaction",
             side_effect=lambda params: call_order.append("approve") or {"accepted": True, "kind": "question"},
         ) as respond:
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "agent.question.respond",
                 {
                     "rpcId": "plan-review-1",
@@ -1687,7 +1688,7 @@ class AgentServerTests(unittest.TestCase):
             side_effect=WorkspaceError("checkpoint unavailable"),
         ), patch.object(self.application.agent, "respond_interaction") as respond:
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "agent.question.respond",
                     {
                         "rpcId": "plan-review-1",

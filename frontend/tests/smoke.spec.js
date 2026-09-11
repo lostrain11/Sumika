@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openPage } from "./helpers/navigation.js";
+import { installNativeQuestionFixture } from "./helpers/native-question-fixture.js";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1883,6 +1884,11 @@ test.describe("Sumika UI shell", () => {
   test("Agent workspace validates and submits a pending DSH question", async ({ page }) => {
     let answered = false;
     let questionBody;
+    await installNativeQuestionFixture(page, baseUrl, body => {
+      questionBody = body;
+      answered = true;
+      return { accepted: true, kind: "question" };
+    });
     await page.route("**/api/agent/status", async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -1927,10 +1933,7 @@ test.describe("Sumika UI shell", () => {
         return;
       }
       if (body?.method === "agent.question.respond") {
-        questionBody = body;
-        answered = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, kind: "question" } }) });
-        return;
+        throw new Error("Question confirmation must not use ordinary HTTP RPC");
       }
       const result = {
         "browser.profiles": { profiles: [] },
@@ -1962,6 +1965,12 @@ test.describe("Sumika UI shell", () => {
     let answerBody;
     let cancelBody;
     const workspaceId = "plan-workspace";
+    await installNativeQuestionFixture(page, baseUrl, body => {
+      answerBody = body;
+      answered = true;
+      const approved = body.params?.answer?.answers?.[0]?.selected?.[0] === "Approve";
+      return { accepted: true, kind: "question", ...(approved ? { workspace_checkpoint: { id: "checkpoint-plan" } } : {}) };
+    });
     await page.route("**/api/agent/status", async (route) => route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, runtime_id: "dsh", version: "0.1.1-rc.2", commit: "b150a551b8d4", runtime_capabilities: ["interactions", "plan", "commands", "workspaces"] }),
@@ -1995,11 +2004,7 @@ test.describe("Sumika UI shell", () => {
         return;
       }
       if (body?.method === "agent.question.respond") {
-        answerBody = body;
-        answered = true;
-        const approved = body.params?.answer?.answers?.[0]?.selected?.[0] === "Approve";
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, kind: "question", ...(approved ? { workspace_checkpoint: { id: "checkpoint-plan" } } : {}) } }) });
-        return;
+        throw new Error("Plan confirmation must not use ordinary HTTP RPC");
       }
       if (body?.method === "agent.question.cancel") {
         cancelBody = body;

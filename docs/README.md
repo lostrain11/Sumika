@@ -45,6 +45,9 @@ API、协议、类名和代码标识保留 English identifier。
 - [文章渠道核验总表](refactor/free-provider-audit.md)
 - [Codex成本协议](refactor/phase-3-cost-routing.md)
 
+- [Harness可替换与高难任务最终执行计划](refactor/harness-portability-hard-tasks-v1.md)
+- [滚动规划与交接实现契约](architecture/task-planning.md)
+- [可信宿主确认实现契约](architecture/host-confirmation.md)
 - [质量优先协作 R0–R5 执行与验收](refactor/quality-routing.md)
 - [Phase 0 模块盘点](refactor/module-inventory.md)
 - [Phase 0 冗余与耦合报告](refactor/redundancy-report.md)
@@ -77,6 +80,7 @@ API、协议、类名和代码标识保留 English identifier。
 - [角色与 persona](architecture/characters.md)
 - [任务中心](architecture/tasks.md)
 - [Agent Runtime 可移植边界](architecture/agent-runtime.md)
+- [开发执行恢复与上游复用](architecture/development-recovery.md)
 - [音频 ASR/TTS/VAD](architecture/audio.md)
 - [长期记忆](architecture/memory.md)
 - [视觉观察](architecture/vision.md)
