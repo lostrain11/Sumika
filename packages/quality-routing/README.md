@@ -119,6 +119,10 @@ The host owns approval. The MCP surface cannot approve tasks, choose a scope, se
 
 The host-bound server exposes `quality_catalog`, `quality_status`, `quality_result`, `quality_submit`, `quality_revise`, and `quality_advance`.
 
+## Harness identity values
+
+`quality_routing.harness` exposes immutable `RuntimeBinding` and `ExternalSessionRef` values with versioned `to_dict/from_dict` serialization. Stable instance identity is separate from launch identity. `matches_attempt` fails closed when the launch is unknown; `session_key` namespaces original session IDs by Harness and stable instance. These helpers neither discover processes nor grant authorization. Evidence references must be verified by the host before binding; a structurally valid object is not proof of identity. They require no Sumika installation.
+
 ## Development evidence and interruption
 
 `run_development` accepts optional `workspace_digest` and `journal` callbacks. With a digest callback, passing tests must have identical before/after/current source digests; missing or invalid evidence fails closed. Without it, legacy write-revision checks remain and results explicitly report that weaker verification basis.

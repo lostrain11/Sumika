@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { openPage } from "./helpers/navigation.js";
+import { installNativeHostFixture } from "./helpers/native-host-fixture.js";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 
@@ -11,12 +12,20 @@ test("模块库严格隐藏停用能力，打开目录不授权，启用失败�
   let modules = [moduleFixture("llm"), moduleFixture("memory"), moduleFixture("asr"), moduleFixture("vision"), moduleFixture("tools")];
   const writes = [];
   await page.route("**/api/modules", (route) => route.fulfill({ json: modules }));
+  const updateModule = (request) => {
+    writes.push(request.params);
+    modules = modules.map((module) => module.id === request.params.module_id ? { ...module, enabled: request.params.enabled, status: request.params.enabled ? "error" : "disabled" } : module);
+    return modules.find((module) => module.id === request.params.module_id);
+  };
+  await installNativeHostFixture(page, baseUrl, { confirm: request => {
+    expect(request.method).toBe("module.update");
+    return updateModule(request);
+  } });
   await page.route("**/rpc", async (route) => {
     const request = route.request().postDataJSON();
     if (request.method !== "module.update") return route.continue();
-    writes.push(request.params);
-    modules = modules.map((module) => module.id === request.params.module_id ? { ...module, enabled: request.params.enabled, status: request.params.enabled ? "error" : "disabled" } : module);
-    return route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result: modules.find((module) => module.id === request.params.module_id) } });
+    expect(request.params.enabled).toBe(false);
+    return route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result: updateModule(request) } });
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await openPage(page, "Modules");
@@ -141,6 +150,7 @@ for (const width of [360, 640, 900, 1280]) {
     await expect(companion.locator('[data-vrm-status="ready"]')).toBeVisible({ timeout: 15000 });
     await expect(companion.locator(".vrm-renderer canvas")).toBeVisible();
     const canvas = await companion.locator(".vrm-renderer canvas").elementHandle();
+    await page.bringToFront();
     const composer = await page.locator(".wv2-composer").boundingBox();
     expect(composer.x).toBeGreaterThanOrEqual(0);
     expect(composer.x + composer.width).toBeLessThanOrEqual(width + 1);

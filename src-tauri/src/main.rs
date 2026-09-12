@@ -22,9 +22,9 @@ use tauri::{AppHandle, Manager, RunEvent, State, Webview};
 const DSH_CREDENTIAL_PROTOCOL_MAGIC: &[u8] = b"SUMIKA_DSH_CREDENTIAL_V2";
 const LOCAL_DSH_CREDENTIAL_REF: &str = "SUMIKA_LOCAL_PROVIDER_API_KEY";
 const LOCAL_DSH_CREDENTIAL_VALUE: &str = "sumika-local";
-const PINNED_DSH_VERSION: &str = "0.1.1-rc.2";
-const PINNED_DSH_EXECUTABLE: &str =
-    r"D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd";
+const DSH_RELEASE_CHANNEL_SCHEMA: &str = "sumika.dsh-release-channel/v1";
+const DSH_RELEASE_SCHEMA: &str = "sumika.dsh-release/v1";
+const DSH_ADAPTER_CONTRACT: &str = "dsh-web-api-v1";
 
 #[derive(Clone)]
 struct CoreProcess {
@@ -32,6 +32,7 @@ struct CoreProcess {
 }
 
 struct CoreProcessInner {
+    agent: AgentProcess,
     host_secret: Mutex<String>,
     child: Mutex<Option<Child>>,
     log_path: PathBuf,
@@ -50,6 +51,7 @@ struct AgentProcess {
 #[derive(Clone)]
 struct AgentLaunchConfig {
     runtime_id: String,
+    release: String,
     executable: String,
     verified_version: String,
     endpoint: String,
@@ -65,6 +67,7 @@ struct AgentLaunchConfig {
 }
 
 struct AgentProcessInner {
+    identity: Mutex<Option<serde_json::Value>>,
     child: Mutex<Option<Child>>,
     log_path: PathBuf,
     runtime_id: String,
@@ -174,7 +177,9 @@ fn spawn_core(
     host: &str,
     port: u16,
     mcp_credential_refs: &[String],
+    agent: &AgentProcess,
 ) -> Result<(Child, String), String> {
+    let identity = agent.inner.identity.lock().map_err(|_| "agent-identity-unavailable")?.clone();
     let secret = host_authorization::new_secret()?;
     let root = repository_root()?;
     let data_dir = desktop_data_dir(&root)?;
@@ -198,6 +203,7 @@ fn spawn_core(
             "-m",
             "sumika_core",
             "--host-bootstrap-stdin",
+            "--runtime-bootstrap-stdin",
             "--host",
             host,
             "--port",
@@ -220,7 +226,8 @@ fn spawn_core(
     let mut child = command
         .spawn()
         .map_err(|error| format!("启动 Sumika Python 核心失败（可设置 SUMIKA_PYTHON 指向 Python）: {error}"))?;
-    let bootstrap = serde_json::json!({"schema": "sumika-host/v1", "secret": secret}).to_string() + "\n";
+    let bootstrap = serde_json::json!({"schema": "sumika-host/v1", "secret": secret}).to_string()
+        + "\n" + &serde_json::to_string(&identity).map_err(|_| "agent-identity-serialization")? + "\n";
     let result = child.stdin.take().ok_or("host-bootstrap-pipe-unavailable".to_string())
         .and_then(|mut pipe| pipe.write_all(bootstrap.as_bytes()).map_err(|_| "host-bootstrap-write-failed".to_string()));
     if let Err(error) = result {
@@ -239,30 +246,7 @@ fn resolve_address(host: &str, port: u16) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("核心地址没有可用解析结果 {host}:{port}"))
 }
 
-fn core_health_request(address: SocketAddr) -> bool {
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    let request = format!(
-        "GET /api/health HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
-    );
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() {
-        return false;
-    }
-    let status_ok = response
-        .lines()
-        .next()
-        .map(|line| line.contains(" 200 "))
-        .unwrap_or(false);
-    status_ok && (response.contains("\"ok\": true") || response.contains("\"ok\":true"))
-}
-
-fn core_ready(child: &mut Child, host: &str, port: u16) -> Result<(), String> {
+fn core_ready(child: &mut Child, host: &str, port: u16, secret: &str) -> Result<(), String> {
     let address = resolve_address(host, port)?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -271,8 +255,9 @@ fn core_ready(child: &mut Child, host: &str, port: u16) -> Result<(), String> {
             Ok(None) => {}
             Err(error) => return Err(format!("检查 Sumika Python 核心状态失败: {error}")),
         }
-        if core_health_request(address) {
-            return Ok(());
+        if host_authorization::core_identity_request(address, secret, child.id()) {
+            if matches!(child.try_wait(), Ok(None)) { return Ok(()); }
+            return Err("Core exited during identity verification".into());
         }
         if Instant::now() >= deadline {
             return Err(format!(
@@ -406,7 +391,7 @@ fn dsh_version_command(executable: &str) -> Command {
     }
 }
 
-fn validate_dsh_executable(executable: &str) -> Result<String, String> {
+fn validate_dsh_executable(executable: &str, expected_version: &str) -> Result<String, String> {
     let display_name = dsh_display_name(executable);
     let path = PathBuf::from(executable);
     if !path.is_absolute() {
@@ -445,19 +430,147 @@ fn validate_dsh_executable(executable: &str) -> Result<String, String> {
                 "DSH executable '{display_name}' rejected [version-output-empty]"
             )
         })?;
-    if actual != PINNED_DSH_VERSION {
+    if actual != expected_version {
         return Err(format!(
-            "DSH executable '{display_name}' rejected [version-mismatch]: expected '{PINNED_DSH_VERSION}', actual '{actual}'"
+            "DSH executable '{display_name}' rejected [version-mismatch]: expected '{expected_version}', actual '{actual}'"
         ));
     }
     Ok(actual)
 }
 
+fn dsh_release_root(root: &Path) -> PathBuf {
+    match env::var("SUMIKA_DSH_RELEASE_ROOT") {
+        Ok(value) if !value.trim().is_empty() => PathBuf::from(value.trim()),
+        _ => root.join("dsh-release"),
+    }
+}
+
+fn read_json_object(path: &Path) -> Result<serde_json::Value, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|_| format!("无法读取受管发行描述: {}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("受管发行描述不是合法 JSON: {}", path.display()))?;
+    if !value.is_object() {
+        return Err(format!("受管发行描述必须是对象: {}", path.display()));
+    }
+    Ok(value)
+}
+
+fn json_str<'a>(value: &'a serde_json::Value, path: &[&str]) -> Result<&'a str, String> {
+    let mut current = value;
+    for key in path {
+        current = current
+            .get(*key)
+            .ok_or_else(|| format!("受管发行描述缺少字段 {}", path.join(".")))?;
+    }
+    current
+        .as_str()
+        .ok_or_else(|| format!("受管发行描述字段 {} 必须是字符串", path.join(".")))
+}
+
+/// Resolve the release the desktop is allowed to run from the shared description.
+///
+/// The channel file and the per-release description are the only place a DSH
+/// version, executable layout or adapter contract is declared.  A release whose
+/// status is not verified-active for this adapter is described but refused.
+fn dsh_release(root: &Path) -> Result<serde_json::Value, String> {
+    let release_root = dsh_release_root(root);
+    let release_id = match env::var("SUMIKA_DSH_RELEASE") {
+        Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => {
+            let channel = read_json_object(&release_root.join("channel.json"))?;
+            if json_str(&channel, &["schema"])? != DSH_RELEASE_CHANNEL_SCHEMA {
+                return Err("不支持的 DSH 发行通道描述".to_string());
+            }
+            json_str(&channel, &["default_release"])?.to_string()
+        }
+    };
+    if release_id.is_empty() || release_id.contains('/') || release_id.contains('\\') {
+        return Err("DSH 发行 id 非法".to_string());
+    }
+    let description = read_json_object(&release_root.join("releases").join(&release_id).join("release.json"))?;
+    if json_str(&description, &["schema"])? != DSH_RELEASE_SCHEMA {
+        return Err("不支持的 DSH 发行描述".to_string());
+    }
+    if json_str(&description, &["id"])? != release_id {
+        return Err("DSH 发行描述与目录不一致".to_string());
+    }
+    match json_str(&description, &["status"])? {
+        "verified-active" => {}
+        "verified-candidate" => {
+            return Err(format!(
+                "DSH 发行 {release_id} 是候选组合，日用启动拒绝使用；请先完成隔离验证并切换默认发行"
+            ))
+        }
+        other => {
+            return Err(format!(
+                "DSH 发行 {release_id} 状态为 {other}，不能用于受管启动"
+            ))
+        }
+    }
+    let contract = json_str(&description, &["adapter_contract"])?;
+    if contract != DSH_ADAPTER_CONTRACT {
+        return Err(format!(
+            "DSH 发行 {release_id} 使用 {contract}，当前适配器只实现 {DSH_ADAPTER_CONTRACT}"
+        ));
+    }
+    Ok(description)
+}
+
+fn dsh_release_executable(_root: &Path, description: &serde_json::Value) -> Result<PathBuf, String> {
+    let install_root = match env::var("SUMIKA_DSH_INSTALL_ROOT") {
+        Ok(value) if !value.trim().is_empty() => PathBuf::from(value.trim()),
+        _ => PathBuf::from(json_str(description, &["harness", "install", "root"])?),
+    };
+    Ok(install_root
+        .join(json_str(description, &["harness", "install", "directory"])?)
+        .join(json_str(description, &["harness", "install", "executable"])?))
+}
+
+/// Compare the trailing path parts of an explicitly configured executable with
+/// the layout the description declares.  A relocated install stays usable; an
+/// unrelated binary is refused before any version command runs.
+fn dsh_layout_matches(description: &serde_json::Value, candidate: &Path) -> bool {
+    let Ok(directory) = json_str(description, &["harness", "install", "directory"]) else {
+        return false;
+    };
+    let Ok(executable) = json_str(description, &["harness", "install", "executable"]) else {
+        return false;
+    };
+    let expected: Vec<String> = PathBuf::from(directory)
+        .join(executable)
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+    let actual: Vec<String> = candidate
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+    actual.len() >= expected.len() && actual[actual.len() - expected.len()..] == expected[..]
+}
+
 fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchConfig, String> {
     let endpoint = configured_agent_endpoint("dsh");
-    let executable = first_nonempty_env(&["SUMIKA_AGENT_EXECUTABLE", "SUMIKA_DSH_EXECUTABLE"])
-        .unwrap_or_else(|| PINNED_DSH_EXECUTABLE.to_string());
-    let verified_version = validate_dsh_executable(&executable)?;
+    let description = dsh_release(root)?;
+    let release_id = json_str(&description, &["id"])?.to_string();
+    let expected_version = json_str(&description, &["harness", "version"])?.to_string();
+    let executable = match first_nonempty_env(&["SUMIKA_AGENT_EXECUTABLE", "SUMIKA_DSH_EXECUTABLE"]) {
+        Some(value) => {
+            let candidate = PathBuf::from(&value);
+            if !candidate.is_absolute() || !candidate.is_file()
+                || !dsh_layout_matches(&description, &candidate) {
+                return Err(format!(
+                    "DSH executable '{}' rejected [not-in-described-release-layout]: {release_id}",
+                    dsh_display_name(&value)
+                ));
+            }
+            value
+        }
+        None => dsh_release_executable(root, &description)?
+            .to_string_lossy()
+            .to_string(),
+    };
+    let verified_version = validate_dsh_executable(&executable, &expected_version)?;
     let profile_dir = first_nonempty_env(&[
         "SUMIKA_AGENT_PROFILE_DIR",
         "SUMIKA_DSH_PROFILE_DIR",
@@ -479,6 +592,7 @@ fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchCon
         ("DSH_HOME".to_string(), profile_text.clone()),
         ("SUMIKA_DSH_HOME".to_string(), profile_text),
         ("SUMIKA_DSH_VERSION_VERIFIED".to_string(), "1".to_string()),
+        ("SUMIKA_DSH_API_PROTOCOL".to_string(), json_str(&description, &["adapter_contract"])?.to_string()),
         ("BSK_AUTO_UPDATE".to_string(), "off".to_string()),
         ("SUMIKA_CORE_HOST".to_string(), core_host),
         ("SUMIKA_CORE_PORT".to_string(), core_port.to_string()),
@@ -502,6 +616,7 @@ fn dsh_launch_config(root: &PathBuf, log_dir: &PathBuf) -> Result<AgentLaunchCon
     }
     Ok(AgentLaunchConfig {
         runtime_id: "dsh".to_string(),
+        release: release_id,
         executable,
         verified_version,
         endpoint,
@@ -670,7 +785,7 @@ fn agent_health_request(config: &AgentLaunchConfig) -> bool {
 }
 
 fn spawn_agent(config: &AgentLaunchConfig) -> Result<Child, String> {
-    let verified_version = validate_dsh_executable(&config.executable)?;
+    let verified_version = validate_dsh_executable(&config.executable, &config.verified_version)?;
     if verified_version != config.verified_version {
         return Err(format!(
             "DSH executable '{}' changed after configuration [version-mismatch]",
@@ -693,28 +808,66 @@ fn spawn_agent(config: &AgentLaunchConfig) -> Result<Child, String> {
         .and_then(|value| value.to_str())
         .map(|value| matches!(value.to_ascii_lowercase().as_str(), "cmd" | "bat"))
         .unwrap_or(false);
-    let mut command = if is_windows_script {
-        let mut command = Command::new("cmd.exe");
-        command.args(["/d", "/c", &config.executable]);
-        command
+    let mut arguments = if is_windows_script {
+        vec!["cmd.exe".to_string(), "/d".to_string(), "/c".to_string(), config.executable.clone()]
     } else {
-        Command::new(&config.executable)
+        vec![config.executable.clone()]
     };
+    arguments.extend(config.args.clone());
+    let root = repository_root()?;
+    let mut command = Command::new(python_command());
     command
-        .current_dir(repository_root().map_err(|error| error.to_string())?)
-        .args(&config.args)
-        .stdin(Stdio::null())
+        .current_dir(&root)
+        .env("PYTHONPATH", development_python_path(&root)?)
+        .args(["-m", "sumika_core.agent.managed_launcher"])
+        .stdin(Stdio::piped())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(error_log));
     for (name, value) in &config.environment {
         command.env(name, value);
     }
-    command
+    let mut child = command
         .spawn()
-        .map_err(|error| format!("启动受管 {} 失败: {error}", config.runtime_id))
+        .map_err(|error| format!("启动受管 {} 失败: {error}", config.runtime_id))?;
+    let frame = serde_json::to_string(&arguments).map_err(|_| "agent-command-serialization")? + "\n";
+    let result = child.stdin.take().ok_or("agent-launch-pipe-unavailable")
+        .and_then(|mut pipe| pipe.write_all(frame.as_bytes()).map_err(|_| "agent-launch-pipe-failed"));
+    if let Err(error) = result { let _ = child.kill(); let _ = child.wait(); return Err(error.into()); }
+    Ok(child)
 }
 
-fn agent_ready(child: &mut Child, config: &AgentLaunchConfig) -> Result<(), String> {
+fn agent_identity_operation(request: &serde_json::Value, stop: bool) -> Result<serde_json::Value, String> {
+    let root = repository_root()?;
+    let mut command = Command::new(python_command());
+    command.current_dir(&root).env("PYTHONPATH", development_python_path(&root)?)
+        .args(["-m", "sumika_core.agent.managed_identity"]);
+    if stop { command.arg("--stop"); }
+    let mut verifier = command
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
+        .spawn().map_err(|_| "agent-identity-verifier-start-failed")?;
+    let write = verifier.stdin.take().ok_or("agent-identity-pipe-unavailable")
+        .and_then(|mut pipe| pipe.write_all((request.to_string() + "\n").as_bytes()).map_err(|_| "agent-identity-pipe-failed"));
+    if write.is_err() { let _ = verifier.kill(); let _ = verifier.wait(); return Err("agent-identity-pipe-failed".into()); }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match verifier.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+            _ => { let _ = verifier.kill(); let _ = verifier.wait(); return Err("agent-identity-verifier-timeout".into()); }
+        }
+    }
+    let output = verifier.wait_with_output().map_err(|_| "agent-identity-verifier-failed")?;
+    if !output.status.success() || output.stdout.len() > 16384 { return Err("agent-identity-unverified".into()); }
+    serde_json::from_slice(&output.stdout).map_err(|_| "agent-identity-invalid-receipt".into())
+}
+
+fn agent_identity(child: &Child, config: &AgentLaunchConfig) -> Result<serde_json::Value, String> {
+    agent_identity_operation(&serde_json::json!({"root_pid": child.id(), "endpoint": config.endpoint,
+        "profile": config.profile_dir, "executable": config.executable, "version": config.verified_version,
+        "release": config.release}), false)
+}
+
+fn agent_ready(child: &mut Child, config: &AgentLaunchConfig) -> Result<serde_json::Value, String> {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         match child.try_wait() {
@@ -723,7 +876,9 @@ fn agent_ready(child: &mut Child, config: &AgentLaunchConfig) -> Result<(), Stri
             Err(error) => return Err(format!("检查受管 {} 状态失败: {error}", config.runtime_id)),
         }
         if agent_health_request(config) {
-            return Ok(());
+            let identity = agent_identity(child, config)?;
+            if matches!(child.try_wait(), Ok(None)) { return Ok(identity); }
+            return Err("agent-exited-during-identity-check".into());
         }
         if Instant::now() >= deadline {
             return Err(format!(
@@ -745,6 +900,13 @@ fn stop_agent_inner(inner: &AgentProcessInner, reason: &str) {
         return;
     };
     let Some(child) = guard.as_mut() else { return };
+    if let Ok(identity) = inner.identity.lock() {
+        if let Some(receipt) = identity.as_ref() {
+            if agent_identity_operation(receipt, true).is_err() {
+                append_log(&inner.log_path, "managed listener identity no longer matches; no foreign listener was terminated");
+            }
+        }
+    }
     match child.try_wait() {
         Ok(Some(_)) => {}
         Ok(None) => {
@@ -829,14 +991,16 @@ fn supervise_agent(state: AgentProcess) {
         }
         failed_restarts += 1;
         std::thread::sleep(Duration::from_millis(700 * failed_restarts as u64));
+        let Ok(mut guard) = state.inner.child.lock() else { return };
         if state.inner.stopping.load(Ordering::SeqCst) {
             return;
         }
         match spawn_agent(&config) {
             Ok(mut child) => match agent_ready(&mut child, &config) {
-                Ok(()) => {
+                Ok(identity) => {
                     let pid = child.id();
-                    if let Ok(mut guard) = state.inner.child.lock() {
+                    if !state.inner.stopping.load(Ordering::SeqCst) {
+                        if let Ok(mut current) = state.inner.identity.lock() { *current = Some(identity); }
                         *guard = Some(child);
                         state.inner.restart_count.fetch_add(1, Ordering::SeqCst);
                         failed_restarts = 0;
@@ -918,6 +1082,7 @@ fn supervise_core(state: CoreProcess) {
         }
         failed_restarts += 1;
         std::thread::sleep(Duration::from_millis(500 * failed_restarts as u64));
+        let Ok(mut guard) = state.inner.child.lock() else { return };
         if state.inner.stopping.load(Ordering::SeqCst) {
             return;
         }
@@ -926,11 +1091,12 @@ fn supervise_core(state: CoreProcess) {
             &state.inner.host,
             state.inner.port,
             &state.inner.mcp_credential_refs,
+            &state.inner.agent,
         ) {
-            Ok((mut child, secret)) => match core_ready(&mut child, &state.inner.host, state.inner.port) {
+            Ok((mut child, secret)) => match core_ready(&mut child, &state.inner.host, state.inner.port, &secret) {
                 Ok(()) => {
                     let pid = child.id();
-                    if let Ok(mut guard) = state.inner.child.lock() {
+                    if !state.inner.stopping.load(Ordering::SeqCst) {
                         if let Ok(mut current) = state.inner.host_secret.lock() { *current = secret; }
                         *guard = Some(child);
                         state.inner.restart_count.fetch_add(1, Ordering::SeqCst);
@@ -1117,13 +1283,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             return Err(std::io::Error::other(error).into());
         }
     };
+    let mut agent_identity_receipt = None;
     let managed_agent = if let Some(config) = &agent_launcher {
         append_log(
             &agent_log_path,
             &format!(
-                "DSH executable validated; name={}; expected={}; actual={}",
+                "DSH executable validated; name={}; release={}; version={}",
                 dsh_display_name(&config.executable),
-                PINNED_DSH_VERSION,
+                config.release,
                 config.verified_version,
             ),
         );
@@ -1154,7 +1321,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &agent_log_path,
             &format!("managed {} spawned; pid={}", config.runtime_id, child.id()),
         );
-        if let Err(error) = agent_ready(&mut child, config) {
+        let readiness = agent_ready(&mut child, config);
+        if let Err(error) = readiness {
             append_log(
                 &agent_log_path,
                 &format!("managed {} health check failed: {error}", config.runtime_id),
@@ -1162,6 +1330,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let _ = child.kill();
             let _ = child.wait();
             return Err(std::io::Error::other(error).into());
+        } else if let Ok(identity) = readiness {
+            agent_identity_receipt = Some(identity);
         }
         append_log(
             &agent_log_path,
@@ -1197,6 +1367,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_default();
     let agent = AgentProcess {
         inner: Arc::new(AgentProcessInner {
+            identity: Mutex::new(agent_identity_receipt),
             child: Mutex::new(managed_agent),
             log_path: agent_log_path,
             runtime_id: agent_runtime_id,
@@ -1206,7 +1377,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             restart_count: AtomicU32::new(0),
         }),
     };
-    let (mut child, host_secret) = match spawn_core(&log_path, &host, port, &mcp_credential_refs) {
+    let (mut child, host_secret) = match spawn_core(&log_path, &host, port, &mcp_credential_refs, &agent) {
         Ok(child) => child,
         Err(error) => {
             append_log(&log_path, &format!("core spawn failed: {error}"));
@@ -1214,7 +1385,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     append_log(&log_path, &format!("Python core spawned; pid={}", child.id()));
-    if let Err(error) = core_ready(&mut child, &host, port) {
+    if let Err(error) = core_ready(&mut child, &host, port, &host_secret) {
         append_log(&log_path, &format!("core health check failed: {error}"));
         let _ = child.kill();
         let _ = child.wait();
@@ -1223,6 +1394,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     append_log(&log_path, &format!("core health check passed on {host}:{port}"));
     let state = CoreProcess {
         inner: Arc::new(CoreProcessInner {
+            agent: agent.clone(),
             host_secret: Mutex::new(host_secret),
             child: Mutex::new(Some(child)),
             log_path,
@@ -1252,48 +1424,82 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::{
-        first_nonempty_version_line, parse_dsh_credential_bindings, validate_dsh_executable,
-        validate_portal_site_id, validate_portal_url, DSH_CREDENTIAL_PROTOCOL_MAGIC,
-        PINNED_DSH_EXECUTABLE, PINNED_DSH_VERSION,
+        dsh_layout_matches, dsh_release, dsh_release_executable, first_nonempty_version_line,
+        parse_dsh_credential_bindings, read_json_object, repository_root, validate_dsh_executable,
+        validate_portal_site_id, validate_portal_url, DSH_ADAPTER_CONTRACT,
+        DSH_CREDENTIAL_PROTOCOL_MAGIC,
     };
 
     #[test]
     fn parses_only_an_exact_dsh_version_line() {
-        assert_eq!(
-            first_nonempty_version_line(b"\n0.1.1-rc.2\n"),
-            Some(PINNED_DSH_VERSION.to_string())
-        );
+        assert_eq!(first_nonempty_version_line(b"\n0.1.1-rc.2\n"), Some("0.1.1-rc.2".to_string()));
         assert_ne!(
             first_nonempty_version_line(b"0.1.0-rc.6\n").as_deref(),
-            Some(PINNED_DSH_VERSION)
+            Some("0.1.1-rc.2")
         );
         assert_eq!(first_nonempty_version_line(b"\n\t"), None);
     }
 
     #[test]
     fn rejects_missing_or_path_based_dsh_candidates() {
-        assert!(validate_dsh_executable("dsh.cmd")
+        assert!(validate_dsh_executable("dsh.cmd", "0.1.1-rc.2")
             .unwrap_err()
             .contains("path-not-absolute"));
-        let missing = PathBuf::from(PINNED_DSH_EXECUTABLE)
+        let missing = repository_root()
+            .unwrap()
+            .join("dsh-release")
+            .join("releases")
+            .join("0.1.1-rc.2")
+            .join("node_modules")
+            .join(".bin")
+            .join("dsh.cmd")
             .with_file_name("sumika-missing-dsh.cmd");
-        assert!(validate_dsh_executable(&missing.to_string_lossy())
+        assert!(validate_dsh_executable(&missing.to_string_lossy(), "0.1.1-rc.2")
             .unwrap_err()
             .contains("path-not-found"));
     }
 
     #[test]
-    fn validates_the_installed_pinned_cmd_launcher_when_available() {
-        if !PathBuf::from(PINNED_DSH_EXECUTABLE).is_file() {
+    fn validates_the_described_release_launcher_when_available() {
+        let Ok(root) = repository_root() else { return };
+        let Ok(description) = dsh_release(&root) else { return };
+        let version = description["harness"]["version"].as_str().unwrap_or_default();
+        let executable = super::dsh_release_executable(&root, &description).unwrap();
+        if !executable.is_file() {
             return;
         }
-        assert_eq!(
-            validate_dsh_executable(PINNED_DSH_EXECUTABLE).unwrap(),
-            PINNED_DSH_VERSION
-        );
+        assert_eq!(validate_dsh_executable(&executable.to_string_lossy(), version).unwrap(), version);
+    }
+
+    #[test]
+    fn describes_the_candidate_without_offering_it_as_a_default() {
+        let Ok(root) = repository_root() else { return };
+        let active = dsh_release(&root).unwrap();
+        assert_eq!(active["status"], "verified-active");
+        assert_eq!(active["adapter_contract"], DSH_ADAPTER_CONTRACT);
+        let candidate = read_json_object(
+            &root.join("dsh-release").join("releases").join("0.1.5-rc.1").join("release.json"),
+        )
+        .unwrap();
+        assert_eq!(candidate["status"], "blocked");
+        assert_ne!(candidate["adapter_contract"], DSH_ADAPTER_CONTRACT);
+    }
+
+    #[test]
+    fn binds_a_launch_to_the_described_install_layout() {
+        let Ok(root) = repository_root() else { return };
+        let description = dsh_release(&root).unwrap();
+        let executable = dsh_release_executable(&root, &description).unwrap();
+        assert!(dsh_layout_matches(&description, &executable));
+        // A relocated install stays usable while an unrelated binary does not.
+        let directory = description["harness"]["install"]["directory"].as_str().unwrap();
+        let file = description["harness"]["install"]["executable"].as_str().unwrap();
+        let relocated = PathBuf::from(r"E:\Other\Harness").join(directory).join(file);
+        assert!(dsh_layout_matches(&description, &relocated));
+        assert!(!dsh_layout_matches(&description, Path::new(r"E:\Other\Harness\dsh.cmd")));
     }
 
     #[test]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from sumika_core.server import CoreApplication
+from trusted_host_fixture import trusted_rpc
 
 try:
     from .test_web_chat import BrowserStub, page_snapshot
@@ -32,7 +33,7 @@ class WebChatServerTests(unittest.TestCase):
         adapters = self.application.rpc("browser.web_chat.adapters", {})
         self.assertIn("deepseek-web", {item["id"] for item in adapters["adapters"]})
 
-        created = self.application.rpc(
+        created = trusted_rpc(self.application,
             "browser.web_chat.profile.create",
             {
                 "name": "DeepSeek 网页测试",
@@ -47,7 +48,7 @@ class WebChatServerTests(unittest.TestCase):
         profile_id = profile["id"]
 
         # An update without the optional draft field keeps the saved draft.
-        edited = self.application.rpc(
+        edited = trusted_rpc(self.application,
             "browser.web_chat.profile.update",
             {
                 "profile_id": profile_id,
@@ -57,7 +58,7 @@ class WebChatServerTests(unittest.TestCase):
         )
         self.assertEqual(edited["status"], "draft")
 
-        checked = self.application.rpc(
+        checked = trusted_rpc(self.application,
             "browser.web_chat.profile.check",
             {"profile_id": profile_id, "approved": True},
         )
@@ -70,7 +71,7 @@ class WebChatServerTests(unittest.TestCase):
         self.assertEqual(checked_route["auth_state"], "authorized")
         self.assertEqual(checked_route["health_state"], "healthy")
         self.assertFalse(checked_route["routable"])
-        consented = self.application.rpc(
+        consented = trusted_rpc(self.application,
             "browser.web_chat.profile.consent",
             {
                 "profile_id": profile_id,
@@ -88,7 +89,7 @@ class WebChatServerTests(unittest.TestCase):
         self.assertTrue(consented_route["routable"])
         self.assertEqual(consented_route["quota_consent"], "granted")
 
-        self.application.rpc(
+        trusted_rpc(self.application,
             "browser.web_chat.profile.authorize",
             {"profile_id": profile_id, "approved": True},
         )
@@ -100,11 +101,11 @@ class WebChatServerTests(unittest.TestCase):
         self.assertEqual(relogin_route["auth_state"], "needs-auth")
         self.assertFalse(relogin_route["routable"])
         self.browser_stub.snapshots.append(page_snapshot(authorized=True, ready=True))
-        self.application.rpc(
+        trusted_rpc(self.application,
             "browser.web_chat.profile.check",
             {"profile_id": profile_id, "approved": True},
         )
-        self.application.rpc(
+        trusted_rpc(self.application,
             "browser.web_chat.profile.consent",
             {
                 "profile_id": profile_id,
@@ -113,7 +114,7 @@ class WebChatServerTests(unittest.TestCase):
                 "approved": True,
             },
         )
-        activated = self.application.rpc(
+        activated = trusted_rpc(self.application,
             "browser.web_chat.profile.activate",
             {"profile_id": profile_id, "approved": True},
         )
@@ -123,7 +124,7 @@ class WebChatServerTests(unittest.TestCase):
 
         # The active profile is protected from archival; turn the module off
         # first, exactly as the production UI requires.
-        self.application.rpc(
+        trusted_rpc(self.application,
             "module.update",
             {"module_id": "llm", "enabled": False, "implementation_id": "none"},
         )
@@ -139,7 +140,7 @@ class WebChatServerTests(unittest.TestCase):
                 for item in self.application.route_supervisor.catalog(include_unavailable=True)["routes"]
             },
         )
-        restored = self.application.rpc(
+        restored = trusted_rpc(self.application,
             "browser.web_chat.profile.restore",
             {"profile_id": profile_id, "approved": True},
         )

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { openPage } from "./helpers/navigation.js";
+import { installNativeHostFixture } from "./helpers/native-host-fixture.js";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 
@@ -16,21 +17,13 @@ test("质量协作通过原生确认夹具执行，且请求保持固定角色�
     results: {},
     budget: { quote: { low_cny: null, typical_cny: 2, high_cny: 3, max_calls: 2, max_tokens: 900 }, rule: { multiplier: "2", extra_cny: "5" }, spent_cny: null, estimated_cny: null, unpriced_calls: 0 },
   };
-  await page.exposeFunction("fixtureHostConfirm", async ({ method, params }) => {
+  await installNativeHostFixture(page, baseUrl, { confirm: ({ method, params }) => {
     expect(["quality.task.confirm", "quality.task.budget"]).toContain(method);
     calls.push({ method, params });
     return method === "quality.task.confirm"
       ? { ...task, revision: 4, status: "running", states: { review: "running" } }
       : { ...task, revision: 5, status: "running", budget: { ...task.budget, rule: params.budget_rule } };
-  });
-  await page.addInitScript((endpoint) => {
-    window.__TAURI_INTERNALS__ = { invoke: async (command, params) => {
-      if (command === "host_confirm") return window.fixtureHostConfirm(params);
-      if (command === "get_display_mode") return "workspace";
-      if (command === "core_status") return { running: true, host: "127.0.0.1", port: Number(new URL(endpoint).port) };
-      return [];
-    } };
-  }, baseUrl);
+  } });
   await page.route("**/rpc", async (route) => {
     const request = route.request().postDataJSON();
     expect(["quality.task.confirm", "quality.task.budget"]).not.toContain(request.method);

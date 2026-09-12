@@ -108,13 +108,13 @@ class AgentServerTests(unittest.TestCase):
             self.assertNotIn("private instruction body", str(candidate))
 
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "agent.skills.approve",
                     {"candidate_id": candidate["candidate_id"], "approved": True},
                 )
             self.assertEqual(error.exception.code, -32031)
 
-            approved = self.application.rpc(
+            approved = trusted_rpc(self.application,
                 "agent.skills.approve",
                 {
                     "candidate_id": candidate["candidate_id"],
@@ -123,7 +123,7 @@ class AgentServerTests(unittest.TestCase):
                 },
             )
             self.assertEqual(approved["state"], "approved")
-            revoked = self.application.rpc(
+            revoked = trusted_rpc(self.application,
                 "agent.skills.revoke",
                 {
                     "candidate_id": candidate["candidate_id"],
@@ -197,7 +197,7 @@ class AgentServerTests(unittest.TestCase):
             },
         ):
             with self.subTest(params=params), self.assertRaises(JsonRpcError):
-                self.application.rpc("agent.mcp.configuration.apply", params)
+                trusted_rpc(self.application, "agent.mcp.configuration.apply", params)
 
         apply_result = {
             "agent_preset": "sumika-work",
@@ -216,7 +216,7 @@ class AgentServerTests(unittest.TestCase):
             "apply_mcp_configuration",
             return_value=apply_result,
         ) as apply:
-            applied = self.application.rpc(
+            applied = trusted_rpc(self.application,
                 "agent.mcp.configuration.apply",
                 {
                     "agentPreset": "sumika-work",
@@ -242,27 +242,38 @@ class AgentServerTests(unittest.TestCase):
         self.assertNotIn("private-mcp-secret", audit)
 
     def test_browser_policy_and_agent_event_audit_are_fail_closed(self):
-        session = self.application.rpc("browser.session.create", {"profile": "temporary", "character_id": "sumika"})
+        session = trusted_rpc(self.application, "browser.session.create", {"profile": "temporary", "character_id": "sumika"})
         listed = self.application.rpc("browser.sessions", {})
         self.assertEqual(listed["sessions"][0]["id"], session["id"])
         self.assertNotIn("backend_session_id", listed["sessions"][0])
         decision = self.application.rpc("browser.action.check", {"session_id": session["id"], "action": "login", "domain": "example.com"})
         self.assertTrue(decision["requires_approval"])
-        event = self.application.rpc("agent.event.ingest", {"event": {"type": "approval/requested", "sessionId": "dsh-session", "apiKey": "sk-secret"}})
-        self.assertEqual(event["event_type"], "approval/requested")
+        params = {"event": {"type": "approval/requested", "sessionId": "dsh-session", "apiKey": "sk-secret"}}
+        with patch.object(self.application.agent, "normalize_event") as normalize, patch.object(
+            self.application, "_handle_route_boundary_event"
+        ) as boundary, patch.object(self.application.route_supervisor, "handle_event") as schedule:
+            with self.assertRaises(JsonRpcError) as error:
+                self.application.rpc("agent.event.ingest", params)
+            self.assertEqual(error.exception.code, -32041)
+            with self.assertRaises(JsonRpcError) as error:
+                trusted_rpc(self.application, "agent.event.ingest", params)
+            self.assertEqual(error.exception.code, -32042)
+            normalize.assert_not_called()
+            boundary.assert_not_called()
+            schedule.assert_not_called()
         audit = self.application.storage.list_events(5)
         serialized = str(audit)
         self.assertNotIn("sk-secret", serialized)
 
     def test_named_browser_profile_rpc_is_persistent_and_approval_gated(self):
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc(
+            trusted_rpc(self.application,
                 "browser.profile.create",
                 {"name": "未经确认", "character_id": "sumika"},
             )
         self.assertEqual(error.exception.code, -32031)
 
-        created = self.application.rpc(
+        created = trusted_rpc(self.application,
             "browser.profile.create",
             {"name": "工作登录", "character_id": "sumika", "approved": True},
         )
@@ -271,7 +282,7 @@ class AgentServerTests(unittest.TestCase):
         listed = self.application.rpc("browser.profiles", {"include_archived": True})
         self.assertEqual(listed["profiles"][0]["name"], "工作登录")
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc(
+            trusted_rpc(self.application,
                 "browser.session.create",
                 {
                     "profile": "named",
@@ -286,7 +297,7 @@ class AgentServerTests(unittest.TestCase):
             {"profile_id": profile["id"], "approved": True},
         )
         self.assertEqual(archived["status"], "archived")
-        restored = self.application.rpc(
+        restored = trusted_rpc(self.application,
             "browser.profile.restore",
             {"profile_id": profile["id"], "approved": True},
         )
@@ -306,7 +317,7 @@ class AgentServerTests(unittest.TestCase):
             "navigate_session",
             return_value={"session_id": "browser-1", "executed": False, "policy": {"allowed": False, "requires_approval": True, "domain": "example.test"}},
         ):
-            pending = self.application.rpc("browser.navigate", {"session_id": "browser-1", "url": "https://example.test"})
+            pending = trusted_rpc(self.application, "browser.navigate", {"session_id": "browser-1", "url": "https://example.test"})
         self.assertFalse(pending["executed"])
         events = self.application.storage.list_events(5)
         self.assertIn("browser.observed", str(events))
@@ -319,7 +330,7 @@ class AgentServerTests(unittest.TestCase):
             "execute_action",
             return_value={"session_id": "browser-1", "executed": False, "action": "fill", "requires_human": True},
         ):
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "browser.action.execute",
                 {"session_id": "browser-1", "action": "fill", "target": "#password", "value": "private-password"},
             )
@@ -363,7 +374,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(result["session_id"], "s1")
         self.assertNotIn("events", result)
 
-    def test_agent_retry_requires_explicit_approval_and_exact_session_confirmation(self):
+    def test_legacy_retry_internal_validation_requires_exact_confirmation(self):
         with patch.object(
             self.application.agent,
             "supports",
@@ -382,14 +393,14 @@ class AgentServerTests(unittest.TestCase):
             ):
                 with self.subTest(params=params):
                     with self.assertRaises(JsonRpcError) as error:
-                        self.confirmed_rpc("agent.session.retry", params)
+                        self.application._rpc("agent.session.retry", params)
                     self.assertEqual(error.exception.code, -32031)
                     retry.assert_not_called()
             with self.assertRaises(JsonRpcError) as error:
-                self.confirmed_rpc("agent.session.retry", {"sessionId": "bad\nid", "approved": True, "confirmSessionId": "bad\nid"})
+                self.application._rpc("agent.session.retry", {"sessionId": "bad\nid", "approved": True, "confirmSessionId": "bad\nid"})
             self.assertEqual(error.exception.code, -32602)
 
-            result = self.confirmed_rpc(
+            result = self.application._rpc(
                 "agent.session.retry",
                 {"sessionId": "s1", "approved": True, "confirmSessionId": "s1", "mode": "execute"},
             )
@@ -403,7 +414,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertIn("agent.turn.retry_accepted", audit)
         self.assertNotIn("must never cross the boundary", audit)
 
-    def test_agent_retry_creates_workspace_checkpoint_and_filters_adapter_receipt(self):
+    def test_legacy_retry_internal_checkpoint_order_and_receipt_filtering(self):
         checkpoint = {
             "id": "wschk-0123456789abcdef0123",
             "name": "Agent retry · s1",
@@ -432,7 +443,7 @@ class AgentServerTests(unittest.TestCase):
                 "raw_history": [{"content": "private target"}],
             },
         ) as retry:
-            result = self.confirmed_rpc(
+            result = self.application._rpc(
                 "agent.session.retry",
                 {
                     "sessionId": "s1",
@@ -549,7 +560,7 @@ class AgentServerTests(unittest.TestCase):
             result = self.application.rpc("agent.session.models", {"session_id": "parent-1"})
         self.assertEqual(result["current"]["model"], "qwen3:4b")
         with patch.object(self.application.agent, "fork_session", return_value={"sessionId": "child-1"}):
-            child = self.application.rpc("agent.session.fork", {"session_id": "parent-1"})
+            child = trusted_rpc(self.application, "agent.session.fork", {"session_id": "parent-1"})
         self.assertEqual(child["sessionId"], "child-1")
         events = self.application.storage.list_events(5)
         self.assertIn("agent.session.forked", str(events))
@@ -568,7 +579,7 @@ class AgentServerTests(unittest.TestCase):
             "preflight",
             return_value={"decision": decision},
         ) as preflight, patch.object(self.application.agent, "create_session") as create_session:
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "agent.session.create",
                 {"routing": {"taskKind": "code"}},
             )
@@ -589,7 +600,7 @@ class AgentServerTests(unittest.TestCase):
             "sumika_route_cancel",
             "sumika_route_retry",
         ]
-        pending = self.application.rpc(
+        pending = trusted_rpc(self.application,
             "sumika.route.bridge_tools",
             {
                 "register": True,
@@ -602,7 +613,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(pending["status"], "runtime-unavailable")
 
         with patch.object(self.application.agent, "status", return_value={"state": "ready", "ready": True}):
-            registered = self.application.rpc(
+            registered = trusted_rpc(self.application,
                 "sumika.route.bridge_tools",
                 {
                     "register": True,
@@ -617,7 +628,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(len(registered["tools"]), 8)
 
         with patch.object(self.application.agent, "status", return_value={"state": "ready", "ready": True}):
-            mismatch = self.application.rpc(
+            mismatch = trusted_rpc(self.application,
                 "sumika.route.bridge_tools",
                 {
                     "register": True,
@@ -631,13 +642,13 @@ class AgentServerTests(unittest.TestCase):
 
     def test_route_bridge_handshake_rejects_malformed_registration_and_clears(self):
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc(
+            trusted_rpc(self.application,
                 "sumika.route.bridge_tools",
                 {"register": "yes"},
             )
         self.assertEqual(error.exception.code, -32602)
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc(
+            trusted_rpc(self.application,
                 "sumika.route.bridge_tools",
                 {
                     "register": True,
@@ -936,7 +947,7 @@ class AgentServerTests(unittest.TestCase):
             lambda dispatch, selected, cancel_event: calls.append(selected.route_id) or {"status": "completed", "answer": "ok"},
         )
 
-        occupied = self.application.rpc(
+        occupied = trusted_rpc(self.application,
             "sumika.route.occupancy",
             {"profile_id": "lease-profile", "owner": "manual"},
         )
@@ -961,7 +972,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertEqual(blocked["status"], "failed")
         self.assertEqual(calls, [])
 
-        released = self.application.rpc(
+        released = trusted_rpc(self.application,
             "sumika.route.occupancy",
             {"profile_id": "lease-profile", "owner": "idle"},
         )
@@ -1023,7 +1034,7 @@ class AgentServerTests(unittest.TestCase):
                 return_value={"selected": {"provider": "zhipu-fixture", "model": "glm-4.5-air"}},
             ) as select_model,
         ):
-            pending = self.application.rpc(
+            pending = trusted_rpc(self.application,
                 "agent.session.create",
                 {"routing": {"taskKind": "code"}},
             )
@@ -1034,7 +1045,7 @@ class AgentServerTests(unittest.TestCase):
             create_session.assert_not_called()
             select_model.assert_not_called()
 
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "agent.session.create",
                 {
                     "routing": {"taskKind": "code"},
@@ -1143,7 +1154,7 @@ class AgentServerTests(unittest.TestCase):
             "copy_preset",
             return_value={"agent_preset": "sumika-work", "source": "standard"},
         ) as copy:
-            copied = self.application.rpc(
+            copied = trusted_rpc(self.application,
                 "agent.preset.copy",
                 {"from": "standard", "agentPreset": "sumika-work", "name": "Sumika 工作"},
             )
@@ -1161,7 +1172,7 @@ class AgentServerTests(unittest.TestCase):
                 "path": "D:\\private\\agent-presets\\sumika-work",
             },
         ) as open_document:
-            opened = self.application.rpc(
+            opened = trusted_rpc(self.application,
                 "agent.preset.open",
                 {"agentPreset": "sumika-work"},
             )
@@ -1181,7 +1192,7 @@ class AgentServerTests(unittest.TestCase):
             ("agent.preset.open", {"agentPreset": "D:\\secret"}),
         ):
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(method, params)
+                trusted_rpc(self.application, method, params)
             self.assertEqual(error.exception.code, -32602)
 
     def test_agent_preset_mount_validation_is_path_free_and_audited(self):
@@ -1245,31 +1256,31 @@ class AgentServerTests(unittest.TestCase):
                 {"agentPreset": "sumika-work", "approved": True, "confirm_agent_preset": "other"},
             ):
                 with self.assertRaises(JsonRpcError) as error:
-                    self.application.rpc("agent.preset.remove", params)
+                    trusted_rpc(self.application, "agent.preset.remove", params)
                 self.assertEqual(error.exception.code, -32031)
 
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "agent.preset.remove",
                     {"agentPreset": "standard", "approved": True, "confirm_agent_preset": "standard"},
                 )
             self.assertEqual(error.exception.code, -32031)
 
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "agent.preset.remove",
                     {"agentPreset": "untrusted", "approved": True, "confirm_agent_preset": "untrusted"},
                 )
             self.assertEqual(error.exception.code, -32031)
 
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "agent.preset.remove",
                     {"agentPreset": "missing", "approved": True, "confirm_agent_preset": "missing"},
                 )
             self.assertEqual(error.exception.code, -32602)
 
-            removed = self.application.rpc(
+            removed = trusted_rpc(self.application,
                 "agent.preset.remove",
                 {
                     "agentPreset": "sumika-work",
@@ -1288,7 +1299,7 @@ class AgentServerTests(unittest.TestCase):
         self.assertNotIn("composition", events)
 
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc(
+            trusted_rpc(self.application,
                 "agent.preset.remove",
                 {"agentPreset": "D:\\secret", "approved": True, "confirm_agent_preset": "D:\\secret"},
             )
@@ -1305,10 +1316,10 @@ class AgentServerTests(unittest.TestCase):
             listed = self.application.rpc("agent.workspaces", {})
         self.assertEqual(listed["workspaces"][0]["id"], "workspace-1")
         with self.assertRaises(JsonRpcError) as error:
-            self.application.rpc("agent.workspace.create", {"path": "\n"})
+            trusted_rpc(self.application, "agent.workspace.create", {"path": "\n"})
         self.assertEqual(error.exception.code, -32602)
         with patch.object(self.application.agent, "create_workspace", return_value={"workspace": workspace, "created": True}):
-            created = self.application.rpc("agent.workspace.create", {"path": "D:\\Code\\Sumika"})
+            created = trusted_rpc(self.application, "agent.workspace.create", {"path": "D:\\Code\\Sumika"})
         self.assertTrue(created["created"])
         events = self.application.storage.list_events(5)
         serialized = str(events)
@@ -1375,16 +1386,16 @@ class AgentServerTests(unittest.TestCase):
         ):
             self.assertEqual(self.application.rpc("workspace.inspect", {"path": workspace_path})["workspace"]["id"], "ws-safe")
             self.assertEqual(self.application.rpc("workspace.checkpoints", {"path": workspace_path})["checkpoints"][0]["id"], checkpoint_id)
-            self.application.rpc("workspace.checkpoint.create", {"path": workspace_path, "name": "before Agent turn"})
+            trusted_rpc(self.application, "workspace.checkpoint.create", {"path": workspace_path, "name": "before Agent turn"})
             self.application.rpc("workspace.checkpoint.diff", {"path": workspace_path, "checkpoint_id": checkpoint_id})
             self.application.rpc("workspace.restore.preview", {"path": workspace_path, "checkpoint_id": checkpoint_id})
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "workspace.restore",
                     {"path": workspace_path, "checkpoint_id": checkpoint_id},
                 )
             self.assertEqual(error.exception.code, -32031)
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "workspace.restore",
                 {
                     "path": workspace_path,
@@ -1478,12 +1489,12 @@ class AgentServerTests(unittest.TestCase):
                 {"source_path": source_path, "destination_path": destination_path, "branch": branch},
             )
             with self.assertRaises(JsonRpcError) as worktree_error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "workspace.worktree.create",
                     {"source_path": source_path, "destination_path": destination_path, "branch": branch},
                 )
             self.assertEqual(worktree_error.exception.code, -32031)
-            created = self.application.rpc(
+            created = trusted_rpc(self.application,
                 "workspace.worktree.create",
                 {
                     "source_path": source_path,
@@ -1500,12 +1511,12 @@ class AgentServerTests(unittest.TestCase):
                 {"path": destination_path, "checkpoint_id": checkpoint_id, "message": "Private commit title"},
             )
             with self.assertRaises(JsonRpcError) as commit_error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "workspace.commit",
                     {"path": destination_path, "checkpoint_id": checkpoint_id, "message": "Private commit title"},
                 )
             self.assertEqual(commit_error.exception.code, -32031)
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "workspace.commit",
                 {
                     "path": destination_path,
@@ -1914,7 +1925,7 @@ class AgentServerTests(unittest.TestCase):
             config={"profile_id": profile["id"]},
         )
         with patch.object(self.application.provider_profiles, "health", return_value={"ok": True, "profile": profile}) as health, patch.object(self.application.agent, "sync_provider_profile", return_value={"profile_id": profile["id"], "route_id": "sumika-local-test", "model": "qwen3:4b", "changed": True, "active": True}), patch.object(self.application.agent, "create_session", return_value={"sessionId": "dsh-session"}), patch.object(self.application.agent, "select_model", return_value={"selected": {"provider": "sumika-local-test", "model": "qwen3:4b"}}):
-            result = self.application.rpc("agent.session.create", {"cwd": "."})
+            result = trusted_rpc(self.application, "agent.session.create", {"cwd": "."})
         health.assert_called_once_with(profile["id"])
         self.assertEqual(result["provider"]["route_id"], "sumika-local-test")
         self.assertEqual(result["selected_model"]["model"], "qwen3:4b")
@@ -2014,7 +2025,7 @@ class AgentServerTests(unittest.TestCase):
             side_effect=mark_unavailable,
         ) as health:
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(
+                trusted_rpc(self.application,
                     "module.update",
                     {
                         "module_id": "llm",
@@ -2099,10 +2110,10 @@ class AgentServerTests(unittest.TestCase):
         ):
             for params in ({}, {"cwd": workspace_path}, {"workspaceId": "missing"}):
                 with self.subTest(params=params), self.assertRaises(JsonRpcError) as error:
-                    self.application.rpc("agent.session.create", params)
+                    trusted_rpc(self.application, "agent.session.create", params)
                 self.assertIn(error.exception.code, {-32602, -32033})
 
-            result = self.application.rpc(
+            result = trusted_rpc(self.application,
                 "agent.session.create",
                 {"workspaceId": "workspace-1", "characterId": "sumika"},
             )
@@ -2254,7 +2265,7 @@ class AgentServerTests(unittest.TestCase):
             patch.object(self.application.agent, "create_workspace") as create,
         ):
             with self.assertRaises(JsonRpcError) as error:
-                self.application.rpc("agent.workspace.create", {"path": workspace_path})
+                trusted_rpc(self.application, "agent.workspace.create", {"path": workspace_path})
 
         self.assertEqual(error.exception.code, -32033)
         create.assert_not_called()

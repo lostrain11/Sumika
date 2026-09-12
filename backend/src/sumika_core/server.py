@@ -326,6 +326,7 @@ class CoreApplication:
         external_route_sources: Iterable[Any] | None = None,
         route_sources: Iterable[Any] | None = None,
         host_secret: str | None = None,
+        runtime_evidence: dict[str, Any] | None = None,
     ) -> None:
         self.host_authorization = HostAuthorization(host_secret)
         configured_dir = data_dir or os.getenv("SUMIKA_DATA_DIR", str(ROOT_DIR / ".sumika"))
@@ -362,7 +363,17 @@ class CoreApplication:
             logger=self.logger,
         )
         self.agent.bind_credential_store(self.credentials)
-        self.agent.set_event_sink(self._on_agent_runtime_event)
+        if runtime_evidence is not None:
+            from .agent.managed_identity import ManagedRuntimeGuard
+            if host_secret is None or self.agent.runtime_id != "dsh":
+                raise ValueError("managed runtime evidence requires the native bootstrap")
+            guard = ManagedRuntimeGuard(runtime_evidence, endpoint=self.agent.config.endpoint,
+                                        profile=self.agent.config.profile_dir, version=self.agent.config.version,
+                                        release=runtime_evidence.get("release"))
+            self.agent.bind_runtime(guard.binding)
+            self.agent.set_identity_guard(guard.check)
+        event_binding = self.agent.runtime_binding()
+        self.agent.set_event_sink(lambda event: self._on_agent_runtime_event(event, source_binding=event_binding))
         # DSH/plugin bridge handshakes are deliberately process-local.  A
         # Core restart must require the managed plugin to prove that it is
         # mounted again; no persisted flag is trusted for this purpose.
@@ -537,6 +548,7 @@ class CoreApplication:
             profiles=lambda: self.storage.list_web_chat_profiles(include_archived=True),
             routes=lambda: self.route_supervisor.registered_routes(),
             agent_offer=lambda params: self.agent.execution_quote(params),
+            runtime_binding=lambda: self.agent.runtime_binding(),
             route_status=lambda identifier: self._rpc("sumika.route.status", {"dispatch_id": identifier}),
         )
         self.projects = ProjectService(self.storage, {"core": CoreConversations(self.storage),
@@ -2065,6 +2077,36 @@ class CoreApplication:
             self.host_authorization.require(caller, method, params)
         except HostAuthorizationError as error:
             raise JsonRpcError(-32041, str(error)) from None
+        if method == "agent.session.retry":
+            _agent_session_id_param(params.get("sessionId") or params.get("session_id"), "sessionId")
+            raise JsonRpcError(-32042, "无法证明原回合未发送且无未决副作用；旧重试已阻断，请先检查原会话。")
+        if method == "agent.event.ingest":
+            raise JsonRpcError(-32042, "事件仅允许来自受管适配器传输；公开事件注入已停用。")
+        if method in {"agent.session.select_model", "agent.session.select_preset", "model.policy.apply", "agent.provider.sync"}:
+            session_id = params.get("sessionId") or params.get("session_id")
+            for owner in tuple(self.work._owner_ids):
+                for value in self.work.repository.list_records(self.work.namespace, owner):
+                    external = value.get("external") or {}
+                    if (external.get("source") == "agent" and (session_id is None or external.get("session_id") == session_id)
+                            and any(attempt.get("status") == "reserved" for attempt in value.get("attempts", {}).values())):
+                        raise JsonRpcError(-32042, "原Agent任务仍有运行或未决尝试；不能修改其模型或执行预设。")
+        if method == "agent.session.retry.preflight":
+            session_id = _agent_session_id_param(params.get("sessionId") or params.get("session_id"), "sessionId")
+            return {"schema_version": "legacy-retry-assessment/v1", "session_id": session_id,
+                    "status": "blocked", "retry_allowed": False, "reason": "retry-evidence-unavailable",
+                    "submission": "unverified", "side_effects": "unverified",
+                    "allowed_actions": ["inspect"], "requires_confirmation": False}
+        if method == "agent.runtime.binding":
+            binding = self.agent.runtime_binding()
+            if binding is not None and hasattr(self.agent, "check_runtime_identity"):
+                try:
+                    self.agent.check_runtime_identity()
+                except AgentRuntimeError:
+                    return {"schema_version": "runtime-binding-status/v1", "available": False,
+                            "binding": binding.to_dict(), "reason": "runtime-instance-changed"}
+            return {"schema_version": "runtime-binding-status/v1", "available": binding is not None,
+                    "binding": binding.to_dict() if binding else None,
+                    "reason": "host-bound" if binding else "runtime-identity-unverified"}
         started = time.monotonic()
         component, capability = classify_rpc_method(method)
         operation_id = None
@@ -2144,7 +2186,7 @@ class CoreApplication:
         finally:
             self.logger.info("rpc end method=%s duration_ms=%d", method, round((time.monotonic() - started) * 1000))
 
-    def _on_agent_runtime_event(self, event: dict[str, Any]) -> None:
+    def _on_agent_runtime_event(self, event: dict[str, Any], *, source_binding=None) -> None:
         """Project harness events into Sumika's local auditable event bus."""
 
         event_type = str(event.get("event_type") or "agent.event")
@@ -2156,11 +2198,14 @@ class CoreApplication:
             "session/event": "agent.session.event",
             "session/queue": "agent.session.queue",
             "session/jobs": "agent.session.jobs",
-        }.get(event_type, f"agent.{self.agent.runtime_id}.event")
+        }.get(event_type, f"agent.{source_binding.harness_id if source_binding else self.agent.runtime_id}.event")
         payload = _redact_agent_payload(event)
+        payload.pop("runtime_binding", None)
+        if source_binding is not None:
+            payload["runtime_binding"] = source_binding.to_dict()
         if hasattr(self, "legacy_work"):
             try:
-                self.legacy_work.observe_agent_event(event, _route_event_boundary(event))
+                self.legacy_work.observe_agent_event(event, _route_event_boundary(event), source_binding=source_binding)
             except Exception as error:
                 self.logger.warning("work event reconciliation failed error_type=%s", type(error).__name__)
         try:
@@ -2192,7 +2237,7 @@ class CoreApplication:
         # the small set of public status spellings without treating arbitrary
         # model/tool events as permission to dispatch work.
         try:
-            self._handle_route_boundary_event(event)
+            self._handle_route_boundary_event(event, source_binding=source_binding)
         except Exception as error:
             # A scheduler error must never break the primary Agent event
             # stream; it is reported as bounded diagnostics only.
@@ -2205,7 +2250,7 @@ class CoreApplication:
             )
         )
 
-    def _handle_route_boundary_event(self, event: Mapping[str, Any] | Any) -> dict[str, Any] | None:
+    def _handle_route_boundary_event(self, event: Mapping[str, Any] | Any, *, source_binding=None) -> dict[str, Any] | None:
         """Send one normalized runtime event through the route supervisor.
 
         This helper is shared by the live runtime callback and the explicit
@@ -2226,8 +2271,8 @@ class CoreApplication:
         if hasattr(self, "legacy_work"):
             return self.legacy_work.advance_boundary(supervisor_event, lambda permitted: self.route_supervisor.handle_event(
                 supervisor_event, dispatch_selected=None if permitted else False,
-            ))
-        return self.route_supervisor.handle_event(supervisor_event, dispatch_selected=False)
+            ), source_binding=source_binding)
+        return None
 
     def _on_route_event(self, event: dict[str, Any]) -> None:
         """Project route/consultation lifecycle into the safe event stream."""
@@ -7483,6 +7528,15 @@ class SumikaRequestHandler(BaseHTTPRequestHandler):
         payload: dict[str, Any] = {}
         try:
             payload = self._read_json()
+            if self.path == "/internal/host-identity/v1":
+                if not isinstance(payload, dict) or set(payload) != {"nonce"}:
+                    raise JsonRpcError(-32602, "invalid host identity envelope")
+                try:
+                    proof = self.application.host_authorization.process_proof(payload["nonce"], os.getpid())
+                except HostAuthorizationError as error:
+                    raise JsonRpcError(-32041, str(error)) from None
+                self._send_json(proof)
+                return
             if self.path == "/internal/host-confirm/v1":
                 if set(payload) != {"method", "params", "digest"} or not isinstance(payload["params"], dict):
                     raise JsonRpcError(-32602, "invalid host confirmation envelope")
@@ -7719,9 +7773,10 @@ def create_server(
     *,
     test_providers: dict[str, list[Any]] | None = None,
     host_secret: str | None = None,
+    runtime_evidence: dict[str, Any] | None = None,
 ) -> tuple[SumikaHTTPServer, CoreApplication]:
     """Create an HTTP server; test doubles must be explicitly injected."""
-    application = CoreApplication(data_dir, test_providers=test_providers, host_secret=host_secret)
+    application = CoreApplication(data_dir, test_providers=test_providers, host_secret=host_secret, runtime_evidence=runtime_evidence)
 
     class Handler(SumikaRequestHandler):
         pass
@@ -7736,9 +7791,18 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.getenv("SUMIKA_PORT", "8765")))
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--host-bootstrap-stdin", action="store_true")
+    parser.add_argument("--runtime-bootstrap-stdin", action="store_true")
     args = parser.parse_args()
     secret = read_bootstrap(sys.stdin) if args.host_bootstrap_stdin else None
-    server, application = create_server(args.host, args.port, args.data_dir, host_secret=secret)
+    runtime_evidence = None
+    if args.runtime_bootstrap_stdin:
+        if secret is None:
+            raise ValueError("runtime bootstrap requires private host bootstrap")
+        frame = sys.stdin.readline(16385)
+        if len(frame) > 16384 or not frame.endswith("\n"):
+            raise ValueError("invalid runtime bootstrap frame")
+        runtime_evidence = json.loads(frame)
+    server, application = create_server(args.host, args.port, args.data_dir, host_secret=secret, runtime_evidence=runtime_evidence)
     secret = None
     print(f"Sumika core listening on http://{args.host}:{args.port}")
     try:

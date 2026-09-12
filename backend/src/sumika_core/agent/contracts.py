@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, ClassVar, Mapping, Protocol
 
 from ..protocol.models import utc_now
+from quality_routing.harness import ExternalSessionRef, RuntimeBinding
 
 
 class AgentRuntimeError(RuntimeError):
@@ -115,6 +116,23 @@ class AgentRuntime(ABC):
 
     runtime_id: ClassVar[str] = "unknown"
     capability_ids: ClassVar[frozenset[AgentCapability]] = frozenset()
+
+    def bind_runtime(self, binding: RuntimeBinding) -> None:
+        if not isinstance(binding, RuntimeBinding) or binding.harness_id != self.runtime_id:
+            raise AgentRuntimeError("runtime binding does not match adapter")
+        previous = getattr(self, "_runtime_binding", None)
+        if previous is not None and previous != binding:
+            raise AgentRuntimeError("runtime binding is immutable; construct a new adapter")
+        self._runtime_binding = binding
+
+    def runtime_binding(self) -> RuntimeBinding | None:
+        return getattr(self, "_runtime_binding", None)
+
+    def external_session_ref(self, session_id: str, turn_id: str | None = None) -> ExternalSessionRef:
+        binding = self.runtime_binding()
+        if binding is None:
+            raise AgentRuntimeError("runtime identity evidence is unavailable")
+        return ExternalSessionRef(binding.harness_id, binding.instance_id, session_id, turn_id)
 
     def execution_quote(self, params: dict[str, Any]) -> dict[str, Any]:
         return {"candidate_id": f"agent:{self.runtime_id}", "identity": [self.runtime_id, "unpriced"],

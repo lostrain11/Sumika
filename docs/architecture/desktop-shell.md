@@ -114,9 +114,9 @@ must run externally until its real launcher is implemented.
 On Windows, `tools/run-desktop.ps1` first probes the configured DSH endpoint.
 It reuses a healthy external process without supervising or stopping it. When
 the endpoint is unavailable, it may auto-start only the already installed,
-version-matched executable at
-`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd`. This discovery
-does not install, update, or download DSH; an absent runtime leaves Agent in an
+version-matched executable whose path comes from the managed release description
+under `dsh-release/`. This discovery does not install, update, or download DSH;
+an absent runtime leaves Agent in an
 explicit unavailable state while the rest of the desktop still starts.
 
 It does not move provider orchestration into Rust or frontend components. The

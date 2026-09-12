@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installNativeHostFixture } from "./helpers/native-host-fixture.js";
 
 const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 
@@ -12,16 +13,24 @@ test("免费资源入口区分资讯与账户证据，配置和签到均需显�
       { id: "lead", source_id: "community", title: "社区发现的免费模型与限时 API 额度资讯，尚待到官网逐项核实账户适用范围", url: "https://www.v2ex.com/feed/share.xml", kind: "lead", evidence: "社区 RSS 线索，不表示已获得额度", state: "active", stale: true, last_seen_at: "2026-09-07T02:00:00Z", expires_at: null },
     ], checkin: { state: "never", checked_at: null, available_balance: null, unit: "magicube", grants: [] },
   };
-  await page.route("**/rpc", async (route) => {
-    const request = route.request().postDataJSON();
-    if (!request.method.startsWith("benefits.")) return route.continue();
+  const respond = (request) => {
     calls.push(request);
     if (request.method === "benefits.configure") snapshot = { ...snapshot, ...request.params };
     if (request.method === "benefits.checkin") snapshot = { ...snapshot, checkin: {
       state: "verified", checked_at: "2026-09-08T02:00:00Z", available_balance: 242, unit: "magicube", stale: false,
       grants: [{ kind: "daily-login", amount: 200, granted_date_display: "2026-09-08", validity_days_display: 1, expires_at: null }],
     } };
-    const result = request.method === "benefits.browsers" ? { browsers: [{ instance_id: "fixture-edge", browser_name: "Edge" }] } : snapshot;
+    return request.method === "benefits.browsers" ? { browsers: [{ instance_id: "fixture-edge", browser_name: "Edge" }] } : snapshot;
+  };
+  await installNativeHostFixture(page, baseUrl, { confirm: request => {
+    expect(["benefits.configure", "benefits.checkin", "benefits.refresh"]).toContain(request.method);
+    return respond(request);
+  } });
+  await page.route("**/rpc", async (route) => {
+    const request = route.request().postDataJSON();
+    expect(["benefits.configure", "benefits.checkin", "benefits.refresh"]).not.toContain(request.method);
+    if (!request.method.startsWith("benefits.")) return route.continue();
+    const result = respond(request);
     await route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result } });
   });
   await page.addInitScript(() => localStorage.setItem("sumika.onboarded.v1", "1"));
@@ -35,7 +44,7 @@ test("免费资源入口区分资讯与账户证据，配置和签到均需显�
   await expect(panel.locator('[data-benefits-action="checkin"]')).toBeDisabled();
   await panel.locator('[name="enabled"]').check();
   await panel.locator('[data-benefits-control="save"]').click();
-  expect(calls.find((call) => call.method === "benefits.configure").params.checkin_enabled).toBe(false);
+  await expect.poll(() => calls.find((call) => call.method === "benefits.configure")?.params.checkin_enabled).toBe(false);
   await panel.locator('[data-benefits-action="browsers"]').click();
   await panel.locator('[name="browser_instance_id"]').selectOption("fixture-edge");
   await panel.locator('[name="checkin_enabled"]').check();
@@ -61,5 +70,5 @@ test("免费资源入口区分资讯与账户证据，配置和签到均需显�
   await panel.locator('[name="enabled"]').uncheck();
   await expect(panel.locator('[name="checkin_enabled"]')).not.toBeChecked();
   await panel.locator('[data-benefits-control="save"]').click();
-  expect(calls.filter((call) => call.method === "benefits.configure").at(-1).params.enabled).toBe(false);
+  await expect.poll(() => calls.filter((call) => call.method === "benefits.configure").at(-1)?.params.enabled).toBe(false);
 });

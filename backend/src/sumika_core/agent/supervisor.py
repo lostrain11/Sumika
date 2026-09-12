@@ -2285,10 +2285,6 @@ class DynamicRouteSupervisor:
             raise SupervisorValidationError("replan requires an event boundary")
         if event and routing.trigger_event != event:
             routing = replace(routing, trigger_event=event)
-        # ``replan`` is itself an explicit semantic request, so it may arm
-        # the same turn for a subsequent boundary without consulting logs.
-        with self._lock:
-            self._turn_requests[self._turn_key(routing.parent_session_id, routing.parent_turn_id)] = routing
         with self._lock:
             candidate_count = len(self._routes)
         self._trace(

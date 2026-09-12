@@ -1,8 +1,21 @@
 # Shared, side-effect-free helpers for the managed DSH launch chain.
 # This file is dot-sourced by run-desktop.ps1 and by its regression fixture.
 
-$SumikaPinnedDshVersion = '0.1.1-rc.2'
-$SumikaPinnedDshExecutable = "D:\Tools\DeepSeekHarness\$SumikaPinnedDshVersion\node_modules\.bin\dsh.cmd"
+$SumikaRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'dsh-release.ps1')
+
+# The pinned release is whatever the shared description names as the default.
+# Loading is fail-closed: a missing or blocked description leaves the values
+# empty so Assert-SumikaDshExecutable reports it instead of launching by guess.
+$SumikaDshRelease = $null
+$SumikaDshReleaseError = $null
+try {
+    $SumikaDshRelease = Get-SumikaDshRelease -RepoRoot $SumikaRepoRoot
+} catch {
+    $SumikaDshReleaseError = $_.Exception.Message
+}
+$SumikaPinnedDshVersion = if ($SumikaDshRelease) { [string]$SumikaDshRelease.harness.version } else { '' }
+$SumikaPinnedDshExecutable = if ($SumikaDshRelease) { Get-SumikaDshReleaseExecutable -Release $SumikaDshRelease } else { '' }
 
 function Get-SumikaDshDisplayName {
     param([AllowEmptyString()][string]$Executable)

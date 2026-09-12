@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from sumika_core.protocol.jsonrpc import JsonRpcError
 from sumika_core.server import CoreApplication
+from trusted_host_fixture import trusted_rpc
 
 
 class BenefitsServerTests(unittest.TestCase):
@@ -25,12 +26,16 @@ class BenefitsServerTests(unittest.TestCase):
     def test_rpc_rejects_external_evidence_and_arbitrary_browser_commands(self):
         for method in ("benefits.status", "benefits.refresh", "benefits.checkin", "benefits.browsers", "benefits.configure"):
             with self.subTest(method=method), self.assertRaises(JsonRpcError) as error:
-                self.application.rpc(method, {"url": "https://example.org", "grants": []})
+                params = {"url": "https://example.org", "grants": []}
+                if method in {"benefits.refresh", "benefits.checkin", "benefits.configure"}:
+                    trusted_rpc(self.application, method, params)
+                else:
+                    self.application.rpc(method, params)
             self.assertEqual(error.exception.code, -32602)
 
     def test_async_request_uses_service_without_touching_model_policy(self):
         with patch.object(self.application.benefits, "request", return_value={"running": True}) as request:
-            result = self.application.rpc("benefits.refresh", {})
+            result = trusted_rpc(self.application, "benefits.refresh", {})
             self.assertTrue(result["running"])
             request.assert_called_once_with("refresh")
 

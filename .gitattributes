@@ -13,3 +13,4 @@
 **/node_modules export-ignore
 /frontend/dist export-ignore
 /src-tauri/target export-ignore
+/dsh-release/releases/** -text

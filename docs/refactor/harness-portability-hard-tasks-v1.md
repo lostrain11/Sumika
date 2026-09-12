@@ -1,9 +1,11 @@
 # Sumika 最终执行计划：规划交接、Harness 可替换与日用开发关键能力
 
-版本：执行交接版 v1  
+版本：执行交接版 v1（日用优先修订）  
 适用对象：随后降低推理强度或更换模型的实施 Agent。
 
-**本计划完整替换此前同主题方案。当前仅完成只读核对，尚未落盘、创建 Skill、升级 DSH 或实施以下功能。退出计划模式后，先执行 H00a 保存本计划，再按顺序开工。**
+**本计划已落盘；最初批准时“仅完成只读核对”的说明属于历史阶段，不代表当前实现状态。本次按用户“可以先不升级内核，急着用于日用开发”的选择，改为先完成 H02-F 旧版冻结验收，再进入 H03；H02-U 新版升级延期。H04–H07 的详细设计及安全约束继续有效，不重复实施已有 H00/H01 成果。**
+
+本次修订沿用本文件，不另建总计划。其他文档如仍写“完成候选协议迁移前不能进入 H03”，其依赖关系已被本修订取代；实施时同步实际执行记录，不把旧报告或本文的计划步骤当作新验收证据。
 
 ---
 
@@ -28,7 +30,7 @@
 实施前重新检查，不恢复或覆盖以下基线：
 
 - 主仓库：`D:\Code\Sumika`。
-- 最近核对 HEAD：`bd9144d`。
+- 最初规划核对 HEAD：`bd9144d`；本次修订核对 HEAD：`2822e28`。已有未提交成果不包含在该提交内。
 - 分支：`codex/dsh-agent-runtime`。
 - 工作区存在重要未提交修改。
 - 已有 `AgentRuntime`、DSH/ZCode 适配器、Quality DAG 和动态选模。
@@ -381,45 +383,125 @@ DSH / 其他Harness / API适配器
 
 **对应：R06、R11、R17。依赖：H01。**
 
-#### 固定选择
+#### 范围拆分与固定选择
 
-- 升级候选为已选定的 `0.1.5-rc.1`。
-- 源码核验点：`183f08e9c6dde7e36cd2318eaee70b0da08fb35e`。
-- 不自动追 `next`，不称 RC 为正式稳定版。
-- 继续现有 Web Runtime 协议。
-- 新 SDK 取消和结果契约不足时不替代现路径。
-- 不以 `sdk-minimal` 代替完整开发运行时或 OS 沙箱。
+- **H02-F：当前版本冻结与兼容验收，本轮实施。** 固定 `0.1.1-rc.2` 和 `dsh-web-api-v1`，在新的 Sumika 专用安装目录及隔离 profile 验证。
+- **H02-U：内核升级及 Remote 协议迁移，延期。** 原 H02a 的候选迁移归入此项；候选仍为 `0.1.5-rc.1`，声明源码核验点仍为 `183f08e9c6dde7e36cd2318eaee70b0da08fb35e`，不自动追 `next`，不称 RC 为正式稳定版。
+- H03 依赖 H02-F 的真实能力验收，不依赖候选版本号。原 H02 的升级目标并未完成，只是不再阻塞日用关键路径。
+- 本次只读核对旧版包及 Node 导入已确认 `LlmAdapter`、`registerAdapter`、`prepareCall`、流式接口存在，原循环请求携带 `sessionId`；这仅证明接口可用，不证明 H03 的费用、授权或生产调用链已实现。
+- 保留 DSH 原生循环和现有 API 显式可选执行路径，不自动切换运行任务；不以 `sdk-minimal` 替代完整运行时或 OS 沙箱。
 
-#### 发行方式
+#### H02-F 实施步骤
 
-建立一个受管 DSH 发行目录，保存：
+1. **收回不完整候选接线。** 只移除候选实验新增的环境变量 token、构造时网络认证、通用点号换斜杠及错误 args 正文替换，不还原整份文件或覆盖其他成果。默认适配器保持完整旧协议；未支持协议启动前明确拒绝。候选描述、缓存和已核实差量保留。
+2. **冻结实际发行输入。** `dsh-release/` 继续为单一来源；运行时及受管 profile 分别保存精确 manifest、冻结锁，必要自有插件预先构建为包并记录实际产物摘要。安装时不再现场 pack 或自由解析插件依赖。发行身份包含运行时、选定插件包与全部锁摘要，不依赖用户绝对路径。
+3. **安装前完整校验。** 描述、相对路径边界、锁摘要、包摘要及支持的 Node/pnpm 信息先核对，安装器、启动器、Tauri/Core 使用一致规则。修复安装器向桥接脚本传入不存在的 `InstallDir` 参数。默认禁用全部生命周期脚本；必要原生构建例外逐项列明，不设宽泛许可。可选办公插件不进入开发必需组合，不因已安装而扩大启用或权限。
+4. **新目录安装及中断保护。** 不覆盖 `D:/Tools/DeepSeekHarness/0.1.1-rc.2` 日用树。新安装先在独立暂存目录准备，全部校验通过后才生成可启动回执；既有非空目录不匹配即拒绝，半成品不能被健康检查认作发行。同一组合重复安装应幂等，失败保留可诊断状态和原运行版，不自动迁移 profile、Cookie 或费用记录。
+5. **真实身份及进程生命周期。** 启动核验实际安装证据、profile、监听者和启动实例，不能只比较版本字符串或锁文件存在。当前日用树与新冻结锁不匹配，不能放宽 guard 将其标为已验证。任务继续执行的发行检查，与关闭自有进程的所有权检查分开：安装后来变化应阻断派发，但不能阻碍清理已确认归属的自有进程。保留 Windows Job Object；不误杀外部服务。`none` 或其他执行路径不被无关 DSH 安装错误阻断。
+6. **插件及 H03 能力验收。** 新冻结组合下验证必要插件实际加载、工具注册、会话、设置、事件、持久化、取消和重连。真实 DSH 原循环配合明确标注的模型 fixture，完成一次真实临时文件工具操作；探测模型适配入口、会话归属、流式结果、辅助用途和取消，不在 H02-F 提前实现完整费用网关。peer 依赖只声明实际验证范围。
 
-- 单一发行描述。
-- 精确顶层依赖。
-- 冻结锁文件。
-- 必要自有插件构建产物及摘要。
-- 支持的 Node、包管理器和适配契约信息。
+不修改安装后的 `node_modules` 来临时修补上游；发现旧版能力缺失时给出最小复现和允许的处理分支，不能静默开启 H02-U 或放宽安全规则。
 
-安装器、启动器和 Tauri 读取同一描述，删除重复版本知识。默认安装锁定组合，不使用当前的无锁解析方式。
+#### H02-F 验收与交接
 
-自有插件的本地构建包作为发行输入，不能依赖用户绝对路径或修改已安装的 `node_modules`。
+- 发行解析、安装路径/摘要校验、幂等安装、中断、卸载保留用户产物及回退专项通过。
+- 新冻结组合完成真实 DSH 会话、工具、设置、事件、持久化、取消/重连；模型 fixture 与真实模型证据分开。
+- 本次构建原生客户端通过受管实例及双窗口生命周期 smoke，检查自有进程退出；不以历史日用树 smoke 代替新组合验收。
+- 先专项再受影响回归，测试及回执明确标出发行组合、profile 和证据位置；未完成不得标为通过。
+- H02-F 达标即可进入 H03；H02-U 仍延期。日用安装切换须另审查具体对象，原生多屏硬件及真实模型费用验证不能伪造通过。
 
-#### 升级验证
+#### H02-U 延期恢复条件
 
-1. 使用新的专用安装目录、隔离 profile 和空闲端口。
-2. 核验关键会话、工具、事件、设置、持久化和取消语义。
-3. 合并工具注册、事件订阅和生命周期中的重复版本转换代码。
-4. 必要插件逐项验证，peer 依赖只声明实际验证范围。
-5. 安装脚本默认不运行；确需原生构建的依赖逐项核验，记录明确允许清单。
-6. 可选办公插件不兼容时保持关闭，不阻断开发主路径。
-7. 验证幂等安装、卸载、产物保留及回退。
-8. 受管启动核对版本、profile 和实例，不能仅因端口返回健康就复用其他进程。
+日用关键链路完成后，或出现可复现且旧版无法安全支持的必需能力缺口，再明确安排升级。届时复用候选资料，分别处理认证、RPC 信封/命名参数、方法映射、事件及批准回传，不使用通用字符串替换猜协议；完整隔离验收通过后才提出日用切换。令牌仅经私有引导传递，不进入环境、普通日志或配置；输出管道可以与 Job Object 共存，不能为抓取启动信息退回无进程归属保护的裸 Popen。
 
-不改用户 Codex 安装，不覆盖日用 DSH 目录。候选版通过后提供可审查切换对象；日用切换与数据迁移单独执行。
+#### H02 历史实现回执（2026-09-11，非本次完成依据）
+
+以下保留阶段证据。原报告的“发行锁定完成”不能视为 H02-F 已完成：实际日用树 mismatch、插件包及 profile 依赖未完整冻结、安装中断保护和候选实验接线仍需上面的修复。第 4 项“不参与启动身份”的历史行为已被后续 guard 改动取代；旧原生 smoke 使用日用树，不能证明新冻结组合。下列历史结果不替代当前回归。
+
+```text
+任务包：H02 DSH 发行锁定与必要插件兼容
+状态：历史部分实现（保留当时证据；H02-F 尚待本次验收，H02-U 延期）
+对应需求及R编号：R06、R11、R17；AGENT-003
+
+实际行为：
+1. 新增dsh-release/单一发行描述：channel.json给出默认发行，releases/<id>/release.json
+   给出DSH版本、npm包摘要、安装布局、协议事实、冻结锁文件摘要、安装策略、自有插件
+   内容摘要与验证结论；releases/<id>/pnpm-lock.yaml为冻结锁文件。
+2. 启动器、安装辅助脚本、Tauri与Core读取同一份描述，删除各自保存的版本号。
+   - tools/dsh-release.ps1：PowerShell共享读取器
+   - src-tauri/src/main.rs：运行时解析描述，status!=verified-active或协议族不符即拒绝
+   - backend/src/sumika_core/agent/dsh_release.py：校验、插件内容摘要、发行身份
+3. distribution_id由描述推导（版本+包摘要+锁文件摘要+插件内容摘要），写入
+   RuntimeBinding.distribution_id，取代legacy-unlocked；adapter_version取协议族。
+4. 安装证据独立观察：frozen-lockfile-verified / mismatch / declared-unverified，
+   不参与启动身份等值判断，重装不会把已验证监听者判成陌生进程。
+5. tools/setup-dsh.ps1改为--frozen-lockfile --ignore-scripts安装，安装后逐字节
+   比对node_modules/.pnpm/lock.yaml；不匹配时只报告、不改动原树，支持-AllowCandidate
+   在隔离目录准备候选。
+6. tools/setup-sumika-dsh-bridges.ps1的自有插件列表、版本与内容摘要改由描述驱动，
+   reference模式不安装，bridge模式必须有对应patch条目。
+
+候选0.1.5-rc.1阻断结论（证据见release.json的verification.blockers）：
+隔离安装D:/Tools/DeepSeekHarness/0.1.5-rc.1，冻结锁文件逐字节一致；
+自有插件可组合、`dsh web`可启动；dsh-tools的defineTool与tools/pre-execute未变。
+但该发行引入进程token换签名cookie鉴权（未鉴权请求返回401，旧适配器正是不鉴权）、
+方法路径由`<namespace>.<method>`改为`<namespace>/<method>`、payload要求唯一
+`{"args": ...}`字段；host.describe、mcp.list、agent.*、session.export、
+session.retry、POST /api/respond、/api/events.mux均已移除或改名
+（session.history→session/page，session.models→session/modelCatalog）；
+旧协议包@deepseek-ai/dsh-host-apiproxy只发布到0.1.1-rc.2，无法作为兼容层补回。
+因此该发行标记blocked：可被审查、不可被受管启动，迁移原列H02a，现归入延期H02-U。
+
+修改文件：
+dsh-release/README.md、dsh-release/channel.json、
+dsh-release/releases/0.1.1-rc.2/{release.json,pnpm-lock.yaml}、
+dsh-release/releases/0.1.5-rc.1/{release.json,pnpm-lock.yaml}
+backend/src/sumika_core/agent/{dsh_release.py,managed_identity.py}、backend/src/sumika_core/server.py
+backend/tests/{test_dsh_release.py,test_managed_identity.py}
+tools/{dsh-release.ps1,dsh-launch.ps1,setup-dsh.ps1,setup-sumika-dsh-bridges.ps1,run-desktop.ps1,test_dsh_release.ps1}
+src-tauri/src/main.rs、docs/architecture/{agent-runtime.md,desktop-shell.md}、
+docs/integrations/dsh-agent.md、README.md、README_zh.md
+
+测试命令与结果：
+python -m unittest discover -s backend/tests -> 1315项通过
+python -m unittest test_dsh_release（专项）-> 13项通过
+python -m unittest test_managed_identity -> 5项通过
+cargo test --manifest-path src-tauri/Cargo.toml -> 41项通过
+pwsh -File tools/test_dsh_release.ps1 -> passed
+pwsh -File tools/test_dsh_launch.ps1 -> passed
+pwsh -File tools/setup-dsh.ps1 -Version 0.1.5-rc.1 -AllowCandidate -InstallDir ... ->
+  install_evidence=frozen-lockfile-verified，二次执行幂等
+pwsh -File tools/setup-sumika-dsh-bridges.ps1 -DshHome <隔离profile> ->
+  历史旧版组合记录安装4个插件；候选只验证3个桥接插件的组合/启动，不含办公插件验收
+python tools/check_docs.py、tools/check_release_assets.py、git diff --check -> 通过
+cargo build --features custom-protocol -> 通过
+
+证据位置：
+D:/Caches/sumika-h02-native/1789122114523/result.json（真实受管DSH双窗口原生smoke全通过）
+D:/Caches/sumika-h02-native/1789122114523/dsh-binding.json
+  -> binding.distribution_id = dsh-release-0.1.1-rc.2-be7b21e9a0f28bc0
+     binding.adapter_version = dsh-web-api-v1
+
+未覆盖：
+1. 未做日用切换：日用0.1.1-rc.2安装树建于锁定之前，与冻结解析存在大量传递依赖
+   差异（例如@aws-sdk/*），安装证据为mismatch；重建日用树属于单独的可见切换。
+2. 候选0.1.5-rc.1未与Sumika Core交换任何会话、提示、工具调用或事件。
+3. 未验证候选在真实模型、真实渠道或长时间运行下的行为。
+4. 安装脚本默认不运行；未引入需要原生构建的依赖，未做多屏热插拔。
+
+普通模型待接入口：
+1. H02-U（原H02a）继续参考已有差量清单，但本次延期，不再作为H03前置。
+2. 旧版新冻结组合先完成H02-F；候选日用切换仍须H02-U及独立原生验收。
+3. 新发行一律通过dsh-release/描述增加，不要在任何脚本重新写死版本。
+
+当前下一步：完成H02-F后进入H03；不据本历史回执直接跳过H02-F。
+```
 
 ### H03：统一受控模型调用与费用恢复
 
-**对应：R02、R13、R14a。依赖：H02。**
+**对应：R02、R13、R14a。依赖：H02-F，不依赖延期的 H02-U。**
+
+首版使用验收通过的 `0.1.1-rc.2` 固定组合。下面的中立接口、调用状态机与授权设计不因暂缓内核升级而删减；无需先迁移新版 Remote 协议，也不要求先补齐全部模型渠道。
 
 #### 固定路线
 
@@ -455,6 +537,8 @@ DSH 不运行另一份 Sumika API 工具循环。Core 不复制 DSH 会话引擎
 - 任务结束或启动实例变化后失效。
 
 不根据“最近活跃会话”、提示词或标题猜测费用归属。辅助调用缺少可验证归属时直接阻断。
+
+旧版 loopback HTTP 不构成可信授权。工作绑定必须关联具体请求版本、运行实例、会话和执行步骤，不能只凭 `sessionId` 接纳新调用；直接调用旧入口、伪造会话字段或批准回复不得绕过 Core 消费与工具授权。此边界在 H03 实际发送/执行前验证，不能把 H02 的模型 fixture 当作已完成。
 
 #### 协议转换
 
@@ -642,7 +726,7 @@ intent
 
 ### H06：开发路径整合与首次真实闭环
 
-**对应：R07a/b、R17。依赖：H00–H05。**
+**对应：R07a/b、R17。依赖：H00、H01、H02-F、H03–H05；不依赖 H02-U。**
 
 #### 执行整合
 
@@ -748,7 +832,7 @@ H00a 落盘
 → H00b Codex Skill
 → H00c/d Sumika交接核心与Quality接线
 → H01 契约与可信确认
-→ H02 DSH固定组合
+→ H02-F 旧版0.1.1-rc.2固定组合与真实兼容验收
 → H03 受控调用与费用
 → H04 安全恢复
 → H05 源码、验证与合入
@@ -757,6 +841,10 @@ H00a 落盘
 ```
 
 H07 随每包同步编写，不等最后才补。H05 的纯文件测试可以提前准备，但共享状态和公共接口仍串行整合。
+
+恢复执行时先核对已有 H00/H01 的实际成果，不从头重做；当前下一包为 H02-F。H02-U（原 H02a）延期，不在以上前置链路中。每包交付实现、证据、限制及下一包入口供外部审查，不再把几行补丁或单项测试当作 H02 收尾。
+
+日用交付仍沿用 R 编号：H06 后补齐 R04/R06 必需交互与工具，再执行 R07c 三类真实任务及至少三个实际工作日使用、R07d 明确运行版切换和回退。当前 Agent 负责高难及最小接线，其余交由普通模型；必要表单、文件/diff/日志面板、草稿保持不能藏在“可选优化”里后宣称成品。可试用版须完成提交、确认、读改测、取消、检查/恢复、审查和受控合入的一键启动链路；首次自改成功不等于稳定日用。完整办公生态、更多渠道、多屏硬件及远期能力不阻塞该日用路径，已有安全与能力限制必须可见。
 
 没有子 Agent 不影响执行；不自动更换用户选定的模型或推理强度。
 
@@ -777,7 +865,7 @@ H07 随每包同步编写，不等最后才补。H05 的纯文件测试可以提
 | T07 | 模型、网页及插件不能伪造用户确认 |
 | T08 | 非 DSH 最小适配器通过中立契约 |
 | T09 | 同名外部会话、不同实例不会混淆 |
-| T10 | DSH 固定组合可重复安装，必要插件真实加载 |
+| T10 | H02-F 旧版冻结组合可重复安装，插件/真实工具及原生生命周期通过；不以候选启动或日用 mismatch 树代替 |
 | T11 | 未确认付费零上游调用，辅助用途不漏账 |
 | T12 | 各账本中断可恢复关联，不双算、不猜释放 |
 | T13 | 部分输出和提交未知不重发 |
@@ -852,7 +940,7 @@ git diff --check
 
 - Codex 冻结 Skill 已实现并完成可进行的加载验证。
 - Sumika 交接核心与动态规划衔接已实现。
-- H01–H05 的高难部分完成相称验证。
+- H01、H02-F、H03–H05 的高难部分完成相称验证；H02-U 明确延期，不以此宣称原升级目标完成。
 - H06 已具备条件的部分完成，真实验收缺口明确。
 - 所有普通任务都有可直接接手的详细文档。
 - 需求、架构、状态矩阵及执行记录一致。
@@ -861,5 +949,3 @@ git diff --check
 随后停止普通功能开发，交还用户安排其他模型。
 
 **“本轮高难基础完成”“首次真实自改完成”“稳定日用替代完成”“原 P00–P14 完成”分别判定，不能互相代替。**
-
-

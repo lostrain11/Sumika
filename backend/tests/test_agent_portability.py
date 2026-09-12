@@ -1,6 +1,10 @@
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
+
+from external_admission_fixture import offline_runtime_binding
+from trusted_host_fixture import trusted_rpc
 
 from sumika_core.agent import (
     AgentCapability,
@@ -102,11 +106,12 @@ class AgentPortabilityTests(unittest.TestCase):
 
     def test_core_accepts_runtime_injection_and_projects_portable_status(self):
         runtime = MinimalAgentRuntime()
+        runtime.bind_runtime(offline_runtime_binding(runtime))
         application = CoreApplication(":memory:", agent_runtime=runtime)
         self.addCleanup(application.close)
 
         status = application.rpc("agent.status", {})
-        created = application.rpc("agent.session.create", {"title": "Portable"})
+        created = trusted_rpc(application, "agent.session.create", {"title": "Portable"})
         sessions = application.rpc("agent.sessions", {})
 
         self.assertEqual(status["runtime_id"], "minimal")
@@ -115,8 +120,27 @@ class AgentPortabilityTests(unittest.TestCase):
         self.assertEqual(sessions["sessions"][0]["title"], "Portable")
         self.assertIsNotNone(runtime.event_sink)
 
-        with self.assertRaisesRegex(JsonRpcError, "does not support event ingestion"):
-            application.rpc("agent.event.ingest", {"event": {"type": "custom"}})
+        params = {"event": {"type": "custom"}}
+        with patch.object(runtime, "normalize_event") as normalize, patch.object(
+            application.route_supervisor, "handle_event"
+        ) as schedule:
+            with self.assertRaises(JsonRpcError) as error:
+                application.rpc("agent.event.ingest", params)
+            self.assertEqual(error.exception.code, -32041)
+            with self.assertRaises(JsonRpcError) as error:
+                trusted_rpc(application, "agent.event.ingest", params)
+            self.assertEqual(error.exception.code, -32042)
+            normalize.assert_not_called()
+            schedule.assert_not_called()
+
+        callback = runtime.event_sink
+        binding = runtime.runtime_binding()
+        event = {"event_type": "turn.started", "session_id": "session-1", "turn_id": "turn-1"}
+        with patch.object(runtime, "runtime_binding", return_value=None), patch.object(
+            application, "_handle_route_boundary_event"
+        ) as boundary:
+            callback(event)
+        boundary.assert_called_once_with(event, source_binding=binding)
 
 
 if __name__ == "__main__":

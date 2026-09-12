@@ -204,9 +204,10 @@ or raw visual/audio data.
 The desktop core listens on `127.0.0.1:8771` by default, while the browser
 preview uses `127.0.0.1:8770`.
 
-The Windows launcher first validates the pinned DSH executable at
-`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd` (or an explicitly
-configured absolute executable) and requires an exact `0.1.1-rc.2` `--version` result.
+The Windows launcher reads the [managed release description](dsh-release/README.md),
+resolves the DSH executable from the layout it declares, and requires an exact
+`--version` match with its `harness.version`. The default release's version and path
+live in that one place; `SUMIKA_DSH_INSTALL_ROOT` relocates the install root.
 It never discovers a global `PATH` DSH. An explicitly configured
 `SUMIKA_AGENT_ENDPOINT` / `SUMIKA_DSH_ENDPOINT` may opt into protocol-only external
 reuse; `host.describe` does not prove the package version. A healthy default `3080`
@@ -223,7 +224,9 @@ If the pinned runtime is not installed yet, explicitly run:
 .\tools\setup-dsh.ps1 -Proxy 'http://127.0.0.1:6064'
 ```
 
-The setup helper writes only to `D:\Tools\DeepSeekHarness\0.1.1-rc.2`; it does
+The setup helper installs from the frozen lockfile the description pins
+(`--frozen-lockfile --ignore-scripts`) and compares the installed lockfile byte for
+byte afterwards, reporting a mismatch without touching the existing tree. It does
 not change `PATH` or the global DSH installation. `run-desktop.ps1` never installs,
 updates, or downloads DSH. The desktop shell uses `.sumika-desktop\dsh-profile`
 as the isolated `DSH_HOME`. A custom install can still set

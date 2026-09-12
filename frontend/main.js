@@ -3179,7 +3179,7 @@ function rpc(method, params = {}) {
 }
 
 async function transportRpc(method, params = {}) {
-  if (requiresHostConfirmation(method)) {
+  if (requiresHostConfirmation(method, params)) {
     return confirmThroughHost({ method, params, desktop: isDesktopShell, companion: companionWindow,
       transport: transportRpc, invoke: invokeDesktop, openMain: openMainWindow });
   }
@@ -5737,11 +5737,15 @@ async function retryAgentTurn() {
   const snapshot = state.agentSnapshot;
   const retry = agentRetryState(snapshot);
   if (!sessionId || !retry.retryable || retry.imageTarget || retry.missingTarget || state.agentBusy || !state.agentStatus?.ready) return;
-  if (!window.confirm("将重新提交当前会话最近一次失败或停止的文本目标。不会重复提交图片或工具结果，是否继续？")) return;
   state.agentBusy = "retry";
   state.agentNotice = `正在让 ${agentRuntimeLabel()} 重试最近目标…`;
   render();
   try {
+    const assessment = await rpc("agent.session.retry.preflight", { sessionId });
+    if (assessment?.retry_allowed !== true) {
+      throw new Error("无法证明原回合未发送且无未决副作用；旧重试已阻断，请先检查原会话。");
+    }
+    if (!window.confirm("已核验原操作未发送。是否在原授权范围内继续？")) return;
     const workspace = currentAgentSessionWorkspace();
     const result = await rpc("agent.session.retry", {
       sessionId,
@@ -7633,8 +7637,7 @@ async function updateModule(params) {
   state.moduleNotice = "";
   render();
   try {
-    const response = await api("/rpc", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "module.update", params }) });
-    const updated = response.result;
+    const updated = await rpc("module.update", params);
     state.modules = state.modules.map((module) => module.id === updated.id ? normalizeModule(updated) : module);
     await loadAudioStatus(false);
     await loadVisionStatus(false);

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import AgentRuntime, UnavailableAgentRuntime
+from quality_routing.harness import RuntimeBinding
 
 AgentRuntimeBuilder = Callable[[str | Path | None, Mapping[str, str], Any], AgentRuntime]
 
@@ -35,6 +36,7 @@ class AgentRuntimeRegistry:
         *,
         env: Mapping[str, str],
         logger: Any = None,
+        binding: RuntimeBinding | None = None,
     ) -> AgentRuntime:
         normalized = runtime_id.strip().lower()
         builder = self._builders.get(normalized)
@@ -42,7 +44,10 @@ class AgentRuntimeRegistry:
             return UnavailableAgentRuntime(
                 f"Agent runtime '{normalized or runtime_id}' is not registered"
             )
-        return builder(data_dir, env, logger)
+        runtime = builder(data_dir, env, logger)
+        if binding is not None:
+            runtime.bind_runtime(binding)
+        return runtime
 
 
 def default_agent_runtime_registry() -> AgentRuntimeRegistry:

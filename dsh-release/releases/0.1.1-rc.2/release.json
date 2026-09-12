@@ -1,0 +1,163 @@
+{
+  "schema": "sumika.dsh-release/v1",
+  "id": "0.1.1-rc.2",
+  "status": "verified-active",
+  "adapter_contract": "dsh-web-api-v1",
+  "harness": {
+    "id": "dsh",
+    "package": "@deepseek-ai/dsh",
+    "version": "0.1.1-rc.2",
+    "source": {
+      "commit": "b150a551b8d4",
+      "commit_evidence": "Carried from the project's existing DSH integration record. The published npm tarball has no gitHead field, so this commit is declared rather than recomputed from the artifact.",
+      "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.1-rc.2.tgz",
+      "tarball_sha512": "sha512-UP1UIh6q3Gme/yXRn/QL2P8IsVlv8Shpg22TRJIZPsCRWLm4CBiA1MUvXmJAfsOEETBMLAl+xWPtFw6ICsN3wg==",
+      "tarball_sha1": "1a5112369f1c46b13a6e6f21de8af5e6afd45074"
+    },
+    "install": {
+      "root": "D:\\Tools\\DeepSeekHarness",
+      "root_env": "SUMIKA_DSH_INSTALL_ROOT",
+      "directory": "0.1.1-rc.2",
+      "executable": "node_modules\\.bin\\dsh.cmd"
+    },
+    "artifacts": [
+      "@deepseek-ai/dsh@0.1.1-rc.2 (npm tarball, integrity recorded above)",
+      "@deepseek-ai/dsh-tools@0.1.1-rc.2 (plugin tool API used by the Sumika bridges)"
+    ],
+    "signals": [
+      "POST /api/<method> with the client-request/rpcId/method/payload envelope",
+      "session.create, session.prompt, session.selectModel, session.updateQueue, session.cancel, session.fork, session.rename, session.search, session.attachment, session.history, session.models, session.export, session.retry",
+      "host.describe inside the same namespace as the session methods",
+      "workspace.list/create/rename/delete/insertBefore/insertSessionBefore/archiveSession",
+      "GET /api/events.mux and /api/events.host WebSocket streams, POST /api/respond for approvals",
+      "loopback /api accepts an unauthenticated request from the same machine"
+    ]
+  },
+  "toolchain": {
+    "node": ">=22",
+    "package_manager": "pnpm",
+    "package_manager_major": 11,
+    "lockfile": "pnpm-lock.yaml",
+    "lockfile_sha256": "0538be19c80c274405b3978b423f658e72349d5484bfb9265eb877b98ae37dfc"
+  },
+  "install_policy": {
+    "lockfile_only": true,
+    "ignore_scripts": true,
+    "scripts_allowed": []
+  },
+  "plugins": [
+    {
+      "id": "sumika-route-bridge",
+      "name": "@sumika/dsh-route-bridge",
+      "version": "0.1.0",
+      "path": "plugins/dsh-route-bridge",
+      "content_digest": "0a2356fee143d69e781da62e408ea1aa2abab3a1dbf2ae818c45698d07f9aba2",
+      "install": "bridge",
+      "default_enabled": true,
+      "capabilities": ["sumika.route.bridge_tools"],
+      "groups": [],
+      "validation": "verified on this release; composed profile and tool registration load"
+    },
+    {
+      "id": "sumika-browser-policy",
+      "name": "@sumika/dsh-browser-policy",
+      "version": "0.1.0",
+      "path": "plugins/dsh-browser-policy",
+      "content_digest": "8661b3eb1d57c66174ac0a78ce6249cca5efbb6d18c88af072d764d982674e94",
+      "install": "bridge",
+      "default_enabled": true,
+      "capabilities": ["browser policy gate for DSH BrowserSkill tools"],
+      "groups": [],
+      "validation": "verified on this release; composed profile and tool registration load"
+    },
+    {
+      "id": "sumika-desktop-automation",
+      "name": "@sumika/dsh-desktop-automation",
+      "version": "0.1.0",
+      "path": "plugins/dsh-desktop-automation",
+      "content_digest": "8266624492f54232496be6bfa2d5f37f86a60ce9f5eca6baf6102ff853e819ff",
+      "install": "bridge",
+      "default_enabled": true,
+      "capabilities": ["controlled desktop application bridge"],
+      "groups": [],
+      "validation": "verified on this release; composed profile and tool registration load"
+    },
+    {
+      "id": "sumika-community-documents",
+      "name": "@sumika/dsh-community-documents",
+      "version": "0.1.0",
+      "path": "plugins/dsh-community-documents",
+      "content_digest": "9b3d1a58ddae5b2fc53d4ef37fc58a7e7702fb7c984605f0135b5184e9a5f447",
+      "install": "optional",
+      "default_enabled": false,
+      "third_party": true,
+      "capabilities": ["word_create", "word_read", "word_update", "excel_create", "excel_read", "excel_update", "ppt_create", "ppt_read", "pdf_read"],
+      "groups": ["word", "excel", "powerpoint", "pdfRead"],
+      "validation": "third-party basics verified on this release; each group keeps its own off-by-default switch"
+    },
+    {
+      "id": "sumika-quality-routing",
+      "name": "@sumika/dsh-quality-routing",
+      "version": "0.1.0",
+      "path": "plugins/dsh-quality-routing",
+      "content_digest": "7b6bbc13192bf293677d1257297441593a771466b3b874d2de6c4f468602b999",
+      "install": "reference",
+      "default_enabled": false,
+      "capabilities": ["quality-routing SDK adapter"],
+      "groups": [],
+      "validation": "not installed by the bridge helper; kept as the reviewed adapter sample for this release"
+    }
+  ],
+  "bundle": {
+    "schema": "sumika.dsh-bundle/v1",
+    "package_manager_version": "11.19.0",
+    "runtime_manifest": "package.json",
+    "profile_directory": "profile",
+    "files": [
+      {
+        "sha256": "ec0f9bc4e64a9a297de7a292b18d52c7f183bd3330e73fe23fcc4412947c9f76",
+        "path": "package.json"
+      },
+      {
+        "sha256": "64334cd2ed08be7ae5b1343009db7de0003a213f14566226c07a2e531768ae43",
+        "path": "profile/cordis.patch.yml"
+      },
+      {
+        "sha256": "63e211f4b12c57265d248716cc07b8538037212af49656ee898c60adcc6ac636",
+        "path": "profile/package.json"
+      },
+      {
+        "sha256": "8ea2e5fbfe8fb947c0dbf3e5c6788818629d368c6cd0870695fd83d115def167",
+        "path": "profile/packages/sumika-browser-policy-0.1.0.tgz"
+      },
+      {
+        "sha256": "f7faa140276828ee59aa552d5e4adeb601630038e52d2c4a6bbb3ad66f319909",
+        "path": "profile/packages/sumika-desktop-automation-0.1.0.tgz"
+      },
+      {
+        "sha256": "0d98688d5b9574297f53568798c7b9af2cd9534dfeac927b15608771a87b3c8e",
+        "path": "profile/packages/sumika-route-bridge-0.1.0.tgz"
+      },
+      {
+        "sha256": "a325e8761a1747da905cc851363941e5e8e87674bc53cb7f06ee14f0f853c891",
+        "path": "profile/pnpm-lock.yaml"
+      },
+      {
+        "sha256": "f0a66da3816788a70da517ded6e5fd50dc28ae5471789c225f32ef8f5a44b722",
+        "path": "profile/pnpm-workspace.yaml"
+      }
+    ]
+  },
+  "verification": {
+    "evidence": [
+      "Frozen lockfile generated with pnpm 11 and installed with --frozen-lockfile --ignore-scripts; node_modules/.pnpm/lock.yaml is byte-identical to the declared pnpm-lock.yaml.",
+      "Isolated native smoke with the managed launch path passed on this release: tools/native-ui-smoke.mjs with SUMIKA_SMOKE_MANAGED_DSH=1, evidence D:/Caches/sumika-h01-final/1789106367654/result.json.",
+      "The four bridge/community plugins compose into the web profile and register their tools through defineTool and the tools/pre-execute waterfall."
+    ],
+    "limitations": [
+      "The daily install tree at D:/Tools/DeepSeekHarness/0.1.1-rc.2 was created before lockfile pinning, so its node_modules/.pnpm/lock.yaml evidence is declared-unverified until it is reinstalled from this description.",
+      "The declared source commit cannot be recomputed from the published npm tarball."
+    ],
+    "blockers": []
+  }
+}

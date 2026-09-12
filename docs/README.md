@@ -26,6 +26,7 @@ API、协议、类名和代码标识保留 English identifier。
   三个动作；不替代状态矩阵。
 - [需求基线](requirements/README.md)：记录长期产品意图、历史取代关系和未来
   重构验收标准；不替代状态矩阵。
+- [新版本项目需求](requirements/next-version.md)：最新 DSH、原生 Web 日用开发平替与独立扩展原则；新版范围从此进入。
 - [需求总表：91项及出处索引](requirements/catalog.md)
 - [统一内置浏览器正式需求](requirements/embedded-browser.md)
 - [完整需求基线](requirements/baseline.md)

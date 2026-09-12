@@ -1,10 +1,12 @@
 import threading
 import unittest
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from quality_routing import RoutingError, Scope
+from quality_routing.harness import RuntimeBinding
 from quality_routing.workflow import ExternalQuote
 from sumika_core.providers.guard import RequestNotSent
 from sumika_core.quality.legacy_admission import LegacyWorkAdmission
@@ -220,7 +222,9 @@ class ExternalWorkTests(unittest.TestCase):
 
     def test_deferred_route_rechecks_price_before_event_dispatch(self):
         profile = {"id": "profile", "budget_policy": "free-only"}
-        admission = LegacyWorkAdmission(self.work, profiles=lambda: [profile], routes=lambda: [], agent_offer=lambda params: {})
+        binding = RuntimeBinding("fixture", "profile", "release", "v1", "managed", "evidence", "launch", "receipt")
+        admission = LegacyWorkAdmission(self.work, profiles=lambda: [profile], routes=lambda: [], agent_offer=lambda params: {},
+                                        runtime_binding=lambda: binding)
         params = {"route_id": "web-chat:profile", "parent_session_id": "session", "parent_turn_id": "turn",
                   "text": "research", "client_request_id": "deferred"}
         arm = Mock(return_value={"armed": True, "parent_session_id": "session", "parent_turn_id": "turn"})
@@ -229,23 +233,90 @@ class ExternalWorkTests(unittest.TestCase):
         admission.dispatch("sumika.route.arm", params, arm)
         profile["budget_policy"] = "allow-paid"
         execute = Mock()
-        result = admission.advance_boundary({"session_id": "session", "turn_id": "turn"}, execute)
+        event = {"session_id": "session", "turn_id": "turn"}
+        for wrong in (None, replace(binding, instance_id="other"), replace(binding, launch_id="new")):
+            rejected = admission.advance_boundary(event, execute, source_binding=wrong)
+            self.assertFalse(rejected["accepted"])
+            execute.assert_not_called()
+            self.assertEqual(self.work.get("deferred", "sumika")["status"], "executing")
+        result = admission.advance_boundary(event, execute, source_binding=binding)
         self.assertEqual(result["status"], "awaiting-confirmation")
         execute.assert_not_called()
         self.assertEqual(next(iter(self.work.get("deferred", "sumika")["attempts"].values()))["status"], "not-sent")
 
-    def test_agent_event_requires_exact_session_and_turn(self):
-        self.offer.update(source="agent", complexity="complex", execution_key="agent:session")
+    def test_agent_event_requires_exact_session_turn_and_host_binding(self):
+        binding = RuntimeBinding("fixture", "profile-one", "release-one", "v1", "managed",
+                                 "fixture-evidence", "launch-one", "launch-evidence")
+        self.offer.update(source="agent", complexity="complex", execution_key="agent:session",
+                          runtime_binding=binding.to_dict(), high_cny="2", free=False, funding="fixture")
+        params = {**self.params, "sessionId": "session"}
+        execute = Mock(return_value={"accepted": True, "turn_id": "turn", "status": "running"})
+        self.confirm(self.dispatch(execute, params)["work_request"], "2")
+        self.dispatch(execute, params)
+        admission = LegacyWorkAdmission(self.work, profiles=lambda: [], routes=lambda: [], agent_offer=lambda params: {})
+        admission.observe_agent_event({"session_id": "other", "turn_id": "turn"}, "turn.completed", source_binding=binding)
+        admission.observe_agent_event({"session_id": "session", "turn_id": "older"}, "turn.completed", source_binding=binding)
+        event = {"session_id": "session", "turn_id": "turn", "runtime_binding": binding.to_dict()}
+        for wrong in (None, replace(binding, harness_id="other"), replace(binding, instance_id="other"),
+                      replace(binding, launch_id="restarted"), replace(binding, distribution_id="upgraded"),
+                      replace(binding, launch_id=None, launch_evidence_ref=None)):
+            admission.observe_agent_event(event, "turn.completed", source_binding=wrong)
+            current = self.work.get("request-1", "sumika")
+            self.assertEqual(current["status"], "executing")
+            self.assertEqual(next(iter(current["attempts"].values()))["status"], "reserved")
+            self.assertEqual(current["authorization"]["reserved_cny"], "2")
+            self.assertEqual(current["authorization"]["spent_cny"], "0")
+        self.assertEqual(self.work.get("request-1", "sumika")["status"], "executing")
+        self.assertEqual(next(iter(current["attempts"].values()))["runtime_binding"], binding.to_dict())
+        admission.observe_agent_event(event, "turn.completed", source_binding=binding)
+        self.assertEqual(self.work.get("request-1", "sumika")["status"], "completed")
+        self.assertEqual(self.work.get("request-1", "sumika")["authorization"]["spent_cny"], "2")
+
+    def test_legacy_agent_record_without_binding_is_not_settled_by_same_name_event(self):
+        self.offer.update(source="agent", complexity="complex")
         params = {**self.params, "sessionId": "session"}
         execute = Mock(return_value={"accepted": True, "turn_id": "turn", "status": "running"})
         self.confirm(self.dispatch(execute, params)["work_request"])
         self.dispatch(execute, params)
+        binding = RuntimeBinding("fixture", "profile", "release", "v1", "managed", "evidence", "launch", "receipt")
         admission = LegacyWorkAdmission(self.work, profiles=lambda: [], routes=lambda: [], agent_offer=lambda params: {})
-        admission.observe_agent_event({"session_id": "other", "turn_id": "turn"}, "turn.completed")
-        admission.observe_agent_event({"session_id": "session", "turn_id": "older"}, "turn.completed")
+        admission.observe_agent_event({"session_id": "session", "turn_id": "turn"}, "turn.completed", source_binding=binding)
         self.assertEqual(self.work.get("request-1", "sumika")["status"], "executing")
-        admission.observe_agent_event({"session_id": "session", "turn_id": "turn"}, "turn.completed")
-        self.assertEqual(self.work.get("request-1", "sumika")["status"], "completed")
+
+    def test_agent_offer_uses_host_binding_and_rechecks_before_reservation(self):
+        binding = RuntimeBinding("fixture", "profile", "release", "v1", "managed", "evidence", "launch", "receipt")
+        current = [binding]
+        admission = LegacyWorkAdmission(self.work, profiles=lambda: [], routes=lambda: [],
+            agent_offer=lambda params: {**self.offer, "runtime_binding": {"forged": True}},
+            runtime_binding=lambda: current[0])
+        params = {**self.params, "sessionId": "session", "runtime_binding": {"forged": True}}
+        offer = admission.offer("agent.session.prompt", params)
+        self.assertEqual(offer["runtime_binding"], binding.to_dict())
+        value = self.work.external_preflight(params, offer)
+        self.confirm(value)
+        current[0] = replace(binding, launch_id="restarted")
+        execute = Mock()
+        with self.assertRaisesRegex(RoutingError, "changed before dispatch"):
+            self.work.external_dispatch(params, offer, execute,
+                refresh_offer=lambda: admission.offer("agent.session.prompt", params))
+        execute.assert_not_called()
+        saved = self.work.get(value["request_id"], "sumika")
+        self.assertEqual(saved["attempts"], {})
+        self.assertEqual(saved["authorization"]["reserved_cny"], "0")
+        restarted = admission.offer("agent.session.prompt", params)
+        self.assertEqual(offer["execution_key"], restarted["execution_key"])
+        current[0] = replace(binding, instance_id="another-profile")
+        self.assertNotEqual(offer["execution_key"], admission.offer("agent.session.prompt", params)["execution_key"])
+
+    def test_stable_profile_without_launch_evidence_cannot_dispatch(self):
+        binding = RuntimeBinding("fixture", "profile", "release", "v1", "managed", "evidence")
+        self.offer.update(source="agent", complexity="complex", runtime_binding=binding.to_dict())
+        execute = Mock()
+        self.confirm(self.dispatch(execute)["work_request"])
+        with self.assertRaisesRegex(RoutingError, "launch identity is unverified"):
+            self.dispatch(execute)
+        execute.assert_not_called()
+        self.assertEqual(self.work.get("request-1", "sumika")["attempts"], {})
 
 
 class LegacyAdmissionEntryTests(unittest.TestCase):

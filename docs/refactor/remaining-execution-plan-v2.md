@@ -4,6 +4,10 @@
 
 ### 当前H包映射
 
+Core与DSH身份分离实现：Core首次/重启用私有引导HMAC；受管DSH另核验自有包装器、实际监听PID、祖先链、创建时间和profile文件标识。Job纳管后才启动目标，Core重启保持DSH绑定，DSH重启使旧适配器失效。协议见[可信确认生命周期](../architecture/host-confirmation.md#引导与生命周期)。
+
+H01身份和权限实现已接线，最终验收见当前执行记录。七类中立对象、Agent工作/尝试和ExternalSessionRef、原来源事件核对、有限可信动作与纯撤权分支均存在。受管DSH已真实验证；外部未核验端点仍unbound。同名事件、缺身份旧记录不自动结算；公开事件注入停用，replan不改已挂起请求。H02从legacy-unlocked升级到固定发行组合，不能由普通模型填随机ID冒充证据。
+
 | H包 | 原任务 | 本轮责任 |
 | --- | --- | --- |
 | H00 | R00、R11、R16 | 批准稿落盘、Codex显式冻结、SDK与Quality交接就绪 |
@@ -17,7 +21,20 @@
 
 本次起点HEAD为bd9144d，既有未提交恢复/进程成果保留。H00a先执行；所有完成层级继续按G0–G5分别判定。
 
-当前恢复点：H00已完成相称验证；H01已接work/quality预算、定时、Agent权限与Plan Review可信确认，仍为部分完成。[剩余权限入口及接线验收](../architecture/host-confirmation.md#已定位的下一批入口)列出具体方法；先完成该审计、中立契约及实例绑定，再进入H02，不提前升级DSH。普通模型不得通过放行HTTP确认修复界面测试。
+最新续做：H02已完成自有发行锁定。`dsh-release/`是唯一发行声明处，`distribution_id`取代了`legacy-unlocked`；候选`0.1.5-rc.1`在隔离目录完成冻结锁文件与插件组合验证，但因其改为token换cookie鉴权、方法名改用`/`分隔、payload要求`args`包装，并移除`host.describe`、`mcp.list`、`agent.*`、`session.export`、`session.retry`、`POST /api/respond`与`/api/events.mux`，被描述为`blocked`且不可受管启动。候选的协议迁移是独立工作，不得当作已完成升级；下一步进入H03受控模型通道。后续不重复开发Skill白名单或中立值对象。DSH失败/取消终态不能证明未发送，H03/H04仍须实现逐操作证据后才开放接续。
+
+retry拒绝分支已落实，公共入口先可信校验再阻断，UI只读预检明确证据不足。H03/H04具备原操作发送事实、工具配对及授权核对后才开放接续。输入输出、错误码与验收见[旧Agent重试的安全停用](../architecture/host-confirmation.md#旧agent重试的安全停用)，不能由普通模型加布尔参数恢复旧原文重放。
+
+当前恢复点：`2822e28`已按此前授权上传，此后H01仍为本地未提交增量。H00已完成相称验证；H01整包验证以当前执行记录为准。后续从H02固定组合开工，不替换日用安装，不删除旧profile。普通模型不得通过放行HTTP确认修复界面测试。
+
+### H01之后的固定接手接口
+
+- H02（部分完成）：`dsh-release/channel.json`与`releases/<id>/release.json`+`pnpm-lock.yaml`成为单一发行描述；启动器、安装辅助脚本、Tauri与Core读取同一份描述，`managed_identity`的发行身份绑定实际安装树及冻结锁文件。候选0.1.5-rc.1记录了协议阻断原因，日用切换与数据迁移仍未执行；候选协议迁移和完整会话/工具/事件验收属于 H02a，完成前不进入 H03。
+- H02a（新增，未开工）：H02的剩余协议迁移，不是已完成 H02 的替代名称。把`DSHAgentRuntime`迁移到`dsh-web-remote-v1`。已知差量：进程token换签名cookie鉴权；方法路径`<namespace>/<method>`；payload包裹`{"args": ...}`；`host.describe`→无直接等价（需改用`settings/describe`或等价事实源）；`session.history`→`session/page`；`session.models`→`session/modelCatalog`；`session.export`/`session.retry`/`mcp.list`/`agent.*`/`POST /api/respond`移除；事件通道改为`/api/remote.mux`与`POST /api/$events/result`。改完后需重跑全部后端与真实受管DSH验收，并更新`release.json`的`adapter_contract`、`status`与`verification`。
+- H03：使用ModelInvocation/InvocationReceipt，把真实usage/资金回执引用写入既有工作操作；DSH桥接插件以受限运行凭据接入，不能使用宿主确认密钥或重新公开bridge_tools自报注册。标题/压缩/验证等辅助用途同样计费；未知不重发。
+- H04：使用RecoveryAssessment，旧unbound记录只读；DSH重启后的runtime-instance-changed必须重新预检，不能把新launch覆盖旧attempt。Core重启时DSH还活着的绑定可重新验证，但不自动派发未决任务。
+- H05：使用MergePreview并保持既有后端merge写操作拒绝边界；等真实预览、版本/摘要与Windows文件保护实现后才把两动作加入原生有限集合。字段与测试见SDK harness.py/test_harness.py，不能只创建类型就宣布合入完成。
+- 普通模型：状态UI处理available=false和runtime-instance-changed时保留历史来源，不显示“已切换成功”；所有设置与授权经rpc/transportRpc，不直接api('/rpc')。不得读取Codex配置、修改证据字段或增加“信任实例”开关。完成后回归原生夹具的模块、预设、浏览器和预算用例，不把fixture当真实模型验收。
 
 本文替代[旧剩余执行顺序](remaining-execution-plan-20260910.md)，保留 R01–R17、L01–L09 编号，新增 R00 与可独立验收的子包。不取代[正式需求账本](../requirements/requirements.json)、[原 P00–P14 计划](client-workflow-v2.md)、[Skill 专题](skill-migration.md)及[实现状态矩阵](../status-matrix.md)。冲突以用户最新确认意图为准，实现以当前代码及对应版本的证据为准。
 

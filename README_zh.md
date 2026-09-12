@@ -187,9 +187,10 @@ provider。Provider、模块、权限和任务配置仍在主窗口中完成。
 
 桌面端核心默认监听 `127.0.0.1:8771`，浏览器预览默认使用 `127.0.0.1:8770`。
 
-Windows 一键启动会先校验固定路径
-`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd`（或显式配置的
-绝对路径），并要求 `--version` 逐字返回 `0.1.1-rc.2`。不会从全局 `PATH` 隐式发现
+Windows 一键启动会读取 [受管发行描述](dsh-release/README.md)，按其中声明的安装布局
+解析 DSH 可执行文件，并要求 `--version` 逐字返回该描述里的 `harness.version`。
+默认发行的版本与路径都只写在这一处；`SUMIKA_DSH_INSTALL_ROOT` 可换安装根。
+不会从全局 `PATH` 隐式发现
 `dsh`。显式设置 `SUMIKA_AGENT_ENDPOINT` / `SUMIKA_DSH_ENDPOINT` 才允许复用外部
 端点；`host.describe` 只证明协议健康，不能证明发行包版本。默认 `3080` 已有无法核验
 版本的服务时，脚本会 fail closed，避免启动错误 Runtime。Tauri 在启动子进程前会再做
@@ -205,11 +206,13 @@ Windows 一键启动会先校验固定路径
 .\tools\setup-dsh.ps1 -Proxy 'http://127.0.0.1:6064'
 ```
 
-安装辅助脚本只写入 `D:\Tools\DeepSeekHarness\0.1.1-rc.2`，不修改 PATH 或
+安装辅助脚本按描述中的冻结锁文件安装（`--frozen-lockfile --ignore-scripts`），
+并在安装后逐字节比对安装锁文件；不匹配时只报告、不改动原树。它不修改 PATH 或
 全局 DSH。`run-desktop.ps1` 不会安装、升级或下载 DSH；桌面端会使用
 `.sumika-desktop\dsh-profile` 作为隔离 `DSH_HOME`。自定义安装位置仍可显式设置
-`SUMIKA_AGENT_EXECUTABLE` 和 `SUMIKA_AGENT_AUTOSTART=1`，但可执行文件必须通过同一
-精确版本校验。
+`SUMIKA_DSH_INSTALL_ROOT`，或设置 `SUMIKA_AGENT_EXECUTABLE` 与
+`SUMIKA_AGENT_AUTOSTART=1`，但可执行文件必须落在描述的安装布局内并通过同一精确
+版本校验。
 
 桌面壳会把 DSH 生命周期写入 `.sumika-desktop/logs/dsh.log`，并把
 `.sumika-desktop/dsh-profile` 作为 `DSH_HOME`。固定版本缺失、路径错误或版本无法

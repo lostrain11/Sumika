@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import process from "node:process";
+import { randomBytes } from "node:crypto";
 
 const root = new URL("..", import.meta.url).pathname.replace(/^\/(?:([A-Za-z]):)/, "$1:");
 const repoRoot = root.endsWith("/") || root.endsWith("\\") ? root.slice(0, -1) : root;
@@ -50,11 +51,12 @@ async function waitForCore(url, child) {
   throw new Error(`timed out waiting for isolated Sumika Core: ${lastError}`);
 }
 
-async function spawnCore(port) {
+async function spawnCore(port, secret) {
   const args = [
     "-u",
     "-m",
     "sumika_core",
+    "--host-bootstrap-stdin",
     "--host",
     "127.0.0.1",
     "--port",
@@ -76,7 +78,7 @@ async function spawnCore(port) {
     const child = spawn(executable, args, {
       cwd: repoRoot,
       env: environment,
-      stdio: "inherit",
+      stdio: ["pipe", "inherit", "inherit"],
       windowsHide: true,
     });
     const errorPromise = once(child, "error").then(([error]) => error);
@@ -84,7 +86,10 @@ async function spawnCore(port) {
       errorPromise,
       new Promise((resolve) => setTimeout(() => resolve(null), 100)),
     ]);
-    if (!result) return child;
+    if (!result) {
+      child.stdin.end(JSON.stringify({ schema: "sumika-host/v1", secret }) + "\n");
+      return child;
+    }
     lastError = result;
   }
   throw new Error(`Python was not found; set SUMIKA_PYTHON to an executable path (${lastError?.message || "unknown error"})`);
@@ -93,7 +98,8 @@ async function spawnCore(port) {
 async function run() {
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const core = await spawnCore(port);
+  const secret = randomBytes(32).toString("hex");
+  const core = await spawnCore(port, secret);
   let exitCode = 1;
   try {
     await waitForCore(baseUrl, core);
@@ -107,6 +113,7 @@ async function run() {
         ...process.env,
         SUMIKA_BASE_URL: `${baseUrl}/`,
         SUMIKA_TEST_ISOLATED: "1",
+        SUMIKA_TEST_HOST_SECRET: secret,
       },
       stdio: "inherit",
       windowsHide: true,

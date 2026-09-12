@@ -1,6 +1,8 @@
 # 固定 DSH 启动故障手册
 
-本手册适用于 Sumika 固定 DSH `0.1.1-rc.2`、Windows `run-desktop.ps1` 和 Tauri
+本手册适用于 Sumika 当前受管 DSH 发行（版本来自
+[发行描述](../../dsh-release/README.md)，当前为 `0.1.1-rc.2`）、Windows
+`run-desktop.ps1` 和 Tauri
 启动器。当前完成度仍以[状态矩阵](../status-matrix.md)为准。
 
 ## 证据顺序
@@ -28,7 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/test_dsh_launch.ps1
 
 ### `version-mismatch`
 
-实际 `--version` 不是 `0.1.1-rc.2`。不要自动回退或升级；安装固定版本，或设置指向同一
+实际 `--version` 不等于发行描述里的 `harness.version`。不要自动回退或升级；安装该描述声明的版本，或设置指向同一
 版本的绝对 `SUMIKA_AGENT_EXECUTABLE`。版本验证失败时 Tauri 不会启动错误 Runtime。
 
 ### 默认 `3080` 已被占用

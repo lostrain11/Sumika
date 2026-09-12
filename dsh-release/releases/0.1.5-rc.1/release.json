@@ -1,0 +1,132 @@
+{
+  "schema": "sumika.dsh-release/v1",
+  "id": "0.1.5-rc.1",
+  "status": "blocked",
+  "adapter_contract": "dsh-web-remote-v1",
+  "harness": {
+    "id": "dsh",
+    "package": "@deepseek-ai/dsh",
+    "version": "0.1.5-rc.1",
+    "source": {
+      "commit": "183f08e9c6dde7e36cd2318eaee70b0da08fb35e",
+      "commit_evidence": "Declared by the approved H02 candidate selection. The published npm tarball has no gitHead field, so this commit is not recomputed from the artifact and must not be presented as artifact-verified.",
+      "tarball": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.1.tgz",
+      "tarball_sha512": "sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==",
+      "tarball_sha1": "6bcdb554bf2eef837666e37f5bd5fa494eb053e4"
+    },
+    "install": {
+      "root": "D:\\Tools\\DeepSeekHarness",
+      "root_env": "SUMIKA_DSH_INSTALL_ROOT",
+      "directory": "0.1.5-rc.1",
+      "executable": "node_modules\\.bin\\dsh.cmd"
+    },
+    "artifacts": [
+      "@deepseek-ai/dsh@0.1.5-rc.1 (npm tarball, integrity recorded above)",
+      "@deepseek-ai/dsh-tools@0.1.5-rc.1 (plugin tool API, compared against 0.1.1-rc.2)"
+    ],
+    "signals": [
+      "POST /api/<namespace>/<method> with the client-request/rpcId/method/payload envelope",
+      "payload must carry exactly one plain-object args field",
+      "session/list, session/create, session/search, session/modelCatalog, session/prompt, session/cancel, session/fork, session/rename, session/selectModel, session/updateQueue, session/attachment, session/page, session/inspect",
+      "workspace/list, workspace/create, workspace/rename, workspace/delete, workspace/insertBefore, workspace/insertSessionBefore, workspace/archiveSession",
+      "settings/describe, credentials/describe, agentPresets/list, llm/listProviders, llm/registerAdapter",
+      "GET /api/remote.mux WebSocket plus POST /api/$events/result for the Remote event pump",
+      "dsh web prints a per-process token URL and requires the exchanged signed cookie on every /api request"
+    ]
+  },
+  "toolchain": {
+    "node": ">=22",
+    "package_manager": "pnpm",
+    "package_manager_major": 11,
+    "lockfile": "pnpm-lock.yaml",
+    "lockfile_sha256": "45298be377af6f88cd106f3a00851971ce7499fa7aa7f13bc8d45ac920a752e5"
+  },
+  "install_policy": {
+    "lockfile_only": true,
+    "ignore_scripts": true,
+    "scripts_allowed": []
+  },
+  "plugins": [
+    {
+      "id": "sumika-route-bridge",
+      "name": "@sumika/dsh-route-bridge",
+      "version": "0.1.0",
+      "path": "plugins/dsh-route-bridge",
+      "content_digest": "0a2356fee143d69e781da62e408ea1aa2abab3a1dbf2ae818c45698d07f9aba2",
+      "install": "bridge",
+      "default_enabled": true,
+      "capabilities": ["sumika.route.bridge_tools"],
+      "groups": [],
+      "validation": "composed and booted on this release in an isolated profile; tool registration API unchanged"
+    },
+    {
+      "id": "sumika-browser-policy",
+      "name": "@sumika/dsh-browser-policy",
+      "version": "0.1.0",
+      "path": "plugins/dsh-browser-policy",
+      "content_digest": "8661b3eb1d57c66174ac0a78ce6249cca5efbb6d18c88af072d764d982674e94",
+      "install": "bridge",
+      "default_enabled": true,
+      "capabilities": ["browser policy gate for DSH BrowserSkill tools"],
+      "groups": [],
+      "validation": "composed and booted on this release in an isolated profile; tool registration API unchanged"
+    },
+    {
+      "id": "sumika-desktop-automation",
+      "name": "@sumika/dsh-desktop-automation",
+      "version": "0.1.0",
+      "path": "plugins/dsh-desktop-automation",
+      "content_digest": "8266624492f54232496be6bfa2d5f37f86a60ce9f5eca6baf6102ff853e819ff",
+      "install": "bridge",
+      "default_enabled": true,
+      "capabilities": ["controlled desktop application bridge"],
+      "groups": [],
+      "validation": "composed and booted on this release in an isolated profile; tool registration API unchanged"
+    },
+    {
+      "id": "sumika-community-documents",
+      "name": "@sumika/dsh-community-documents",
+      "version": "0.1.0",
+      "path": "plugins/dsh-community-documents",
+      "content_digest": "9b3d1a58ddae5b2fc53d4ef37fc58a7e7702fb7c984605f0135b5184e9a5f447",
+      "install": "optional",
+      "default_enabled": false,
+      "third_party": true,
+      "capabilities": ["word_create", "word_read", "word_update", "excel_create", "excel_read", "excel_update", "ppt_create", "ppt_read", "pdf_read"],
+      "groups": ["word", "excel", "powerpoint", "pdfRead"],
+      "validation": "not re-verified on this release; the optional office plugins stay unavailable there until re-checked"
+    },
+    {
+      "id": "sumika-quality-routing",
+      "name": "@sumika/dsh-quality-routing",
+      "version": "0.1.0",
+      "path": "plugins/dsh-quality-routing",
+      "content_digest": "7b6bbc13192bf293677d1257297441593a771466b3b874d2de6c4f468602b999",
+      "install": "reference",
+      "default_enabled": false,
+      "capabilities": ["quality-routing SDK adapter"],
+      "groups": [],
+      "validation": "not re-verified on this release"
+    }
+  ],
+  "verification": {
+    "evidence": [
+      "Frozen lockfile generated with pnpm 11 and installed with --frozen-lockfile --ignore-scripts at D:/Tools/DeepSeekHarness/0.1.5-rc.1; node_modules/.pnpm/lock.yaml is byte-identical to the declared pnpm-lock.yaml.",
+      "The candidate boots and prints its startup URL: `dsh web: http://127.0.0.1:3399/?token=...`.",
+      "The three bridge packages install into an isolated web profile with `dsh plugin --profile web add`, compose into `dsh --profile web --dump-config`, and the composed profile boots without error. The optional community documents package was not installed on this candidate.",
+      "dsh-tools 0.1.5-rc.1 exports the same defineTool signature and the same tools/pre-execute waterfall that the Sumika plugins use, so the plugin-facing tool API did not change."
+    ],
+    "limitations": [
+      "This install is an isolated verification tree. It is not the daily profile, no user session, credential or history was migrated into it, and nothing in the running desktop points at it by default.",
+      "Only the plugin half of the candidate was exercised. No Sumika Core session, prompt, tool call or event was exchanged with this release, because the adapter cannot speak its protocol yet. That exchange remains unverified."
+    ],
+    "blockers": [
+      "Token authentication: the loopback /api surface now rejects the unauthenticated POST that DSHAgentRuntime._post performs with HTTP 401. Every request needs the cookie issued by the startup token exchange (GET /?token=... yields a dsh-auth-<id> signed cookie).",
+      "Endpoint naming: methods moved from `<namespace>.<method>` to `<namespace>/<method>`. /api/session.list returns 404 while /api/session/list resolves.",
+      "Payload envelope: the gateway rejects the current flat payload with gateway/internal 'Remote payload must contain exactly one plain-object args field'. Requests must send {\"args\": {...}}.",
+      "Removed endpoints used by the adapter: host.describe, mcp.list, agent.list, agent.prompt, agent.history, agent.interrupt, session.export, session.retry. Renamed: session.history moved to session/page, session.models moved to session/modelCatalog.",
+      "Event transport: GET /api/events.mux and /api/events.host are gone, replaced by the Gateway-owned /api/remote.mux WebSocket and POST /api/$events/result. POST /api/respond, which DSHAgentRuntime uses for approvals, no longer exists.",
+      "The legacy protocol package @deepseek-ai/dsh-host-apiproxy was last published at 0.1.1-rc.2, so the old surface cannot be restored by adding it to this release."
+    ]
+  }
+}

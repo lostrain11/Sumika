@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from quality_routing import Node, Quote, RoutingError, Scope
 from quality_routing.contracts import amount
+from quality_routing.harness import ExternalSessionRef, RuntimeBinding
 from quality_routing.development_journal import append_event, recovery_state
 from quality_routing.workflow import ExternalQuote, WorkRequest, admission_state, authorize, check_authorization, check_delegation, classify_request, delegation_digest, work_artifact
 from ..development.contracts import DevelopmentExecutor, LEGACY_EXECUTOR_ID
@@ -331,6 +332,8 @@ class WorkService:
                 "status_detail": offer.get("reason", ""),
                 "external": {"source": source, "payload_digest": payload_digest, "binding_digest": binding_digest,
                              "limit_enforced": supported, "identity": offer.get("identity"),
+                             "runtime_binding": deepcopy(offer.get("runtime_binding")),
+                             "trigger_binding": deepcopy(offer.get("trigger_binding")),
                              "upstream_id": None, "execution_key": offer.get("execution_key"),
                              "method": offer.get("method"),
                              "own_high_cny": own_high,
@@ -349,6 +352,11 @@ class WorkService:
                 value["authorization"] = authorize(request, quote, candidate_ids=(candidate_id,), max_cny=high)
                 value["authorization"]["budget_owner_request_id"] = parent["request_id"]
                 value["status"] = "ready"
+            if source == "agent" and offer.get("runtime_binding") is not None and value["external"]["session_id"]:
+                binding = RuntimeBinding.from_dict(offer["runtime_binding"])
+                value["external"]["session_ref"] = ExternalSessionRef(
+                    binding.harness_id, binding.instance_id, value["external"]["session_id"],
+                ).to_dict()
             saved = self._save(value)
             if self.record_received:
                 self.record_received(request)
@@ -390,6 +398,10 @@ class WorkService:
             current_digest = hashlib.sha256(json.dumps(current_offer, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
             if current_digest != value["external"]["binding_digest"]:
                 raise RoutingError("external route or price changed before dispatch")
+            if current_offer.get("runtime_binding") is not None:
+                binding = RuntimeBinding.from_dict(current_offer["runtime_binding"])
+                if not binding.matches_attempt(binding):
+                    raise RoutingError("runtime launch identity is unverified")
             if current_offer.get("limit_enforced") is not True:
                 raise RoutingError("host cannot enforce a spending limit")
             upper = amount(value["external"].get("own_high_cny", value["quote"]["high_cny"]))
@@ -407,7 +419,8 @@ class WorkService:
                                                    "child_request_id": value["request_id"], "step_id": value["parent_authorization"]["step_id"]}
             previous = deepcopy(value)
             value["authorization"]["reserved_cny"] = str(upper)
-            value["attempts"][attempt_id] = {"status": "reserved", "upper_cny": str(upper)}
+            value["attempts"][attempt_id] = {"status": "reserved", "upper_cny": str(upper),
+                                             "runtime_binding": deepcopy(value["external"].get("runtime_binding"))}
             value["status"] = "executing"
             if parent is not None:
                 self.repository.save_record_group(self.namespace, value["assistant_id"], [(parent_previous, parent), (previous, value)])

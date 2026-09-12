@@ -6,6 +6,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 . (Join-Path $PSScriptRoot 'dsh-launch.ps1')
+$requestedRuntime = [string]$env:SUMIKA_AGENT_RUNTIME
+if ([string]::IsNullOrWhiteSpace($requestedRuntime)) { $requestedRuntime = 'dsh' }
+if ($requestedRuntime.Trim().ToLowerInvariant() -eq 'dsh' -and $SumikaDshReleaseError) {
+    throw "The managed DSH release description is unusable, so no managed runtime will be started. $SumikaDshReleaseError"
+}
 $pinnedDshVersion = $SumikaPinnedDshVersion
 $pinnedDshExecutable = $SumikaPinnedDshExecutable
 

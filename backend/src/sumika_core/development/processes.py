@@ -66,7 +66,7 @@ class WindowsJob:
             self.handle = None
 
 
-class ManagedTestProcess:
+class ManagedProcess:
     def __init__(self, command, *, cwd, env, output):
         self.job = WindowsJob() if os.name == "nt" else None
         self.process = None
@@ -107,3 +107,6 @@ class ManagedTestProcess:
 
     def __exit__(self, *args):
         self.close()
+
+
+ManagedTestProcess = ManagedProcess

@@ -1,10 +1,14 @@
 import { expect } from "@playwright/test";
 
 export async function installNativeQuestionFixture(page, endpoint, respond) {
+  return installNativeConfirmationFixture(page, endpoint, "agent.question.respond", respond);
+}
+
+export async function installNativeConfirmationFixture(page, endpoint, method, respond) {
   if (process.env.SUMIKA_TEST_ISOLATED !== "1") throw new Error("Native fixture requires isolated Core");
-  await page.exposeFunction("fixtureQuestionConfirmation", ({ method, params }) => {
-    expect(method).toBe("agent.question.respond");
-    return respond({ method, params });
+  await page.exposeFunction("fixtureQuestionConfirmation", request => {
+    expect(Array.isArray(method) ? method : [method]).toContain(request.method);
+    return respond(request);
   });
   await page.addInitScript((endpoint) => {
     window.__TAURI_INTERNALS__ = { invoke: async (command, params) => {

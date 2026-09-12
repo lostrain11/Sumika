@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from quality_routing import RoutingError
 from quality_routing.contracts import bounded_text, identifier
+from quality_routing.harness import RuntimeBinding
 from quality_routing.privacy import looks_like_secret_text
 
 
@@ -48,12 +49,13 @@ class LegacyWorkAdmission:
     }
 
     def __init__(self, work, *, profiles: Callable, routes: Callable, agent_offer: Callable,
-                 route_status: Callable | None = None) -> None:
+                 route_status: Callable | None = None, runtime_binding: Callable | None = None) -> None:
         self.work = work
         self.profiles = profiles
         self.routes = routes
         self.agent_offer = agent_offer
         self.route_status = route_status
+        self.runtime_binding = runtime_binding
         self._armed: dict[tuple[str, str], dict[str, Any]] = {}
 
     def handles(self, method: str, params: dict[str, Any]) -> bool:
@@ -109,13 +111,23 @@ class LegacyWorkAdmission:
             params = {**previous, **params}
         if source == "agent":
             supplied = dict(self.agent_offer(params))
+            binding = self.runtime_binding() if self.runtime_binding else None
+            session_id = str(params.get("sessionId") or params.get("session_id") or params.get("childSessionId") or "default")
+            execution_key = "agent:" + session_id
+            if binding is not None:
+                if not isinstance(binding, RuntimeBinding):
+                    raise RoutingError("invalid host runtime binding")
+                execution_key = "agent:" + hashlib.sha256(json.dumps(
+                    [binding.harness_id, binding.instance_id, session_id], ensure_ascii=False,
+                ).encode()).hexdigest()
             return {
                 "source": source, "method": method, "candidate_id": supplied.get("candidate_id", "agent:configured"),
                 "identity": supplied.get("identity", ["agent", "unpriced"]),
                 "high_cny": supplied.get("high_cny"), "limit_enforced": supplied.get("limit_enforced") is True,
                 "free": supplied.get("free") is True, "funding": supplied.get("funding", "unknown"),
                 "complexity": "complex",
-                "execution_key": "agent:" + str(params.get("sessionId") or params.get("session_id") or params.get("childSessionId") or "default"),
+                "runtime_binding": binding.to_dict() if binding else None,
+                "execution_key": execution_key,
                 "reason": supplied.get("reason") or "宿主无法承诺硬上限；此入口暂不能自动派发，费用未知",
             }
         profiles = {str(row["id"]): row for row in self.profiles()}
@@ -159,6 +171,8 @@ class LegacyWorkAdmission:
         digest = hashlib.sha256(json.dumps(identities, sort_keys=True, default=str).encode()).hexdigest()
         return {
             "source": source, "method": method, "candidate_id": f"{source}:{digest[:32]}", "identity": identities,
+            "trigger_binding": (self.runtime_binding().to_dict() if method == "sumika.route.arm"
+                                and self.runtime_binding and self.runtime_binding() is not None else None),
             "high_cny": "0" if free else None, "limit_enforced": free, "free": free,
             "funding": "free-policy" if free else "unknown", "complexity": "simple" if source == "web" else "complex",
             "execution_key": ",".join(sorted("web-profile:" + str(profile["id"]) for profile in selected)),
@@ -196,14 +210,23 @@ class LegacyWorkAdmission:
                                     "owner": result["work_request"]["assistant_id"]}
         return result
 
-    def advance_boundary(self, event: dict[str, Any], execute: Callable) -> Any:
+    def advance_boundary(self, event: dict[str, Any], execute: Callable,
+                         *, source_binding: RuntimeBinding | None = None) -> Any:
+        if not isinstance(source_binding, RuntimeBinding) or source_binding.launch_id is None:
+            return {"accepted": False, "reason": "runtime-identity-unverified"}
         key = (str(event.get("session_id") or event.get("parent_session_id") or ""),
                str(event.get("turn_id") or event.get("parent_turn_id") or ""))
         with self.work._lock:
             armed = self._armed.get(key) or self._armed.get((key[0], ""))
             if not armed:
-                return execute(False)
+                return {"accepted": False, "reason": "no-authorized-arm"}
             value = self.work.get(armed["work_request_id"], armed["owner"])
+            try:
+                original = RuntimeBinding.from_dict(value["external"].get("trigger_binding"))
+            except RoutingError:
+                return {"accepted": False, "reason": "runtime-identity-unverified"}
+            if not original.matches_attempt(source_binding):
+                return {"accepted": False, "reason": "runtime-binding-changed"}
             if value["status"] != "executing":
                 return {"accepted": False, "status": value["status"], "reason": "armed work is not executable"}
             current = self.offer("sumika.route.arm", armed["params"])
@@ -237,8 +260,11 @@ class LegacyWorkAdmission:
                 return self.work.external_observe(value["request_id"], owner, result)
         return result
 
-    def observe_agent_event(self, event: dict[str, Any], boundary: str | None) -> None:
+    def observe_agent_event(self, event: dict[str, Any], boundary: str | None,
+                            *, source_binding: RuntimeBinding | None = None) -> None:
         if boundary not in {"turn.completed", "turn.failed", "turn.cancelled"}:
+            return
+        if not isinstance(source_binding, RuntimeBinding) or source_binding.launch_id is None:
             return
         turn_id, session_id = event.get("turn_id"), event.get("session_id")
         if not turn_id or not session_id:
@@ -248,6 +274,14 @@ class LegacyWorkAdmission:
                 external = value.get("external") or {}
                 if (external.get("source") == "agent" and external.get("session_id") == session_id
                         and external.get("upstream_id") == turn_id):
+                    try:
+                        recorded = RuntimeBinding.from_dict(external.get("runtime_binding"))
+                        attempt = value.get("attempts", {}).get(f'{value["request_id"]}:external:1', {})
+                        dispatched = RuntimeBinding.from_dict(attempt.get("runtime_binding"))
+                    except RoutingError:
+                        continue
+                    if not recorded.matches_attempt(source_binding) or not dispatched.matches_attempt(source_binding):
+                        continue
                     self.work.external_observe(value["request_id"], owner, {
                         "status": "completed" if boundary == "turn.completed" else "submission-unknown",
                         "turn_id": turn_id, "possibly_sent": True,

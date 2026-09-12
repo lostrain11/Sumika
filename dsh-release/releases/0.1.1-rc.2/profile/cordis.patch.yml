@@ -1,0 +1,15 @@
+- id: sumika-route-bridge
+  config:
+    endpoint: '__SUMIKA_CORE_ENDPOINT__'
+    policyTimeoutMs: 1500
+    enabled: true
+- id: sumika-browser-policy
+  config:
+    endpoint: '__SUMIKA_CORE_ENDPOINT__'
+    policyTimeoutMs: 1500
+    helpTimeoutMs: 300000
+- id: sumika-desktop-automation
+  config:
+    endpoint: '__SUMIKA_CORE_ENDPOINT__'
+    policyTimeoutMs: 1500
+    enabled: true

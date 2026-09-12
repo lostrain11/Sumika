@@ -1,6 +1,7 @@
 import base64
 from io import BytesIO
 import json
+import secrets
 import sys
 import tempfile
 import threading
@@ -11,6 +12,7 @@ from http.client import HTTPConnection
 from unittest.mock import patch
 
 from sumika_core.server import CoreApplication, SumikaRequestHandler, create_server
+from sumika_core.host_authorization import confirmation_digest
 from sumika_core.storage import Storage
 from sumika_core.protocol.jsonrpc import JsonRpcError
 from sumika_core.protocol.models import Message
@@ -23,10 +25,12 @@ from fixtures.providers import (
 
 class ServerTests(unittest.TestCase):
     def setUp(self):
+        self.host_secret = secrets.token_hex(32)
         self.server, self.application = create_server(
             "127.0.0.1",
             0,
             ":memory:",
+            host_secret=self.host_secret,
             test_providers={
                 "llm": [FakeProvider("这是测试回复")],
                 "asr": [FakeASRProvider("这是 Fake ASR 的演示转写。")],
@@ -52,6 +56,32 @@ class ServerTests(unittest.TestCase):
         value = json.loads(response.read().decode())
         connection.close()
         return response.status, value
+
+    def host_request(self, method, path, payload):
+        self.assertEqual((method, path), ("POST", "/rpc"))
+        action = payload["method"]
+        params = payload.get("params", {})
+        body = json.dumps({
+            "method": action,
+            "params": params,
+            "digest": confirmation_digest(action, params),
+        }).encode()
+        connection = HTTPConnection("127.0.0.1", self.port, timeout=3)
+        try:
+            connection.request("POST", "/internal/host-confirm/v1", body=body, headers={
+                "Content-Type": "application/json",
+                "X-Sumika-Host": self.host_secret,
+            })
+            response = connection.getresponse()
+            return response.status, json.loads(response.read().decode())
+        finally:
+            connection.close()
+
+    def trusted_rpc(self, method, params):
+        caller = self.application.host_authorization.authenticate(
+            self.host_secret, method, params, confirmation_digest(method, params),
+        )
+        return self.application.rpc(method, params, caller=caller)
 
     def request_bytes(self, method, path, headers=None):
         connection = HTTPConnection("127.0.0.1", self.port, timeout=3)
@@ -193,7 +223,7 @@ class ServerTests(unittest.TestCase):
         provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
         provider_thread.start()
         try:
-            status, saved = self.request(
+            status, saved = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -214,7 +244,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(saved["result"]["config"]["models"][0]["id"], "model-a")
 
-            _, discovered = self.request(
+            _, discovered = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -229,7 +259,7 @@ class ServerTests(unittest.TestCase):
                 ["model-a", "model-b"],
             )
 
-            _, selected = self.request(
+            _, selected = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -241,7 +271,7 @@ class ServerTests(unittest.TestCase):
             )
             self.assertEqual(selected["result"]["profile"]["config"]["model"], "model-b")
 
-            _, health = self.request(
+            _, health = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -264,7 +294,7 @@ class ServerTests(unittest.TestCase):
             provider_thread.join(timeout=2)
 
     def test_model_policy_pricing_rpc_and_http_filter_public_evidence(self):
-        status, saved = self.request(
+        status, saved = self.host_request(
             "POST",
             "/rpc",
             {
@@ -418,7 +448,7 @@ class ServerTests(unittest.TestCase):
         status, modules = self.request("GET", "/api/modules")
         self.assertEqual(status, 200)
         self.assertTrue(any(module["id"] == "llm" for module in modules))
-        status, response = self.request(
+        status, response = self.host_request(
             "POST",
             "/rpc",
             {
@@ -440,7 +470,7 @@ class ServerTests(unittest.TestCase):
         preview = self.application.rpc("provider.import.preview", {"raw": raw})
         self.assertEqual(preview["importer_id"], "ccswitch-v1")
         self.assertIn("source:futureToken", preview["secret_fields"])
-        imported = self.application.rpc("provider.import.save", {"raw": raw})
+        imported = self.trusted_rpc("provider.import.save", {"raw": raw})
         profile = imported["profile"]
         self.assertEqual(profile["status"], "unavailable")
         setting = self.application.storage.get_module_setting("llm")
@@ -453,7 +483,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.application.credentials.read(profile["id"])["source:futureToken"], "rpc-secret")
 
         with self.assertRaisesRegex(JsonRpcError, "connection failed"):
-            self.application.rpc("provider.profile.activate", {"profile_id": profile["id"]})
+            self.trusted_rpc("provider.profile.activate", {"profile_id": profile["id"]})
 
     def test_provider_profile_rpc_health_activation_and_privacy_aggregation(self):
         class Handler(BaseHTTPRequestHandler):
@@ -470,7 +500,7 @@ class ServerTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            profile = self.application.rpc(
+            profile = self.trusted_rpc(
                 "provider.profile.save",
                 {
                     "profile": {
@@ -481,9 +511,9 @@ class ServerTests(unittest.TestCase):
                     }
                 },
             )
-            health = self.application.rpc("provider.profile.health", {"profile_id": profile["id"]})
+            health = self.trusted_rpc("provider.profile.health", {"profile_id": profile["id"]})
             self.assertTrue(health["ok"])
-            activated = self.application.rpc("provider.profile.activate", {"profile_id": profile["id"]})
+            activated = self.trusted_rpc("provider.profile.activate", {"profile_id": profile["id"]})
             self.assertEqual(activated["module"]["config"], {"profile_id": profile["id"]})
             self.assertEqual(activated["privacy"]["label"], "本地处理")
 
@@ -515,7 +545,7 @@ class ServerTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            profile = self.application.rpc(
+            profile = self.trusted_rpc(
                 "provider.profile.save",
                 {
                     "profile": {
@@ -526,11 +556,11 @@ class ServerTests(unittest.TestCase):
                     }
                 },
             )
-            health = self.application.rpc(
+            health = self.trusted_rpc(
                 "provider.profile.health", {"profile_id": profile["id"]}
             )
             self.assertTrue(health["ok"])
-            self.application.rpc("provider.profile.activate", {"profile_id": profile["id"]})
+            self.trusted_rpc("provider.profile.activate", {"profile_id": profile["id"]})
         finally:
             server.shutdown()
             server.server_close()
@@ -591,7 +621,7 @@ class ServerTests(unittest.TestCase):
             candidate = discovered["result"][0]
             self.assertEqual(candidate["state"], "discovered")
             self.assertFalse(marker.exists())
-            status, approved = self.request(
+            status, approved = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -604,7 +634,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(approved["result"]["state"], "approved")
             self.assertFalse(marker.exists())
-            status, configured = self.request(
+            status, configured = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -625,7 +655,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(configured["result"]["launcher"])
             self.assertFalse(marker.exists())
-            self.request(
+            self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -640,7 +670,7 @@ class ServerTests(unittest.TestCase):
                     },
                 },
             )
-            status, blocked = self.request(
+            status, blocked = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -653,7 +683,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertIn("approval", blocked["error"]["message"])
             self.assertFalse(marker.exists())
-            status, executed = self.request(
+            status, executed = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -698,12 +728,12 @@ class ServerTests(unittest.TestCase):
                 {"jsonrpc": "2.0", "id": 52, "method": "plugin.discover", "params": {"paths": [str(plugin_dir)]}},
             )
             candidate_id = discovered["result"][0]["candidate_id"]
-            self.request(
+            self.host_request(
                 "POST",
                 "/rpc",
                 {"jsonrpc": "2.0", "id": 53, "method": "plugin.approve", "params": {"candidate_id": candidate_id}},
             )
-            status, configured = self.request(
+            status, configured = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -726,7 +756,7 @@ class ServerTests(unittest.TestCase):
 
             provider_id = f"plugin:{candidate_id}"
             for module_id in ("asr", "vision"):
-                status, updated = self.request(
+                status, updated = self.host_request(
                     "POST",
                     "/rpc",
                     {
@@ -738,24 +768,24 @@ class ServerTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(updated["result"]["implementation_id"], provider_id)
-            self.request(
+            self.host_request(
                 "POST",
                 "/rpc",
                 {"jsonrpc": "2.0", "id": 57, "method": "audio.permission.set", "params": {"permission_id": "microphone", "granted": True}},
             )
-            self.request(
+            self.host_request(
                 "POST",
                 "/rpc",
                 {"jsonrpc": "2.0", "id": 58, "method": "vision.permission.set", "params": {"permission_id": "screen.read", "granted": True}},
             )
-            status, audio_started = self.request(
+            status, audio_started = self.host_request(
                 "POST",
                 "/rpc",
                 {"jsonrpc": "2.0", "id": 59, "method": "audio.start", "params": {"capability": "asr"}},
             )
             self.assertEqual(status, 200)
             self.assertTrue(next(item for item in audio_started["result"]["capabilities"] if item["id"] == "asr")["running"])
-            status, vision_started = self.request(
+            status, vision_started = self.host_request(
                 "POST",
                 "/rpc",
                 {"jsonrpc": "2.0", "id": 60, "method": "vision.start", "params": {"source": "screen"}},
@@ -789,7 +819,7 @@ class ServerTests(unittest.TestCase):
                 "print(json.dumps({'type': 'result', 'result': {'received': request['input']}}))\n",
                 encoding="utf-8",
             )
-            status, configured = self.request(
+            status, configured = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -820,7 +850,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertIn("approval", blocked["error"]["message"])
 
-            status, result = self.request(
+            status, result = self.host_request(
                 "POST",
                 "/rpc",
                 {
@@ -870,14 +900,14 @@ class ServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         task_id = created["result"]["id"]
-        status, waiting = self.request(
+        status, waiting = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 21, "method": "task.run", "params": {"task_id": task_id}},
         )
         self.assertEqual(status, 200)
         self.assertEqual(waiting["result"]["status"], "waiting_approval")
-        status, completed = self.request(
+        status, completed = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 22, "method": "task.run", "params": {"task_id": task_id, "approved": True}},
@@ -1622,7 +1652,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(diff["result"]["diff"]["changed"])
 
-        status, restored = self.request(
+        status, restored = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 36, "method": "snapshot.restore", "params": {"snapshot_id": snapshot_id}},
@@ -1671,7 +1701,7 @@ class ServerTests(unittest.TestCase):
             "/rpc",
             {"jsonrpc": "2.0", "id": 40, "method": "character.update", "params": {"character_id": "other", "name": "另一个角色·修改"}},
         )
-        status, restored = self.request(
+        status, restored = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 41, "method": "snapshot.restore", "params": {"snapshot_id": snapshot_id}},
@@ -1728,7 +1758,7 @@ class ServerTests(unittest.TestCase):
         status, audio = self.request("GET", "/api/audio/status")
         self.assertEqual(status, 200)
         self.assertEqual({item["id"] for item in audio["capabilities"]}, {"asr", "tts", "vad"})
-        _, response = self.request(
+        _, response = self.host_request(
             "POST",
             "/rpc",
             {
@@ -1739,14 +1769,14 @@ class ServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(response["result"]["implementation_id"], "fake-asr")
-        status, response = self.request(
+        status, response = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 7, "method": "audio.start", "params": {"capability": "asr"}},
         )
         self.assertEqual(status, 400)
         self.assertIn("permission", response["error"]["message"])
-        _, permission = self.request(
+        _, permission = self.host_request(
             "POST",
             "/rpc",
             {
@@ -1757,14 +1787,14 @@ class ServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(next(item for item in permission["result"]["permissions"] if item["permission_id"] == "microphone")["state"], "granted")
-        status, started = self.request(
+        status, started = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 9, "method": "audio.start", "params": {"capability": "asr"}},
         )
         self.assertEqual(status, 200)
         self.assertTrue(next(item for item in started["result"]["capabilities"] if item["id"] == "asr")["running"])
-        status, transcribed = self.request(
+        status, transcribed = self.host_request(
             "POST",
             "/rpc",
             {
@@ -1781,7 +1811,7 @@ class ServerTests(unittest.TestCase):
         status, memory_status = self.request("GET", "/api/memory/status")
         self.assertEqual(status, 200)
         self.assertFalse(memory_status["enabled"])
-        _, response = self.request(
+        _, response = self.host_request(
             "POST",
             "/rpc",
             {
@@ -1832,7 +1862,7 @@ class ServerTests(unittest.TestCase):
         status, vision_status = self.request("GET", "/api/vision/status")
         self.assertEqual(status, 200)
         self.assertEqual({item["id"] for item in vision_status["sources"]}, {"screen", "camera"})
-        _, response = self.request(
+        _, response = self.host_request(
             "POST",
             "/rpc",
             {
@@ -1843,14 +1873,14 @@ class ServerTests(unittest.TestCase):
             },
         )
         self.assertTrue(response["result"]["enabled"])
-        status, response = self.request(
+        status, response = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 16, "method": "vision.start", "params": {"source": "screen"}},
         )
         self.assertEqual(status, 400)
         self.assertIn("permission", response["error"]["message"])
-        _, permission = self.request(
+        _, permission = self.host_request(
             "POST",
             "/rpc",
             {
@@ -1861,14 +1891,14 @@ class ServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(next(item for item in permission["result"]["permissions"] if item["permission_id"] == "screen.read")["state"], "granted")
-        status, started = self.request(
+        status, started = self.host_request(
             "POST",
             "/rpc",
             {"jsonrpc": "2.0", "id": 18, "method": "vision.start", "params": {"source": "screen"}},
         )
         self.assertEqual(status, 200)
         self.assertTrue(next(item for item in started["result"]["sources"] if item["id"] == "screen")["running"])
-        status, observed = self.request(
+        status, observed = self.host_request(
             "POST",
             "/rpc",
             {

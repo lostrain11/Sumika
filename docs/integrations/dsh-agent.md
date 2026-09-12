@@ -7,16 +7,22 @@ Sumika 当前采用 DSH-first，但 DSH 只是 [Agent Runtime](../architecture/a
 `AgentRuntime` 边界。DSH 未运行时，Agent 页面显示“未连接”，不会生成 Fake
 回复，也不会自动改写全局 DSH 配置。
 
-当前固定基线：`0.1.1-rc.2`、commit
-`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`，默认地址
-`http://127.0.0.1:3080`。`SUMIKA_AGENT_RUNTIME=dsh` 是默认选择。可以用
+当前固定基线不再写在本文或脚本里，而由[受管发行描述](../../dsh-release/README.md)
+声明：默认发行的DSH版本、安装布局、冻结锁文件摘要、自有插件内容摘要和协议事实都
+在`dsh-release/releases/<id>/release.json`。此前记录的`0.1.1-rc.2`、commit
+`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（npm包无`gitHead`，该commit为声明值而
+非从产物重算）与默认地址`http://127.0.0.1:3080`仍适用于该发行。
+`SUMIKA_AGENT_RUNTIME=dsh` 是默认选择。可以用
 `SUMIKA_AGENT_ENDPOINT`（兼容 `SUMIKA_DSH_ENDPOINT`）指向受管实例，用
 `SUMIKA_AGENT_PROFILE_DIR`（兼容 `SUMIKA_DSH_PROFILE_DIR`）指定隔离 profile；
 Windows 的 `tools/run-desktop.ps1` 是完整客户端的唯一推荐入口。它在启动 Tauri
-之前先验证固定路径
-`D:\Tools\DeepSeekHarness\0.1.1-rc.2\node_modules\.bin\dsh.cmd` 的
-`--version`，或验证显式 `SUMIKA_AGENT_EXECUTABLE` /
-`SUMIKA_DSH_EXECUTABLE`；输出必须逐字等于 `0.1.1-rc.2`，否则立即 fail closed。
+之前先按描述解析可执行文件并验证其 `--version`；输出必须逐字等于描述中的
+`harness.version`，否则立即 fail closed。`SUMIKA_DSH_INSTALL_ROOT` 可把安装根换到
+别处，`SUMIKA_DSH_RELEASE` 与 `SUMIKA_DSH_RELEASE_ROOT` 可选择另一份已描述发行；
+显式 `SUMIKA_AGENT_EXECUTABLE` / `SUMIKA_DSH_EXECUTABLE` 只在路径符合描述的安装
+布局时被接受。`tools/setup-dsh.ps1` 只按冻结锁文件安装（`--frozen-lockfile
+--ignore-scripts`），安装后逐字节比对`node_modules/.pnpm/lock.yaml`；不匹配时
+只报告并保持原树不变，不会静默重装。
 全局 `PATH` 中的 `dsh` 永远不会被隐式选用。显式配置的外部 endpoint 可以复用，
 但 `host.describe` 只证明协议健康，不证明发行包版本；没有显式 endpoint 时，若默认
 `3080` 已有无法核验版本的服务，launcher 会拒绝启动并提示停止该服务或显式选择外部

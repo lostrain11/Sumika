@@ -53,6 +53,16 @@ def _route(route_id: str, *, kind: str = "provider", **overrides):
 
 
 class DynamicRouteSupervisorTests(unittest.TestCase):
+    def test_preview_replan_cannot_replace_an_authorized_pending_request(self):
+        route = _route("preview-route", cost_class="local")
+        supervisor = self.make_supervisor([route], [])
+        original = {"parent_session_id": "session", "parent_turn_id": "turn", "question": "approved goal",
+                    "route_id": route.route_id, "auto_dispatch": True, "confirmation_mode": "automatic"}
+        supervisor.arm_turn(original)
+        before = dict(supervisor._turn_requests)
+        supervisor.replan({**original, "question": "different goal"}, dispatch_selected=False)
+        self.assertEqual(supervisor._turn_requests, before)
+
     def setUp(self):
         self.supervisors: list[DynamicRouteSupervisor] = []
 

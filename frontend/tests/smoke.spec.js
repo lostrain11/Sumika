@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { openPage } from "./helpers/navigation.js";
-import { installNativeQuestionFixture } from "./helpers/native-question-fixture.js";
+import { hostRpc, installNativeHostFixture } from "./helpers/native-host-fixture.js";
+import { requiresHostConfirmation } from "../src/host-confirmation.js";
+import { installNativeQuestionFixture, installNativeConfirmationFixture } from "./helpers/native-question-fixture.js";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,17 +12,27 @@ const baseUrl = process.env.SUMIKA_BASE_URL || "http://127.0.0.1:8770/";
 let providerStub;
 let providerStubUrl;
 
-async function resetWorkspace(page) {
-  const rpcUrl = `${baseUrl.replace(/\/$/, "")}/rpc`;
-  const call = async (method, params) => {
-    const response = await page.request.post(rpcUrl, {
-      data: { jsonrpc: "2.0", id: `${method}-${Date.now()}`, method, params },
-    });
-    if (!response.ok()) throw new Error(`${method} reset failed: ${response.status()}`);
-    const body = await response.json();
-    if (body.error) throw new Error(`${method} reset failed: ${body.error.message}`);
-    return body.result;
-  };
+function fixtureResponse(response) {
+  expect(response, "Native action must have an explicit business fixture").toBeDefined();
+  if (response.error) throw new Error(response.error.message);
+  expect(response).toHaveProperty("result");
+  return response.result;
+}
+
+async function routeFixtureRpc(page, respond) {
+  await page.route("**/rpc", async route => {
+    const request = route.request().postDataJSON();
+    expect(requiresHostConfirmation(request.method, request.params)).toBe(false);
+    if (request.method === "host.confirmation.digest") {
+      return route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result: { digest: "fixture-only" } } });
+    }
+    const response = await respond(request);
+    return response === undefined ? route.continue() : route.fulfill({ json: response });
+  });
+}
+
+async function resetWorkspace() {
+  const call = (method, params) => hostRpc(baseUrl, method, params);
   await call("provider.profile.save", {
     profile: {
       id: "playwright-openai-stub",
@@ -111,8 +123,8 @@ test.describe("Sumika UI shell", () => {
     if (providerStub) await new Promise((resolve) => providerStub.close(resolve));
   });
 
-  test.beforeEach(async ({ page }) => {
-    await resetWorkspace(page);
+  test.beforeEach(async () => {
+    await resetWorkspace();
   });
 
   test("chat, navigation, and Avatar visibility", async ({ page }) => {
@@ -189,6 +201,16 @@ test.describe("Sumika UI shell", () => {
   test("Developer manages metadata-only Skills and shows the MCP catalog", async ({ page }) => {
     const skillRoot = await mkdtemp(join(tmpdir(), "sumika-skill-catalog-"));
     const skillPath = join(skillRoot, "catalog-smoke", "SKILL.md");
+    const registrations = new Map();
+    const skillMetadata = new Map();
+    await installNativeConfirmationFixture(page, baseUrl, ["agent.skills.approve", "agent.skills.revoke"], ({ method, params }) => {
+      expect(params.confirm_skill_id).toBe(params.candidate_id);
+      expect(params.approved).toBe(true);
+      const state = method.endsWith(".approve") ? "approved" : "revoked";
+      registrations.set(params.candidate_id, state);
+      expect(skillMetadata.has(params.candidate_id)).toBe(true);
+      return { ...skillMetadata.get(params.candidate_id), state };
+    });
     await page.route("**/rpc", async (route) => {
       const request = route.request();
       if (request.method() !== "POST") {
@@ -197,6 +219,19 @@ test.describe("Sumika UI shell", () => {
       }
       let body;
       try { body = request.postDataJSON(); } catch { body = null; }
+      if (["agent.skills.approve", "agent.skills.revoke"].includes(body?.method)) {
+        throw new Error("Skill registration must use native confirmation");
+      }
+      if (["agent.skills.catalog", "agent.skills.discover"].includes(body?.method)) {
+        const response = await route.fetch();
+        const payload = await response.json();
+        for (const skill of payload.result.skills) {
+          skillMetadata.set(skill.candidate_id, skill);
+          if (registrations.has(skill.candidate_id)) skill.state = registrations.get(skill.candidate_id);
+        }
+        await route.fulfill({ response, json: payload });
+        return;
+      }
       if (body?.method !== "agent.mcp.catalog") {
         await route.continue();
         return;
@@ -738,9 +773,8 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "runtime-owned", ready: true, runtime_id: "minimal", profile: null }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method === "agent.session.prompt") submittedPrompt = body.params;
       const result = {
         "browser.profiles": { profiles: [] },
@@ -762,14 +796,15 @@ test.describe("Sumika UI shell", () => {
         },
       }[body?.method];
       if (result === undefined) {
-        await route.continue();
         return;
       }
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
-      });
-    });
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
@@ -817,17 +852,15 @@ test.describe("Sumika UI shell", () => {
         }),
       });
     });
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       if (body?.method === "agent.commands") {
         if (body.params?.sessionId === "playwright-agent-session") sessionCapabilityRefreshes += 1;
         const result = body.params?.sessionId === "playwright-agent-session"
           ? { available: true, entries: [{ name: "plan", description: "Enter or leave plan mode" }] }
           : { available: false, entries: [] };
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result };
       }
       const result = {
         "browser.profiles": { profiles: [] },
@@ -860,14 +893,15 @@ test.describe("Sumika UI shell", () => {
       }[body?.method];
       if (body?.method === "agent.session.prompt") submittedPrompts.push(body.params);
       if (result === undefined) {
-        await route.continue();
         return;
       }
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
-      });
-    });
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await expect(page.locator(".agent-status-line")).toContainText("DSH 已连接");
@@ -878,7 +912,7 @@ test.describe("Sumika UI shell", () => {
     await expect(page.locator("[data-agent-mcp-inventory='observed']")).toContainText("1 服务 · 1 工具");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
-    expect(sessionCreated).toBe(true);
+    await expect.poll(() => sessionCreated).toBe(true);
     await expect.poll(() => sessionCapabilityRefreshes).toBeGreaterThan(0);
     await expect(page.locator("body")).toContainText("Agent 会话已创建");
     await expect(page.locator(".agent-session-panel")).toContainText("当前会话");
@@ -1016,6 +1050,13 @@ test.describe("Sumika UI shell", () => {
     const previewToken = "b".repeat(64);
     let checkpointCreated = false;
     let restoreParams = null;
+    const confirmSpecial = body => {
+      restoreParams = body.params;
+      return { checkpoint, pre_restore_checkpoint: { ...checkpoint, id: preRestoreId, name: "pre-restore" },
+        diff, archive: { root: privateArchiveRoot,
+          entries: [{ original_path: "src/app.js", archive_path: "deprecated/20260827T120000Z/workspace-restore/src/app.js" }] },
+        restored: true };
+    };
     const workspace = {
       id: "ws-playwright",
       title: "sumika-workspace-test",
@@ -1053,9 +1094,8 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "unavailable", ready: false, runtime_id: "dsh", runtime_capabilities: [] }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       let result;
       if (body?.method === "workspace.inspect") {
         result = { workspace, checkpoint_count: checkpointCreated ? 1 : 0 };
@@ -1078,26 +1118,17 @@ test.describe("Sumika UI shell", () => {
           },
         };
       } else if (body?.method === "workspace.restore") {
-        restoreParams = body.params;
-        result = {
-          checkpoint,
-          pre_restore_checkpoint: { ...checkpoint, id: preRestoreId, name: "pre-restore" },
-          diff,
-          archive: {
-            root: privateArchiveRoot,
-            entries: [{ original_path: "src/app.js", archive_path: "deprecated/20260827T120000Z/workspace-restore/src/app.js" }],
-          },
-          restored: true,
-        };
+        throw new Error("Workspace restore must use native confirmation");
       } else {
-        await route.continue();
         return;
       }
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
-      });
-    });
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["workspace.checkpoint.create", "workspace.restore"]).toContain(request.method);
+      return (request.method === "workspace.restore" ? confirmSpecial(request) : fixtureResponse(await fixtureRpc(request)));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
@@ -1145,6 +1176,17 @@ test.describe("Sumika UI shell", () => {
     let committed = false;
     let worktreeCreateParams = null;
     let commitParams = null;
+    await installNativeConfirmationFixture(page, baseUrl, ["workspace.worktree.create", "workspace.commit"], body => {
+      if (body.method === "workspace.worktree.create") {
+        worktreeCreateParams = body.params;
+        linkedCreated = true;
+        return { source, worktree: linked, created: true };
+      }
+      commitParams = body.params;
+      committed = true;
+      return { workspace: { ...linked, head: "b".repeat(40), dirty: false }, checkpoint,
+        commit: "b".repeat(40), branch, file_count: 1, files: ["frontend/main.js"], pushed: false };
+    });
     const source = {
       id: "ws-source",
       title: "sumika-source",
@@ -1211,9 +1253,7 @@ test.describe("Sumika UI shell", () => {
       } else if (body?.method === "workspace.worktree.preview") {
         result = { source, worktree: linked, preview_token: worktreeToken, requires_approval: true, includes_uncommitted_changes: false };
       } else if (body?.method === "workspace.worktree.create") {
-        worktreeCreateParams = body.params;
-        linkedCreated = true;
-        result = { source, worktree: linked, created: true };
+        throw new Error("Worktree creation must use native confirmation");
       } else if (body?.method === "workspace.commit.preview") {
         result = {
           ...diff,
@@ -1228,9 +1268,7 @@ test.describe("Sumika UI shell", () => {
           signing: "disabled",
         };
       } else if (body?.method === "workspace.commit") {
-        commitParams = body.params;
-        committed = true;
-        result = { workspace: { ...linked, head: "b".repeat(40), dirty: false }, checkpoint, commit: "b".repeat(40), branch, file_count: 1, files: ["frontend/main.js"], pushed: false };
+        throw new Error("Workspace commit must use native confirmation");
       } else {
         await route.continue();
         return;
@@ -1312,9 +1350,8 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "runtime-owned", ready: true }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       let result;
       if (body?.method === "agent.workspace.create") {
         registered = true;
@@ -1345,9 +1382,14 @@ test.describe("Sumika UI shell", () => {
           "agent.session.snapshot": { session_id: sessionId, state: "idle", title: "Daily", plan: { active: false, pending: false, steps: [] }, messages: [], tools: [], approvals: [], artifacts: [], timeline: [], stats: {} },
         }[body?.method];
       }
-      if (result === undefined) return route.continue();
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-    });
+      if (result === undefined) return;
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.workspace.create", "agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
@@ -1360,7 +1402,7 @@ test.describe("Sumika UI shell", () => {
     await page.locator("#agent-register-workspace").click();
     await expect(page.locator("#agent-create-session")).toBeEnabled();
     await page.locator("#agent-create-session").click();
-    expect(createParams).toMatchObject({ workspaceId });
+    await expect.poll(() => createParams).toMatchObject({ workspaceId });
 
     await page.locator("#agent-prompt").fill("修改并验证项目");
     await page.locator("#agent-send").click();
@@ -1383,6 +1425,20 @@ test.describe("Sumika UI shell", () => {
     let mcpPreviewParams;
     let mcpApplyParams;
     const mcpConfigurations = new Map();
+    const confirmSpecial = body => {
+      mcpApplyParams = body.params;
+      const credential = mcpPreviewParams.configuration.credential;
+      mcpConfigurations.set(body.params.agentPreset, [{
+        ...mcpPreviewParams.configuration,
+        enabled: credential ? false : mcpPreviewParams.configuration.enabled,
+        ...(credential ? { credential: { target: credential.target, prefix: credential.prefix,
+          configured: true, loaded_at_launch: false, restart_required: true } } : {}),
+      }]);
+      return { agent_preset: body.params.agentPreset, server_name: mcpPreviewParams.configuration.server_name,
+        change: "create", applied: true, mountable: true, validation_session_archived: true,
+        backup_retained: true, credential_changed: Boolean(credential), restart_required: Boolean(credential),
+        deferred_enable: Boolean(credential) };
+    };
     const presets = [
       { id: "standard", name: "标准", trust: "system", is_default: true },
       { id: "advanced", name: "高级", trust: "user" },
@@ -1396,9 +1452,8 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, profile_id: "playwright-openai-stub", route_id: "sumika-test", model: "model-a", profile: { name: "Playwright stub" } }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       const method = body?.method;
       calls.push(body);
       let result;
@@ -1452,33 +1507,7 @@ test.describe("Sumika UI shell", () => {
           client_version: "0.1.1-rc.2",
         };
       } else if (method === "agent.mcp.configuration.apply") {
-        mcpApplyParams = body.params;
-        const credential = mcpPreviewParams.configuration.credential;
-        mcpConfigurations.set(body.params.agentPreset, [{
-          ...mcpPreviewParams.configuration,
-          enabled: credential ? false : mcpPreviewParams.configuration.enabled,
-          ...(credential ? {
-            credential: {
-              target: credential.target,
-              prefix: credential.prefix,
-              configured: true,
-              loaded_at_launch: false,
-              restart_required: true,
-            },
-          } : {}),
-        }]);
-        result = {
-          agent_preset: body.params.agentPreset,
-          server_name: mcpPreviewParams.configuration.server_name,
-          change: "create",
-          applied: true,
-          mountable: true,
-          validation_session_archived: true,
-          backup_retained: true,
-          credential_changed: Boolean(credential),
-          restart_required: Boolean(credential),
-          deferred_enable: Boolean(credential),
-        };
+        throw new Error("MCP configuration approval must not use ordinary HTTP RPC");
       } else if (method === "agent.goal.create") {
         goal = { ref: { id: "goal-contract", revision: 0 }, objective: body.params.objective, phase: "active", max_goal_rounds: body.params.maxGoalRounds };
         result = { ref: goal.ref };
@@ -1521,17 +1550,21 @@ test.describe("Sumika UI shell", () => {
       } else if (method === "agent.commands") {
         result = { available: true, entries: [{ name: "plan" }] };
       } else {
-        await route.continue();
         return;
       }
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-    });
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create", "agent.session.select_preset", "agent.preset.copy", "agent.preset.open", "agent.preset.remove", "agent.mcp.configuration.apply"]).toContain(request.method);
+      return (request.method === "agent.mcp.configuration.apply" ? confirmSpecial(request) : fixtureResponse(await fixtureRpc(request)));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
     await expect(page.locator(".agent-session-panel")).toContainText("契约测试会话");
-    expect(createdParams.agentPreset).toBe("standard");
+    await expect.poll(() => createdParams?.agentPreset).toBe("standard");
     expect(createdParams.workspaceId).toBe(workspaceId);
 
     await page.locator("#agent-preset-select").selectOption("advanced");
@@ -1597,7 +1630,7 @@ test.describe("Sumika UI shell", () => {
     expect(JSON.stringify(mcpPreviewParams)).not.toContain("playwright-mcp-secret");
     await page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#agent-mcp-apply").click();
-    expect(mcpApplyParams.credentialValue).toBe("playwright-mcp-secret");
+    await expect.poll(() => mcpApplyParams.credentialValue).toBe("playwright-mcp-secret");
     await expect(page.locator('[data-agent-mcp-row="filesystem"]')).toContainText("凭据待重启");
     await expect(page.locator("body")).not.toContainText("playwright-mcp-secret");
     await expect(page.locator('[data-agent-preset-remove="standard"]')).toHaveCount(0);
@@ -1654,9 +1687,8 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, profile_id: "playwright-openai-stub", route_id: "sumika-test", model: "model-a", profile: { name: "Playwright stub" } }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       const sessionId = forked ? "agent-child" : "agent-parent";
       let result;
       if (body?.method === "agent.workspace.create") {
@@ -1686,9 +1718,14 @@ test.describe("Sumika UI shell", () => {
           "agent.session.models": { current: { provider: "sumika-test", model: selectedModel }, routable: true, groups: [{ id: "sumika-test", name: "Sumika test", models: [{ id: "model-a", name: "Model A" }, { id: "model-b", name: "Model B" }] }], failures: [] },
         }[body?.method];
       }
-      if (result === undefined) return route.continue();
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-    });
+      if (result === undefined) return;
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.workspace.create", "agent.session.create", "agent.session.select_model", "agent.session.fork"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
@@ -1827,9 +1864,8 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, profile_id: "playwright-openai-stub", route_id: "sumika-test", model: "model-a", profile: { name: "Playwright stub" } }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       const result = {
         "browser.profiles": { profiles: [] },
@@ -1857,17 +1893,21 @@ test.describe("Sumika UI shell", () => {
       }[body?.method];
       if (body?.method === "agent.session.update_queue") {
         updatedQueue = body;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, session_id: "queue-session", item_id: "queue-item", action: "edit" } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { accepted: true, session_id: "queue-session", item_id: "queue-item", action: "edit" } };
       }
-      if (result === undefined) return route.continue();
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-    });
+      if (result === undefined) return;
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
-    expect(sessionCreated).toBe(true);
+    await expect.poll(() => sessionCreated).toBe(true);
     await expect(page.locator(".agent-queue-subsection")).toContainText("检查文档");
     await expect(page.locator(".agent-tool-card")).toContainText("读取文件");
     await expect(page.locator(".agent-artifact-row")).toContainText("修改文件");
@@ -2150,21 +2190,18 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, profile_id: "playwright-openai-stub", route_id: "sumika-test", model: "model-a", profile: { name: "Playwright stub" } }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       const method = body?.method;
       if (method === "agent.session.create") sessionCreated = body.params?.workspaceId === workspaceId;
       if (method === "agent.session.prompt") {
         promptBody = body;
         includeAttachment = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { accepted: true, id: "turn-image" } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { accepted: true, id: "turn-image" } };
       }
       if (method === "agent.session.attachment") {
         attachmentRead = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { session_id: "image-session", attachment: { attachment_id: "image-1", media_type: "image/png", name: "tiny.png" }, data: tinyPng } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { session_id: "image-session", attachment: { attachment_id: "image-1", media_type: "image/png", name: "tiny.png" }, data: tinyPng } };
       }
       const result = {
         "browser.profiles": { profiles: [] },
@@ -2183,13 +2220,18 @@ test.describe("Sumika UI shell", () => {
         "agent.session.models": { current: { provider: "sumika-test", model: "model-a" }, routable: true, groups: [{ id: "sumika-test", name: "Sumika test", models: [{ id: "model-a", name: "Model A" }] }] },
         "agent.workspaces": { workspaces: [{ id: workspaceId, title: "Image test", path: "D:\\Repos\\sumika-image-test", session_ids: sessionCreated ? ["image-session"] : [] }], archived_session_ids: [] },
       }[method] || {};
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-    });
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await page.locator("#agent-workspace-select").selectOption(workspaceId);
     await page.locator("#agent-create-session").click();
-    expect(sessionCreated).toBe(true);
+    await expect.poll(() => sessionCreated).toBe(true);
     await page.locator("#agent-image-input").setInputFiles({ name: "tiny.png", mimeType: "image/png", buffer: Buffer.from(tinyPng, "base64") });
     await expect(page.locator(".agent-attachment-chip")).toContainText("tiny.png");
     await page.locator("#agent-send").click();
@@ -2205,7 +2247,7 @@ test.describe("Sumika UI shell", () => {
     expect(promptBody.params.content.filter((item) => item.type === "image")).toHaveLength(1);
   });
 
-  test("Agent failed text turns expose an approval-gated retry", async ({ page }) => {
+  test("Agent failed text turns cannot replay without recovery evidence", async ({ page }) => {
     const sessionId = "retry-session";
     let retryParams = null;
     await page.route("**/api/agent/status", async (route) => route.fulfill({
@@ -2226,6 +2268,7 @@ test.describe("Sumika UI shell", () => {
       const body = route.request().postDataJSON();
       if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
       const method = body?.method;
+      if (method === "agent.session.retry.preflight") return route.continue();
       if (method === "agent.session.retry") {
         retryParams = body.params;
         await route.fulfill({
@@ -2262,18 +2305,12 @@ test.describe("Sumika UI shell", () => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await expect(page.locator("#agent-retry-turn")).toBeVisible();
-    page.once("dialog", (dialog) => dialog.accept());
+    const dialogs = [];
+    page.on("dialog", async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
     await page.locator("#agent-retry-turn").click();
-    await expect.poll(() => retryParams).toEqual({
-      assistant_id: "sumika",
-      client_request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      core_session_id: await page.locator("[data-conversation-select].active").getAttribute("data-conversation-select"),
-      sessionId,
-      approved: true,
-      confirmSessionId: sessionId,
-      workspaceId: "retry-workspace",
-    });
-    await expect(page.locator(".agent-notice")).toContainText("重试已提交");
+    await expect(page.locator(".agent-notice")).toContainText("旧重试已阻断");
+    expect(retryParams).toBeNull();
+    expect(dialogs).toEqual([]);
   });
 
   test("Agent workspace lists and stops isolated browser sessions", async ({ page }) => {
@@ -2286,36 +2323,30 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, version: "0.1.1-rc.2", commit: "b150a551b8d4" }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method === "browser.navigate") {
         navigationApproved = Boolean(body.params.approved);
         const result = navigationApproved
           ? { session_id: "browser-test", executed: true, domain: "example.test" }
           : { session_id: "browser-test", executed: false, policy: { allowed: false, requires_approval: true, domain: "example.test" } };
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result };
       }
       if (body?.method === "browser.tab.select") {
         tabSelected = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, tab_id: body.params.tab_id } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, tab_id: body.params.tab_id } };
       }
       if (body?.method === "browser.tab.close") {
         tabClosed = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, tab_id: body.params.tab_id } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, tab_id: body.params.tab_id } };
       }
       if (body?.method === "browser.console") {
         consoleRead = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, result: { entries: [{ level: "info", message: "safe console summary" }] } } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, result: { entries: [{ level: "info", message: "safe console summary" }] } } };
       }
       if (body?.method === "browser.network") {
         networkRead = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, result: { entries: [{ status: 200, url: "https://example.test/api" }] } } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { session_id: "browser-test", executed: true, result: { entries: [{ status: 200, url: "https://example.test/api" }] } } };
       }
       const result = {
         "browser.profiles": { profiles: [] },
@@ -2333,9 +2364,14 @@ test.describe("Sumika UI shell", () => {
         "browser.request_help": { session_id: "browser-test", backend_requested: true, state: "paused" },
         "browser.session.close": { id: "browser-test", closed: true },
       }[body?.method];
-      if (result === undefined) return route.continue();
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result }) });
-    });
+      if (result === undefined) return;
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["browser.navigate", "browser.tab.select", "browser.tab.close", "browser.console", "browser.network", "browser.tab.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await expect(page.locator(".browser-session-row")).toContainText("browser-test");
@@ -2363,7 +2399,7 @@ test.describe("Sumika UI shell", () => {
     await page.locator('[data-browser-help="browser-test"]').click();
     await expect(page.locator(".agent-notice")).toContainText("已请求人工接管");
     await page.locator('[data-browser-tab-close="tab-1"]').click();
-    expect(tabClosed).toBe(true);
+    await expect.poll(() => tabClosed).toBe(true);
     await page.locator('[data-browser-session-close="browser-test"]').click();
     await expect(page.locator("body")).toContainText("隔离浏览器会话已停止");
     await expect(page.locator(".browser-session-row")).toHaveCount(0);
@@ -2574,19 +2610,19 @@ test.describe("Sumika UI shell", () => {
     await page.route("**/api/model-policy/pricing*", async (route) => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(pricing) });
     });
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method === "provider.profile.save") {
         savedProfiles.push(body.params.profile);
-        await route.fulfill({
-          contentType: "application/json",
-          body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { ...profile, config: body.params.profile } }),
-        });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { ...profile, config: body.params.profile } };
       }
-      await route.continue();
-    });
+      return;
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["provider.profile.save"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Modules");
@@ -2846,16 +2882,19 @@ test.describe("Sumika UI shell", () => {
     let restored = false;
     await page.route("**/api/browser/web-chat/adapters", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ adapters: [] }) }));
     await page.route("**/api/browser/web-chat/profiles*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ profiles: restored ? [{ ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null }] : [archived] }) }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method === "browser.web_chat.profile.restore") {
         restored = true;
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { ...archived, status: "needs-auth", auth_state: "unknown", archived_at: null } };
       }
-      await route.continue();
-    });
+      return;
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["browser.web_chat.profile.restore"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Developer");
     const panel = page.locator("[data-web-chat-archive-panel]");
@@ -2961,17 +3000,13 @@ test.describe("Sumika UI shell", () => {
         }]),
       });
     });
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       if (body?.method !== "provider.profile.restore") {
-        await route.continue();
         return;
       }
       restored = true;
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {
+      return { jsonrpc: "2.0", id: body.id, result: {
           id: "archived-profile",
           name: "已归档连接",
           adapter_id: "openai-compatible",
@@ -2982,9 +3017,13 @@ test.describe("Sumika UI shell", () => {
           resolved_processing_location: "cloud",
           config: { model: "archived-model", active_base_url: "https://example.invalid/v1", base_urls: ["https://example.invalid/v1"] },
           has_secrets: false,
-        } })
-      });
-    });
+        } };
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["provider.profile.restore"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Developer");
     await expect(page.locator('[data-provider-restore="archived-profile"]')).toBeVisible();
@@ -3038,14 +3077,11 @@ test.describe("Sumika UI shell", () => {
       contentType: "application/json",
       body: JSON.stringify({ state: "ready", ready: true, profile_id: "local-test", model: "playwright-model" }),
     }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       calls.push(body);
       if (body?.method === "model.policy.preflight") {
-        await route.fulfill({
-          contentType: "application/json",
-          body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {
+        return { jsonrpc: "2.0", id: body.id, result: {
             request: body.params,
             decision: {
               status: "needs-confirmation",
@@ -3070,20 +3106,21 @@ test.describe("Sumika UI shell", () => {
               confidence: 0.9,
               requires_confirmation: true,
             },
-          } }),
-        });
-        return;
+          } };
       }
       if (body?.method === "agent.session.create") {
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "routing-session" } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { id: "routing-session" } };
       }
       if (body?.method === "agent.session.prompt") {
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "routing-turn", accepted: true } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { id: "routing-turn", accepted: true } };
       }
-      await route.continue();
-    });
+      return;
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await expect(page.locator("[data-agent-routing-panel]")).toBeVisible();
@@ -3125,24 +3162,25 @@ test.describe("Sumika UI shell", () => {
     await page.route("**/api/model-policy/catalog*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy_version: "model-policy/v1", checked_at: "2026-08-30T00:00:00Z", entries: [policyEntry], quotas: [] }) }));
     await page.route("**/api/model-policy/quota*", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy_version: "model-policy/v1", snapshots: [], runtime: { state: "unknown" } }) }));
     await page.route("**/api/agent/provider", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ state: "ready", ready: true, profile_id: "local-auto", model: "auto-model" }) }));
-    await page.route("**/rpc", async (route) => {
-      const body = route.request().postDataJSON();
-      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return route.continue();
+    const fixtureRpc = async (body) => {
+      if (/^(project\.|work\.|schedule\.|quality\.|conversation\.)/.test(body?.method || "")) return;
       calls.push(body);
       if (body?.method === "model.policy.preflight") {
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { decision: { status: "selected", selected_route: policyEntry.route_id, selected_entry: policyEntry, alternatives: [], quality_gate: { required: "basic", passed: true }, reason_codes: ["free_or_local_preferred"], estimated_cost: "local", quota_impact: { state: "not-applicable" }, confidence: 0.9, requires_confirmation: false } } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { decision: { status: "selected", selected_route: policyEntry.route_id, selected_entry: policyEntry, alternatives: [], quality_gate: { required: "basic", passed: true }, reason_codes: ["free_or_local_preferred"], estimated_cost: "local", quota_impact: { state: "not-applicable" }, confidence: 0.9, requires_confirmation: false } } };
       }
       if (body?.method === "agent.session.create") {
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "auto-session" } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { id: "auto-session" } };
       }
       if (body?.method === "agent.session.prompt") {
-        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { id: "auto-turn", accepted: true } }) });
-        return;
+        return { jsonrpc: "2.0", id: body.id, result: { id: "auto-turn", accepted: true } };
       }
-      await route.continue();
-    });
+      return;
+    };
+    await installNativeHostFixture(page, baseUrl, { confirm: async request => {
+      expect(["agent.session.create"]).toContain(request.method);
+      return fixtureResponse(await fixtureRpc(request));
+    } });
+    await routeFixtureRpc(page, fixtureRpc);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPage(page, "Agent");
     await page.locator("#agent-routing-mode").selectOption("automatic");

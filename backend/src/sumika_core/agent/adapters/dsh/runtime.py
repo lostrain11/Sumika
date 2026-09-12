@@ -204,6 +204,8 @@ class DSHAgentRuntime(AgentRuntime):
             in {"1", "true", "yes"},
             enabled=enabled.lower() not in {"0", "false", "no"},
         )
+        if str(env.get("SUMIKA_DSH_API_PROTOCOL") or "dsh-web-api-v1").strip() != "dsh-web-api-v1":
+            raise AgentRuntimeError("unsupported DSH protocol; candidate migration is deferred")
         self.logger = logger
         self._last_health: dict[str, Any] | None = None
         self._last_health_at = 0.0
@@ -1800,6 +1802,20 @@ class DSHAgentRuntime(AgentRuntime):
     def set_event_sink(self, sink: Any) -> None:
         self._event_sink = sink
 
+    def set_identity_guard(self, guard) -> None:
+        if getattr(self, "_identity_guard", None) is not None:
+            raise AgentRuntimeError("runtime identity guard is immutable")
+        self._identity_guard = guard
+
+    def check_runtime_identity(self) -> None:
+        guard = getattr(self, "_identity_guard", None)
+        if guard is not None:
+            guard()
+
+    def execution_quote(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.check_runtime_identity()
+        return super().execution_quote(params)
+
     def start_event_bridge(self) -> None:
         with self._event_lock:
             if not self.config.enabled or self._event_sink is None or self._event_bridge is not None:
@@ -1904,6 +1920,7 @@ class DSHAgentRuntime(AgentRuntime):
         if self._event_sink is None:
             return
         try:
+            self.check_runtime_identity()
             self._event_sink(self.normalize_event(payload))
         except Exception as error:
             if self.logger:
@@ -1944,6 +1961,7 @@ class DSHAgentRuntime(AgentRuntime):
         return self._request(request, timeout=timeout)
 
     def _request(self, request: urllib.request.Request, *, timeout: float = 3.0) -> dict[str, Any]:
+        self.check_runtime_identity()
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 value = json.loads(response.read().decode("utf-8"))

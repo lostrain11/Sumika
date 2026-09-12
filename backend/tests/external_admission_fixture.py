@@ -3,6 +3,17 @@
 from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
+from quality_routing.harness import RuntimeBinding
+
+
+def offline_runtime_binding(runtime):
+    return RuntimeBinding(
+        harness_id=runtime.runtime_id, instance_id="offline-test-profile",
+        distribution_id="offline-test-distribution", adapter_version="1", execution_mode="managed",
+        identity_evidence_ref="offline-test-identity", launch_id="offline-test-launch",
+        launch_evidence_ref="offline-test-launch-evidence",
+    )
+
 
 @contextmanager
 def offline_network():
@@ -36,6 +47,8 @@ def offline_execution_quote(application, method):
 
     with ExitStack() as stack:
         stack.enter_context(offline_network())
+        binding = application.agent.runtime_binding() or offline_runtime_binding(application.agent)
+        stack.enter_context(patch.object(application.agent, "runtime_binding", return_value=binding))
         if method.startswith("agent."):
             stack.enter_context(patch.object(application.agent, "execution_quote", return_value=quote))
         else:

@@ -284,11 +284,12 @@ class TransportDesktopAdapterTests(unittest.TestCase):
 
 class DesktopAutomationRpcTests(unittest.TestCase):
     def test_core_rpc_exposes_full_registration_session_and_capability_projection(self):
+        from trusted_host_fixture import trusted_rpc
         application = CoreApplication(":memory:")
         adapter = RecordingAdapter()
         application.desktop_automation.register_adapter("recording", adapter)
         try:
-            registered = application.rpc(
+            registered = trusted_rpc(application,
                 "desktop.automation.register",
                 {
                     "application": {
@@ -301,7 +302,7 @@ class DesktopAutomationRpcTests(unittest.TestCase):
                 },
             )
             self.assertEqual(registered["app_id"], "rpc-app")
-            opened = application.rpc(
+            opened = trusted_rpc(application,
                 "desktop.automation.open",
                 {"app_id": "rpc-app", "approved": True, "owner": "agent"},
             )
@@ -313,7 +314,7 @@ class DesktopAutomationRpcTests(unittest.TestCase):
             catalog = application.rpc("capability.catalog", {"includeRuntime": False})
             entries = [entry for group in catalog["groups"] for entry in group["entries"]]
             self.assertIn("desktop:rpc-app", {entry["id"] for entry in entries})
-            closed = application.rpc(
+            closed = trusted_rpc(application,
                 "desktop.automation.close",
                 {"session_id": session_id, "approved": True},
             )

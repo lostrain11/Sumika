@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { openPage } from "./helpers/navigation.js";
 import { baseUrl, installWorkbenchFixture, quotedRequest, confirmFixture } from "./helpers/workbench-fixture.js";
+import { installNativeHostFixture } from "./helpers/native-host-fixture.js";
 
 test("内置Skill默认关闭、独立启停，设置页不执行路径检查", async ({ page, context }) => {
   const fixture = await installWorkbenchFixture(context);
@@ -14,6 +15,16 @@ test("内置Skill默认关闭、独立启停，设置页不执行路径检查", 
     if (params.skill_id === "tool-registry") row.config_path = "isolated-fixture/config/paths.json";
     return { skills: rows };
   };
+  await installNativeHostFixture(page, baseUrl, { confirm: ({ method, params }) => {
+    expect(method).toBe("skill.builtin.set");
+    fixture.calls.push({ method, params, transport: "native-fixture" });
+    return fixture.handlers[method](params);
+  } });
+  await page.route("**/rpc", route => {
+    const request = route.request().postDataJSON();
+    if (request.method === "skill.builtin.set") expect(request.params.enabled).toBe(false);
+    return route.fallback();
+  });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator('[data-wv2-view="settings"]').click();
   const skills = page.locator("[data-builtin-skills]");
@@ -22,9 +33,8 @@ test("内置Skill默认关闭、独立启停，设置页不执行路径检查", 
   const progress = skills.locator('[data-builtin-skill="project-progress"]');
   await expect(tool).not.toBeChecked();
   await expect(progress).not.toBeChecked();
-  const settingResponse = page.waitForResponse(response => response.url().endsWith("/rpc") && response.request().postDataJSON()?.method === "skill.builtin.set");
   await tool.check();
-  expect(await (await settingResponse).json()).not.toHaveProperty("error");
+  await expect.poll(() => fixture.calls.filter(call => call.method === "skill.builtin.set" && call.transport === "native-fixture").length).toBe(1);
   await expect(tool).toBeEnabled();
   await expect(tool).toBeChecked();
   await expect(progress).not.toBeChecked();
@@ -225,6 +235,15 @@ for (const source of ["agent", "web"]) {
         fixture.handlers["agent.sessions"] = () => ({ sessions: [] });
         fixture.handlers["agent.commands"] = () => ({ available: true, entries: [{ name: "plan" }] });
         fixture.handlers["agent.session.snapshot"] = () => ({ session_id: "fixture-session", state: "idle", messages: [], tools: [], approvals: [], artifacts: [], timeline: [], stats: {}, plan: { active: false, steps: [] } });
+        await installNativeHostFixture(page, baseUrl, { confirm: ({ method, params }) => {
+          expect(["agent.session.create", "work.authorization.confirm"]).toContain(method);
+          fixture.calls.push({ method, params, transport: "native-fixture" });
+          return fixture.handlers[method](params);
+        } });
+        await page.route("**/rpc", route => {
+          expect(["agent.session.create", "work.authorization.confirm"]).not.toContain(route.request().postDataJSON().method);
+          return route.fallback();
+        });
       } else {
         fixture.handlers["sumika.route.catalog"] = () => ({ routes: [{ route_id: "web:offline", worker_kind: "web", label: "隔离网页", routable: true, status: "ready", occupancy: "idle" }] });
         fixture.handlers["sumika.route.pending"] = () => ({ results: [] });

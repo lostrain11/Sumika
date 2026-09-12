@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -41,6 +41,8 @@ async function until(check, label, timeout = 30000) {
 
 const corePort = await port();
 const cdpPort = await port();
+const managedDsh = process.env.SUMIKA_SMOKE_MANAGED_DSH === "1";
+const dshPort = managedDsh ? await port() : null;
 const binary = resolve(process.env.SUMIKA_SMOKE_BINARY || join(root, "src-tauri/target/debug/sumika-desktop.exe"));
 const child = spawn(binary, [], {
   cwd: root,
@@ -51,9 +53,11 @@ const child = spawn(binary, [], {
     SUMIKA_CORE_HOST: "127.0.0.1",
     SUMIKA_CORE_PORT: String(corePort),
     SUMIKA_DESKTOP_DATA_DIR: data,
-    SUMIKA_AGENT_RUNTIME: "none",
-    SUMIKA_AGENT_AUTOSTART: "0",
-    SUMIKA_DSH_AUTOSTART: "0",
+    SUMIKA_AGENT_RUNTIME: managedDsh ? "dsh" : "none",
+    SUMIKA_AGENT_AUTOSTART: managedDsh ? "1" : "0",
+    SUMIKA_DSH_AUTOSTART: managedDsh ? "1" : "0",
+    ...(managedDsh ? { SUMIKA_AGENT_ENDPOINT: `http://127.0.0.1:${dshPort}`,
+      SUMIKA_AGENT_PROFILE_DIR: join(data, "dsh-profile"), SUMIKA_DSH_ENABLED: "1" } : {}),
     SUMIKA_SMOKE_MAIN_DATA_DIR: join(data, "shell-webviews"),
     WEBVIEW2_USER_DATA_FOLDER: join(data, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort}`,
@@ -164,6 +168,40 @@ try {
   assert.match(await invoke(companionPage, "host_confirm", { method: questionMethod, params: questionParams, digest: questionPreview.result.digest }).then(() => "", String), /restricted to the main webview/);
   record("private native bootstrap works; HTTP forgery, companion confirmation and arbitrary RPC are denied");
   record("Plan Review cannot approve through ordinary HTTP or the companion window");
+  const mcpMethod = "agent.mcp.configuration.apply";
+  const mcpParams = {};
+  assert.equal((await coreRpc(mcpMethod, mcpParams)).error.code, -32041);
+  const mcpPreview = await coreRpc("host.confirmation.digest", { method: mcpMethod, params: mcpParams });
+  const mcpArgs = { method: mcpMethod, params: mcpParams, digest: mcpPreview.result.digest };
+  assert.match(await invoke(mainPage, "host_confirm", mcpArgs).then(() => "", String), /agentPreset must be a preset id/);
+  assert.match(await invoke(companionPage, "host_confirm", mcpArgs).then(() => "", String), /restricted to the main webview/);
+  record("MCP apply requires main native confirmation and retains business validation without starting MCP");
+  for (const method of ["workspace.worktree.create", "workspace.commit", "workspace.restore"]) {
+    const params = { checkpoint_id: "wschk-" + "a".repeat(20) };
+    assert.equal((await coreRpc(method, params)).error.code, -32041);
+    const preview = await coreRpc("host.confirmation.digest", { method, params });
+    const args = { method, params, digest: preview.result.digest };
+    assert.match(await invoke(mainPage, "host_confirm", args).then(() => "", String), /requires a fresh preview/);
+    assert.match(await invoke(companionPage, "host_confirm", args).then(() => "", String), /restricted to the main webview/);
+  }
+  record("workspace writes require main native confirmation and still reject missing previews without touching files");
+  for (const method of ["agent.skills.approve", "agent.skill.approve", "agent.skills.revoke", "agent.skill.revoke"]) {
+    const params = {};
+    assert.equal((await coreRpc(method, params)).error.code, -32041);
+    const preview = await coreRpc("host.confirmation.digest", { method, params });
+    const args = { method, params, digest: preview.result.digest };
+    assert.match(await invoke(mainPage, "host_confirm", args).then(() => "", String), /requires explicit approval and an exact candidate id/);
+    assert.match(await invoke(companionPage, "host_confirm", args).then(() => "", String), /restricted to the main webview/);
+  }
+  record("all Skill registration aliases require main native confirmation and retain exact candidate validation");
+  const retryMethod = "agent.session.retry";
+  const retryParams = { sessionId: "smoke-nonexistent", approved: true, confirmSessionId: "smoke-nonexistent" };
+  assert.equal((await coreRpc(retryMethod, retryParams)).error.code, -32041);
+  const retryPreview = await coreRpc("host.confirmation.digest", { method: retryMethod, params: retryParams });
+  const retryArgs = { method: retryMethod, params: retryParams, digest: retryPreview.result.digest };
+  assert.match(await invoke(mainPage, "host_confirm", retryArgs).then(() => "", String), /旧重试已阻断/);
+  assert.match(await invoke(companionPage, "host_confirm", retryArgs).then(() => "", String), /restricted to the main webview/);
+  record("legacy Agent retry stays blocked even after trusted native confirmation");
 
   const models = await (await fetch(`http://127.0.0.1:${corePort}/api/avatar/models`)).json();
   const sample = models.find((model) => model.kind === "vrm");
@@ -300,6 +338,64 @@ try {
   await until(async () => (await invoke(mainPage, "native_windows_state")).main.visible, "main tray-path restore");
   record("each close hides only that window; restore keeps the managed Core alive");
 
+  const beforeRestart = await invoke(mainPage, "core_status");
+  const beforeBinding = managedDsh ? (await coreRpc("agent.runtime.binding", {})).result : null;
+  if (managedDsh) {
+    assert.equal(beforeBinding.available, true);
+    assert.equal(beforeBinding.binding.harness_id, "dsh");
+    assert(beforeBinding.binding.launch_id);
+    await writeFile(join(evidence, "dsh-binding.json"), JSON.stringify(beforeBinding, null, 2));
+    record("real isolated DSH listener and wrapper have verified managed runtime evidence");
+  }
+  assert(Number.isSafeInteger(beforeRestart.pid) && beforeRestart.pid > 0);
+  assert.equal(beforeRestart.port, corePort);
+  const nonce = "b".repeat(64);
+  const readIdentity = async () => (await fetch(`http://127.0.0.1:${corePort}/internal/host-identity/v1`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nonce }),
+  })).json();
+  const beforeIdentity = await readIdentity();
+  assert.equal(beforeIdentity.pid, beforeRestart.pid);
+  const stopOwnedCore = `$owned = Get-CimInstance Win32_Process -Filter 'ProcessId = ${beforeRestart.pid}'; if (-not $owned -or $owned.ParentProcessId -ne ${child.pid} -or $owned.CommandLine -notmatch '--host-bootstrap-stdin') { throw 'Core is not owned by isolated smoke' }; Stop-Process -Id ${beforeRestart.pid} -Force -ErrorAction Stop`;
+  execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", stopOwnedCore], { windowsHide: true });
+  await until(async () => {
+    const current = await invoke(mainPage, "core_status");
+    return current.running && current.pid !== beforeRestart.pid && current.restart_count > beforeRestart.restart_count;
+  }, "new Core passes authenticated readiness after restart");
+  const afterRestart = await invoke(mainPage, "core_status");
+  const afterIdentity = await readIdentity();
+  assert.equal(afterIdentity.pid, afterRestart.pid);
+  assert.notEqual(afterIdentity.proof, beforeIdentity.proof);
+  const freshPreview = await coreRpc("host.confirmation.digest", { method: confirmationMethod, params: confirmationParams });
+  assert.match(await invoke(mainPage, "host_confirm", { method: confirmationMethod, params: confirmationParams,
+    digest: freshPreview.result.digest }).then(() => "", String), /not found/i);
+  assert.equal((await invoke(companionPage, "core_status")).pid, afterRestart.pid);
+  record("owned Core restart passes a fresh identity handshake and both windows retain the authenticated confirmation channel");
+  if (managedDsh) {
+    assert.deepEqual((await coreRpc("agent.runtime.binding", {})).result.binding, beforeBinding.binding);
+    record("Core restart retains the same live DSH profile and launch binding");
+    const ownedAgent = await invoke(mainPage, "core_status");
+    assert(Number.isSafeInteger(ownedAgent.agent_pid) && ownedAgent.agent_pid > 0);
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      `$owned = Get-CimInstance Win32_Process -Filter 'ProcessId = ${ownedAgent.agent_pid}'; if (-not $owned -or $owned.ParentProcessId -ne ${child.pid}) { throw 'DSH wrapper is not owned by isolated smoke' }`], { windowsHide: true });
+    execFileSync(process.env.SUMIKA_PYTHON || "python", ["-c",
+      "import sys; from sumika_core.agent.windows_identity import observe_listener, stop_verified_listener; endpoint=sys.argv[2]; stop_verified_listener(observe_listener(int(sys.argv[1]), endpoint), endpoint)",
+      String(ownedAgent.agent_pid), `http://127.0.0.1:${dshPort}`], { windowsHide: true,
+      env: { ...process.env, PYTHONPATH: `${join(root, "backend/src")};${join(root, "packages/quality-routing/src")}` } });
+    await until(async () => {
+      const current = await invoke(mainPage, "core_status");
+      return current.agent_running && current.agent_pid !== ownedAgent.agent_pid && current.agent_restart_count > ownedAgent.agent_restart_count;
+    }, "DSH restarts with new native launch evidence", 45000);
+    const stale = (await coreRpc("agent.runtime.binding", {})).result;
+    assert.equal(stale.available, false);
+    assert.equal(stale.reason, "runtime-instance-changed");
+    assert.deepEqual(stale.binding, beforeBinding.binding);
+    record("real DSH restart invalidates the old Core adapter without silently rebinding tasks");
+    const exiting = await invoke(mainPage, "core_status");
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      `$owned = Get-CimInstance Win32_Process -Filter 'ProcessId = ${exiting.pid}'; if (-not $owned -or $owned.ParentProcessId -ne ${child.pid} -or $owned.CommandLine -notmatch '--host-bootstrap-stdin') { throw 'Core is not owned by isolated smoke' }; Stop-Process -Id ${exiting.pid} -Force -ErrorAction Stop`], { windowsHide: true });
+    record("shutdown begins with a Core restart pending; cleanup must leave no late backend");
+  }
+
   if (state.monitor_count < 2) {
     limitations.push("Multi-monitor hot-unplug recovery was not hardware-verified; Rust geometry tests cover missing-monitor fallback.");
   } else {
@@ -329,6 +425,14 @@ try {
       return true;
     }
   }, "managed Core cleanup");
+  if (managedDsh) {
+    await until(async () => {
+      try { await fetch(`http://127.0.0.1:${dshPort}`); return false; } catch { return true; }
+    }, "verified DSH listener cleanup");
+  }
+  for (const name of ["desktop.log", "dsh.log"]) {
+    await copyFile(join(data, "logs", name), join(evidence, name)).catch(() => {});
+  }
   assert(data.startsWith(`${evidence}\\`) || data.startsWith(`${evidence}/`));
   await rm(data, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
   console.log(`Evidence: ${evidence}`);
@@ -337,5 +441,5 @@ try {
 record("native process and owned Core exit cleanly; isolated runtime removed");
 await writeFile(
   join(evidence, "result.json"),
-  JSON.stringify({ passed: true, scope: "isolated native UI only; no DSH, login or model calls", checks, limitations }, null, 2),
+  JSON.stringify({ passed: true, scope: managedDsh ? "isolated native UI and real DSH; no login or model calls" : "isolated native UI only; no DSH, login or model calls", checks, limitations }, null, 2),
 );

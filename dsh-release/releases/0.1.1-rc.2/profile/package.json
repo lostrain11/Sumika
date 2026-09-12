@@ -1,0 +1,23 @@
+{
+  "name": "sumika-managed-dsh-web",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@sumika/dsh-browser-policy": "file:packages/sumika-browser-policy-0.1.0.tgz",
+    "@sumika/dsh-desktop-automation": "file:packages/sumika-desktop-automation-0.1.0.tgz",
+    "@sumika/dsh-route-bridge": "file:packages/sumika-route-bridge-0.1.0.tgz"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@sumika/dsh-route-bridge",
+        "@sumika/dsh-browser-policy",
+        "@sumika/dsh-desktop-automation"
+      ]
+    }
+  }
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from external_admission_fixture import (
@@ -9,7 +10,10 @@ from external_admission_fixture import (
     confirmed_offline_rpc,
     offline_execution_quote,
     offline_network,
+    offline_runtime_binding,
 )
+
+from test_agent_portability import MinimalAgentRuntime
 
 from sumika_core.agent.runtime_workers import (
     ExternalHarnessClientWorker,
@@ -325,7 +329,10 @@ class ExternalHarnessCoreTests(unittest.TestCase):
 
     def test_core_event_boundary_consumes_one_armed_request(self):
         client = SessionHarnessFixture()
-        application = CoreApplication(":memory:", external_route_sources=[client])
+        runtime = MinimalAgentRuntime()
+        binding = offline_runtime_binding(runtime)
+        runtime.bind_runtime(binding)
+        application = CoreApplication(":memory:", agent_runtime=runtime, external_route_sources=[client])
         try:
             application.rpc("sumika.route.catalog", {"refresh": True})
             route = next(item for item in application.route_supervisor.catalog()["routes"] if item["runtime_id"] == "fixture-harness")
@@ -348,8 +355,8 @@ class ExternalHarnessCoreTests(unittest.TestCase):
                                 "confirmed": True,
                                 "quota_consent": True,
                             },
-                        })
-                        self.assertEqual(rejected["reason"], "no-routing-request")
+                        }, source_binding=binding)
+                        self.assertEqual(rejected["reason"], "no-authorized-arm")
                         dispatch.assert_not_called()
             self.assertEqual([name for name, _ in client.calls if name in {"create", "prompt"}], [])
             self.enterContext(offline_execution_quote(application, "sumika.route.arm"))
@@ -369,13 +376,28 @@ class ExternalHarnessCoreTests(unittest.TestCase):
             )
             self.assertTrue(armed["armed"])
             self.assertEqual([name for name, _ in client.calls if name in {"create", "prompt"}], [])
+            with patch.object(application.route_supervisor, "handle_event", wraps=application.route_supervisor.handle_event) as schedule:
+                for source, reason in (
+                    (None, "runtime-identity-unverified"),
+                    (replace(binding, launch_id=None, launch_evidence_ref=None), "runtime-identity-unverified"),
+                    (replace(binding, launch_id="other-launch"), "runtime-binding-changed"),
+                    (replace(binding, instance_id="other-profile"), "runtime-binding-changed"),
+                ):
+                    with self.subTest(source=source):
+                        rejected = application._handle_route_boundary_event(
+                            {"event_type": "turn.started", "session_id": "event-session", "turn_id": "event-turn"},
+                            source_binding=source,
+                        )
+                        self.assertFalse(rejected["accepted"])
+                        self.assertEqual(rejected["reason"], reason)
+                        schedule.assert_not_called()
             first = application._handle_route_boundary_event(
                 {
                     "event_type": "turn.started",
                     "event_id": "event-boundary-1",
                     "session_id": "event-session",
                     "turn_id": "event-turn",
-                }
+                }, source_binding=binding
             )
             self.assertEqual(first["status"], "dispatched")
             self.assertEqual(application.route_supervisor.wait(first["dispatch"]["dispatch_id"], timeout=2)["status"], "completed")
@@ -385,9 +407,9 @@ class ExternalHarnessCoreTests(unittest.TestCase):
                     "event_id": "event-boundary-2",
                     "session_id": "event-session",
                     "turn_id": "event-turn",
-                }
+                }, source_binding=binding
             )
-            self.assertEqual(duplicate["reason"], "no-routing-request")
+            self.assertEqual(duplicate["reason"], "no-authorized-arm")
             self.assertEqual(sum(name == "prompt" for name, _ in client.calls), 1)
         finally:
             application.close()

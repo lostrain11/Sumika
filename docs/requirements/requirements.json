@@ -20,8 +20,8 @@
       "intent_state": "active",
       "source_refs": ["visible-conversation-context"],
       "excerpt_refs": ["EX-HARNESS-003"],
-      "implementation_refs": ["../refactor/harness-portability-hard-tasks-v1.md"],
-      "test_refs": [],
+      "implementation_refs": ["../refactor/harness-portability-hard-tasks-v1.md", "../architecture/agent-runtime.md", "../architecture/host-confirmation.md", "../../packages/quality-routing/src/quality_routing/harness.py"],
+      "test_refs": ["../../backend/tests/test_harness_binding.py", "../../backend/tests/test_managed_identity.py", "../../backend/tests/test_windows_identity.py", "../../backend/tests/test_host_authorization.py", "../../packages/quality-routing/tests/test_harness.py"],
       "status_ref": "status-matrix:agent-runtime-portability",
       "supersedes": [],
       "superseded_by": []

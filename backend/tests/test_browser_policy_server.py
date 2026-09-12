@@ -1,4 +1,5 @@
 import unittest
+from trusted_host_fixture import trusted_rpc
 from unittest.mock import patch
 
 from sumika_core.protocol.jsonrpc import JsonRpcError
@@ -13,7 +14,7 @@ class BrowserPolicyServerTests(unittest.TestCase):
         self.application.close()
 
     def test_policy_rpc_uses_local_session_ownership_and_audits_only_metadata(self):
-        session = self.application.rpc(
+        session = trusted_rpc(self.application,
             "browser.session.create",
             {"profile": "temporary", "character_id": "sumika"},
         )
