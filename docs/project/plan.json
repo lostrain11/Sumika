@@ -147,7 +147,7 @@
     {
       "id": "P2",
       "name": "DSH 发行锁定与真实能力验收",
-      "status": "planned",
+      "status": "in_progress",
       "requirements": [
         "R-033",
         "R-034",

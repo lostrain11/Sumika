@@ -1099,6 +1099,16 @@
       "status": "active",
       "sha256": "94ee3d8980e6af4f0c8dfc7a08916590a58a75bc12b8cfa7607152f0a92f5596",
       "kind": "user_original"
+    },
+    {
+      "id": "R-104",
+      "original": "上传，完成阶段2",
+      "source": "visible-conversation: latest user request",
+      "sequence": 104,
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "74b14c72e14395b88c537eb5a2afb954b68e9916f0c1e17ee6c67c748d9a53ba"
     }
   ]
 }

@@ -9,6 +9,9 @@ description = "Portable project continuity and a thin managed Harness boundary"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+dsh = ["websocket-client==1.9.2"]
+
 [project.scripts]
 sumika = "sumika_next.cli:main"
 

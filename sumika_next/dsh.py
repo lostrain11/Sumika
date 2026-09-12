@@ -1,5 +1,6 @@
 """DSH 0.1.5-rc.2 Remote API adapter. No private Agent loop or paid fallback."""
 import hashlib
+from collections import deque
 import http.cookiejar
 import json
 import os
@@ -32,9 +33,11 @@ class Dsh:
         self.process = None
         self.instance = HarnessInstance("dsh", secrets.token_hex(16), Trust.UNVERIFIED)
         self.sessions = set()
+        self.startup_messages = deque(maxlen=20)
+        self._cookies = http.cookiejar.CookieJar()
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
-            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+            urllib.request.HTTPCookieProcessor(self._cookies))
 
     def start(self, timeout=60):
         if self.process is not None and self.process.poll() is None:
@@ -57,13 +60,14 @@ class Dsh:
             or k.endswith(("_API_KEY", "_API_TOKEN")))}
         env["DSH_HOME"] = str(self.home)
         self.process = subprocess.Popen(
-            [node, str(cli), "web", "--host", "127.0.0.1", "--port", "0", "--no-open"],
+            [node, str(cli), "--profile", "web", "--host", "127.0.0.1", "--port", "0", "--no-open"],
             cwd=self.home, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         lines = queue.Queue()
         def read():
             for line in self.process.stdout:
+                self.startup_messages.append(re.sub(r"(?i)(token|api[_-]?key|password)([=:]\s*)[^\s]+", r"\1\2<redacted>", line).strip())
                 lines.put(line)
         threading.Thread(target=read, daemon=True).start()
         deadline = time.monotonic() + timeout
@@ -161,6 +165,34 @@ class Dsh:
             raise DshError("invalid history response")
         # History availability alone proves neither task completion nor safe replay.
         return Recovery(binding, TaskState.UNKNOWN)
+
+    def stream(self, endpoint, arguments, timeout=15):
+        """Read native Remote streams; iteration errors never authorize replay."""
+        import websocket
+        if endpoint not in ("session/follow", "session/control", "$events"):
+            raise DshError("unsupported read stream")
+        self._check_owner(int(self.url.rsplit(":", 1)[1]))
+        request = urllib.request.Request(self.url + "/api/remote.mux")
+        self._cookies.add_cookie_header(request)
+        ws = websocket.create_connection(self.url.replace("http:", "ws:") + "/api/remote.mux",
+            cookie=request.get_header("Cookie"), origin=self.url, timeout=timeout,
+            http_no_proxy=["127.0.0.1"])
+        stream_id = secrets.token_hex(16)
+        payload = {"args": {"request": arguments}} if endpoint == "session/follow" else {"args": arguments}
+        try:
+            ws.send(json.dumps({"type":"open", "streamId":stream_id, "endpoint":endpoint, "payload":payload}))
+            while True:
+                frame = json.loads(ws.recv())
+                if frame.get("streamId") != stream_id:
+                    raise DshError("stream id mismatch")
+                if frame.get("type") == "item":
+                    yield frame["value"]
+                elif frame.get("type") == "end":
+                    return
+                else:
+                    raise DshError(f"Remote stream error: {frame.get('error', {}).get('code', 'malformed')}")
+        finally:
+            ws.close()
 
     def close(self):
         if self.process is not None:
