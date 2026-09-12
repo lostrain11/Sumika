@@ -3,17 +3,21 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
 from sumika_next.continuity import validate, handoff
+
+try:
+    from tests_next.scratch import ScratchDirectory
+except ImportError:  # ``unittest discover -s tests_next`` imports modules top-level
+    from scratch import ScratchDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContinuityTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = ScratchDirectory()
         self.root = Path(self.tmp.name)
         shutil.copytree(ROOT / "docs/project", self.root / "docs/project")
 

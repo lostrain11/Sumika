@@ -1,11 +1,15 @@
 from dataclasses import replace
 from pathlib import Path
-import tempfile
 import unittest
 
 from sumika_next.authorization import Authority, AuthorizationError
 from sumika_next.contracts import HarnessInstance, Trust, ToolRequest, WorkBinding, TaskState
 from sumika_next.execution import Execution
+
+try:
+    from tests_next.scratch import ScratchDirectory
+except ImportError:  # ``unittest discover -s tests_next`` imports modules top-level
+    from scratch import ScratchDirectory
 
 
 class MemoryHarness:
@@ -23,7 +27,7 @@ class MemoryHarness:
 
 class ExecutionTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = ScratchDirectory()
         self.path = Path(self.tmp.name) / "steps.sqlite3"
         self.harness = MemoryHarness()
         self.authority = Authority(self.harness.instance)

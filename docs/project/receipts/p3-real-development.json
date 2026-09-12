@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "task_id": "p3-real-development",
+  "session_id": "sumika-c16f3899599b4073a89a6f6da76c948e",
+  "summary": "P3 真实开发任务：实现显式任务成果记录（receipt CLI、规范化记录、handoff 追加），完成两轮独立代码审查与全部修复，真实测试 70 项通过（1 项跳过）。",
+  "changes": [
+    "sumika_next/receipts.py（新增：严格校验、规范化、独占写盘、读取与 handoff 渲染）",
+    "sumika_next/cli.py（receipt 子命令与 --input）",
+    "sumika_next/continuity.py（check 校验 receipts；handoff 追加最近成果摘要）",
+    "tests_next/test_receipts.py（新增 30 项用例）",
+    "tests_next/scratch.py（新增：ACL 安全临时目录夹具）",
+    "tests_next/test_continuity.py、test_dsh.py、test_execution.py（仅替换临时目录夹具，断言不变）",
+    "README.md、docs/project/README.md（CLI 帮助与用法文档）",
+    "sumika_next/dsh.py、sumika_next/daily.py（主 Agent 整合的原生工作区注册与日用启动入口；本次仅核验）"
+  ],
+  "verification": [
+    {
+      "command": "python -B -m unittest discover -s tests_next -q",
+      "result": "passed"
+    },
+    {
+      "command": "python -B -m sumika_next.cli check",
+      "result": "passed"
+    },
+    {
+      "command": "python -B -m unittest tests_next.test_receipts.ReceiptHandoffTests.test_dangling_receipts_link_fails_loudly",
+      "result": "not_run"
+    }
+  ],
+  "remaining": [
+    "P3 主 Agent 最终整合验收（daily 启动入口、本功能与本记录合并提交）",
+    "P4 自动捕获：从 DSH 会话自动生成成果记录并注入上下文",
+    "本机无创建符号链接权限，悬空链接用例未运行，仅代码路径推断"
+  ],
+  "next": "主 Agent 校验 docs/project/receipts/p3-real-development.json 并完成 P3 整合验收。本记录是操作者声明，不是独立证明，P3 整体尚未完成。",
+  "provenance": "operator_report",
+  "git_head": "b304a0caf759d0c2317f892624f03313cf0f3823",
+  "recorded_at": "2026-09-12T18:19:33.371246+00:00"
+}

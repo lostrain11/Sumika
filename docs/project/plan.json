@@ -211,7 +211,7 @@
     {
       "id": "P3",
       "name": "Codex 日用开发平替",
-      "status": "planned",
+      "status": "complete",
       "requirements": [
         "R-041",
         "R-042",
@@ -228,51 +228,63 @@
         {
           "id": "P3-1",
           "requirement": "R-041",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-2",
           "requirement": "R-042",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-3",
           "requirement": "R-043",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-4",
           "requirement": "R-044",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-5",
           "requirement": "R-045",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-6",
           "requirement": "R-046",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-7",
           "requirement": "R-047",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-8",
           "requirement": "R-048",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         },
         {
           "id": "P3-9",
           "requirement": "R-049",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-03-acceptance.md"
         }
       ],
       "acceptance": "在真实项目中完成一个中等规模开发任务，包含规划、修改、测试、审查和恢复；过程中不丢失需求和授权边界。",
-      "evidence": []
+      "evidence": [
+        "docs/project/phase-03-acceptance.md",
+        "docs/project/phase-03-evidence.json"
+      ]
     },
     {
       "id": "P4",

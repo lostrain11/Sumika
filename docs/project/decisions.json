@@ -42,6 +42,14 @@
       "kind": "implementation_default",
       "reason": "Python 3.14 mkdtemp 的受保护 ACL 不代表日常工作区；保留原生 workspace-write 沙箱，无需修改 DSH 或设置 full access",
       "evidence": "phase-02-acceptance.md"
+    },
+    {
+      "id": "D-007",
+      "decision": "P3 复用原生 Web 工作流，成果记录保持显式 operator_report",
+      "status": "active",
+      "kind": "implementation_default",
+      "reason": "真实模型任务与恢复已验证；不新增 Agent 循环或从摘要推断授权，自动生命周期接线留到 P4",
+      "evidence": "phase-03-acceptance.md"
     }
   ]
 }

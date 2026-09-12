@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "current_phase": "P3",
+  "current_phase": "P4",
   "phase_status": "planned",
   "implemented": [
     "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
     "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复",
-    "P2：锁定原生 DSH 组合；可重复真实工具、Plan、取消与恢复验收门槛"
+    "P2：锁定原生 DSH 组合；可重复真实工具、Plan、取消与恢复验收门槛",
+    "P3：受管原生 Web 日用入口、绑定工作区、显式任务成果记录及压缩/重启交接闭环"
   ],
   "verified": [
     "33 项自动化测试通过",
@@ -14,18 +15,22 @@
     "独立wheel安装和仅项目记录的交接重建通过",
     "a464af6 Git bundle验证、隔离恢复及发行文件摘要校验通过",
     "P2 完整组合门槛通过；冻结安装通过；Web HTML 与脚本资源通过",
-    "真实文件读改写、终端测试/退出码/超时/活动取消、Skills/子Agent/MCP、Plan审阅、断线重连、重启历史与无自动重放通过；外部模型调用 0"
+    "真实文件读改写、终端测试/退出码/超时/活动取消、Skills/子Agent/MCP、Plan审阅、断线重连、重启历史与无自动重放通过；外部模型调用 0",
+    "P3 整合测试运行70项：69通过、1项符号链接权限跳过；DSH沙箱内复验通过",
+    "真实 DeepSeek 完成规划、实现、两轮审查、修复、压缩239条历史和重启后继续任务并生成成果记录",
+    "原生 Edge 实际发送和显示结果通过；P2完整回归门槛与wheel构建通过；测试凭据临时副本已删除"
   ],
   "partial": [],
   "blocked": [],
   "not_implemented": [
-    "P3 Codex日用平替闭环",
     "P4 自动捕获需求并注入会话上下文",
     "P5-P7 桌面、办公、角色和长期愿景"
   ],
-  "next": "进入 P3：在原生 Web 中完成真实中等规模开发任务，验证模型效果和日用流程。",
+  "next": "P4：优先调研 DSH 原生扩展/Skills 接线，将现有连续性记录接入任务生命周期；尚未开始实现。",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
-    "docs/project/phase-02-acceptance.md"
+    "docs/project/phase-02-acceptance.md",
+    "docs/project/phase-03-acceptance.md",
+    "docs/project/phase-03-evidence.json"
   ]
 }

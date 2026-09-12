@@ -3,6 +3,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from .receipts import handoff_lines, read_receipts
+
 
 def read_records(root: Path):
     base = root / "docs/project"
@@ -54,6 +56,7 @@ def validate(root: Path):
         raise ValueError("unknown handoff phase")
     if not data["handoff"]["next_action"] or not data["handoff"]["remaining"]:
         raise ValueError("missing next action or remaining work")
+    read_receipts(root)
     return data
 
 
@@ -65,6 +68,8 @@ def handoff(root: Path) -> str:
     text.extend("- " + item for item in current["completed"])
     text.append("## 剩余与限制")
     text.extend("- " + item for item in current["remaining"] + current["constraints"])
-    text += ["## 下一步", current["next_action"], "## 需求原文索引"]
+    text += ["## 下一步", current["next_action"]]
+    text.extend(handoff_lines(root))
+    text.append("## 需求原文索引")
     text.extend(f"- {item['id']} [{item['status']}]: {item['original']}" for item in data["requirements"]["entries"])
     return "\n".join(text) + "\n"

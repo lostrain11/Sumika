@@ -24,16 +24,18 @@ class DshError(RuntimeError):
 
 
 class Dsh:
-    # Only these lifecycle operations are admitted in P1. Prompt/model dispatch
-    # awaits P2/P3 real tool and model acceptance, never silently falls back.
-    ACTIONS = {"session.create": "session/create", "session.cancel": "session/cancel"}
+    # Workspace registration and lifecycle operations use the host authority.
+    # Prompt/model dispatch belongs to native Web; no silent fallback.
+    ACTIONS = {"workspace.create": "workspace/create", "session.create": "session/create", "session.cancel": "session/cancel"}
 
     def __init__(self, root: Path, home: Path):
         self.root, self.home = root.resolve(), home.resolve()
         self.process = None
         self.instance = HarnessInstance("dsh", secrets.token_hex(16), Trust.UNVERIFIED)
         self.sessions = set()
+        self.workspaces = {}
         self.startup_messages = deque(maxlen=20)
+        self._browser_url = None
         self._cookies = http.cookiejar.CookieJar()
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
@@ -89,6 +91,7 @@ class Dsh:
                 self._check_owner(int(match[2]))
                 self._rpc("settings/describe", {})
                 self.instance = HarnessInstance("dsh", self.instance.instance_id, Trust.MANAGED)
+                self._browser_url = match[1]
                 return self
             raise DshError("DSH startup timed out")
         except BaseException:
@@ -138,12 +141,28 @@ class Dsh:
         if request.action not in self.ACTIONS:
             raise AuthorizationError("unsupported action; no implicit model or tool dispatch")
         args = json.loads(request.arguments)
+        if request.action == "workspace.create":
+            if not isinstance(args, dict) or set(args) != {"path"}:
+                raise AuthorizationError("unsupported workspace arguments")
+            path = Path(args["path"])
+            if not path.is_absolute() or not path.is_dir() or str(path.resolve()) != request.target:
+                raise AuthorizationError("workspace differs from approved target")
+            result = self._rpc(self.ACTIONS[request.action], args)
+            workspace = result.get("workspace", {}) if isinstance(result, dict) else {}
+            if (not isinstance(workspace, dict) or not isinstance(workspace.get("workspaceId"), str)
+                    or not workspace["workspaceId"] or not isinstance(workspace.get("path"), str)
+                    or str(Path(workspace["path"]).resolve()) != request.target):
+                raise DshError("workspace acknowledged a different path or missing identity")
+            self.workspaces[workspace["workspaceId"]] = request.target
+            return result
         if not isinstance(args, dict) or args.get("sessionId") != request.binding.session_id:
             raise AuthorizationError("session arguments differ from approved binding")
         if request.action == "session.create":
-            if set(args) != {"sessionId", "cwd"}:
+            if set(args) not in ({"sessionId", "cwd"}, {"sessionId", "workspaceId"}):
                 raise AuthorizationError("unsupported create arguments")
-            cwd = Path(args["cwd"])
+            if "workspaceId" in args and self.workspaces.get(args["workspaceId"]) != request.target:
+                raise AuthorizationError("workspace registration differs from approved target")
+            cwd = Path(args.get("cwd", request.target))
             if not cwd.is_absolute() or not cwd.is_dir() or str(cwd.resolve()) != request.target:
                 raise AuthorizationError("workspace differs from approved target")
         else:
@@ -196,7 +215,17 @@ class Dsh:
         finally:
             ws.close()
 
+    def open_browser(self):
+        """Pass the owned launch URL directly to the browser, never to logs."""
+        import webbrowser
+        if self.instance.trust != Trust.MANAGED or not self._browser_url:
+            raise DshError("no managed browser session")
+        self._check_owner(int(self.url.rsplit(":", 1)[1]))
+        if not webbrowser.open(self._browser_url):
+            raise DshError("could not open the native browser")
+
     def close(self):
+        self._browser_url = None
         if self.process is not None:
             if self.process.poll() is None:
                 self.process.terminate()
@@ -209,3 +238,4 @@ class Dsh:
                 self.process.stdout.close()
         self.instance = HarnessInstance("dsh", self.instance.instance_id, Trust.UNVERIFIED)
         self.sessions.clear()
+        self.workspaces.clear()

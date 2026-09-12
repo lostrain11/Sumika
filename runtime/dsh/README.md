@@ -40,3 +40,16 @@ python -m venv .sumika-next/verify-env
 升级先保留当前发行与 profile，再在独立目录安装候选版本；明确检查版本、依赖变更后更新候选摘要，跑冻结安装和完整门槛，只有通过才登记为已验收。失败保留当前组合，不自动切换或重放任务。
 
 Windows 测试工作区使用普通 `mkdir` 继承项目 ACL。Python 3.14 的 `mkdtemp()` 使用专门的受保护 ACL，与正常项目权限不同，会导致受限令牌无法读取文件、PowerShell 工作目录回落；不要为此关闭沙箱。既有特殊 ACL 工作区需单独评估，不能宣称所有 ACL 布局均受支持。
+
+## P3 日用与浏览器验收
+
+在项目根运行 `python -B -m sumika_next.cli run`，默认使用 `.sumika-next/daily/<version>`；工作区、恢复和成果记录见 [日用流程](../../docs/project/daily-workflow.md)。
+
+原生浏览器回归使用系统 Edge 和本地模型替身：
+
+```powershell
+.sumika-next/verify-env/Scripts/python.exe -m pip install -e ".[dsh,browser-test]"
+.sumika-next/verify-env/Scripts/python.exe -X utf8 -B tools/verify_dsh_web.py
+```
+
+这项检查验证页面实际发送与显示；真实模型开发、审查与重启恢复证据见 [P3 验收](../../docs/project/phase-03-acceptance.md)。

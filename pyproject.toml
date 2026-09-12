@@ -11,6 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dsh = ["websocket-client==1.9.2"]
+browser-test = ["playwright==1.62.0"]
 
 [project.scripts]
 sumika = "sumika_next.cli:main"

@@ -1,3 +1,4 @@
+from tests_next.scratch import ScratchDirectory
 import io
 import json
 from pathlib import Path
@@ -89,7 +90,7 @@ class DshTests(unittest.TestCase):
             rpc.assert_not_called()
 
     def test_release_tamper_rejected_before_launch(self):
-        from tempfile import TemporaryDirectory
+        from tests_next.scratch import ScratchDirectory as TemporaryDirectory
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             runtime = root / "runtime/dsh"
@@ -100,3 +101,22 @@ class DshTests(unittest.TestCase):
             with patch("sumika_next.dsh.subprocess.Popen") as launch:
                 with self.assertRaises(DshError): adapter.start()
                 launch.assert_not_called()
+
+    def test_registered_workspace_must_match_session_target(self):
+        self.adapter.instance = HarnessInstance('dsh', 'owned', Trust.MANAGED)
+        self.adapter.workspaces['w1'] = 'different'
+        binding = WorkBinding('owned', 'r', 1, 's', 'create')
+        args = json.dumps({'sessionId': 's', 'workspaceId': 'w1'}).encode()
+        with patch.object(self.adapter, '_check_owner'), patch.object(self.adapter, '_rpc') as rpc:
+            with self.assertRaises(AuthorizationError):
+                self.adapter.execute(ToolRequest(binding, 'session.create', str(Path.cwd()), args))
+            rpc.assert_not_called()
+
+    def test_wrong_workspace_acknowledgement_does_not_register(self):
+        self.adapter.instance = HarnessInstance('dsh', 'owned', Trust.MANAGED)
+        binding = WorkBinding('owned', 'r', 1, 's', 'workspace')
+        args = json.dumps({'path': str(Path.cwd())}).encode()
+        with patch.object(self.adapter, '_check_owner'), patch.object(self.adapter, '_rpc', return_value={'workspace': {'workspaceId': 'w1', 'path': 'elsewhere'}}):
+            with self.assertRaises(DshError):
+                self.adapter.execute(ToolRequest(binding, 'workspace.create', str(Path.cwd()), args))
+        self.assertFalse(self.adapter.workspaces)

@@ -9,6 +9,7 @@
 - `progress.json`：实现、验证、阻碍和下一步。
 - `decisions.json`：已确认决策及变更原因。
 - `handoff.json`：交给下一次会话或其他模型的最小上下文。
+- `receipts/<task_id>.json`：显式任务成果记录（人工声明，含验证与剩余项）。
 - `backup-recovery.md`：Git checkpoint 与项目数据备份恢复规则。
 - `approved-plan.md`：用户批准的完整八阶段计划原文。
 - `phase-01-acceptance.md`：本轮实现与实际验收证据。
@@ -24,3 +25,31 @@
 在需求、计划、成果、验证或阻碍变化时更新记录，运行 `python -B -m sumika_next.cli check`。
 `python -B -m sumika_next.cli handoff` 输出可交给另一模型的目标、进度、约束、下一步和原文索引，不依赖旧源码和聊天缓存。
 阶段 0/1 使用显式维护；自动从 DSH 会话捕获并注入上下文属于 P4。
+
+## 成果记录（receipt）
+
+```powershell
+python -B -m sumika_next.cli receipt --root <项目根> --input <project-relative JSON>
+```
+
+`--input` 必须是项目内相对路径，7 个字段的类型严格校验：
+
+```json
+{
+  "task_id": "P3-receipt-001",
+  "session_id": "sumika-...",
+  "summary": "一句话成果",
+  "changes": ["sumika_next/receipts.py"],
+  "verification": [{"command": "python -B -m unittest discover -s tests_next", "result": "passed"}],
+  "remaining": ["未完成项"],
+  "next": "下一步"
+}
+```
+
+- `verification` 每项只有 `command` 和 `result`；`result` 只能是 `passed`、`failed`、`not_run`，状态原样保留，不因失败或未运行而丢弃记录。
+- `task_id`、`summary`、`next` 不接受空值；`task_id` 只允许 ASCII 字母数字开头、由 `A-Za-z0-9._-` 组成，不支持路径分隔符或穿越。
+- `session_id` 必须是字符串，strip 后为空写作 `null`（写读两侧一致，可正常读回）。
+- 未知/缺失字段、类型不符、列表空项、非法 `result`、绝对或越界的 `--input`、缺少 `docs/project`、无法按 UTF-8 编码的文本一律拒绝，且不写任何文件（不会残留半成品）；已有 task_id 拒绝覆盖。
+- 记录附 `schema_version`、`provenance=operator_report`、当前 Git HEAD（无 Git 为 `null`）和 UTC `recorded_at`；读取时校验 `recorded_at` 必须是带 UTC 偏移的 ISO 时间。
+- 它是操作者声明，不构成独立验证，也不改变 `phase_status`；阶段完成仍以 `plan.json` 的 `evidence` 为准，`check` 会对损坏的 receipt 文件或名为 `*.json` 的目录报错；`.json` 以外的普通文件（如 `.gitkeep`、编辑器备份）会被忽略，`A.JSON` 与 `a.json` 在所有平台按同一记录处理。
+- `handoff` 追加最近 3 条成果摘要与验证/剩余项，便于压缩上下文或更换模型后接手；没有 `receipts/` 的旧项目输出保持不变。

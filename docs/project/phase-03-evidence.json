@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-12T18:27:21.826983+00:00",
+  "complete": true,
+  "release": "@deepseek-ai/dsh@0.1.5-rc.2",
+  "real_development": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoning_effort": "high",
+    "session_id": "sumika-c16f3899599b4073a89a6f6da76c948e",
+    "review_agent_id": "dfa66133-4ae9-48db-8469-b1e255f7593d",
+    "review_rounds": 2,
+    "native_plan_review": true,
+    "implementation_tests_review_fixes": true,
+    "compact": {
+      "history_items": 239,
+      "approximate_tokens": 126862
+    },
+    "restart_same_profile_and_explicit_resume": true,
+    "recovered_receipt": "docs/project/receipts/p3-real-development.json",
+    "temporary_credentials_removed": true
+  },
+  "verification": {
+    "unit_tests": {
+      "command": "python -B -m unittest discover -s tests_next -q",
+      "run": 70,
+      "passed": 69,
+      "skipped": 1,
+      "skip_reason": "Windows symbolic link privilege unavailable",
+      "also_run_inside_native_dsh": true
+    },
+    "p2_gate": {
+      "command": ".sumika-next/verify-env/Scripts/python.exe -X utf8 -B tools/verify_phase2.py",
+      "result": "passed"
+    },
+    "native_web": {
+      "command": ".sumika-next/verify-env/Scripts/python.exe -X utf8 -B tools/verify_dsh_web.py",
+      "result": "passed",
+      "browser": "system Edge, headless",
+      "external_model_calls": 0
+    },
+    "wheel_build": "passed"
+  },
+  "limitations": [
+    "一次真实任务不证明所有模型或插件兼容。",
+    "暂停使用取消和交接；Windows 沙箱沿用上游限制。",
+    "成果记录为 operator_report，自动捕获接线属于 P4。",
+    "原始模型日志仅保留本地，未上传。"
+  ],
+  "artifacts": [
+    {
+      "path": ".sumika-next/p3-258566d91bbb4184877fbeb168f46029/events.jsonl",
+      "sha256": "280cd1608a9a3cd63baf37b9cd40d6f478ce27bf98a5c616b7485c1cf341d29c",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p3-258566d91bbb4184877fbeb168f46029/session.jsonl",
+      "sha256": "b84271d580864608a8367f4320f69718aa56686062df5af1abdd72bd86a66ede",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p3-258566d91bbb4184877fbeb168f46029/snapshot.json",
+      "sha256": "3fc58267711b7c28189ebaf0a4191e30628709f07de0a0728279fd3b0188a677",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p3-web-8754dfe3d47147f08bec15d1687eaf21/report.json",
+      "sha256": "60b2b00fab98df263772ee69436dad1b0114ab968c47aee24b1c3bfcf5ad0255",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p3-web-8754dfe3d47147f08bec15d1687eaf21/native-web.png",
+      "sha256": "3effc93fe6d24f62e4ea107127d10029039b1b4c3eef8f1716ece32306bd7feb",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p2-941f6916c6a54fb2b1786fc4dc190791/report.json",
+      "sha256": "592fc83a88304411f788479304b1b60beaca1e5a6d562be445b6150c5d6cd4a1",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p2-recovery-480bef3513954078b7940321c5dcf974/report.json",
+      "sha256": "f484ab53d011ad8f25d5b27d3c85ae370f239bf9082e9e6ae4202f165eee0d84",
+      "tracked": false
+    },
+    {
+      "path": ".sumika-next/p3-build/sumika_next-0.1.0-py3-none-any.whl",
+      "sha256": "d58456e41838661cdd96cf5298bc4b4d5148a7b7e6d0219e9ece543c96e8b2e5",
+      "tracked": false
+    },
+    {
+      "path": "docs/project/receipts/p3-real-development.json",
+      "sha256": "43c226c28b11c4e088157e68a3e2a584273fef7f17d91b9446079d4d4fe6788f",
+      "tracked": true
+    }
+  ]
+}
