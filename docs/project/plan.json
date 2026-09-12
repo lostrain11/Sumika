@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "plan_version": 1,
+  "goal": "基于 Harness 中立架构和最新已验证 DSH，实现 Codex 日用开发平替",
+  "phases": [
+    {"id": "P0", "name": "项目与连续性基础", "status": "in_progress", "acceptance": "新模型只依靠项目记录即可恢复目标、计划、进度、阻碍和下一步"},
+    {"id": "P1", "name": "Harness 中立契约与安全边界", "status": "planned"},
+    {"id": "P2", "name": "DSH 发行锁定与真实能力验收", "status": "planned"},
+    {"id": "P3", "name": "Codex 日用开发平替", "status": "planned"},
+    {"id": "P4", "name": "连续性记录正式接入", "status": "planned"},
+    {"id": "P5", "name": "办公文件与桌面助手扩展", "status": "planned"},
+    {"id": "P6", "name": "角色系统及长期设备愿景", "status": "planned"}
+  ],
+  "history": []
+}

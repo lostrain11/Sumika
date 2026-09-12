@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "current_phase": "P0",
+  "implemented": ["orphan 分支和新版需求入口", "连续性记录文件骨架"],
+  "verified": ["新版分支根提交存在"],
+  "partial": [],
+  "blocked": [],
+  "next": "建立 Harness 中立契约与 DSH 发行锁定前的事实探测"
+}

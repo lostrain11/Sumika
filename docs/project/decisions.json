@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "decisions": [
+    {"id": "D-001", "decision": "新版使用 orphan 分支重新开始", "status": "active", "reason": "不继承旧版实现和历史架构"},
+    {"id": "D-002", "decision": "默认适配 DSH，但核心逻辑保持 Harness 中立", "status": "active", "reason": "复用当前能力并保留未来更换 Harness 的空间"},
+    {"id": "D-003", "decision": "项目数据备份恢复首版暂不考虑加密", "status": "active", "reason": "先完成可恢复性"}
+  ]
+}

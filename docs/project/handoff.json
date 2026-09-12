@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "updated_at": null,
+  "current_goal": "完成 Sumika 新版阶段 0",
+  "current_phase": "P0",
+  "completed": ["创建 orphan 分支", "建立连续性记录骨架"],
+  "remaining": ["增加记录校验", "建立首次 Git checkpoint", "开始 P1 Harness 中立契约"],
+  "constraints": ["不复制旧版源码", "未知状态不得冒充完成", "不记录凭据和私人原文之外的敏感数据"],
+  "next_action": "运行 tools/check_continuity.py 并提交阶段 0 checkpoint"
+}
