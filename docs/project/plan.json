@@ -147,7 +147,7 @@
     {
       "id": "P2",
       "name": "DSH 发行锁定与真实能力验收",
-      "status": "in_progress",
+      "status": "complete",
       "requirements": [
         "R-033",
         "R-034",
@@ -162,41 +162,51 @@
         {
           "id": "P2-1",
           "requirement": "R-033",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         },
         {
           "id": "P2-2",
           "requirement": "R-034",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         },
         {
           "id": "P2-3",
           "requirement": "R-035",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         },
         {
           "id": "P2-4",
           "requirement": "R-036",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         },
         {
           "id": "P2-5",
           "requirement": "R-037",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         },
         {
           "id": "P2-6",
           "requirement": "R-038",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         },
         {
           "id": "P2-7",
           "requirement": "R-039",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-02-acceptance.md"
         }
       ],
       "acceptance": "在隔离 profile 中完成一次真实临时项目的读取、修改、测试、取消、恢复和结果查看。",
-      "evidence": []
+      "evidence": [
+        "docs/project/phase-02-acceptance.md",
+        "docs/project/phase-02-evidence.json"
+      ]
     },
     {
       "id": "P3",

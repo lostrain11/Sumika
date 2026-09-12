@@ -34,6 +34,14 @@
       "reason": "丢失回执不能证明未执行；取消回执也不能证明未发送",
       "kind": "implementation_default",
       "evidence": "phase-01-acceptance.md"
+    },
+    {
+      "id": "D-006",
+      "decision": "P2 使用继承 ACL 的普通隔离项目目录及本地确定性模型替身",
+      "status": "active",
+      "kind": "implementation_default",
+      "reason": "Python 3.14 mkdtemp 的受保护 ACL 不代表日常工作区；保留原生 workspace-write 沙箱，无需修改 DSH 或设置 full access",
+      "evidence": "phase-02-acceptance.md"
     }
   ]
 }

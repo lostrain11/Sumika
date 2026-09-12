@@ -11,9 +11,6 @@ importers:
       '@deepseek-ai/dsh':
         specifier: 0.1.5-rc.2
         version: 0.1.5-rc.2(108eb6bb8437a8108dd051e64627e14f)
-      '@deepseek-ai/dsh-pwsh-sandbox':
-        specifier: 0.1.5-rc.2
-        version: 0.1.5-rc.2(a69b8076de7528b716c165d57f7d3271)
 
 packages:
 

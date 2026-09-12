@@ -27,4 +27,16 @@ node runtime/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js web --host 127.0.0.1 -
 
 回退同时选择已保存的 Git 发行提交与该版本 profile 的备份副本。不得将新版写过的 profile 直接交给旧版猜测兼容；先保留当前数据，再在新目录恢复旧副本。不覆盖现有数据、不清理旧分支。
 
-阶段 2 仍需真实文件/终端/Plan/Skills/MCP/子 Agent/事件流/活动取消/恢复验收，以及插件组合的兼容检查。
+每次发行更新必须通过完整门槛：
+
+```powershell
+python -m venv .sumika-next/verify-env
+.sumika-next/verify-env/Scripts/python.exe -m pip install -e '.[dsh]'
+.sumika-next/verify-env/Scripts/python.exe -X utf8 -B tools/verify_phase2.py
+```
+
+该门槛使用真实 DSH、原生工具和本地确定性模型服务，结果及事件证据保留在 `.sumika-next/p2-*/`、`.sumika-next/p2-recovery-*/`。
+固定组合为 standard agent preset、原生 Skills、子 Agent、stdio MCP；不需要额外社区插件或 PowerShell 替换插件。MCP 测试服务仅用于验收。
+升级先保留当前发行与 profile，再在独立目录安装候选版本；明确检查版本、依赖变更后更新候选摘要，跑冻结安装和完整门槛，只有通过才登记为已验收。失败保留当前组合，不自动切换或重放任务。
+
+Windows 测试工作区使用普通 `mkdir` 继承项目 ACL。Python 3.14 的 `mkdtemp()` 使用专门的受保护 ACL，与正常项目权限不同，会导致受限令牌无法读取文件、PowerShell 工作目录回落；不要为此关闭沙箱。既有特殊 ACL 工作区需单独评估，不能宣称所有 ACL 布局均受支持。

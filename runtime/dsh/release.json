@@ -4,12 +4,14 @@
   "rollback": "Keep previous installation and profile, switch both together; never downgrade an in-place profile",
   "install": "pnpm install --frozen-lockfile --ignore-scripts",
   "files": {
-    "package.json": "633c9dd1178ebdbce807611f06a5f43904eb3e51165082bd8c70b6417321a8d5",
+    "package.json": "7708ea3372ce07b3e5330056ecb9859b2f997f08dba55af15850b12669edcbf3",
     "node_modules/@deepseek-ai/dsh/lib/bin.js": "0ff7f1d72c4e0cbe14001709c81e20a04b70464118a7f78568952988e28f2ac5",
     "node_modules/@deepseek-ai/dsh/package.json": "0d9ea2f7a42e7bacf319abd57016e40d0351d07032c7eb709d7c54158300d4cb",
-    "pnpm-lock.yaml": "0dd04d98b1ef486bc1383a1515ef7d83647064c3df413c4d482b2e58db18ee82"
+    "pnpm-lock.yaml": "0be5c93321f89326dd0381aba8f2c9b8d7db67a862c176bf51208345c2d717c4"
   },
   "package": "@deepseek-ai/dsh",
   "schema_version": 1,
-  "status": "candidate"
+  "status": "verified",
+  "acceptance": "docs/project/phase-02-evidence.json",
+  "validation_scope": "Windows inherited-ACL workspace; native standard preset, Skills, subagents, stdio MCP; loopback model"
 }

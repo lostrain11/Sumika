@@ -1,31 +1,29 @@
 {
   "schema_version": 1,
-  "current_phase": "P2",
-  "phase_status": "partial_blocked",
+  "current_phase": "P3",
+  "phase_status": "planned",
   "implemented": [
     "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
-    "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复"
+    "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复",
+    "P2：锁定原生 DSH 组合；可重复真实工具、Plan、取消与恢复验收门槛"
   ],
   "verified": [
-    "31 项自动化测试通过",
+    "33 项自动化测试通过",
     "真实DSH rc.2认证、PID归属、创建、历史读取、空闲取消、跨域拒绝通过；0模型调用",
     "冻结依赖重复安装通过",
     "独立wheel安装和仅项目记录的交接重建通过",
-    "a464af6 Git bundle验证、隔离恢复及发行文件摘要校验通过"
+    "a464af6 Git bundle验证、隔离恢复及发行文件摘要校验通过",
+    "P2 完整组合门槛通过；冻结安装通过；Web HTML 与脚本资源通过",
+    "真实文件读改写、终端测试/退出码/超时/活动取消、Skills/子Agent/MCP、Plan审阅、断线重连、重启历史与无自动重放通过；外部模型调用 0"
   ],
-  "partial": [
-    "P2 Windows pwsh workspace-write 沙箱路径拒绝"
-  ],
-  "blocked": [
-    "需用 DSH 原生配置或上游修复后重跑终端与活动取消恢复"
-  ],
+  "partial": [],
+  "blocked": [],
   "not_implemented": [
-    "P2 完整DSH工具/终端/事件/活跃取消/恢复及插件组合验收",
     "P3 Codex日用平替闭环",
     "P4 自动捕获需求并注入会话上下文",
     "P5-P7 桌面、办公、角色和长期愿景"
   ],
-  "next": "修复或确认 Windows pwsh sandbox 工作区路径策略后重跑 P2 终端、活动取消和恢复验收。",
+  "next": "进入 P3：在原生 Web 中完成真实中等规模开发任务，验证模型效果和日用流程。",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md"

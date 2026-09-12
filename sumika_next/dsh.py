@@ -110,8 +110,10 @@ class Dsh:
 
     def _rpc(self, method, arguments):
         rpc_id = secrets.token_hex(16)
+        # Native command/event services use named parameters, not request DTOs.
+        direct = {"settings/describe", "commands/execute", "commands/list", "$events/result"}
         body = json.dumps({"type": "client-request", "rpcId": rpc_id,
-                           "method": method, "payload": {"args": {} if method == "settings/describe" else {"request": arguments}}}).encode()
+                           "method": method, "payload": {"args": arguments if method in direct else {"request": arguments}}}).encode()
         request = urllib.request.Request(self.url + "/api/" + method, data=body,
             headers={"Content-Type": "application/json", "Origin": self.url})
         try:
@@ -125,7 +127,7 @@ class Dsh:
         if not isinstance(outcome, dict) or outcome.get("ok") is not True:
             code = outcome.get("error", {}).get("code", "malformed") if isinstance(outcome, dict) else "malformed"
             raise DshError(f"DSH RPC {method} failed: {code}")
-        if "value" not in outcome:
+        if "value" not in outcome and method not in {"$events/result", "commands/execute"}:
             raise DshError("RPC success has no value")
         return outcome.get("value")
 

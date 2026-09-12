@@ -1,27 +1,29 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-12T14:12:51.656315+00:00",
-  "current_goal": "完成 P2 DSH 发行与真实能力验收",
-  "current_phase": "P2",
-  "phase_status": "partial_blocked",
+  "updated_at": "2026-09-12T17:21:37.857482+00:00",
+  "current_goal": "进入 P3 Codex 日用开发平替验收",
+  "current_phase": "P3",
+  "phase_status": "planned",
   "completed": [
     "独立orphan分支和完整原文索引、八阶段计划、校验与可导出交接",
     "DSH rc.2 固定安装和真实受管生命周期",
-    "审批绑定完整操作；SQLite 发送前落盘；未知状态重启不重放；31项测试通过"
+    "审批绑定完整操作；SQLite 发送前落盘；未知状态重启不重放；31项测试通过",
+    "P2 完整组合门槛通过，33 项测试；原生终端、Plan、Skills、MCP、子Agent、活动取消、断线与重启恢复已验证"
   ],
   "remaining": [
-    "P2：Windows pwsh 沙箱、活动取消、断线恢复和完整插件组合"
+    "P3：真实中等规模开发任务及原生 Web 端到端交互验收",
+    "P4：连续性记录正式接入；P5-P7：扩展与未来愿景"
   ],
   "constraints": [
     "DSH原生Web；新增核心独立，优先复用社区插件/开源方案",
-    "没有自动选模、付费fallback、凭据迁移；本轮未调用模型",
+    "没有自动选模、付费fallback、凭据迁移；仅调用本地确定性模型替身，未调用外部模型",
     "P1只有创建/取消及只读历史适配；完整工具调用是P2/P3验收范围",
     "原文不被摘要覆盖；旧源码和运行数据保留但不纳入新分支",
     "进程内宿主是信任边界，不声明OS沙箱或全部DSH工具已安全验收",
-    "阶段0/1已推送至origin/codex/sumika-next-dsh；P2进行中。"
+    "阶段0/1已推送至origin/codex/sumika-next-dsh；P2已验收。"
   ],
-  "next_action": "先解决 Windows pwsh workspace-write 沙箱拒绝，再重跑终端、活动取消和恢复验收。",
-  "last_existing_checkpoint": "706b4ea",
+  "next_action": "基于已验收 rc.2 组合开展真实开发任务，验证原生 Web 的完整人机操作和模型能力；先检查当前项目记录及凭据选择，不自动调用外部付费模型。",
+  "last_existing_checkpoint": "7ccc7f9",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-01-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle"
 }

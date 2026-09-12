@@ -1,10 +1,13 @@
 """Isolated real DSH lifecycle acceptance, without model calls or credentials."""
 import json
+import html
+import re
 from pathlib import Path
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+import urllib.parse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sumika_next.authorization import Authority
@@ -25,6 +28,18 @@ def main():
         executor = None
         try:
             adapter.start()
+            with adapter._opener.open(adapter.url, timeout=10) as response:
+                document = response.read().decode('utf-8')
+                assert 'text/html' in response.headers.get('Content-Type', '')
+            assert '<html' in document.lower()
+            scripts = re.findall(r'<script[^>]+src="([^"]+)"', document)
+            assert scripts, 'Web UI has no script entry'
+            for script in scripts:
+                asset = urllib.parse.urljoin(adapter.url + '/', html.unescape(script))
+                assert asset.startswith(adapter.url + '/'), 'unexpected external Web entry'
+                with adapter._opener.open(asset, timeout=10) as response:
+                    assert response.status == 200 and len(response.read()) > 100
+            print('native Web document and script assets: passed')
             for path in ("/api/settings/describe", "/api/session/create"):
                 request = urllib.request.Request(adapter.url + path, data=b'{"args":{}}', headers={"Content-Type":"application/json", "X-Approved":"true"})
                 try:

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-09-12T17:21:37.857482+00:00",
+  "dsh": "0.1.5-rc.2",
+  "validation": "real DSH with loopback deterministic model and real native tools",
+  "external_model_calls": 0,
+  "unit_tests": 33,
+  "gate": "tools/verify_phase2.py",
+  "gate_result": "passed",
+  "web_assets_followup": "passed after HTML entity decoding correction",
+  "artifacts": [
+    {
+      "path": ".sumika-next/p2-e251f540b4ff4bd38cfca05c1ce79bb6",
+      "report": {
+        "complete": true,
+        "checks": {
+          "files": true,
+          "terminal_test": true,
+          "skills": true,
+          "subagent": true,
+          "mcp": true,
+          "terminal_exit_timeout_cancel": true
+        }
+      },
+      "sha256": {
+        "events.json": "9ca973e4d506c2c6cc06f81c65b0ebc52ab2d693336bbf0707b4bb77fd7fcebe",
+        "model-requests.json": "c14449104cbcce32e97a0bcfd29eb0a219f99d06954e518cf4076d7616f01b21",
+        "report.json": "592fc83a88304411f788479304b1b60beaca1e5a6d562be445b6150c5d6cd4a1",
+        "terminal-lifecycle.json": "6dc1054fb7e353e9cd68e9e2e063b7da34d256109a7c7a11a4a1382b81191247"
+      }
+    },
+    {
+      "path": ".sumika-next/p2-recovery-6273c6a7de5e495ba87ddadc44b4404b",
+      "report": {
+        "checks": {
+          "plan_review": true,
+          "reconnect": true,
+          "restart_history_no_replay": true,
+          "active_model_cancel": true
+        },
+        "complete": true
+      },
+      "sha256": {
+        "evidence.json": "94f6848b226d21e93576e555ceae8d16e2d9cc516716bf86df3bdb1d0639cebc",
+        "report.json": "f484ab53d011ad8f25d5b27d3c85ae370f239bf9082e9e6ae4202f165eee0d84"
+      }
+    }
+  ]
+}

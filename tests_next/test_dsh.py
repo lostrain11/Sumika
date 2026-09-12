@@ -46,6 +46,23 @@ class DshTests(unittest.TestCase):
         self.adapter._opener = ResponseOpener(lambda r:r)
         self.assertEqual(self.adapter._rpc("session/cancel", {}), {"accepted":True})
 
+    def test_only_declared_void_methods_accept_missing_value(self):
+        self.adapter._opener = ResponseOpener(lambda r: {**r, "result": {"ok": True}})
+        self.assertIsNone(self.adapter._rpc("$events/result", {}))
+        with self.assertRaises(DshError):
+            self.adapter._rpc("session/cancel", {})
+
+    def test_native_event_and_command_arguments_are_not_request_wrapped(self):
+        for method in ("$events/result", "commands/execute", "commands/list"):
+            with self.subTest(method=method):
+                def open_response(request, **kwargs):
+                    body = json.loads(request.data)
+                    self.assertEqual(body['payload'], {'args': {'agentId': 'fixture'}})
+                    return io.BytesIO(json.dumps({'type': 'server-response', 'rpcId': body['rpcId'],
+                                                 'result': {'ok': True, 'value': {}}}).encode())
+                with patch.object(self.adapter._opener, 'open', side_effect=open_response):
+                    self.adapter._rpc(method, {'agentId': 'fixture'})
+
     def test_prompt_has_no_implicit_model_dispatch(self):
         self.adapter.instance = HarnessInstance("dsh", "owned", Trust.MANAGED)
         binding = WorkBinding("owned", "r", 1, "s", "step")

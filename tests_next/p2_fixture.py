@@ -9,6 +9,9 @@ class ModelFixture:
         self.requests = []
         self.recipe = []
         self.responses = 0
+        self.block = False
+        self.hold = threading.Event()
+        self.waiting = threading.Event()
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -16,11 +19,15 @@ class ModelFixture:
 
             def handle(self):
                 try: super().handle()
-                except (ConnectionResetError, BrokenPipeError): pass
+                except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError): pass
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 fixture.requests.append(body)
+                if fixture.block:
+                    fixture.waiting.set()
+                    if not fixture.hold.wait(30):
+                        return
                 child = any('P2_CHILD' in json.dumps(m.get('content','')) for m in body.get('messages',[]) if m.get('role')=='user')
                 index = fixture.responses
                 if not child: fixture.responses += 1
