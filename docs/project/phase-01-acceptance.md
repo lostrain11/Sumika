@@ -35,6 +35,8 @@
 - `python -B tools/probe_dsh_next.py`：真实 rc.2 子进程/端口归属、认证拒绝、携带有效 cookie 的跨域拒绝、创建会话、历史读取、空闲会话取消通过，模型调用 0。
 - 连续性校验与 Git diff 空白校验通过。正式完成状态和 checkpoint 在收尾时写入 progress/handoff。
 - Wheel 构建成功；在独立 venv 以 `--no-index --no-deps` 安装，并使用 `python -I` 从 `site-packages` 加载。仅复制 docs/project 后可校验、输出完整交接和 103 条原文记录；没有读取原工作目录中的 Python 源码或旧聊天。
+- 实现 checkpoint：`a464af63d1a43abd627057da7d220477e0901526`。已创建 `.sumika-next/backups/phase-01-a464af6.bundle` 并通过 `git bundle verify`；从 bundle 克隆到新目录后，独立安装的 CLI 校验通过、发行 package/lock 字节摘要保持一致。恢复包保存源码和项目记录，不包含运行 profile。
+- 本轮创建的 DSH 子进程均已退出；分支仍以 `0030058` 为唯一根提交，不继承旧版历史。新分支尚未推送。
 
 ## 实际限制与纠错
 

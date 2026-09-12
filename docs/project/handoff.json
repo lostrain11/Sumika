@@ -24,6 +24,7 @@
     "进程内宿主是信任边界，不声明OS沙箱或全部DSH工具已安全验收"
   ],
   "next_action": "从 runtime/dsh/README.md 和 phase-01-acceptance.md 开始P2；用固定rc.2隔离profile验证工具审批与真实文件/终端/活动取消，确认结果后才开放新增prompt入口。",
-  "last_existing_checkpoint": "f14c5bd",
-  "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-01-acceptance.md"
+  "last_existing_checkpoint": "a464af63d1a43abd627057da7d220477e0901526",
+  "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-01-acceptance.md",
+  "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle"
 }
