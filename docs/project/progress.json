@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "current_phase": "P1",
-  "phase_status": "complete",
+  "current_phase": "P2",
+  "phase_status": "partial_blocked",
   "implemented": [
     "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
     "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复"
@@ -13,14 +13,21 @@
     "独立wheel安装和仅项目记录的交接重建通过",
     "a464af6 Git bundle验证、隔离恢复及发行文件摘要校验通过"
   ],
-  "partial": [],
-  "blocked": [],
+  "partial": [
+    "P2 Windows pwsh workspace-write 沙箱路径拒绝"
+  ],
+  "blocked": [
+    "需用 DSH 原生配置或上游修复后重跑终端与活动取消恢复"
+  ],
   "not_implemented": [
     "P2 完整DSH工具/终端/事件/活跃取消/恢复及插件组合验收",
     "P3 Codex日用平替闭环",
     "P4 自动捕获需求并注入会话上下文",
     "P5-P7 桌面、办公、角色和长期愿景"
   ],
-  "next": "进入P2，在相同固定发行的隔离profile完成真实工具和工作闭环验收。",
-  "evidence": "docs/project/phase-01-acceptance.md"
+  "next": "修复或确认 Windows pwsh sandbox 工作区路径策略后重跑 P2 终端、活动取消和恢复验收。",
+  "evidence": [
+    "docs/project/phase-01-acceptance.md",
+    "docs/project/phase-02-acceptance.md"
+  ]
 }
