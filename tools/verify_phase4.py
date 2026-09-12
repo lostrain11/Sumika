@@ -71,6 +71,7 @@ def main():
             originals = [r for r in rows if r['kind'] == 'original']
             assert len(originals) == 1 and originals[0]['payload']['content'][0]['text'] == original
             assert any(r['kind'] == 'outcome' for r in rows), rows
+            assert not any(r['kind'] in {'message', 'tool'} for r in rows), 'native logs were duplicated'
             assert (work/'reader.txt').read_text() == 'reader implemented once'
             report['checks']['original_skill_tools_outcome'] = True
             plan2 = dict(plan, plan='keep reader; implement writer after failed integration',

@@ -55,5 +55,44 @@
       "path": "extensions/continuity/skill/SKILL.md",
       "sha256": "5579ffb23979b13035a8a45a00b74c9ebb09cf3c5bb8029d0a9714748d2b53a6"
     }
+  ],
+  "followups": [
+    {
+      "change": "R-111: stop duplicate native model/tool capture and skip empty sync",
+      "recorded_at": "2026-09-12T19:17:24.016687+00:00",
+      "complete": true,
+      "python_tests": {
+        "run": 85,
+        "passed": 84,
+        "skipped": 1
+      },
+      "node_tests_passed": 4,
+      "native_dsh": {
+        "complete": true,
+        "external_model_calls": 0,
+        "checks": {
+          "original_skill_tools_outcome": true,
+          "plan_history": true,
+          "compact_new_model_new_session_handoff": true,
+          "same_session_backfill_idempotent": true,
+          "workspace_opt_in": true,
+          "disabled_no_capture_tools_injection_data_preserved": true
+        }
+      },
+      "artifacts": [
+        {
+          "path": ".sumika-next/p4-4a07de238b31425b8a6652f5df2dfb2e/report.json",
+          "sha256": "744ac7a19f54648be8181e2f4916431c6607fc2fd79d6eacb752012055e6e656"
+        },
+        {
+          "path": ".sumika-next/p4-4a07de238b31425b8a6652f5df2dfb2e/evidence.json",
+          "sha256": "d8f9b12cee0256071b7020e3bbd85e4ce35fc13b57d612343bd17214b4f574bb"
+        },
+        {
+          "path": "extensions/continuity/dsh.mjs",
+          "sha256": "b78838bed37697714dfa38869c3b26b89cb3a551bce9f573176883e75d24668f"
+        }
+      ]
+    }
   ]
 }

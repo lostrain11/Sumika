@@ -431,7 +431,8 @@
         "R-070",
         "R-071",
         "R-072",
-        "R-073"
+        "R-073",
+        "R-112"
       ],
       "tasks": [
         {
@@ -447,7 +448,9 @@
         {
           "id": "P6-3",
           "requirement": "R-070",
-          "status": "planned"
+          "status": "planned",
+          "design": "docs/project/long-term-memory-plan.md",
+          "approach": "先复用高质量现成插件或独立适配的开源记忆方案形成基线，后续用中文、多角色、事实更新及成本评测择优替换；不先自建引擎。"
         },
         {
           "id": "P6-4",

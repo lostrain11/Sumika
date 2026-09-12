@@ -57,3 +57,4 @@ python -B -m sumika_next.cli receipt --root <项目根> --input <project-relativ
 
 - `agent-diagnostics-plan.md`：F-001 Agent 专用诊断日志未来计划。
 - `continuity-comparison.md`：P4 与 Codex/DSH 原生能力及社区方案的比较与限制。
+- `long-term-memory-plan.md`：P6 长期记忆的现成方案接入、可替换边界与实测选型。

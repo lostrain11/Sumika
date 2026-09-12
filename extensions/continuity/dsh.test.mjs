@@ -14,11 +14,12 @@ test('human text survives while plugin messages and surface rewrites are exclude
   assert.equal(observation({ ...event, surfaceOp: { op: 'replace' } }), undefined);
 });
 
-test('assistant reasoning and provider secrets never enter normalized observations', () => {
+test('native model/tool history is not duplicated and provider secrets are excluded', () => {
   const e = observation({ seq: 5, type: 'assistant/message', data: { turn: 1, step: 1,
     message: { source: { kind: 'model', model: 'a' }, content: [
       { type: 'reasoning', text: 'private' }, { type: 'text', text: 'result' }] } } });
-  assert.deepEqual(e.payload.content, [{ type: 'text', text: 'result' }]);
+  assert.equal(e, undefined);
+  assert.equal(observation({ seq: 6, type: 'tool/result', data: {} }), undefined);
   const m = observation({ seq: 6, type: 'request/header', data: { reason: 'change',
     header: { config: { model: 'b', provider: 'local', apiKey: 'private' } } } });
   assert.equal(m.payload.model, 'b');
@@ -30,7 +31,7 @@ test('disabled extension registers nothing and does not access runtime or storag
   await assert.rejects(apply({}, { enabled: 'false' }), /enabled must be boolean/);
 });
 
-test('downstream rejection remains rejection without storage or message mutation', async () => {
+test('rejected steps and empty/native-only sync do not launch storage', async () => {
   const root = realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
   const runtimeEntry = realpathSync(root+'/runtime/dsh/node_modules/@deepseek-ai/dsh/package.json');
   const handlers = new Map();
@@ -40,4 +41,8 @@ test('downstream rejection remains rejection without storage or message mutation
   const result = await handlers.get('agent/pre-step')({ agent: { session: { header: { cwd: root } } }, turn: 1 },
     async () => rejected);
   assert.equal(result, rejected);
+  const session = { header: { cwd: root }, snapshotEvents: () => [] };
+  await handlers.get('session/flush')(session);
+  session.snapshotEvents = () => [{ seq: 0, type: 'tool/result', data: {} }];
+  await handlers.get('session/flush')(session);
 });

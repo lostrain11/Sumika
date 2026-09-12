@@ -1169,6 +1169,26 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "75f8bfa1fcf716570e8c81ed9302f293738b989dedd365901e8e28c5fd01e12e"
+    },
+    {
+      "id": "R-111",
+      "sequence": 111,
+      "original": "那P4的实现是不是可以删繁就简或者优化下？有很多已经实现过或者有现成的？",
+      "source": "visible-conversation: user message; locator=那P4的实现是不是可以删繁就简或者优化下？有很多已经实现过或者有",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "291d2a00e1abdfefb4de3dd3793f6955189a101933f48b8099ea4551cb9e0650"
+    },
+    {
+      "id": "R-112",
+      "sequence": 112,
+      "original": "关于长期记忆，现在是怎么计划的？可以优先用现成的，例如社区插件实现，后面再挑选下最有效的、能力最强的方案",
+      "source": "visible-conversation: user message; locator=关于长期记忆，现在是怎么计划的？可以优先用现成的，例如社区插件实",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "62fa852fa7e8e5b9c5d915a2019c677b575bab5648f695acc127bacbb6e13939"
     }
   ]
 }

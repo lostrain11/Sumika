@@ -18,15 +18,6 @@ export function observation(event) {
     // Do not mistake role=user plugin notices/tool results for human originals.
     if (data.source?.kind !== 'user' || event.surfaceOp !== 'append') return;
     kind = 'original'; payload = data;
-  } else if (event.type === 'assistant/message') {
-    kind = 'message';
-    payload = { turn: data.turn, step: data.step, source: data.message.source,
-      content: data.message.content.filter(b => b.type === 'text') };
-  } else if (event.type === 'tool/result') {
-    // Outcomes are observations, never automatic verification claims. No tool arguments/secrets.
-    kind = 'tool'; payload = { turn: data.turn, step: data.step,
-      source: data.message.source,
-      results: data.message.content.map(b => ({ callId: b.callId, isError: b.isError })) };
   } else if (event.type === 'request/header') {
     kind = 'model'; payload = { reason: data.reason, model: data.header.config.model,
       provider: data.header.config.provider, reasoningEffort: data.header.config.reasoningEffort };
@@ -90,8 +81,9 @@ export async function apply(ctx, config) {
       const start = cursors.get(session) ?? 0;
       const events = session.snapshotEvents(start);
       const selected = events.flatMap(observation).filter(Boolean);
-      const state = await call(root, { action: 'ingest', harness: 'dsh', session: session.header.id,
-        events: selected });
+      // Ordinary model/tool traffic stays in DSH. Avoid an empty subprocess/write cycle.
+      const state = selected.length ? await call(root, { action: 'ingest', harness: 'dsh',
+        session: session.header.id, events: selected }) : undefined;
       cursors.set(session, start + events.length);
       failures.delete(session);
       return state;
@@ -117,9 +109,11 @@ export async function apply(ctx, config) {
     const downstream = await next();
     if (downstream.kind !== 'enter') return downstream;
     // Await storage before admitting model work. Never turn a downstream rejection into approval.
-    const state = await sync(agent.session);
+    let state = await sync(agent.session);
     if (failures.has(agent.session)) throw failures.get(agent.session);
     if (injectedTurn.get(agent.session) === turn) return downstream;
+    // Read fresh project state only when injecting; another session may have changed it.
+    state ??= await enqueue(() => call(project(agent.session), { action: 'recover' }));
     const serialized = JSON.stringify(state);
     const context = serialized.length <= 16000 ? serialized : JSON.stringify({
       boundary: state.boundary, project: state.project,
