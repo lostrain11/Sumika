@@ -1,10 +1,29 @@
 {
   "schema_version": 1,
-  "updated_at": null,
-  "current_goal": "完成 Sumika 新版阶段 0",
-  "current_phase": "P0",
-  "completed": ["创建 orphan 分支", "建立连续性记录骨架"],
-  "remaining": ["增加记录校验", "建立首次 Git checkpoint", "开始 P1 Harness 中立契约"],
-  "constraints": ["不复制旧版源码", "未知状态不得冒充完成", "不记录凭据和私人原文之外的敏感数据"],
-  "next_action": "运行 tools/check_continuity.py 并提交阶段 0 checkpoint"
+  "updated_at": "2026-09-12T14:12:51.656315+00:00",
+  "current_goal": "Sumika 新版：P0/P1 已完成，后续实现 Codex 日用开发平替",
+  "current_phase": "P1",
+  "phase_status": "complete",
+  "completed": [
+    "独立orphan分支和完整原文索引、八阶段计划、校验与可导出交接",
+    "DSH rc.2 固定安装和真实受管生命周期",
+    "审批绑定完整操作；SQLite 发送前落盘；未知状态重启不重放；31项测试通过"
+  ],
+  "remaining": [
+    "P2：DSH完整工具、终端、Plan、Skills、MCP、子Agent、流式事件与活跃任务恢复验收",
+    "P3：真实中型开发任务日用闭环",
+    "P4：需求和进度自动记录接线",
+    "P5-P7：办公、桌面控制、角色、记忆、虚拟居所、多角色、远程和设备"
+  ],
+  "constraints": [
+    "DSH原生Web；新增核心独立，优先复用社区插件/开源方案",
+    "没有自动选模、付费fallback、凭据迁移；本轮未调用模型",
+    "P1只有创建/取消及只读历史适配；完整工具调用是P2/P3验收范围",
+    "原文不被摘要覆盖；旧源码和运行数据保留但不纳入新分支",
+    "旧分支恢复点059d600已上传；新分支本轮仅本地提交",
+    "进程内宿主是信任边界，不声明OS沙箱或全部DSH工具已安全验收"
+  ],
+  "next_action": "从 runtime/dsh/README.md 和 phase-01-acceptance.md 开始P2；用固定rc.2隔离profile验证工具审批与真实文件/终端/活动取消，确认结果后才开放新增prompt入口。",
+  "last_existing_checkpoint": "f14c5bd",
+  "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-01-acceptance.md"
 }

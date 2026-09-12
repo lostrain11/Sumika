@@ -1,8 +1,39 @@
 {
   "schema_version": 1,
   "decisions": [
-    {"id": "D-001", "decision": "新版使用 orphan 分支重新开始", "status": "active", "reason": "不继承旧版实现和历史架构"},
-    {"id": "D-002", "decision": "默认适配 DSH，但核心逻辑保持 Harness 中立", "status": "active", "reason": "复用当前能力并保留未来更换 Harness 的空间"},
-    {"id": "D-003", "decision": "项目数据备份恢复首版暂不考虑加密", "status": "active", "reason": "先完成可恢复性"}
+    {
+      "id": "D-001",
+      "decision": "新版使用 orphan 分支重新开始",
+      "status": "active",
+      "reason": "不继承旧版实现和历史架构"
+    },
+    {
+      "id": "D-002",
+      "decision": "默认适配 DSH，但核心逻辑保持 Harness 中立",
+      "status": "active",
+      "reason": "复用当前能力并保留未来更换 Harness 的空间"
+    },
+    {
+      "id": "D-003",
+      "decision": "项目数据备份恢复首版暂不考虑加密",
+      "status": "active",
+      "reason": "先完成可恢复性"
+    },
+    {
+      "id": "D-004",
+      "decision": "复用DSH原生Web认证、Remote会话API与既有Agent能力",
+      "status": "active",
+      "reason": "避免重写客户端、Agent循环或登录系统；仅补连续性与跨Harness工作边界",
+      "kind": "implementation_default",
+      "evidence": "reuse.md"
+    },
+    {
+      "id": "D-005",
+      "decision": "UNKNOWN跨重启保留，禁止通过同请求新版本/步骤自动重放",
+      "status": "active",
+      "reason": "丢失回执不能证明未执行；取消回执也不能证明未发送",
+      "kind": "implementation_default",
+      "evidence": "phase-01-acceptance.md"
+    }
   ]
 }

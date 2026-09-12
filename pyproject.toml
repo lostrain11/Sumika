@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sumika-next"
+version = "0.1.0"
+description = "Portable project continuity and a thin managed Harness boundary"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+sumika = "sumika_next.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sumika_next*"]

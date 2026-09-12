@@ -1,4 +1,5 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 from sumika_next.authorization import Approval, Authority, AuthorizationError
@@ -37,6 +38,57 @@ class AuthorizationTests(unittest.TestCase):
         authority = Authority(HarnessInstance("external", "instance-1", Trust.UNVERIFIED))
         with self.assertRaises(AuthorizationError):
             authority.bind(self.binding)
+
+    def test_changed_content_is_rejected(self):
+        request = replace(self.request, arguments=b'{"content":"approved"}')
+        approval = self.authority.approve(request)
+        with self.assertRaises(AuthorizationError):
+            self.authority.consume(replace(request, arguments=b'{"content":"changed"}'), approval)
+        self.authority.consume(request, approval)
+
+    def test_revoked_binding_cannot_be_reactivated(self):
+        self.authority.approve(self.request)
+        self.authority.revoke(self.binding)
+        with self.assertRaises(AuthorizationError):
+            self.authority.bind(self.binding)
+        self.assertEqual(self.authority._pending, {})
+
+    def test_binding_fields_are_all_bound(self):
+        approval = self.authority.approve(self.request)
+        for changes in ({"request_id": "other"}, {"session_id": "other"},
+                        {"step_id": "other"}, {"request_version": 2}):
+            binding = replace(self.binding, **changes)
+            self.authority.bind(binding)
+            with self.assertRaises(AuthorizationError):
+                self.authority.consume(replace(self.request, binding=binding), approval)
+        with self.assertRaises(AuthorizationError):
+            self.authority.bind(replace(self.binding, instance_id="other"))
+
+    def test_concurrent_consumers_have_one_winner(self):
+        approval = self.authority.approve(self.request)
+        def consume(_):
+            try:
+                self.authority.consume(self.request, approval)
+                return True
+            except AuthorizationError:
+                return False
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            self.assertEqual(sum(pool.map(consume, range(32))), 1)
+
+    def test_new_authority_rejects_old_approval(self):
+        approval = self.authority.approve(self.request)
+        restarted = Authority(self.authority.instance)
+        restarted.bind(self.binding)
+        with self.assertRaises(AuthorizationError):
+            restarted.consume(self.request, approval)
+
+    def test_new_request_version_retires_previous_approvals(self):
+        approval = self.authority.approve(self.request)
+        self.authority.bind(replace(self.binding, request_version=2))
+        with self.assertRaises(AuthorizationError):
+            self.authority.consume(self.request, approval)
+        with self.assertRaises(AuthorizationError):
+            self.authority.bind(self.binding)
 
 
 if __name__ == "__main__":

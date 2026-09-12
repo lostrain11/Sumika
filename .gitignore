@@ -1,0 +1,20 @@
+# Runtime profiles and original work left outside the new Git history.
+/.sumika*/
+/.zcode/
+/artifacts/
+/backend/
+/frontend/
+/deprecated/
+/output/
+/packages/
+/plugins/
+/src-tauri/
+/test-results/
+/example.txt
+/output.txt
+/%SystemDrive%/
+**/node_modules/
+**/__pycache__/
+/.sumika-next/
+*.egg-info/
+/build/

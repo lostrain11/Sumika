@@ -1,9 +1,24 @@
 {
   "schema_version": 1,
   "current_phase": "P1",
-  "implemented": ["orphan 分支和新版需求入口", "连续性记录文件骨架", "Harness 中立实例/绑定/工具请求契约", "进程内单次审批与撤销边界"],
-  "verified": ["新版分支根提交存在", "伪造批准、目标修改、重复消费、撤销和未核验实例拒绝测试"],
-  "partial": ["P1 的真实 DSH 适配和实例身份证明尚未接入"],
+  "phase_status": "complete",
+  "implemented": [
+    "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
+    "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复"
+  ],
+  "verified": [
+    "31 项自动化测试通过",
+    "真实DSH rc.2认证、PID归属、创建、历史读取、空闲取消、跨域拒绝通过；0模型调用",
+    "冻结依赖重复安装通过"
+  ],
+  "partial": [],
   "blocked": [],
-  "next": "探测 DSH 当前发布版本与原生接口，实现薄适配器并验证真实实例身份"
+  "not_implemented": [
+    "P2 完整DSH工具/终端/事件/活跃取消/恢复及插件组合验收",
+    "P3 Codex日用平替闭环",
+    "P4 自动捕获需求并注入会话上下文",
+    "P5-P7 桌面、办公、角色和长期愿景"
+  ],
+  "next": "进入P2，在相同固定发行的隔离profile完成真实工具和工作闭环验收。",
+  "evidence": "docs/project/phase-01-acceptance.md"
 }

@@ -1,0 +1,4 @@
+* text=auto eol=lf
+# Release hashes must survive a Windows Git checkout byte-for-byte.
+/runtime/dsh/package.json -text
+/runtime/dsh/pnpm-lock.yaml -text
