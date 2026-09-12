@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "plan_version": 2,
+  "plan_version": 3,
   "goal": "基于 Harness 中立架构和最新已验证 DSH，实现 Codex 日用开发平替",
   "source": "approved-plan.md",
   "phases": [
@@ -362,6 +362,53 @@
       ]
     },
     {
+      "id": "P4-UI",
+      "name": "UI设计",
+      "status": "planned",
+      "requirements": [
+        "R-113",
+        "R-106",
+        "R-107",
+        "R-108",
+        "R-109"
+      ],
+      "tasks": [
+        {
+          "id": "P4-UI-1",
+          "name": "旧版与DSH界面参考取舍",
+          "requirement": "R-113",
+          "status": "planned"
+        },
+        {
+          "id": "P4-UI-2",
+          "name": "信息架构",
+          "requirement": "R-113",
+          "status": "planned"
+        },
+        {
+          "id": "P4-UI-3",
+          "name": "关键流程及功能开关设计",
+          "requirement": "R-113",
+          "status": "planned"
+        },
+        {
+          "id": "P4-UI-4",
+          "name": "视觉与可交互原型",
+          "requirement": "R-113",
+          "status": "planned"
+        },
+        {
+          "id": "P4-UI-5",
+          "name": "独立UI接入清单",
+          "requirement": "R-113",
+          "status": "planned"
+        }
+      ],
+      "acceptance": "提供可审阅原型、设计取舍和接入清单，明确设计/实现/真实接通的区别；用户审阅关键布局后进入P5。",
+      "design": "docs/project/ui-design-plan.md",
+      "evidence": []
+    },
+    {
       "id": "P5",
       "name": "首批扩展——办公文件与桌面助手能力",
       "status": "planned",
@@ -553,6 +600,11 @@
       "version": 2,
       "change": "P4 独立扩展、薄适配、Skill 与开关预留完成；设置 UI 按 R-108 留待后续。",
       "reason": "用户明确要求独立可复用实现；真实 DSH 及相称自动化验收通过。"
+    },
+    {
+      "version": 3,
+      "change": "在P4和P5之间新增P4-UI，保留P0-P7稳定编号及历史验收。",
+      "reason": "用户要求P5之前先做UI设计，参考旧版。"
     }
   ],
   "future_tasks": [

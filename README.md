@@ -26,4 +26,4 @@ python -B tools/probe_dsh_next.py
 
 阶段 0–4 已完成连续性基础、Harness 边界、DSH 发行验收及真实日用开发闭环。
 使用 `python -B -m sumika_next.cli run` 打开原生 Web；用法见
-[日用流程](docs/project/daily-workflow.md)。P4 通过[独立连续性扩展](extensions/continuity/README.md)接入记录；下一阶段为 P5。
+[日用流程](docs/project/daily-workflow.md)。P4 通过[独立连续性扩展](extensions/continuity/README.md)接入记录；下一阶段为 [P4-UI 设计](docs/project/ui-design-plan.md)，之后进入 P5。

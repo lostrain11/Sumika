@@ -37,7 +37,21 @@ class ContinuityTests(unittest.TestCase):
         self.assertIn(data["handoff"]["next_action"], result)
         for item in data["requirements"]["entries"]:
             self.assertIn(item["original"], result)
-        self.assertEqual(len(data["plan"]["phases"]), 8)
+        self.assertEqual([p['id'] for p in data['plan']['phases']],
+                         ['P0', 'P1', 'P2', 'P3', 'P4', 'P4-UI', 'P5', 'P6', 'P7'])
+
+    def test_missing_or_misplaced_ui_stage_fails(self):
+        self.change('plan', lambda x: x['phases'].insert(6, x['phases'].pop(5)))
+        with self.assertRaises(ValueError): validate(self.root)
+        self.change('plan', lambda x: x.update(phases=[p for p in x['phases'] if p['id'] != 'P4-UI']))
+        with self.assertRaises(ValueError): validate(self.root)
+
+    def test_legacy_eight_stage_plan_remains_readable(self):
+        self.change('plan', lambda x: x.update(plan_version=2,
+                    phases=[p for p in x['phases'] if p['id'] != 'P4-UI']))
+        for name in ['handoff', 'progress']:
+            self.change(name, lambda x: x.update(current_phase='P5'))
+        validate(self.root)
 
     def test_empty_originals_fail(self):
         self.change("requirements", lambda x: x.update(entries=[]))

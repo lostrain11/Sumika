@@ -37,8 +37,11 @@ def validate(root: Path):
             raise ValueError("unknown superseded requirement")
     phases = data["plan"]["phases"]
     phase_ids = [p["id"] for p in phases]
-    if phase_ids != [f"P{i}" for i in range(8)]:
-        raise ValueError("plan must preserve phases P0-P7")
+    expected = [f"P{i}" for i in range(8)]
+    if data["plan"].get("plan_version", 2) >= 3:
+        expected.insert(5, "P4-UI")
+    if phase_ids != expected:
+        raise ValueError("plan must preserve P0-P7 and the approved UI stage order")
     for p in phases:
         if not p.get("acceptance") or not p.get("tasks") or not p.get("requirements"):
             raise ValueError(f"phase missing acceptance, tasks or provenance: {p['id']}")

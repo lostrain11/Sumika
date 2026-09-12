@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "current_phase": "P5",
+  "current_phase": "P4-UI",
   "phase_status": "planned",
   "implemented": [
     "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
@@ -28,11 +28,12 @@
   "partial": [],
   "blocked": [],
   "not_implemented": [
+    "P4-UI：UI设计、原型与接入清单（旧版源码已初步查看，设计尚未交付）",
     "P5-P7 桌面、办公、角色和长期愿景",
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "P5：先选型可复用办公文件与通用桌面能力；尚未开始实现。",
+  "next": "P4-UI：继续查看旧版与DSH界面，产出信息架构、关键页面与交互原型；必要时询问用户。",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",

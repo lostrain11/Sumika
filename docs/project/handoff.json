@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-12T19:15:32.541278+00:00",
-  "current_goal": "P0-P4 已完成；下一阶段为 P5 办公文件与桌面助手能力",
-  "current_phase": "P5",
+  "updated_at": "2026-09-12T19:23:41.143758+00:00",
+  "current_goal": "P0-P4已完成；先完成P4-UI设计，再进入P5",
+  "current_phase": "P4-UI",
   "phase_status": "planned",
   "completed": [
     "独立orphan分支和完整原文索引、八阶段计划、校验与可导出交接",
@@ -13,6 +13,7 @@
     "P4：独立连续性存储、DSH薄适配、Skill、自动捕获/交接、专用报告查询工具及 enabled 开关预留"
   ],
   "remaining": [
+    "P4-UI：借鉴旧版，完成新版UI设计与可审阅原型",
     "P5-P7 桌面、办公、角色和长期愿景",
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
@@ -30,8 +31,8 @@
     "R-109：不修改DSH上游源码、安装包或node_modules；保持原生扩展接入与独立实现",
     "长期记忆仍在P6：优先社区插件/现成引擎，先接入可用基线，再实测择优替换；P4不是角色长期记忆。"
   ],
-  "next_action": "P5：先选型可复用办公文件与通用桌面能力；尚未开始实现。",
-  "last_existing_checkpoint": "de4f9247d577cc0ffb3805a7dbdb524a31883c42",
+  "next_action": "P4-UI：继续查看旧版与DSH界面，产出信息架构、关键页面与交互原型；必要时询问用户。",
+  "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle"
 }
