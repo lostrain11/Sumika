@@ -50,6 +50,22 @@
       "kind": "implementation_default",
       "reason": "真实模型任务与恢复已验证；不新增 Agent 循环或从摘要推断授权，自动生命周期接线留到 P4",
       "evidence": "phase-03-acceptance.md"
+    },
+    {
+      "id": "D-008",
+      "decision": "P4 采用独立 Python 记录库 + DSH 原生薄插件 + Skill",
+      "status": "active",
+      "kind": "implementation_default",
+      "reason": "官方Hook桥缺少压缩事件且压平来源；独立模块不导入Harness，实现和数据可迁移",
+      "evidence": "phase-04-acceptance.md"
+    },
+    {
+      "id": "D-009",
+      "decision": "新增非DSH原生能力预留enabled开关，设置UI以后接入",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户 R-107/R-108；关闭捕获/工具/注入并保留数据是具体实现约定",
+      "evidence": "requirements.json"
     }
   ]
 }

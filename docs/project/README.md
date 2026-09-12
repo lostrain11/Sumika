@@ -12,7 +12,8 @@
 - `receipts/<task_id>.json`：显式任务成果记录（人工声明，含验证与剩余项）。
 - `backup-recovery.md`：Git checkpoint 与项目数据备份恢复规则。
 - `approved-plan.md`：用户批准的完整八阶段计划原文。
-- `phase-01-acceptance.md`：本轮实现与实际验收证据。
+- `phase-01-acceptance.md` 至 `phase-04-acceptance.md`：各阶段实现与实际验收证据。
+- `../../extensions/continuity/README.md`：P4 独立扩展、适配器、开关及本地原始记录说明。
 
 所有摘要都不得替代原始需求；未知和未验证内容必须明确标记。
 
@@ -24,7 +25,7 @@
 模型整理不写进 original，写入 decisions 或任务说明并标明 implementation_default；原始摘要不能增加授权。
 在需求、计划、成果、验证或阻碍变化时更新记录，运行 `python -B -m sumika_next.cli check`。
 `python -B -m sumika_next.cli handoff` 输出可交给另一模型的目标、进度、约束、下一步和原文索引，不依赖旧源码和聊天缓存。
-阶段 0/1 使用显式维护；自动从 DSH 会话捕获并注入上下文属于 P4。
+P4 独立扩展从 DSH 会话自动捕获原文和生命周期事件，注入来源明确的交接；目标、计划变化和成果由专用工具按 Skill 记录，仍需如实区分报告与验证。
 
 ## 成果记录（receipt）
 

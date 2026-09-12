@@ -45,4 +45,4 @@ python -B -m sumika_next.cli handoff
 
 结果写入 `docs/project/receipts/<task_id>.json`，绑定当前 Git HEAD 与 UTC 时间；不覆盖同 ID 已有结果。验证状态只允许 `passed`、`failed`、`not_run`，保留失败和未运行记录。所有条目标明 `operator_report`，属于操作方声明，并非独立验证或阶段完成证明。完成状态仍须在计划/进度文件中依据证据维护。
 
-输入路径相对 `--root` 且不能越出项目；task_id 为可移植文件名。不要在成果记录中放入密钥或不必要的个人数据。自动捕获需求、计划和会话接线属于 P4。
+输入路径相对 `--root` 且不能越出项目；task_id 为可移植文件名。不要在成果记录中放入密钥或不必要的个人数据。P4 独立扩展的安装、enabled 开关、自动捕获和专用工具见 extensions/continuity/README.md；receipt 保持独立的显式成果格式。

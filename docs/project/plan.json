@@ -289,7 +289,7 @@
     {
       "id": "P4",
       "name": "连续性记录正式接入",
-      "status": "planned",
+      "status": "complete",
       "requirements": [
         "R-051",
         "R-052",
@@ -299,52 +299,67 @@
         "R-056",
         "R-057",
         "R-058",
-        "R-059"
+        "R-059",
+        "R-105",
+        "R-106",
+        "R-107",
+        "R-108"
       ],
       "tasks": [
         {
           "id": "P4-1",
           "requirement": "R-051",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-2",
           "requirement": "R-052",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-3",
           "requirement": "R-053",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-4",
           "requirement": "R-054",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-5",
           "requirement": "R-055",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-6",
           "requirement": "R-056",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-7",
           "requirement": "R-057",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         },
         {
           "id": "P4-8",
           "requirement": "R-058",
-          "status": "planned"
+          "status": "complete",
+          "evidence": "docs/project/phase-04-acceptance.md"
         }
       ],
       "acceptance": "中途更换模型后，模型能从记录继续任务，不重复已完成工作，也不误把未验证结果当作完成。",
-      "evidence": []
+      "evidence": [
+        "docs/project/phase-04-acceptance.md",
+        "docs/project/phase-04-evidence.json"
+      ]
     },
     {
       "id": "P5",
@@ -530,6 +545,11 @@
       "version": 2,
       "change": "P0/P1 完成基础范围实现与相称验证，P2-P7 保持 planned。",
       "reason": "真实 rc.2 生命周期和核心故障测试已通过；完整日用闭环仍按原阶段2/3验收。"
+    },
+    {
+      "version": 2,
+      "change": "P4 独立扩展、薄适配、Skill 与开关预留完成；设置 UI 按 R-108 留待后续。",
+      "reason": "用户明确要求独立可复用实现；真实 DSH 及相称自动化验收通过。"
     }
   ]
 }

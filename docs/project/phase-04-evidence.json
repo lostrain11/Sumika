@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-12T19:02:23.683606+00:00",
+  "complete": true,
+  "dsh_version": "0.1.5-rc.2",
+  "checks": {
+    "original_skill_tools_outcome": true,
+    "plan_history": true,
+    "compact_new_model_new_session_handoff": true,
+    "same_session_backfill_idempotent": true,
+    "workspace_opt_in": true,
+    "disabled_no_capture_tools_injection_data_preserved": true
+  },
+  "external_model_calls": 0,
+  "model_acceptance": "Two independent local deterministic endpoints, actual DSH lifecycle and tool execution; not a cloud model quality evaluation.",
+  "compact": {
+    "commandId": "cmd-920a7661-1",
+    "result": {
+      "kind": "success",
+      "text": "Compacted 23 history items (~5434 tokens).",
+      "sourceEventSeq": 69
+    }
+  },
+  "tests": {
+    "python": {
+      "run": 85,
+      "passed": 84,
+      "skipped": 1
+    },
+    "node_adapter": {
+      "passed": 4
+    },
+    "concurrent_stress_rounds": 15
+  },
+  "installed_profile": ".sumika-next/daily/0.1.5-rc.2",
+  "ui_switch": "enabled config verified; settings UI deferred per R-108",
+  "artifacts": [
+    {
+      "path": ".sumika-next/p4-ead5aaa3a0a34c02a6b183aff529d374/report.json",
+      "sha256": "744ac7a19f54648be8181e2f4916431c6607fc2fd79d6eacb752012055e6e656"
+    },
+    {
+      "path": ".sumika-next/p4-ead5aaa3a0a34c02a6b183aff529d374/evidence.json",
+      "sha256": "6f3b58724df4589a0f43c370891c01d8c178c8702a8c67fc5b2c1cba46dca2a9"
+    },
+    {
+      "path": "extensions/continuity/continuity.py",
+      "sha256": "bea8273003d63634c34939f0ec3d6a4c1c7510ee4243ccd2eb3887ee9775a16f"
+    },
+    {
+      "path": "extensions/continuity/dsh.mjs",
+      "sha256": "b26b1c1b3387f4e80ce0dfea5ed69e8a803292382b6d9919d0b6e8a36c6b84ab"
+    },
+    {
+      "path": "extensions/continuity/skill/SKILL.md",
+      "sha256": "5579ffb23979b13035a8a45a00b74c9ebb09cf3c5bb8029d0a9714748d2b53a6"
+    }
+  ]
+}

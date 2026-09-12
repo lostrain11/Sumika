@@ -1109,6 +1109,46 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "74b14c72e14395b88c537eb5a2afb954b68e9916f0c1e17ee6c67c748d9a53ba"
+    },
+    {
+      "id": "R-105",
+      "sequence": 105,
+      "original": "执行阶段4。记得优先以DSH插件/Skill等，或者是独立的拓展层代码形式，不要跟别的耦合",
+      "source": "visible-conversation: user message; locator=执行阶段4。记得优先以DSH插件/Skill等，或者是独立的",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "00b464bc253654b19627cd955e9ff52b89d286c44ef98ed7a331fe09506ab804"
+    },
+    {
+      "id": "R-106",
+      "sequence": 106,
+      "original": "独立扩展层，你是怎么理解的？我的想法是在DSH源代码上，额外做适配中间层，然后用独立代码实现。这样以后更新DSH版本，或者更换Harness也还能复用写的代码",
+      "source": "visible-conversation: user message; locator=独立扩展层，你是怎么理解的？我的想法是在DSH源代码上，额外",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "5d8e4953369eae5666b5a208e63e80a5a82182f8b080d84a50888c203083a15a"
+    },
+    {
+      "id": "R-107",
+      "sequence": 107,
+      "original": "这些新增的非DSH原生功能，能不能都在设置里做个开关？把这个加到需求文档中",
+      "source": "visible-conversation: user message; locator=这些新增的非DSH原生功能，能不能都在设置里做个开关？把这个",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "d4adaf105effc0550f02de749af5d405e687ff90dfcea937fe8f7f930c0f63fa"
+    },
+    {
+      "id": "R-108",
+      "sequence": 108,
+      "original": "可以先只预留开关，后面设计UI时再正式接上",
+      "source": "visible-conversation: user message; locator=可以先只预留开关，后面设计UI时再正式接上",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "5cdeef81b99fd908463e8ac042cca6ed920721c855d069dde28b4c4bf88eb858"
     }
   ]
 }

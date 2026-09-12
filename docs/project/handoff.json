@@ -1,19 +1,20 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-12T18:27:21.826983+00:00",
-  "current_goal": "P0-P3 已完成；下一阶段为 P4 连续性记录正式接入",
-  "current_phase": "P4",
+  "updated_at": "2026-09-12T19:02:23.683606+00:00",
+  "current_goal": "P0-P4 已完成；下一阶段为 P5 办公文件与桌面助手能力",
+  "current_phase": "P5",
   "phase_status": "planned",
   "completed": [
     "独立orphan分支和完整原文索引、八阶段计划、校验与可导出交接",
     "DSH rc.2 固定安装和真实受管生命周期",
     "审批绑定完整操作；SQLite 发送前落盘；未知状态重启不重放；31项测试通过",
     "P2 完整组合门槛通过，33 项测试；原生终端、Plan、Skills、MCP、子Agent、活动取消、断线与重启恢复已验证",
-    "P3：受管原生 Web 日用入口、绑定工作区、显式任务成果记录及压缩/重启交接闭环"
+    "P3：受管原生 Web 日用入口、绑定工作区、显式任务成果记录及压缩/重启交接闭环",
+    "P4：独立连续性存储、DSH薄适配、Skill、自动捕获/交接、专用报告查询工具及 enabled 开关预留"
   ],
   "remaining": [
-    "P4：连续性记录自动捕获与会话接线",
-    "P5-P7：桌面、办公、角色和长期愿景"
+    "P5-P7 桌面、办公、角色和长期愿景",
+    "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证"
   ],
   "constraints": [
     "DSH原生Web；新增核心独立，优先复用社区插件/开源方案",
@@ -21,10 +22,13 @@
     "新增适配入口为工作区登记、创建/取消及只读恢复；模型和工具仍由原生Web及其权限策略管理",
     "原文不被摘要覆盖；旧源码和运行数据保留但不纳入新分支",
     "进程内宿主是信任边界，不声明完整OS沙箱或所有第三方工具已验收",
-    "成果记录是操作方声明；历史receipt保留其当时未完成项，当前状态以计划与阶段验收为准"
+    "成果记录是操作方声明；历史receipt保留其当时未完成项，当前状态以计划与阶段验收为准",
+    "P4功能代码与DSH适配分离；更换Harness复用独立代码及数据",
+    "新增非原生功能预留独立开关；统一设置UI按用户要求后续接入",
+    "自动原文在私有.sumika-continuity目录，Git不包含；模型报告不等于批准或验证事实"
   ],
-  "next_action": "P4：优先调研 DSH 原生扩展/Skills 接线，将现有连续性记录接入任务生命周期；尚未开始实现。",
-  "last_existing_checkpoint": "b304a0caf759d0c2317f892624f03313cf0f3823",
-  "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-03-acceptance.md",
+  "next_action": "P5：先选型可复用办公文件与通用桌面能力；尚未开始实现。",
+  "last_existing_checkpoint": "0b2f0b452ceafd9396a59cce1081a4b8fa9e5d1b",
+  "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle"
 }

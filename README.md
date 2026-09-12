@@ -24,6 +24,6 @@ python -B tools/probe_dsh_next.py
 默认依赖固定为 `@deepseek-ai/dsh@0.1.5-rc.2`。安装/profile/回退见
 [运行说明](runtime/dsh/README.md)。核心可选用 `python -m pip install .` 安装；不依赖 DSH 的 Python 包。
 
-阶段 0–3 已完成连续性基础、Harness 边界、DSH 发行验收及真实日用开发闭环。
+阶段 0–4 已完成连续性基础、Harness 边界、DSH 发行验收及真实日用开发闭环。
 使用 `python -B -m sumika_next.cli run` 打开原生 Web；用法见
-[日用流程](docs/project/daily-workflow.md)。下一阶段 P4 接入自动连续性记录。
+[日用流程](docs/project/daily-workflow.md)。P4 通过[独立连续性扩展](extensions/continuity/README.md)接入记录；下一阶段为 P5。

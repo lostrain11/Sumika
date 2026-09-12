@@ -17,6 +17,6 @@ python -B -m sumika_next.cli check
 python -B -m sumika_next.cli handoff
 ```
 
-DSH `/compact` 后仍从上述文件核验目标，不依赖摘要保存授权。原始需求、代码、diff、成果正文与模型附言保持边界。自动捕获接线属于 P4。
+DSH `/compact` 后仍从上述文件核验目标，不依赖摘要保存授权。原始需求、代码、diff、成果正文与模型附言保持边界。P4 通过独立连续性扩展接入自动捕获；启用后使用 continuity_query / continuity_record 及 sumika-continuity Skill。
 
 验证说明见 `runtime/dsh/README.md`、`docs/project/phase-02-acceptance.md`。`.sumika-next/` 是本地运行数据，不上传凭据或原始模型请求。旧源码可能仍留在忽略目录中，新实现不以其为架构基础。
