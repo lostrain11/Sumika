@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "current_phase": "P0",
-  "implemented": ["orphan 分支和新版需求入口", "连续性记录文件骨架"],
-  "verified": ["新版分支根提交存在"],
-  "partial": [],
+  "current_phase": "P1",
+  "implemented": ["orphan 分支和新版需求入口", "连续性记录文件骨架", "Harness 中立实例/绑定/工具请求契约", "进程内单次审批与撤销边界"],
+  "verified": ["新版分支根提交存在", "伪造批准、目标修改、重复消费、撤销和未核验实例拒绝测试"],
+  "partial": ["P1 的真实 DSH 适配和实例身份证明尚未接入"],
   "blocked": [],
-  "next": "建立 Harness 中立契约与 DSH 发行锁定前的事实探测"
+  "next": "探测 DSH 当前发布版本与原生接口，实现薄适配器并验证真实实例身份"
 }
