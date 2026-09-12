@@ -551,5 +551,23 @@
       "change": "P4 独立扩展、薄适配、Skill 与开关预留完成；设置 UI 按 R-108 留待后续。",
       "reason": "用户明确要求独立可复用实现；真实 DSH 及相称自动化验收通过。"
     }
+  ],
+  "future_tasks": [
+    {
+      "id": "F-001",
+      "name": "Agent 专用诊断日志扩展",
+      "status": "planned",
+      "requirements": [
+        "R-110",
+        "R-109",
+        "R-106",
+        "R-107",
+        "R-108"
+      ],
+      "phase_assignment": "跨阶段扩展，实施顺序尚未安排；不改变P0-P7编号",
+      "design": "docs/project/agent-diagnostics-plan.md",
+      "acceptance": "Agent仅凭查询入口定位失败任务和相关事件，区分事实、推断与未知状态，提取可验证修复所需证据；覆盖工具失败、权限拒绝和连续性写入失败。",
+      "evidence": []
+    }
   ]
 }

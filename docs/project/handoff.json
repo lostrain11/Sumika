@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-12T19:02:23.683606+00:00",
+  "updated_at": "2026-09-12T19:08:41.101785+00:00",
   "current_goal": "P0-P4 已完成；下一阶段为 P5 办公文件与桌面助手能力",
   "current_phase": "P5",
   "phase_status": "planned",
@@ -14,7 +14,8 @@
   ],
   "remaining": [
     "P5-P7 桌面、办公、角色和长期愿景",
-    "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证"
+    "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
+    "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
   "constraints": [
     "DSH原生Web；新增核心独立，优先复用社区插件/开源方案",
@@ -25,10 +26,11 @@
     "成果记录是操作方声明；历史receipt保留其当时未完成项，当前状态以计划与阶段验收为准",
     "P4功能代码与DSH适配分离；更换Harness复用独立代码及数据",
     "新增非原生功能预留独立开关；统一设置UI按用户要求后续接入",
-    "自动原文在私有.sumika-continuity目录，Git不包含；模型报告不等于批准或验证事实"
+    "自动原文在私有.sumika-continuity目录，Git不包含；模型报告不等于批准或验证事实",
+    "R-109：不修改DSH上游源码、安装包或node_modules；保持原生扩展接入与独立实现"
   ],
   "next_action": "P5：先选型可复用办公文件与通用桌面能力；尚未开始实现。",
-  "last_existing_checkpoint": "0b2f0b452ceafd9396a59cce1081a4b8fa9e5d1b",
+  "last_existing_checkpoint": "d5f4a14d02bd6dd6a53018f3bfdf6787c1515248",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle"
 }

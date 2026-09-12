@@ -66,6 +66,14 @@
       "kind": "user_confirmed",
       "reason": "用户 R-107/R-108；关闭捕获/工具/注入并保留数据是具体实现约定",
       "evidence": "requirements.json"
+    },
+    {
+      "id": "D-010",
+      "decision": "新增Agent专用诊断查询扩展作为未来计划，复用已有原始日志",
+      "status": "active",
+      "kind": "implementation_default",
+      "reason": "用户R-110允许按必要性决定；现场已有会话日志和P4记录，但缺统一版本/调用/异常关联查询，P4工具观察仅保存关联与错误标记。",
+      "evidence": "agent-diagnostics-plan.md"
     }
   ]
 }

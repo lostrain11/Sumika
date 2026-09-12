@@ -1,6 +1,6 @@
 # Sumika Next 开发入口
 
-本项目使用 DSH 原生 Web、Agent、工具、Skills 和 MCP。新增核心逻辑保持 Harness 中立；优先复用上游能力。
+本项目使用 DSH 原生 Web、Agent、工具、Skills 和 MCP。新增核心逻辑保持 Harness 中立；优先复用上游能力。不修改 DSH 上游源码、安装包或 node_modules；新增功能通过原生扩展接口与独立适配中间层实现。
 
 开始任务、压缩上下文后或换模型接手时：
 

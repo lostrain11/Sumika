@@ -54,3 +54,6 @@ python -B -m sumika_next.cli receipt --root <项目根> --input <project-relativ
 - 记录附 `schema_version`、`provenance=operator_report`、当前 Git HEAD（无 Git 为 `null`）和 UTC `recorded_at`；读取时校验 `recorded_at` 必须是带 UTC 偏移的 ISO 时间。
 - 它是操作者声明，不构成独立验证，也不改变 `phase_status`；阶段完成仍以 `plan.json` 的 `evidence` 为准，`check` 会对损坏的 receipt 文件或名为 `*.json` 的目录报错；`.json` 以外的普通文件（如 `.gitkeep`、编辑器备份）会被忽略，`A.JSON` 与 `a.json` 在所有平台按同一记录处理。
 - `handoff` 追加最近 3 条成果摘要与验证/剩余项，便于压缩上下文或更换模型后接手；没有 `receipts/` 的旧项目输出保持不变。
+
+- `agent-diagnostics-plan.md`：F-001 Agent 专用诊断日志未来计划。
+- `continuity-comparison.md`：P4 与 Codex/DSH 原生能力及社区方案的比较与限制。
