@@ -4,7 +4,7 @@ from pathlib import Path
 import sqlite3
 import zipfile
 
-def query(root, *, task=None, session=None, error_only=False, limit=50):
+def query(root, *, task=None, session=None, call_id=None, error_kind=None, error_only=False, limit=50):
  db=Path(root)/'.sumika-continuity/records.sqlite3'
  if not db.is_file(): raise ValueError('continuity database missing')
  if not isinstance(limit,int) or not 1<=limit<=100: raise ValueError('invalid limit')
@@ -13,7 +13,9 @@ def query(root, *, task=None, session=None, error_only=False, limit=50):
   r=json.loads(raw);p=r.get('payload',{});wire=json.dumps(p,ensure_ascii=False).lower()
   if task and r.get('task')!=task:continue
   if session and r.get('session')!=session:continue
+  if call_id and call_id not in p.values():continue
   if error_only and not any(x in wire for x in ('error','failed','denied','timeout','unknown')):continue
+  if error_kind and error_kind.lower() not in wire:continue
   ids=[]
   for k in ('callId','toolCallId','source_id'):
    if k in p and isinstance(p[k],str): ids.append(p[k])
