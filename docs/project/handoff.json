@@ -23,7 +23,6 @@
     "P4-UI：借鉴旧版，完成新版UI设计与可审阅原型",
     "P5-1视觉/复杂文件/真实模型质量尚未验收；P5其余能力和P6-P7仍待实施",
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
-    "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）",
     "P6-3长期记忆provider实测与适配；P6角色真实模型/语音加载和UI接入仍待完成",
     "P6-3长期记忆：Mem0 OSS为首选基线，仍需隔离中文评测、来源/多角色隔离、成本与迁移验证",
     "P6-3需以统一中文评测比较MemMachine与M3-Agent；当前已安装MemMachine客户端并完成本地作用域/开关边界，尚未完成效果最终验收。",
@@ -44,7 +43,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "继续P6非UI：完善记忆删除/导入恢复与评测报告；UI由其他模型负责。",
+  "next_action": "继续P3/P6非UI：增强任务恢复与长期记忆 provider 评测",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
