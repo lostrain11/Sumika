@@ -18,3 +18,4 @@
 /.sumika-next/
 *.egg-info/
 /build/
+/.agents/skills/sumika-office/

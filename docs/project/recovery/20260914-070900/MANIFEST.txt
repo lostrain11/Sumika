@@ -1,0 +1,4 @@
+Moved research HTML files:
+AI_game_agent_screen_control_open_source.html
+Project_NEKO_AI_companion_game_video.html
+open_source_AI_companion_watch_game_commentary.html

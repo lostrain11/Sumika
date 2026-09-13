@@ -82,6 +82,14 @@
       "kind": "implementation_default",
       "reason": "用户R-111/R-112；减少重复原生日志和无效存储调用；不因选择社区方案而叠加另一套计划或Agent循环",
       "evidence": "long-term-memory-plan.md"
+    },
+    {
+      "id": "D-012",
+      "decision": "P5-1先复用开源文件库与可移植Skill，原生DSH负责发现和终端执行；UI工作并行由其他模型负责。",
+      "status": "active",
+      "kind": "implementation_default",
+      "reason": "R-114允许推进非UI任务；社区MCP候选已有相同文件库，本轮基础范围无需自建解析器或额外工具服务。",
+      "evidence": "office-reuse.md"
     }
   ]
 }

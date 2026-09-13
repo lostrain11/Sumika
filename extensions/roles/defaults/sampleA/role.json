@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "sampleA",
+  "name": "Sample A",
+  "enabled": true,
+  "persona": "Sumika 默认示例角色，用于验证 VRM 资源加载。",
+  "assets": {"model_3d": "AvatarSample_A.vrm", "thumbnail": "AvatarSample_A.thumbnail.png"},
+  "license": {"source": "madjin/vrm-samples", "terms": "VRoid Studio sample model conditions; see docs/project/default-role-assets.md"}
+}

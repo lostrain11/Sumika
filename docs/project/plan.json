@@ -411,7 +411,7 @@
     {
       "id": "P5",
       "name": "首批扩展——办公文件与桌面助手能力",
-      "status": "planned",
+      "status": "in_progress",
       "requirements": [
         "R-060",
         "R-061",
@@ -426,7 +426,10 @@
         {
           "id": "P5-1",
           "requirement": "R-060",
-          "status": "planned"
+          "status": "partial",
+          "evidence": "docs/project/phase-05-office-acceptance.md",
+          "implemented": "可移植Skill、独立锁定环境、原生终端接线、四类文件基础读写修改与enabled开关",
+          "remaining": "视觉渲染、复杂文件特性和自然语言任务质量尚未验收；公式重算等按实际需求补充。"
         },
         {
           "id": "P5-2",
@@ -465,8 +468,12 @@
         }
       ],
       "acceptance": "逐项验证所列能力，保留真实场景结果、限制与下一步；不将本阶段当作 P0/P1 前置。",
-      "evidence": [],
-      "acceptance_kind": "implementation_default"
+      "evidence": [
+        "docs/project/phase-05-office-acceptance.md",
+        "docs/project/phase-05-office-evidence.json"
+      ],
+      "acceptance_kind": "implementation_default",
+      "execution_note": "按R-114与其他模型的UI设计并行；本轮仅P5-1基础文件能力，不代表UI或P5整阶段完成。"
     },
     {
       "id": "P6",
@@ -605,6 +612,11 @@
       "version": 3,
       "change": "在P4和P5之间新增P4-UI，保留P0-P7稳定编号及历史验收。",
       "reason": "用户要求P5之前先做UI设计，参考旧版。"
+    },
+    {
+      "version": 3,
+      "change": "UI由用户另选模型负责，本Agent并行完成P5-1办公基础能力；P5保持in_progress，P5-1为partial。",
+      "reason": "R-114允许先继续其他任务；没有更改UI设计方案或原阶段验收门槛。"
     }
   ],
   "future_tasks": [

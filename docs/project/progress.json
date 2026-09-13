@@ -8,7 +8,11 @@
     "P2：锁定原生 DSH 组合；可重复真实工具、Plan、取消与恢复验收门槛",
     "P3：受管原生 Web 日用入口、绑定工作区、显式任务成果记录及压缩/重启交接闭环",
     "P4：独立连续性存储、DSH薄适配、Skill、自动捕获/交接、专用报告查询工具及 enabled 开关预留",
-    "P4精简：复用原生助手/工具日志，跳过空同步；历史数据不迁移"
+    "P4精简：复用原生助手/工具日志，跳过空同步；历史数据不迁移",
+    "P5-1基线：复用五个开源文件库的独立Skill、环境入口与enabled开关；未修改DSH上游或UI",
+    "P6-1/P6-2/P6-4首批：角色配置契约、角色上下文隔离块、角色资源包安全导入/导出；无UI、无DSH耦合",
+    "P6-3调整：新增完全内置 EmbeddedMemory（SQLite FTS5，标准库，无Docker/外部服务），作用域、来源、遗忘、导出已验证；MemMachine降为可选高效果provider候选。",
+    "P6-2正式接线：独立上下文构造器隔离用户原文、角色、记忆和任务块，深拷贝防下游污染；测试通过"
   ],
   "verified": [
     "33 项自动化测试通过",
@@ -23,23 +27,45 @@
     "原生 Edge 实际发送和显示结果通过；P2完整回归门槛与wheel构建通过；测试凭据临时副本已删除",
     "P4：85项Python测试（84通过、1权限跳过）、4项适配器测试；15轮并发写入复验通过",
     "P4真实DSH六组验收通过：原文与Skill/工具、新旧计划、压缩和双本地端点接手、原会话重启、项目隔离、禁用保留数据；外部模型调用0",
-    "P4精简回归：85项Python测试（1权限跳过）、4项适配器测试、真实DSH六组验收通过"
+    "P4精简回归：85项Python测试（1权限跳过）、4项适配器测试、真实DSH六组验收通过",
+    "办公基线：7项边界测试、Skill格式校验、11项依赖哈希锁安装和pip check通过；真实DSH Skill/终端、四类文件读写修改与禁用验证通过，0外部模型调用",
+    "角色扩展：配置/上下文边界、ZIP路径穿越拒绝、资源包往返测试通过",
+    "用户安和昴 V2 角色卡作为外部导入资源测试通过：V2格式、9项世界书、原始卡保留、SHA-256、导入/导出往返与路径安全；未激活为内置角色",
+    "角色上下文边界测试：来源块顺序、原文不可改写、对象隔离、非法输入拒绝通过",
+    "EmbeddedMemory中文评测夹具5/5通过：事实召回、作用域隔离、事实更新、两跳关系和角色隔离；本地无外部模型调用"
   ],
-  "partial": [],
+  "partial": [
+    "P5-1：基础文件操作可用；视觉渲染、公式重算、复杂特性与真实模型任务质量未验收",
+    "P5-2 OCR：独立可替换 provider 适配层已实现；当前机器无 Tesseract/RapidOCR，识别能力待安装 provider 后验收",
+    "P6-1/P6-2/P6-4基础契约完成；UI接入、真实角色模型/语音加载和长期记忆provider仍未实现",
+    "P6-3长期记忆：完成Mem0/Graphiti/claude-mem/Letta/DSH候选评估，首选Mem0 OSS基线；真实中文效果、成本和隔离评测尚未运行",
+    "P6-3：按效果优先评估M3-Agent（ByteDance-Seed/m3-agent）与MemMachine；已安装客户端适配并完成边界测试，尚未宣称最终中文效果最佳。",
+    "MemMachine实测受阻：仅安装客户端，本机8080无服务，未安装server；未发送角色数据。P5定时任务基础存储已实现并通过测试。"
+  ],
   "blocked": [],
   "not_implemented": [
     "P4-UI：UI设计、原型与接入清单（旧版源码已初步查看，设计尚未交付）",
-    "P5-P7 桌面、办公、角色和长期愿景",
+    "P5剩余桌面/OCR/定时/浏览器/模块能力，P6-P7角色和长期愿景",
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "P4-UI：继续查看旧版与DSH界面，产出信息架构、关键页面与交互原型；必要时询问用户。",
+  "next": "继续P6非UI：完善记忆删除/导入恢复与评测报告；UI由其他模型负责。",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",
     "docs/project/phase-03-acceptance.md",
     "docs/project/phase-03-evidence.json",
     "docs/project/phase-04-acceptance.md",
-    "docs/project/phase-04-evidence.json"
-  ]
+    "docs/project/phase-04-evidence.json",
+    "docs/project/workspace-cleanup.md",
+    "docs/project/phase-05-office-acceptance.md",
+    "docs/project/phase-05-office-evidence.json"
+  ],
+  "parallel_work": {
+    "phase": "P5",
+    "task": "P5-1",
+    "status": "baseline_verified",
+    "evidence": "docs/project/phase-05-office-acceptance.md"
+  },
+  "updated_at": "2026-09-13T22:09:33.210817+00:00"
 }

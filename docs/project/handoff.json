@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-12T19:23:41.143758+00:00",
-  "current_goal": "P0-P4已完成；先完成P4-UI设计，再进入P5",
+  "updated_at": "2026-09-13T22:09:33.211703+00:00",
+  "current_goal": "P0-P4已完成；UI由用户另选模型设计，本Agent并行推进不依赖UI的P5办公能力",
   "current_phase": "P4-UI",
   "phase_status": "planned",
   "completed": [
@@ -10,29 +10,48 @@
     "审批绑定完整操作；SQLite 发送前落盘；未知状态重启不重放；31项测试通过",
     "P2 完整组合门槛通过，33 项测试；原生终端、Plan、Skills、MCP、子Agent、活动取消、断线与重启恢复已验证",
     "P3：受管原生 Web 日用入口、绑定工作区、显式任务成果记录及压缩/重启交接闭环",
-    "P4：独立连续性存储、DSH薄适配、Skill、自动捕获/交接、专用报告查询工具及 enabled 开关预留"
+    "P4：独立连续性存储、DSH薄适配、Skill、自动捕获/交接、专用报告查询工具及 enabled 开关预留",
+    "P5-1基础范围：独立Office Skill复用成熟库；7项测试与真实DSH接线/文件操作/开关验收通过；不代表P5完成",
+    "P5-2 OCR：独立可替换适配层已实现；3项OCR边界测试通过；当前环境未安装Tesseract/RapidOCR，未宣称识别可用",
+    "P6-1/P6-2/P6-4首批无UI基础：角色配置契约、角色上下文隔离块、角色资源包安全导入/导出；测试通过",
+    "用户安和昴 V2 角色卡外部导入测试通过；不作为Sumika内置资源，运行数据保存在忽略目录",
+    "长期记忆内置基线：EmbeddedMemory无需外部软件；SQLite FTS5作用域隔离、遗忘、导出测试通过。MemMachine仅保留可选provider。",
+    "P6-2正式接线：上下文来源块隔离构造器及边界测试完成，不污染原文、代码、diff和工具参数",
+    "EmbeddedMemory中文评测夹具5/5通过：召回、隔离、更新、多跳关系和导出验证完成"
   ],
   "remaining": [
     "P4-UI：借鉴旧版，完成新版UI设计与可审阅原型",
-    "P5-P7 桌面、办公、角色和长期愿景",
+    "P5-1视觉/复杂文件/真实模型质量尚未验收；P5其余能力和P6-P7仍待实施",
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
-    "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
+    "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）",
+    "P6-3长期记忆provider实测与适配；P6角色真实模型/语音加载和UI接入仍待完成",
+    "P6-3长期记忆：Mem0 OSS为首选基线，仍需隔离中文评测、来源/多角色隔离、成本与迁移验证",
+    "P6-3需以统一中文评测比较MemMachine与M3-Agent；当前已安装MemMachine客户端并完成本地作用域/开关边界，尚未完成效果最终验收。",
+    "MemMachine真实Add/Search尚未验收（本机无服务）；P5定时任务基础存储已完成，执行调度仍由Harness接管。"
   ],
   "constraints": [
     "DSH原生Web；新增核心独立，优先复用社区插件/开源方案",
     "用户授权的 DeepSeek 真实验收已完成，临时凭据已移除；没有自动选模或付费fallback",
     "新增适配入口为工作区登记、创建/取消及只读恢复；模型和工具仍由原生Web及其权限策略管理",
-    "原文不被摘要覆盖；旧源码和运行数据保留但不纳入新分支",
+    "原文不被摘要覆盖；旧版残留已移至项目外恢复目录，详见 docs/project/workspace-cleanup.md",
     "进程内宿主是信任边界，不声明完整OS沙箱或所有第三方工具已验收",
     "成果记录是操作方声明；历史receipt保留其当时未完成项，当前状态以计划与阶段验收为准",
     "P4功能代码与DSH适配分离；更换Harness复用独立代码及数据",
     "新增非原生功能预留独立开关；统一设置UI按用户要求后续接入",
     "自动原文在私有.sumika-continuity目录，Git不包含；模型报告不等于批准或验证事实",
     "R-109：不修改DSH上游源码、安装包或node_modules；保持原生扩展接入与独立实现",
-    "长期记忆仍在P6：优先社区插件/现成引擎，先接入可用基线，再实测择优替换；P4不是角色长期记忆。"
+    "长期记忆仍在P6：优先社区插件/现成引擎，先接入可用基线，再实测择优替换；P4不是角色长期记忆。",
+    "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
+    "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "P4-UI：继续查看旧版与DSH界面，产出信息架构、关键页面与交互原型；必要时询问用户。",
+  "next_action": "继续P6非UI：完善记忆删除/导入恢复与评测报告；UI由其他模型负责。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
-  "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle"
+  "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
+  "parallel_work": {
+    "ui": "用户另选模型负责；本轮不改UI设计文件",
+    "active_task": "P5-1办公文件独立Skill基线",
+    "status": "baseline_verified",
+    "next": "P5剩余非UI任务：优先OCR与通用桌面控制复用调研"
+  }
 }

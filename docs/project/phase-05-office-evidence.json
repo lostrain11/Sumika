@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "scope": "P5-1 basic office files only",
+  "status": "baseline_verified_phase_partial",
+  "verified_at": "2026-09-12T20:18:27.629363+00:00",
+  "external_model_calls": 0,
+  "automated_tests": {
+    "command": "python -B -m unittest tests_next.test_office_extension -q",
+    "run": 7,
+    "passed": 7
+  },
+  "native_dsh": {
+    "passed": true,
+    "external_model_calls": 0,
+    "checks": {
+      "native_skill_load": true,
+      "native_terminal_file_roundtrips": {
+        "passed": true,
+        "checks": [
+          "docx_create_read_edit_runs_table",
+          "xlsx_create_read_edit_formula_style_merge",
+          "xlsx_no_fake_calculation",
+          "pptx_create_read_edit_preserve_second_slide",
+          "pdf_create_read_chinese_rotate_metadata",
+          "originals_unchanged"
+        ],
+        "visual_validation": "not_run",
+        "formula_calculation": "not_run",
+        "files": {
+          "edited.docx": "5dae4292904655adc5dc3103ef18119d5855ab8c8b50ae07a77bf57c53083f9f",
+          "edited.pdf": "e279bc67f4f3d93f02da86efb46da236f8a0720f32bc74a53d21c69c1a930527",
+          "edited.pptx": "96aa13f2242151a6789955afbc16efb2876bcb2491ce50761b9d08c03e804eee",
+          "edited.xlsx": "1c4425befd7fb0da4eef06c1c068788714226c0292bc1294437208fa5ba968e0",
+          "source.docx": "bdc86777b7fd011d59a2dc5ef4c820d2709a7acb701a6167477573981381cad1",
+          "source.pdf": "c961ada99aa2bcbc3826b71c5126cf53ec7c455bd4779e1a202da1a4739ca236",
+          "source.pptx": "36d204cfbad35269bd67a27be7c317184f374a8088314934abcddf5d12cd7993",
+          "source.xlsx": "f7100dfa3516e49bbc1ab88fb257c5657c1e9122246ec0a24dc35d5629b6a33b"
+        }
+      },
+      "disabled_no_work_exit_preserved": true
+    }
+  },
+  "artifacts": {
+    ".sumika-next/p5-office-7fcc38c3e53d4b229d303d9a86c75704/report.json": "24cc502f3ddbf328807815104aab11ae4cd51fdafe7eb8b64c9cf7a7a458e33e",
+    ".sumika-next/p5-office-7fcc38c3e53d4b229d303d9a86c75704/events.json": "35ef96090b578939b437fcd705ece6da10c0fe3a496d80c6811e5d28f6bb75e6",
+    "extensions/office/requirements.lock": "7f209c6dc939bf0d6c52b92fdeff51f556517903e6345ab8c479d2484a1df141"
+  },
+  "unverified": [
+    "visual rendering",
+    "formula recalculation",
+    "OCR",
+    "arbitrary lossless Office editing",
+    "live desktop application control",
+    "natural-language task quality with a real model"
+  ],
+  "remaining_phase_tasks": [
+    "P5-2",
+    "P5-3",
+    "P5-4",
+    "P5-5",
+    "P5-6",
+    "P5-7",
+    "P5-8"
+  ]
+}
