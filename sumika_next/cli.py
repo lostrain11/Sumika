@@ -1,5 +1,6 @@
 import argparse
 import sys
+import json
 from pathlib import Path
 
 from .continuity import handoff, validate
@@ -19,6 +20,8 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--task", help="Task id for diagnostics/evidence")
     parser.add_argument("--out", type=Path, help="Output JSON/ZIP for diagnostics/evidence")
+    parser.add_argument("--call-id", help="Operation call id for diagnostics")
+    parser.add_argument("--error-kind", help="Error marker for diagnostics")
     args = parser.parse_args()
     if args.input is not None and args.command != "receipt":
         parser.error("--input is only valid with 'receipt'")
@@ -40,7 +43,10 @@ def main():
             parser.error("--task is required")
         from extensions.diagnostics.query import timeline, evidence_bundle
         if args.command == "diagnostics":
-            result = timeline(args.root.resolve(), args.task, args.out)
+            from extensions.diagnostics.query import query
+            result = query(args.root.resolve(), task=args.task, call_id=args.call_id, error_kind=args.error_kind)
+            if args.out:
+                args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf8')
             if args.out is None:
                 import json
                 print(json.dumps(result, ensure_ascii=False, indent=2))
