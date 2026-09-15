@@ -64,11 +64,11 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
 
 class Bridge:
     def __init__(self, settings_path=None, *, capability_database=None, workbench_root=None,
-                 schedule_directory=None, shell_url=None):
+                 schedule_directory=None):
         self.settings_path = Path(settings_path) if settings_path else default_path()
         self.capability_database = Path(capability_database) if capability_database else None
         self.workbench = WorkbenchController(workbench_root or Path(__file__).resolve().parents[1],
-                                             shell_url=shell_url)
+                                             )
         self.schedule = ScheduleController(schedule_directory)
         self.capability_bootstrap()
 
@@ -654,8 +654,7 @@ def serve(settings_path=None, *, host="127.0.0.1", port=8765, capability_databas
     if host != "127.0.0.1":
         raise ValueError("UI bridge must bind loopback")
     bridge = Bridge(settings_path, capability_database=capability_database,
-                    workbench_root=workbench_root, schedule_directory=schedule_directory,
-                    shell_url=f"http://{host}:{port}/")
+                    workbench_root=workbench_root, schedule_directory=schedule_directory)
     httpd = ThreadingHTTPServer((host, port), _handler(bridge))
     return httpd
 

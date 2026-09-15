@@ -21,7 +21,7 @@ BRAND_PACKAGE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sum
 WORKBENCH_PACKAGE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-workbench"
 
 
-def ensure_skin(home, *, enabled=True, shell_url=None):
+def ensure_skin(home, *, enabled=True):
     """Register the Sumika skin in a managed profile's patch layer.
 
     The patch file is the documented extension point of a DSH profile; nothing
@@ -61,7 +61,7 @@ def ensure_skin(home, *, enabled=True, shell_url=None):
     except (OSError, ValueError):
         release = None
     brand_entry = {"id": "sumika-brand", "name": str(BRAND_PACKAGE / "lib" / "index.js"),
-                   "config": {"harness": "dsh", "release": release, "shellUrl": shell_url}}
+                   "config": {"harness": "dsh", "release": release}}
     brand_found = False
     for row in rows:
         if not isinstance(row, dict):
@@ -96,10 +96,8 @@ class WorkbenchError(RuntimeError):
 
 
 class WorkbenchController:
-    def __init__(self, root, *, python=None, browser=False, start_timeout=90, shell_url=None):
+    def __init__(self, root, *, python=None, browser=False, start_timeout=90):
         self.root = Path(root).resolve()
-        # The shell's own address, so the workbench can hand the user back to it.
-        self.shell_url = shell_url
         self.python = python or sys.executable
         self.browser = browser
         self.start_timeout = start_timeout
@@ -206,7 +204,7 @@ class WorkbenchController:
             self._embed_url = None
             home = default_home(self.root)
             home.mkdir(parents=True, exist_ok=True)
-            skin = ensure_skin(home, shell_url=self.shell_url)
+            skin = ensure_skin(home)
             if skin.get("registered"):
                 self._record("Sumika 皮肤已登记到受管 profile")
             adapter = Dsh(self.root, home)

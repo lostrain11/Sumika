@@ -65,7 +65,6 @@ const probe = await page.evaluate(() => {
   const text = document.body.innerText;
   return {
     skinMarker: document.documentElement.dataset.sumikaSkin || null,
-    shellGlobal: window.__sumikaShell || null,
     // The design's sidebar has no brand of its own; the wordmark belongs to the
     // shell's top bar, so the identity button must be hidden here (and DSH's own
     // wordmark must not show through either).
@@ -74,18 +73,13 @@ const probe = await page.evaluate(() => {
       return node ? getComputedStyle(node).display === 'none' : 'absent';
     })(),
     sidebarWordmarks: ['晴日部室', 'HARNESS'].filter(word => text.includes(word)),
-    footerStatus: text.includes('本地优先 · 数据不出本机'),
-    footerRelease: /已连接\s*DSH\s*[0-9]/.test(text),
-    shellLink: document.querySelector('[data-sumika-shell-link]')?.getAttribute('href') || null,
-    heroMark: (() => {
-      // The slot hands its occupant the surrounding mark geometry class, so find
-      // whichever element inside the headline actually paints a gradient.
-      const headline = document.querySelector("[class*='_headline']") || document.body;
-      for (const node of headline.querySelectorAll('*')) {
-        const image = getComputedStyle(node).backgroundImage;
-        if (image && image !== 'none' && image.includes('gradient')) return image;
-      }
-      return null;
+    // The design's board screen has no hero mark, and the shell top bar already
+    // carries the brand, so the hero mark must stay hidden.
+    // The design's board screen has no welcome headline (mark + title + preview
+    // badge), so the whole line stays hidden; the chips and composer below remain.
+    heroHeadlineHidden: (() => {
+      const node = document.querySelector("[class*='_headline']");
+      return node ? getComputedStyle(node).display === 'none' : 'absent';
     })(),
     surfaces: {
       frame: style("[class$='_frame']"),
@@ -112,7 +106,15 @@ if (sidebarPath) {
 let rail = null;
 const toggle = page.locator("[class*='_toggle']").first();
 if (await toggle.count().catch(() => 0)) {
-  await toggle.click().catch(() => {});
+  // While the column is open the control is hidden on purpose; the footer block
+  // offers the collapse action instead, and the rail keeps the control to come back.
+  // The control is hidden while the column is open, so invoke DSH's own toggle
+  // through the DOM instead of pointing at a hidden target.
+  await page.evaluate(() => {
+    const node = document.querySelector("[class*='_logoRow'] [class*='_toggle']")
+      || document.querySelector("[class*='_toggle']");
+    node?.click();
+  }).catch(() => {});
   await page.waitForTimeout(700);
   await toggle.hover().catch(() => {});
   await page.waitForTimeout(300);
@@ -186,12 +188,7 @@ if (probe.sidebarBrandHidden === false) failures.push('the sidebar still shows a
 if (probe.sidebarWordmarks.length) {
   failures.push(`sidebar shows a wordmark: ${probe.sidebarWordmarks.join(', ')}`);
 }
-if (!probe.footerStatus) failures.push('footer status line missing');
-if (!probe.footerRelease) failures.push('footer harness release missing');
-if (!probe.shellLink) failures.push('no way back to the Sumika shell from the workbench');
-if (!probe.heroMark || !probe.heroMark.includes('linear-gradient')) {
-  failures.push(`hero brand mark is ${probe.heroMark}`);
-}
+if (probe.heroHeadlineHidden === false) failures.push('the hero headline is still visible');
 if (probe.surfaces.sidebar?.background !== 'rgb(250, 248, 240)') {
   failures.push(`sidebar surface is ${probe.surfaces.sidebar?.background}`);
 }

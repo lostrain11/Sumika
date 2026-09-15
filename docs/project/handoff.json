@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T20:05:05.674526+00:00",
+  "updated_at": "2026-09-15T20:16:01.147736+00:00",
   "current_goal": "D 方向 UI 收敛：工作台=DSH、能力与项目作为 DSH 主面板、活动室接真实角色服务，扩展开关与角色完整性均有验收",
   "current_phase": "P6",
   "phase_status": "in_progress",
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "审批卡（需用户切权限预设或授权工作区外操作）、diff/终端（需展开态）；另需核查 DSH 沙箱内 tests_next 113 errors 的原因。",
+  "next_action": "若需要“从展开态收成轨道”的入口，需另选位置（当前没有）；其余按覆盖表推进（审批卡/终端 diff 需真实场景）。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -137,7 +137,8 @@
       "输入区皮肤完成并实测：先 dump 出真实 DOM 链（composerStack > root > card > scroll > grow > input，底部是 tools），据此改正选择器——输入卡 1px 描边/10px 圆角/纸色底、控件行虚线分隔、占位符 muted、外边距与设计稿 .wb-composer 一致；原生控件全部保留。",
       "审批/diff/终端场景实测：真实工具调用 2 次（跑测试、写并删除临时文件）——工具卡样式已生效；diffStat 节点存在；diff 正文与终端容器均未渲染（仍标未验证）；审批卡未出现，原因是权限为「工作区内修改」，工作区内写文件不弹审批，需要用户切权限预设或执行工作区外操作才能验证。",
       "修复外壳布局 bug：1160x800 视口下 body 被算成 900px 且 overflow:hidden，导致输入区控件行（含权限模式）与侧栏页脚永远看不到、也滚不到；改为 html/body 定高 + body flex 纵向 + .screen flex:1 min-height:0。实测两种尺寸 frame 底边都等于视口高度、scrollable=false。同时撤回“被框架加载时跳过品牌”——那会让侧栏露出 DSH 官方 deepseek HARNESS 字样，反而更差。",
-      "侧栏去品牌（贴合设计稿）：隐藏 `_brand`（晴日部室/官方 HARNESS 字样都不再出现），保留折叠按钮，logoRow 行高 60→40；验收脚本把“侧栏必须有品牌”改为反向断言“侧栏不得出现品牌字样”。另注意到 DSH 沙箱内跑 tests_next 报 113 errors（工作区外为 293 OK），是沙箱环境差异，非代码回归，留待核查。"
+      "侧栏去品牌（贴合设计稿）：隐藏 `_brand`（晴日部室/官方 HARNESS 字样都不再出现），保留折叠按钮，logoRow 行高 60→40；验收脚本把“侧栏必须有品牌”改为反向断言“侧栏不得出现品牌字样”。另注意到 DSH 沙箱内跑 tests_next 报 113 errors（工作区外为 293 OK），是沙箱环境差异，非代码回归，留待核查。",
+      "去掉两处多余品牌与整块侧栏页脚：hero 标题（标记 + 探索未至之境 + 预览版）与侧栏页脚状态块（含“回 Sumika/收起侧栏”）全部隐藏/删除，同时清掉为页脚注入的宿主代码与 shell_url 管线；修掉“回 Sumika”把 iframe 自身导航到外壳导致双顶栏的 bug。现状：展开态无折叠按钮（设计稿没有），轨道态保留按钮用于展开回来。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -150,7 +151,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "侧栏去品牌（贴合设计稿）：隐藏 `_brand`（晴日部室/官方 HARNESS 字样都不再出现），保留折叠按钮，logoRow 行高 60→40；验收脚本把“侧栏必须有品牌”改为反向断言“侧栏不得出现品牌字样”。另注意到 DSH 沙箱内跑 tests_next 报 113 errors（工作区外为 293 OK），是沙箱环境差异，非代码回归，留待核查。",
+    "current_task": "去掉两处多余品牌与整块侧栏页脚：hero 标题（标记 + 探索未至之境 + 预览版）与侧栏页脚状态块（含“回 Sumika/收起侧栏”）全部隐藏/删除，同时清掉为页脚注入的宿主代码与 shell_url 管线；修掉“回 Sumika”把 iframe 自身导航到外壳导致双顶栏的 bug。现状：展开态无折叠按钮（设计稿没有），轨道态保留按钮用于展开回来。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",

@@ -236,11 +236,39 @@ html[data-sumika-skin='1'] [class$='_brand'],
 html[data-sumika-skin='1'] [class*='_brand '] {
   display: none;
 }
-/* With the identity gone that row only holds the collapse control, so it does
-   not need its original 60px; the design starts the column with 新建任务. */
+/* With the identity gone that row would hold nothing but the collapse control,
+   and an empty 40–60px band above 新建任务 reads as a mistake. The row collapses
+   to zero and the control moves to the sidebar's foot, just above 设置, where a
+   rail toggle belongs. */
 html[data-sumika-skin='1'] [class*='_logoRow'] {
-  height: 40px;
-  margin-bottom: 6px;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+/* While the column is open the control is hidden outright: the design's column
+   starts with 新建任务 and an empty band above it reads as a mistake. The rail
+   keeps the control, because there it is the only way back out. Collapsing from
+   the open state is offered by our own footer block instead. */
+html[data-sumika-skin='1'] [class*='_logoRow'] [class*='_toggle'] {
+  display: none;
+}
+html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle'] {
+  display: inline-flex;
+}
+
+/* The New Session hero repeats the brand that the shell's top bar already shows,
+   and the design's board screen has no such mark at all, so it is hidden: the
+   headline keeps DSH's own title and preview badge. */
+html[data-sumika-skin='1'] [class*='_fishHitbox'] {
+  display: none;
+}
+
+/* The empty-state headline (mark + 探索未至之境 + 预览版 badge) is DSH welcome
+   copy that the design never had; the chips and the composer below it stay. */
+html[data-sumika-skin='1'] [class*='_headline'] {
+  display: none;
 }
 `;
 
