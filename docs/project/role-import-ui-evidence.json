@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-09-15T18:21:30.961Z",
+  "checked_at": "2026-09-15T19:18:00.165Z",
   "bridge": "http://127.0.0.1:8765",
   "imported": {
     "complete": {
@@ -47,7 +47,7 @@
         ]
       },
       "status": "已导入（未带 3D 模型）",
-      "unfinished_note": "未完整（不计入名册）：Sumika 示例助手（缺 3D 模型）；导入流程测试角色（缺 3D 模型）"
+      "unfinished_note": "未完整（不计入名册）：\nSumika 示例助手（缺 3D 模型）\n导入流程测试角色（缺 3D 模型）\n补挂模型"
     }
   },
   "cleanup": {

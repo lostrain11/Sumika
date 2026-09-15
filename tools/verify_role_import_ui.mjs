@@ -108,6 +108,32 @@ else {
   if (!unfinishedNote.includes('缺 3D 模型')) {
     failures.push(`the roster does not say what the unfinished role lacks: ${unfinishedNote}`);
   }
+  // Completing it in place must move it into the roster.
+  const field = page.locator(`[data-attach-path='${cardOnlyId}']`);
+  if (await field.count() === 0) {
+    failures.push('an unfinished user role offers no way to attach its model');
+  } else {
+    await field.fill(modelPath);
+    await page.locator(`${'#screen-room .roster'} .sumika-unfinished button`).first().click();
+    let attached = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      attached = (await (await fetch(`${bridge}/api/roles`)).json()).roles
+        .find(item => item.id === cardOnlyId);
+      if (attached?.complete === true) break;
+      await page.waitForTimeout(500);
+    }
+    if (attached?.complete !== true) {
+      failures.push(`attaching the model did not complete the role: ${JSON.stringify(attached)}`);
+    } else {
+      await page.waitForTimeout(1200);
+      const afterAttach = await page.evaluate(() => Array.from(
+        document.querySelectorAll('#screen-room .roster .member'))
+        .map(node => node.querySelector('.nm')?.textContent || ''));
+      if (!afterAttach.some(name => name.includes('导入流程测试角色'))) {
+        failures.push(`the completed role is still not in the roster: ${JSON.stringify(afterAttach)}`);
+      }
+    }
+  }
 }
 
 const entry = (listed.roles || []).find(item => item.id === completeId);

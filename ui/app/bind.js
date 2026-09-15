@@ -134,9 +134,46 @@ function bindRoster(payload) {
     note.style.margin = '6px 0 0';
     note.style.fontSize = '10px';
     const labels = { card: '缺角色卡', model_3d: '缺 3D 模型' };
-    note.textContent = '未完整（不计入名册）：' + unfinished.map(role =>
-      `${role.name}（${(role.missing || []).map(kind => labels[kind] || kind).join('、') || '缺少资产'}）`
-    ).join('；');
+    const headline = document.createElement('span');
+    headline.textContent = '未完整（不计入名册）：';
+    note.appendChild(headline);
+    unfinished.forEach((role, index) => {
+      const line = document.createElement('span');
+      line.style.display = 'block';
+      line.textContent = `${role.name}（${(role.missing || []).map(kind => labels[kind] || kind).join('、') || '缺少资产'}）`;
+      note.appendChild(line);
+      // A role that only lacks its model can be completed right here; the file
+      // stays on this machine, it is never uploaded.
+      if ((role.missing || []).includes('model_3d') && role.kind === 'user') {
+        const fix = document.createElement('span');
+        fix.style.cssText = 'display:flex;gap:4px;margin:2px 0 4px';
+        const field = document.createElement('input');
+        field.placeholder = 'D:\\路径\\model.vrm';
+        field.setAttribute('data-attach-path', role.id);
+        field.style.cssText = 'flex:1;min-width:0;font-size:9.5px;padding:2px 4px;'
+          + 'border:1px solid var(--line);border-radius:5px;background:#fff';
+        const button = document.createElement('button');
+        button.className = 'mini-btn';
+        button.style.cssText = 'font-size:9.5px;padding:2px 8px;white-space:nowrap';
+        button.textContent = '补挂模型';
+        button.addEventListener('click', async () => {
+          const path = field.value.trim();
+          if (!path) { button.textContent = '先填路径'; return; }
+          button.textContent = '附加中…';
+          try {
+            await api('/api/roles/attach', {
+              method: 'POST',
+              body: JSON.stringify({ id: role.id, kind: 'model_3d', path }),
+            });
+            bindRoster(await api('/api/roles'));
+          } catch (error) {
+            button.textContent = `失败：${(error.payload || {}).error || error.message}`;
+          }
+        });
+        fix.append(field, button);
+        note.appendChild(fix);
+      }
+    });
     roster.appendChild(note);
   }
   // The active role must be one the roster can actually show; if it is not, say

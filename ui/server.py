@@ -279,6 +279,28 @@ class Bridge:
             raise ValueError("role id required")
         return str(remove_role(role_id.strip(), user_role_store()))
 
+    def attach_role_asset(self, payload):
+        """Give an existing role an asset it is missing, typically its model.
+
+        Only user roles can be edited: a built-in role is part of the client and
+        adding a model to it would be a silent fork of what ships.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError("invalid payload")
+        role_id = payload.get("id")
+        kind = payload.get("kind")
+        source = payload.get("path")
+        if not isinstance(role_id, str) or not role_id.strip():
+            raise ValueError("role id required")
+        if kind not in ("model_3d", "model_2d", "voice", "scene", "thumbnail"):
+            raise ValueError("unsupported asset kind for this action")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("local file path required")
+        if self._role_kinds().get(role_id.strip()) != "user":
+            raise ValueError("only imported roles can be completed here")
+        target = attach_asset(role_id.strip(), user_role_store(), kind, source.strip())
+        return {"id": role_id.strip(), "kind": kind, "path": str(target)}
+
     def select_role(self, role_id):
         """Point the active role session at this role so switching is real."""
         if not isinstance(role_id, str) or not role_id.strip():
@@ -584,6 +606,11 @@ def _handler(bridge):
             if route == "/api/roles/remove":
                 try:
                     return self._json(200, {"removed": bridge.remove_role(self._body().get("id"))})
+                except (ValueError, OSError, KeyError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/roles/attach":
+                try:
+                    return self._json(200, bridge.attach_role_asset(self._body()))
                 except (ValueError, OSError, KeyError) as error:
                     return self._json(400, {"error": str(error)})
             if route in ("/api/schedule/toggle", "/api/schedule/remove", "/api/schedule/acknowledge"):
