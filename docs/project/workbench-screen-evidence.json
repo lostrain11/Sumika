@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-09-15T17:49:15.921Z",
+  "bridge": "http://127.0.0.1:8765",
+  "screen": {
+    "screenVisible": true,
+    "framePresent": true,
+    "frameSrc": "http://127.0.0.1:5175/?token=WD2CumGVuitUZgvUtWrErVmMOV7RrVjJKmHkgkT2GNg",
+    "frameHeight": 836,
+    "mockWrapPresent": false,
+    "navVisible": true,
+    "deskpetVisible": false
+  },
+  "frame_requests": [
+    "http://127.0.0.1:5175/",
+    "http://127.0.0.1:5175/plugins/",
+    "http://127.0.0.1:5175/assets/index-BKQ_L1z6.js",
+    "http://127.0.0.1:5175/assets/vendor-CCJJTK99.js",
+    "http://127.0.0.1:5175/assets/vendor-BNsW4eBh.css"
+  ],
+  "bad_responses": [],
+  "page_errors": [],
+  "console_errors": [],
+  "failures": [],
+  "status": "passed"
+}

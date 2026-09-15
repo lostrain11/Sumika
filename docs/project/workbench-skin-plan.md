@@ -275,6 +275,36 @@ ctx.slots.inject("sidebar", () => ctx.slots.register({
 node tools/verify_workbench_ui.mjs http://127.0.0.1:8765 docs/project/workbench-ui-evidence.json
 ```
 
+## 工作台那一屏就是 DSH 前端（2026-09-16）
+
+用户要的是「点进工作台，这一屏本身就是 DSH 前端」，既不是跳走也不是新开标签页；先前实现过同标签页跳转（`window.location.assign`），用户明确否掉了。现在的做法：
+
+- `ui/app/bind.js` 在 `#screen-board` 里放一个撑满该屏的 `iframe`（`#sumika-workbench-frame`），src 是受管实例的 token 化地址；壳的顶栏（晴日部室 + 活动室/工作台/能力/设置）继续留在上方，下方整块就是 DSH。
+- 内嵌可行性是实测的：DSH 不返回 `X-Frame-Options` 或 CSP，token 化地址是 303 + `Set-Cookie`（`SameSite=Strict`，与壳同属 127.0.0.1，因此跨端口仍算 same-site），framing 正常，页面资源（`/assets/*`、`/plugins/*`）都在框架里加载成功。
+- 设计稿的模拟工作台标记（`.wb-wrap` 里的时间线/审批卡）整体替换掉，不再和真实工作台叠在一起；`body.on-board` 时隐藏仍带示例台词的桌宠浮窗。
+- 品牌插件在被框架加载时（`window.self !== window.top`）不再注册侧栏品牌槽，避免顶栏和侧栏出现两个「晴日部室」；侧栏底部保留「← 回 Sumika 活动室 / 能力 / 设置」，链接地址由 `ensure_skin(shell_url=...)` 从桥接端口注入，不写死。
+
+验收：`node tools/verify_workbench_screen.mjs`（断言该屏为当前屏、frame 存在且高度 >400px、src 指向 5175、模拟标记已移除、桌宠不可见、确实向 5175 发过资源请求、无 pageerror 与 console error）。
+
+## 把 Sumika 屏幕做成 DSH 主面板（2026-09-16，能力面板已落地）
+
+用户接着问「是不是整个客户端都做成 DSH 前端」。这里先做了一个可运行的原型来回答，而不是先讨论：
+
+- 机制：`ctx.slots.register({ name: 'main', key: 'sumika-capabilities', children: {} }, Panel)` 注册主区域面板，再用 `ctx.slots.register({ name: 'sidebar.panellist', id: 'sumika-capabilities', label: '能力', order: 10 }, Glyph)` 在侧栏加一行；点击该行调用 `ctx.layout.selectPanel(id)` 切换主区域。
+- 数据：DSH 在 5175、桥接在 8765，属跨源。桥接新增**仅回显本机来源**的 CORS（`http://127.0.0.1[:port]`、`http://localhost[:port]`、`[::1]`）并补了 `OPTIONS` 预检，其它站点依旧读不到；面板直接调 `/api/modules`、`/api/readiness` 与 `/api/capabilities/toggle`。
+- 结果：侧栏出现「能力」面板行，主区域渲染真实能力页（7 项可开关 + 4 项就绪视图），从面板点击开关真的写进注册表；`tools/verify_dsh_panel.mjs` 断言这些并会在结束前把开关恢复原值。
+
+由此得到对各屏的成本判断：
+
+| 屏幕 | 做成 DSH 面板 | 说明 |
+| --- | --- | --- |
+| 能力 | ✅ 已完成 | 列表 + 开关，纯 DOM 与 HTTP，最合适 |
+| 设置 | 低成本 | 与能力同构；外观分区另需主题/密度落地 |
+| 活动室 | 高成本 | 3D/VRM 渲染、语音输入输出、麦克风设备选择都要搬进 DSH 客户端插件，收益低于成本 |
+| 横向顶栏导航 | 结构性缺口 | DSH 布局只暴露 `sidebar`/`main`/`rightbar`/`shell.overlay`/`root`，没有顶栏槽；要还原设计稿的横向导航得整体接管 `sidebar`，或自绘一个 `shell.overlay` 浮层 |
+
+因此建议：**工作台保持现在这样（壳 + DSH 那一屏）**，能力与设置这类「列表 + 开关」的屏幕优先做成 DSH 面板，活动室继续留在壳里；等 DSH 提供顶栏槽或我们决定接管侧栏时，再把壳整体收进 DSH。
+
 ## 待办
 
 1. 时间线：会话内的 DSH 原生组件（conversation / tool / approval / deliverables）保留，皮肤只做令牌级调整；设计稿里的时间线版式逐屏对照后逐项补齐。

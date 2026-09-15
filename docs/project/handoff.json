@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T17:39:02.181547+00:00",
-  "current_goal": "D 方向 UI 收敛：工作台（品牌/侧栏/会话头状态与面包屑）与外壳（设置、能力页真实开关）均已完成",
+  "updated_at": "2026-09-15T17:49:38.663052+00:00",
+  "current_goal": "Sumika 客户端形态收敛：工作台那屏即 DSH 前端，能力屏已可作为 DSH 主面板运行",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "UI 剩余：侧栏圆点/间距/时间文案的皮肤级贴近；独立 main 面板 + sidebar.panellist 条目展示 /api/tree 阶段任务；外观分区的主题/背景/密度接线；待确认药丸需真实审批/计划/提问场景验证。改动工作台后重跑 tools/verify_workbench_ui.mjs，改动外壳后重跑 tools/verify_capability_ui.mjs。",
+  "next_action": "待用户确认形态后继续：(A) 维持壳 + DSH 那一屏，把设置也做成 DSH 面板；(B) 整体收进 DSH —— 需先决定横向顶栏怎么处理（DSH 无顶栏槽，只能接管 sidebar 或自绘 shell.overlay）。其余 UI 待办：侧栏圆点/间距贴近、/api/tree 面板、外观分区接线、待确认药丸需真实审批场景。改工作台后重跑 verify_workbench_ui / verify_workbench_screen / verify_dsh_panel。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -119,7 +119,8 @@
       "工作台壳层第四轮：新增独立插件 extensions/ui/sumika-workbench，在会话头 utilities 槽渲染真实状态的药丸（running→执行中；pendingInteraction approval/plan-review/question→等待审批/计划审阅/等待回答）；实测会话头三个槽位的 props 签名；实时验证脚本抓到 idle→running 与「执行中」文案。",
       "能力注册表补齐：ui/readiness.service_capabilities() 按真实依赖推导可服务能力，Bridge.capability_bootstrap() 只补缺不覆盖；本机注册表现在有 ocr/rapidocr、desktop/windows-uia、voice/windows-sapi、asr/vosk(带模型路径)、camera、microphone、office-render/libreoffice；真实验收通过：开关往返、停用被拒、启用后经 desktop service 跑通 OCR；证据 docs/project/capability-registry-evidence.json。",
       "R-107/R-108 界面接线完成：能力页三组（扩展模块可开关 / 就绪视图无开关 / DSH 原生不做开关）、设置页能力模块区真实总览与逐项开关、卡片点选填真实详情；模型与连接改为真实或明确交由 DSH；未接线分区加「原型·未接入」并禁用按钮，删除示例检查点哈希与 MCP 授权计数。真实验收：从 DOM 点击开关后端确实改变并恢复，0 客户端报错。",
-      "工作台会话头补完：conversation.session.header.lineage 实为追加槽（原生标题仍由 shell 渲染），改为只补真实工作区归属「工作区 · Sumika」与子会话的上级链接；顺带修掉组件漏常量导致的渲染崩溃，并把「槽位崩溃只报 console」这条排查经验写进方案文档，验收脚本改为同时监听 pageerror 与 console error。"
+      "工作台会话头补完：conversation.session.header.lineage 实为追加槽（原生标题仍由 shell 渲染），改为只补真实工作区归属「工作区 · Sumika」与子会话的上级链接；顺带修掉组件漏常量导致的渲染崩溃，并把「槽位崩溃只报 console」这条排查经验写进方案文档，验收脚本改为同时监听 pageerror 与 console error。",
+      "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -132,7 +133,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "工作台会话头补完：conversation.session.header.lineage 实为追加槽（原生标题仍由 shell 渲染），改为只补真实工作区归属「工作区 · Sumika」与子会话的上级链接；顺带修掉组件漏常量导致的渲染崩溃，并把「槽位崩溃只报 console」这条排查经验写进方案文档，验收脚本改为同时监听 pageerror 与 console error。",
+    "current_task": "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",
@@ -152,8 +153,8 @@
     "status": "in_progress",
     "evidence": "docs/project/local-model-comparison-evidence.json",
     "verification": "190 tests run, 189 passed, 1 skipped",
-    "current_task": "工作台会话头补完：conversation.session.header.lineage 实为追加槽（原生标题仍由 shell 渲染），改为只补真实工作区归属「工作区 · Sumika」与子会话的上级链接；顺带修掉组件漏常量导致的渲染崩溃，并把「槽位崩溃只报 console」这条排查经验写进方案文档，验收脚本改为同时监听 pageerror 与 console error。",
-    "next_action": "UI 剩余：侧栏圆点/间距/时间文案的皮肤级贴近；独立 main 面板 + sidebar.panellist 条目展示 /api/tree 阶段任务；外观分区的主题/背景/密度接线；待确认药丸需真实审批/计划/提问场景验证。改动工作台后重跑 tools/verify_workbench_ui.mjs，改动外壳后重跑 tools/verify_capability_ui.mjs。"
+    "current_task": "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。",
+    "next_action": "待用户确认形态后继续：(A) 维持壳 + DSH 那一屏，把设置也做成 DSH 面板；(B) 整体收进 DSH —— 需先决定横向顶栏怎么处理（DSH 无顶栏槽，只能接管 sidebar 或自绘 shell.overlay）。其余 UI 待办：侧栏圆点/间距贴近、/api/tree 面板、外观分区接线、待确认药丸需真实审批场景。改工作台后重跑 verify_workbench_ui / verify_workbench_screen / verify_dsh_panel。"
   },
   "ui_workbench": {
     "design": "D:\\Code\\Sumika-UI-Designs\\direction-d-hiyori",

@@ -15,6 +15,11 @@ const style = document.createElement('style');
 style.textContent = `
 .sumika-dsh-frame { width: 100%; height: calc(100vh - 200px); min-height: 520px;
   border: 1px solid var(--line, #e2dccd); border-radius: 9px; background: #fff; margin: 10px 0; }
+#screen-board { overflow: hidden; }
+#sumika-workbench-frame { position: absolute; inset: 0; }
+/* The design's floating deskpet still carries sample dialogue; it must not sit
+   on top of the real workbench. */
+body.on-board #deskpet { display: none; }
 .wb-task { display: flex; align-items: center; gap: 8px; padding: 3px 6px;
   font-size: 12px; color: var(--muted, #7d8a86); }
 .wb-task em { margin-left: auto; font-style: normal; opacity: .7; }
@@ -118,6 +123,30 @@ function bindTree(tree) {
   });
 }
 
+/**
+ * Make sure the managed instance is up and hand back the URL the workbench
+ * screen frames. Never navigates: the workbench is a screen of this page, so the
+ * user stays in the shell.
+ */
+async function ensureWorkbenchUrl() {
+  let status;
+  try {
+    status = await api('/api/workbench');
+    if (!status.running) {
+      status = await api('/api/workbench/start', {
+        method: 'POST', body: JSON.stringify({ port: 5175 }),
+      });
+    }
+    if (!status.embed_ready) return { url: null, error: 'DSH 实例未就绪' };
+    const { url } = await api('/api/workbench/embed');
+    if (!url) return { url: null, error: 'DSH 未返回可用地址' };
+    return { url, error: null };
+  } catch (error) {
+    const message = (error.payload || {}).message || error.message;
+    return { url: null, error: message };
+  }
+}
+
 async function bindWorkbench() {
   const main = document.querySelector('.wb-main');
   if (!main) return;
@@ -149,33 +178,37 @@ async function bindWorkbench() {
   let url = null;
   if (status.embed_ready) url = (await api('/api/workbench/embed')).url;
 
-  // The workbench is DSH itself, skinned through DSH's own index-injection hook.
-  // Sumika therefore removes the design's mock timeline and approval card and
-  // hands the user to the real instance instead of framing it.
-  main.querySelectorAll('.wb-timeline, .confirm-d').forEach(node => node.remove());
-  const head = main.querySelector('.wb-head');
-  const card = document.createElement('div');
-  card.style.cssText = 'margin:14px 0;padding:16px;border:1px solid var(--line,#e2dccd);'
-    + 'border-radius:9px;background:var(--panel,#fffdf7)';
-  card.innerHTML = url
-    ? '<p style="margin:0 0 10px">工作台由受管 DSH 提供，并已加载 Sumika 皮肤。</p>'
-      + '<button class="sumika-open-dsh" style="padding:6px 14px">打开 DSH 工作台</button>'
-    : '<p style="margin:0">DSH 实例未就绪，请稍后重试。</p>';
-  (head || main).after(card);
+  // The workbench screen *is* the DSH front end: the managed instance renders
+  // into this screen, under the shell's own top bar, skinned by DSH's own
+  // index-injection hook. The design's mock board markup is replaced rather than
+  // layered, so nothing mock sits on top of the real workbench.
+  const screen = document.querySelector('#screen-board');
+  const wrap = screen?.querySelector('.wb-wrap');
+  if (!screen || !wrap) return;
+  wrap.querySelectorAll('.wb-timeline, .confirm-d').forEach(node => node.remove());
+
   if (url) {
-    const open = () => window.open(url, '_blank', 'noopener');
-    card.querySelector('.sumika-open-dsh').addEventListener('click', open);
-    const nav = document.querySelector('#gnav button[data-go="board"]');
-    if (nav && !nav.dataset.sumikaBound) {
-      nav.dataset.sumikaBound = '1';
-      nav.addEventListener('click', open);
+    const frame = document.createElement('iframe');
+    frame.id = 'sumika-workbench-frame';
+    frame.title = 'Sumika 工作台（受管 DSH）';
+    frame.src = url;
+    frame.style.cssText = 'width:100%;height:100%;border:0;display:block;background:var(--paper,#fffdf8)';
+    wrap.replaceWith(frame);
+    if (document.querySelector('#gnav button[data-go="board"]')) {
+      document.querySelector('#gnav button[data-go="board"]').dataset.sumikaBound = '1';
     }
+  } else {
+    const card = document.createElement('div');
+    card.style.cssText = 'margin:14px 0;padding:16px;border:1px solid var(--line,#e2dccd);'
+      + 'border-radius:9px;background:var(--panel,#fffdf7)';
+    card.innerHTML = '<p style="margin:0 0 10px">DSH 实例未就绪，工作台暂时无法显示。</p>'
+      + '<button class="sumika-open-dsh" style="padding:6px 14px">重试</button>';
+    card.querySelector('.sumika-open-dsh')
+      .addEventListener('click', async () => { await ensureWorkbenchUrl(); location.reload(); });
+    const head = main.querySelector('.wb-head');
+    (head || main).after(card);
+    setText('.wb-crumb', '受管 DSH · 未就绪');
   }
-  setText('.wb-crumb', url ? '受管 DSH · 皮肤已启用' : '受管 DSH · 未就绪');
-  const pills = main.querySelector('.pills');
-  if (pills) pills.innerHTML = url
-    ? '<span class="pill-d run">● DSH 已就绪</span>'
-    : '<span class="pill-d wait">● 未就绪</span>';
 }
 
 // ---- capability switches (R-107/R-108) -------------------------------------
@@ -563,13 +596,10 @@ async function bindSettingsFacts(tree) {
     }
     value.innerHTML = '<b>由 DSH 工作台管理</b>'
       + (name === '工作模型' ? '<button class="mini-btn">打开工作台 →</button>' : '');
+    // The workbench is a screen of this page now, so these entries switch to it
+    // instead of opening anything.
     const button = value.querySelector('button');
-    if (button) {
-      button.addEventListener('click', async () => {
-        const embed = await api('/api/workbench/embed').catch(() => null);
-        if (embed?.url) window.open(embed.url, '_blank', 'noopener');
-      });
-    }
+    if (button) button.addEventListener('click', () => { location.hash = 'board'; });
   }
 }
 
@@ -628,10 +658,7 @@ async function bindUnwiredSettings() {
         const button = document.createElement('button');
         button.className = 'mini-btn';
         button.textContent = '打开工作台 →';
-        button.addEventListener('click', async () => {
-          const embed = await api('/api/workbench/embed').catch(() => null);
-          if (embed?.url) window.open(embed.url, '_blank', 'noopener');
-        });
+        button.addEventListener('click', () => { location.hash = 'board'; });
         value.append(label, button);
       }
     }
@@ -640,6 +667,13 @@ async function bindUnwiredSettings() {
 
 (async () => {
   try {
+    // The design's inline script owns screen switching; the workbench screen
+    // needs one extra body class so its mock overlays stay hidden.
+    const syncBoardClass = () => {
+      document.body.classList.toggle('on-board', location.hash === '#board');
+    };
+    window.addEventListener('hashchange', syncBoardClass);
+    syncBoardClass();
     const [state, roles, tree] = await Promise.all([
       api('/api/state'), api('/api/roles'), api('/api/tree'),
     ]);

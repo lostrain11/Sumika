@@ -1,0 +1,1589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方向 D · 晴日部室 — Sumika Next UI 设计原型</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23567f6c'/%3E%3Cstop offset='1' stop-color='%23b4496a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3C/svg%3E">
+<style>
+  /* ============ 设计令牌（旧版清爽日系：米白 / 墨绿 / 玫红 / 水色） ============ */
+  :root{
+    --bg:#f5f3ea;
+    --paper:#fffdf8;
+    --paper-2:#faf8f0;
+    --ink:#2f3a34;
+    --muted:#6e7a72;
+    --line:#ddd9c8;
+    --rose:#b4496a;        /* 玫红主强调（中和旧版 #a94067 与初版 #c24e6e） */
+    --rose-deep:#9c3a56;
+    --rose-soft:#f9e8ed;
+    --green:#567f6c;       /* 绿辅助（中和旧版 #47746a） */
+    --green-soft:#e8f1ea;
+    --mizu:#7aa8c7;        /* 水色点缀 */
+    --mizu-soft:#e9f1f7;
+    --amber:#9a7038;
+    --amber-soft:#f7efdd;
+    --danger:#a6404d;
+    --chara:#b4496a;       /* 当前在场角色强调色（JS 可切换） */
+    --chara-soft:#f9e8ed;
+    --radius:9px;
+    --shadow:0 4px 14px rgba(80,75,50,.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    width:1440px;height:900px;overflow:hidden;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+    background:var(--bg);color:var(--ink);
+  }
+  button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  ::-webkit-scrollbar{width:0;height:0}
+
+  /* ============ 顶栏（旧版 workbench-v2 式：细线 · 文本导航 · 大留白） ============ */
+  .topbar{
+    height:64px;display:flex;align-items:stretch;gap:22px;padding:0 26px;
+    background:var(--paper);border-bottom:1px solid var(--line);position:relative;z-index:10;
+  }
+  .topbar>*{align-self:center}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand .jp{font:700 20px Georgia,"SimSun",serif;letter-spacing:2px}
+  .brand .jp em{font-style:normal;color:var(--rose)}
+  .brand .ver{font-size:9px;color:var(--green);border:1px solid #cfe0d4;background:var(--green-soft);border-radius:99px;padding:2px 8px;letter-spacing:1px}
+  .crumb{font-size:11px;color:var(--muted);letter-spacing:1px}
+  .crumb b{color:var(--ink);font-weight:500}
+  /* 全局导航：唯一权威入口，与场景无关（旧版式：激活项底部 3px 玫红条） */
+  .gnav{display:flex;gap:30px;margin:0 auto;align-self:stretch}
+  .gnav button{position:relative;padding:0 4px;font-size:13px;color:var(--muted);letter-spacing:1px}
+  .gnav button:hover{color:var(--ink)}
+  .gnav button.active{color:var(--rose-deep);font-weight:600}
+  .gnav button.active::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--rose);border-radius:3px 3px 0 0}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .model-chip{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--green);border:1px solid #cfe0d4;background:#f5faf5;border-radius:99px;padding:5px 13px}
+  .model-chip i{width:7px;height:7px;border-radius:50%;background:#58a86b}
+  .proto{font-size:10px;color:var(--amber);background:var(--amber-soft);border:1px solid #e8d9b8;border-radius:8px;padding:4px 9px}
+  .back-btn{display:flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 13px;background:var(--paper);color:var(--muted)}
+  .back-btn:hover{color:var(--rose-deep);border-color:#e6c3cf}
+
+  .screen{display:none;height:calc(100% - 64px);position:relative}
+  .screen.show{display:block}
+
+  /* ============================================================
+     桌宠小窗（L0：跨页常驻的可拖动浮动小窗，陪伴页自动隐藏）
+  ============================================================ */
+  .deskpet{position:fixed;right:14px;bottom:14px;z-index:50;display:flex;flex-direction:column;align-items:flex-end;gap:6px;cursor:grab;user-select:none;touch-action:none}
+  .deskpet:active{cursor:grabbing}
+  .deskpet.dragging{transition:none}
+  body.on-room .deskpet{display:none}
+  /* ---- 聊天气泡 / 历史记录 ----
+     默认收起：只显示最近 3 条；悬停展开为完整记录（可滚动），点击固定展开以便翻更早内容。
+     关键：气泡采用「向上生长」的绝对定位——展开时不推挤下方取景框，
+     小窗总高度保持不变，鼠标在气泡与取景框之间移动时不会因布局跳动而抖动。 */
+  .dp-bubble{position:absolute;left:0;right:0;bottom:100%;margin-bottom:6px;
+    border:1px solid var(--line);border-left:3px solid var(--chara);border-radius:9px;
+    background:var(--paper);box-shadow:0 10px 24px rgba(120,100,60,.16);padding:7px 10px;
+    font-size:10.5px;line-height:1.6;box-sizing:border-box;cursor:pointer;
+    transition:box-shadow .2s,border-color .2s}
+  /* 气泡的定位参照系：小窗里的「取景框行」，气泡悬于其正上方 */
+  .dp-stage{position:relative}
+  .dp-bubble:hover{border-color:#e6c3cf;box-shadow:0 8px 20px rgba(120,100,60,.18)}
+  .dp-bubble .st{display:flex;align-items:center;justify-content:space-between;font-size:9px;color:var(--chara);letter-spacing:1px;margin-bottom:4px}
+  .dp-bubble .st i{font-style:normal;color:#b3ab8f;letter-spacing:0;font-size:8.5px}
+  /* 消息列表：收起态固定露出「最近三条」，展开态可滚到更早。
+     用 :nth-last-child 而不是靠 max-height 去猜高度——消息一旦换行，
+     按像素裁就会出现「只露两条 / 第二条被切一半」的不确定结果。 */
+  .dp-log{display:flex;flex-direction:column;gap:5px;max-height:88px;overflow:hidden;transition:max-height .28s ease}
+  .dp-bubble:not(.open) .dp-msg:not(:nth-last-child(-n+3)){display:none}
+  .dp-bubble.open .dp-log{max-height:210px;overflow-y:auto;touch-action:pan-y;scrollbar-width:thin}
+  .dp-bubble.no-more .more{display:none}
+  .dp-msg{display:flex;gap:6px;align-items:baseline}
+  .dp-msg b{flex:none;font-weight:600;font-size:9px;letter-spacing:.5px;color:var(--chara)}
+  .dp-msg.me b{color:#8d9c93}
+  .dp-msg span{color:var(--ink);word-break:break-word}
+  .dp-msg.me span{color:var(--muted)}
+  .dp-bubble .more{display:block;margin-top:5px;font-size:8.5px;color:#a89f85;letter-spacing:.5px;text-align:center}
+  .dp-bubble.open .more .lbl-open{display:inline}
+  .dp-bubble.open .more .lbl-closed{display:none}
+  .dp-bubble .more .lbl-open{display:none}
+  /* 小窗竖向流：取景框 → 操作行 → 输入框。
+     聊天气泡不占文档流（绝对定位悬在取景框上方），因此展开时不会推挤下方内容。 */
+  .dp-main{display:flex;flex-direction:column;align-items:stretch;gap:6px;width:300px}
+  /* 取景框行：既是「取景框 + 操作按钮」的容器，也是气泡的定位参照系
+     （气泡绝对定位到它的上边缘之上，向上生长） */
+  .dp-stage{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px}
+  /* 桌宠取景框：内部放「房间场景克隆」，故必须裁剪溢出，并建立独立层叠上下文，
+     把克隆房间的一切（含 z-index:3 的角色层、z-index:2 的 VRM 层）都关在框内 */
+  .dp-chara{position:relative;isolation:isolate;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--bg);
+    box-shadow:0 6px 16px rgba(120,100,60,.16);width:300px;height:336px}
+  .dp-chara>svg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:262px;height:284px}
+  .dp-scene{position:absolute;inset:0;z-index:0}
+  /* 克隆进来的房间：只作为「世界画布」被窗口化截取，自身尺寸与舞台一致后按 zoom 变换 */
+  .dp-scene>*{position:absolute;left:0;top:0;pointer-events:none;transform-origin:0 0}
+  .dp-scene .vport-frame,.dp-scene .vport-tag,.dp-scene .vport-ratio,.dp-scene .obj3d,
+  .dp-scene .d-caption,.dp-scene .layers,.dp-scene .cam-cap,
+  .dp-scene .gshadow,.dp-scene .chara-name-tag,.dp-scene .standee{display:none!important}
+  /* 小窗专属 VRM 实例容器：与主持屏角色层同位同尺寸（.vport = 300×430）。
+     画布是透明的（渲染器 alpha:true + 清屏 alpha 0），所以它会自然"贴"在房间之上，
+     人站在房间里的效果由「房间层 + 透明人层」叠加得到，不需要再挖空或压暗背景。
+     容器高度取 .vport 的 430，超出取景框 336 的部分由 overflow:hidden 裁掉。 */
+  .dp-scene .dp-vrm{position:absolute;left:0;bottom:0;width:300px;height:430px;z-index:2}
+  .dp-scene .dp-vrm canvas{display:block;width:100%!important;height:100%!important;background:transparent!important}
+  .dp-scene .dp-vrm .vrm-renderer-status{display:none!important}
+  /* VRM 生效时，小窗内的占位立绘必须让位。
+     用 CSS 由 data 属性驱动，而不是依赖脚本时序去改 style.display——
+     小窗的立绘有三处副本（外层占位、克隆角色层内、主持屏），逐一改样式极易漏改或时序错位。
+     注意：选择器必须覆盖「克隆体内所有层级的 .chara-svg」。
+     初版只写了 .dp-scene .vport .chara-svg，一旦角色层的类名被 .pos-work / .pos-rest 改过、
+     或立绘被放进更深一层，规则就失配——结果小窗里同时出现「占位立绘 + VRM」两个角色。
+     这里改用兜底写法，凡克隆房间内的立绘/地影一律隐藏。 */
+  #deskpet[data-vrm="on"] .dp-chara > svg,
+  #deskpet[data-vrm="on"] .dp-scene .chara-svg,
+  #deskpet[data-vrm="on"] .dp-scene .gshadow,
+  #deskpet[data-vrm="on"] .dp-scene .standee{display:none!important}
+  #deskpet[data-vrm="off"] .dp-vrm{display:none!important}
+  /* 占位立绘模式（未绑定 VRM 的角色）时，.dp-scene 里的居中立绘会与最外层立绘重叠，
+     同样只留最外层那一张 */
+  #deskpet[data-vrm="off"] .dp-scene .chara-svg{display:none!important}
+  /* 操作行：仅保留「收起」（取景切换与放大入口已移除，放大与顶栏「回活动室」重复） */
+  .dp-ops{display:flex;gap:4px}
+  .dp-ops button{border:1px solid var(--line);background:var(--paper);font-size:9.5px;color:var(--muted);border-radius:7px;padding:3px 10px;white-space:nowrap}
+  .dp-ops button:hover{color:var(--rose-deep);border-color:#e6c3cf;background:#fdf4f7}
+  .dp-mini{display:none;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow);font-size:14px;color:var(--chara);font-family:Georgia,"SimSun",serif;place-items:center}
+  .deskpet.mini .dp-main,.deskpet.mini .dp-chat,.deskpet.mini .dp-bubble{display:none}
+  .deskpet.mini .dp-mini{display:grid}
+  /* 桌宠闲聊输入框 */
+  .dp-chat{display:flex;align-items:center;gap:6px;width:300px;border:1px solid var(--line);border-radius:11px;background:var(--paper);box-shadow:var(--shadow);padding:5px 6px 5px 10px}
+  .dp-chat input{flex:1;min-width:0;border:none;outline:none;background:none;font:inherit;font-size:11.5px;color:var(--ink)}
+  .dp-chat input::placeholder{color:#b5b098}
+  .dp-chat [data-dp-send]{width:26px;height:26px;border-radius:8px;background:var(--chara);display:grid;place-items:center;flex:none;transition:background .2s;color:#fff;font-size:11px;border:none}
+  .dp-chat [data-dp-send]:hover{filter:brightness(1.08)}
+
+  /* ============================================================
+     屏 1：活动室（部员名册 | 舞台 | 对话）
+  ============================================================ */
+  .room-wrap{height:100%;display:grid;grid-template-columns:216px minmax(0,1fr) 336px}
+
+  /* ---- 部员名册（多角色排布演示） ---- */
+  .roster{border-right:1px solid var(--line);background:var(--paper-2);padding:16px 12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto}
+  .roster h3{font-size:10px;color:var(--muted);letter-spacing:2px;margin:0 6px 8px;display:flex;justify-content:space-between}
+  .roster h3 b{font-weight:400;color:#b3ab8f}
+  .member{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    border:1px solid transparent;border-radius:9px;padding:9px 10px;position:relative;
+  }
+  .member:hover{background:#f1eee0}
+  .member.active{background:var(--paper);border-color:var(--line);box-shadow:var(--shadow)}
+  .member.active::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--mc,#c24e6e)}
+  .member .ava{width:34px;height:34px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:13px;color:#fff;font-family:Georgia,serif}
+  .member .nm{font-size:12.5px;font-weight:600}
+  .member .st{display:block;font-size:9.5px;color:var(--muted);margin-top:1px;font-weight:400}
+  .member .bind{margin-left:auto;font-size:8.5px;color:var(--mizu);border:1px solid #cfdfea;background:var(--mizu-soft);border-radius:99px;padding:1px 6px;white-space:nowrap}
+  .member.rsv{border:1px dashed #d8cfb4;background:transparent;color:#a39e8b}
+  .member.rsv:hover{background:#f5f1e4}
+  .member.rsv .nm{color:#a39e8b;font-weight:500}
+  .member.rsv .ava{border:1.5px dashed #cfc6a8;color:#b3ab8f;background:transparent}
+  .roster-note{border:1px dashed #d8d2ba;border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7;margin-top:4px}
+  .roster-note b{color:var(--green)}
+  .roster-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px}
+  .import-btn{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:10px;padding:8px;background:var(--amber-soft)}
+  .coop{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);padding:2px 4px}
+  .coop .tag{font-size:8.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:99px;padding:0 6px}
+
+  /* ---- 舞台（镜头窗口：她的房间） ---- */
+  .stage{position:relative;overflow:hidden;
+    background:
+      /* 木地板拼缝 */
+      repeating-linear-gradient(90deg,transparent 0 132px,rgba(140,104,66,.13) 132px 133px),
+      /* 踢脚线 */
+      linear-gradient(180deg,transparent 0 60.2%,rgba(255,252,244,.92) 60.2% 61.6%,rgba(176,137,94,.35) 61.6% 62.1%,transparent 62.1%),
+      /* 地板：暖木色 */
+      linear-gradient(180deg,transparent 0 60%,#d2ac7f 60%,#c39a6a 82%,#ba8f5e 100%),
+      /* 墙面：暖奶油色（贴合暖色系 VRM 模型肤色与服装） */
+      linear-gradient(180deg,#f4e7d2 0%,#f7eddc 40%,#f3e6ce 60%,#efdfc4 60.5%,#e9d8bb 100%)}
+  .cam-view{position:absolute;inset:0;transition:transform .9s cubic-bezier(.4,0,.2,1);transform-origin:73% 62%}
+  /* 地板近处的柔和明暗，避免大面积平涂 */
+  .cam-view::after{content:"";position:absolute;left:0;right:0;top:60%;bottom:0;pointer-events:none;
+    background:
+      radial-gradient(120% 90% at 20% 110%,rgba(120,86,48,.16),transparent 62%),
+      radial-gradient(90% 70% at 86% 10%,rgba(255,246,228,.22),transparent 60%)}
+  /* 取景框 */
+  .vf{position:absolute;inset:12px;z-index:6;pointer-events:none}
+  .vf i{position:absolute;width:22px;height:22px;border:2px solid rgba(122,168,199,.65)}
+  .vf i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
+  .vf i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
+  .vf i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 6px}
+  .vf i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 6px 0}
+  .cam-chip{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:7;display:flex;align-items:center;gap:7px;
+    font-size:9.5px;color:var(--mizu);letter-spacing:1px;background:rgba(255,253,248,.92);border:1px solid #cfdfea;border-radius:99px;padding:5px 13px}
+  .cam-chip i{width:7px;height:7px;border-radius:50%;background:#d06a6a;box-shadow:0 0 0 3px rgba(208,106,106,.18)}
+  .cam-chip b{color:var(--ink);font-weight:500}
+  /* 镜头模式与活动演示 */
+  .d-ctrls{position:absolute;top:16px;right:16px;z-index:7;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
+  .d-ctrl{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--ink);border:1px solid var(--line);background:rgba(255,253,248,.92);border-radius:99px;padding:5px 12px}
+  .d-ctrl .on{color:var(--green);font-size:9px}
+  .d-ctrl.rsv{color:var(--muted);border-style:dashed}
+  .d-ctrl.rsv .on{color:var(--amber)}
+  .cam-modes{display:flex;gap:4px}
+  .cam-modes button{font-size:10px;border:1px solid var(--line);border-radius:99px;padding:5px 11px;color:var(--muted);background:rgba(255,253,248,.92)}
+  .cam-modes button.active{color:var(--mizu);border-color:#cfdfea;background:var(--mizu-soft);font-weight:600}
+  .act-demos{display:flex;flex-direction:column;gap:5px;align-items:flex-end;border:1px dashed #d9c49a;background:rgba(255,253,248,.94);border-radius:12px;padding:8px 10px}
+  .act-demos .lab{font-size:8.5px;color:var(--amber);letter-spacing:1px}
+  .act-demos .row{display:flex;gap:4px}
+  .act-demos button{font-size:10px;border:1px solid var(--line);border-radius:99px;padding:4px 10px;color:var(--muted);background:var(--paper)}
+  .act-demos button.active{color:var(--rose-deep);border-color:#e6c3cf;background:var(--rose-soft);font-weight:600}
+  /* 渲染图层图例 */
+  .layers{position:absolute;left:16px;bottom:16px;z-index:7;display:flex;gap:6px}
+  .layers span{font-size:8.5px;letter-spacing:.5px;border-radius:99px;padding:3px 10px;border:1px solid var(--line);background:rgba(255,253,248,.9);color:var(--muted)}
+  .layers .l2d{color:var(--green);border-color:#cfe0d4;background:rgba(232,241,234,.92)}
+  .layers .l3d{color:var(--mizu);border-color:#cfdfea;background:rgba(233,241,247,.92)}
+  .layers .lvrm{color:var(--amber);border-style:dashed;border-color:#d9c49a;background:rgba(247,239,221,.92)}
+  .d-caption{position:absolute;top:16px;left:18px;z-index:7;font-size:10px;color:#a2937a;line-height:1.7;letter-spacing:1px}
+  .d-caption b{color:var(--rose-deep);font-weight:600}
+  .d-caption .act{color:var(--green)}
+  /* 午后阳光在地板上的暖色光斑（贴合暖色调角色） */
+  .d-glow{position:absolute;top:58%;left:0;right:0;bottom:0;pointer-events:none;
+    background:
+      radial-gradient(58% 40% at 66% 4%,rgba(255,240,208,.66),transparent 68%),
+      radial-gradient(42% 32% at 12% 88%,rgba(255,232,196,.34),transparent 70%)}
+  /* 窗与暖色天光 */
+  .d-win{position:absolute;top:9%;right:8%;width:216px;height:254px;border-radius:12px;
+    background:linear-gradient(165deg,#a9d0e2,#d9ecf0 52%,#f6ecd0 78%,#f0dcb6);border:9px solid #fffaf0;box-shadow:0 10px 26px rgba(140,105,60,.2)}
+  .d-win::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:6px;margin-left:-3px;background:#fffaf0}
+  .d-win::after{content:"";position:absolute;top:50%;left:0;right:0;height:6px;margin-top:-3px;background:#fffaf0}
+  .d-curtain{position:absolute;top:calc(9% - 10px);width:30px;height:270px;background:rgba(255,250,240,.62);border:1px solid rgba(196,172,136,.55);border-radius:8px}
+  .d-light{position:absolute;top:12%;right:2%;width:330px;height:420px;background:radial-gradient(closest-side,rgba(255,226,170,.42),transparent);transform:skewX(-12deg)}
+  /* 挂轴 */
+  .d-scroll{position:absolute;top:12%;left:33%;width:84px;height:124px;background:#fffef6;border:5px solid #ddd2b6;border-radius:4px;box-shadow:0 6px 14px rgba(120,110,70,.12)}
+  .d-scroll::before{content:"花";position:absolute;inset:0;display:grid;place-items:center;font:400 30px Georgia,"SimSun",serif;color:var(--rose)}
+  /* 植物 */
+  .d-plant{position:absolute;bottom:14%;left:37%;width:56px;height:88px;z-index:1}
+  .d-plant .pot{position:absolute;bottom:0;left:9px;width:40px;height:30px;background:#e6d3b4;border:1px solid #d3bd97;border-radius:5px 5px 12px 12px}
+  .d-plant .leaf{position:absolute;border-radius:50%;background:#a4c3a5}
+  /* 入口物件（物件即界面 · 清风版）——已废弃：场景物件仅为陈设，不绑定功能 */
+  .d-board{position:absolute;top:9%;left:5%;width:200px;height:148px;background:#f3e6cb;border:6px solid #c8a172;border-radius:10px;box-shadow:0 8px 20px rgba(120,86,44,.16)}
+  .d-board .pn{position:absolute;border-radius:3px;border:1px solid rgba(140,120,80,.25)}
+  .d-desk2{position:absolute;bottom:12%;left:5%;width:270px;height:14px;background:#c9a273;border:1px solid #b98d5c;border-radius:6px;box-shadow:0 8px 20px rgba(120,86,44,.2)}
+  .d-desk2::before,.d-desk2::after{content:"";position:absolute;top:13px;width:12px;height:96px;background:#bd9564;border:1px solid #ad8552;border-radius:5px}
+  .d-desk2::before{left:18px}.d-desk2::after{right:18px}
+  .d-desk2 .mon{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:7px;width:128px;height:88px;background:#f7f2e4;border:1px solid #d3c5a4;border-radius:9px;box-shadow:0 8px 20px rgba(120,86,44,.18)}
+  .d-desk2 .mon::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);width:44px;height:11px;background:#e3d8bd;border:1px solid #d3c5a4;border-top:0;border-radius:0 0 6px 6px}
+  .d-desk2 .mon .scr{position:absolute;inset:8px;border-radius:5px;background:linear-gradient(160deg,#dfeaf0,#eef4ef)}
+  .d-desk2 .mon .scr i{position:absolute;left:8px;height:4px;border-radius:2px}
+  .d-desk2 .cup{position:absolute;bottom:100%;left:12px;margin-bottom:4px;width:20px;height:22px;background:var(--mizu-soft);border:1px solid #cfdfea;border-radius:4px 4px 8px 8px}
+  .d-shelf2{position:absolute;bottom:12%;left:31%;width:148px;height:224px;background:#eedfbe;border:1px solid #d3b88c;border-radius:9px;box-shadow:0 8px 20px rgba(120,86,44,.18)}
+  .d-shelf2 .sl{position:absolute;left:7px;right:7px;height:6px;background:#c8a172;border-radius:3px}
+  .d-shelf2 .brow{position:absolute;left:12px;right:12px;display:flex;gap:3px;align-items:flex-end}
+  .d-shelf2 .brow i{width:12px;border-radius:2px 2px 0 0}
+  /* 挂钟 */
+  .d-clock{position:absolute;top:13%;left:46%;width:72px;height:72px;border-radius:50%;background:#fffdf6;border:5px solid #cbab79;box-shadow:0 8px 18px rgba(120,86,44,.18)}
+  .d-clock i{position:absolute;left:calc(50% - 1.5px);width:3px;background:#8a8272;border-radius:2px;transform-origin:bottom center}
+  .d-clock .h{top:calc(50% - 15px);height:15px;transform:rotate(-55deg)}
+  .d-clock .m{top:calc(50% - 21px);height:21px;transform:rotate(35deg)}
+  .d-clock::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#8a8272}
+  /* 地毯 */
+  .d-rug{position:absolute;bottom:4%;left:44%;width:420px;height:92px;border-radius:50%;background:radial-gradient(closest-side,#f7e3e6,#f2ded2);border:1px solid rgba(186,140,124,.3)}
+  /* VRM 角色层（位置可随活动状态迁移） */
+  .vport{position:absolute;left:calc(88% - 300px);bottom:7.5%;width:300px;height:430px;z-index:3;
+    transition:left 1s cubic-bezier(.4,0,.2,1),bottom 1s cubic-bezier(.4,0,.2,1),transform 1s cubic-bezier(.4,0,.2,1);
+    transform-origin:50% 100%}
+  .vport.pos-work{left:calc(5% - 52px);bottom:9.5%;transform:scale(.8)}
+  .vport.pos-rest{left:33%;bottom:8%;transform:scale(.92)}
+  .vport-frame{position:absolute;inset:0;border:1.5px dashed rgba(122,168,199,.55);border-radius:16px;background:rgba(255,255,255,.18)}
+  .vport-tag{position:absolute;top:-11px;left:14px;display:flex;align-items:center;gap:6px;font-size:9px;color:var(--mizu);letter-spacing:1px;background:var(--mizu-soft);border:1px solid #cfdfea;border-radius:99px;padding:3px 10px}
+  .vport-tag i{width:6px;height:6px;border-radius:50%;background:#58a86b}
+  .vport-ratio{position:absolute;top:-11px;right:14px;font-size:9px;color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+  .vport .chara-svg{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);width:262px;height:284px;filter:drop-shadow(0 10px 18px rgba(120,100,60,.16))}
+  /* VRM 实机渲染层：与占位立绘同视口互斥显示 */
+  .vrm-live{position:absolute;inset:0;z-index:2;display:none}
+  .vrm-live canvas{display:block;width:100%!important;height:100%!important}
+  .vrm-live .vrm-renderer-status{position:absolute;left:0;right:0;top:44%;text-align:center;font-size:10px;color:var(--muted);letter-spacing:1px}
+  #vport.show-vrm .vrm-live{display:block}
+  #vport.show-vrm .chara-svg{display:none}
+  /* 实机渲染时去掉「预留占位」观感：虚线取景框变实线、隐藏比例标注 */
+  #vport.show-vrm .vport-frame{border-style:solid;border-color:rgba(122,168,199,.32);background:rgba(255,255,255,.1)}
+  #vport.show-vrm .vport-ratio{display:none}
+  .vport-swap{position:absolute;top:16px;right:14px;z-index:5;font-size:9.5px;color:var(--mizu);border:1px solid #cfdfea;background:var(--paper);border-radius:99px;padding:4px 12px;box-shadow:var(--shadow)}
+  .vport-swap:hover{color:var(--rose-deep);border-color:#e6c3cf}
+  .vport .gshadow{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:210px;height:26px;border-radius:50%;background:radial-gradient(closest-side,rgba(120,100,55,.22),transparent)}
+  .chara-name-tag{position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);white-space:nowrap;display:flex;align-items:center;gap:8px;font-size:11px;border:1px solid var(--line);background:var(--paper);border-radius:99px;padding:5px 14px;box-shadow:var(--shadow)}
+  .chara-name-tag b{color:var(--chara);font-family:Georgia,"SimSun",serif}
+  /* 次要角色站位（多人同屏预留演示） */
+  .standee{position:absolute;bottom:8%;right:calc(12% + 320px);width:120px;text-align:center;z-index:2;opacity:.62}
+  .standee svg{width:96px;height:104px;filter:grayscale(.55)}
+  .standee .cap{font-size:8.5px;color:var(--muted);border:1px dashed #d8cfb4;border-radius:99px;padding:2px 9px;background:rgba(255,253,248,.85);white-space:nowrap}
+  /* 电脑椅（3D 关键物件占位） */
+  .d-chair{position:absolute;bottom:9.5%;left:calc(5% + 104px);width:58px;height:78px;z-index:2}
+  .d-chair .back{position:absolute;bottom:30px;left:0;width:11px;height:48px;background:#d3ba92;border:1px solid #cbb183;border-radius:5px}
+  .d-chair .seat{position:absolute;bottom:20px;left:0;width:58px;height:12px;background:#dcc49c;border:1px solid #d0b98e;border-radius:6px}
+  .d-chair .leg{position:absolute;bottom:0;width:8px;height:22px;background:#cbb183;border-radius:4px}
+  /* 3D 物件标注 */
+  .obj3d{position:absolute;font-size:8px;letter-spacing:.5px;color:var(--mizu);border:1px solid #cfdfea;background:rgba(233,241,247,.92);border-radius:99px;padding:1px 7px;z-index:3;white-space:nowrap}
+
+  /* ---- 对话栏（按角色着色） ---- */
+  .chat{border-left:1px solid var(--line);background:var(--paper);display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+  .chat-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .chat-head h2{font:600 15px Georgia,"SimSun",serif}
+  .chat-head h2 b{color:var(--chara)}
+  .chat-head .sub{font-size:9.5px;color:var(--muted);margin-top:2px}
+  .chat-msgs{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
+  .cm{max-width:94%;display:flex;flex-direction:column;gap:4px}
+  .cm .who{font-size:9.5px;color:var(--muted);padding:0 3px}
+  .cm .bub{border:1px solid var(--line);border-radius:8px;background:var(--paper-2);padding:10px 13px;font-size:12.5px;line-height:1.75}
+  .cm.agent .bub{border-left:3px solid var(--chara)}
+  .cm.agent .who b{color:var(--chara)}
+  .cm.user{align-self:flex-end}
+  .cm.user .bub{background:var(--mizu-soft);border-color:#d4e2ec}
+  .chat-composer{margin:0 13px 13px;border:1px solid var(--line);border-radius:9px;background:var(--paper);box-shadow:var(--shadow);padding:10px 12px}
+  .chat-composer .input{color:#aaa894;font-size:12.5px;padding:2px 4px 10px}
+  .chat-composer footer{display:flex;align-items:center;gap:8px;border-top:1px dashed var(--line);padding-top:9px}
+  .voice{width:30px;height:30px;border-radius:9px;border:1px dashed #d9c49a;color:var(--amber);display:grid;place-items:center;font-size:12px;position:relative}
+  .voice span{position:absolute;top:-8px;right:-9px;font-size:8px;background:var(--amber-soft);border:1px solid #e8d3ab;border-radius:99px;padding:0 4px}
+  .at-chip{font-size:9.5px;color:var(--chara);border:1px solid var(--line);border-radius:99px;padding:3px 10px;background:var(--chara-soft)}
+  .chat-composer .hint{font-size:9px;color:#b5b098;margin-left:auto}
+  .send{width:32px;height:32px;border-radius:10px;background:var(--chara);display:grid;place-items:center;transition:background .2s}
+
+  /* ============================================================
+     屏 2：工作台（Codex/ZCode 式：项目▸任务树侧栏 | 时间线）
+  ============================================================ */
+  .wb-wrap{height:100%;display:grid;grid-template-columns:248px minmax(0,1fr)}
+  .wb-side{border-right:1px solid var(--line);background:var(--paper-2);padding:16px 12px;display:flex;flex-direction:column;gap:14px;overflow-y:auto}
+  .new-task-d{display:flex;align-items:center;justify-content:center;gap:7px;height:38px;border-radius:8px;background:var(--rose);color:#fff;font-size:12.5px;font-weight:600;box-shadow:0 3px 10px rgba(180,73,106,.22)}
+  .wb-search{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:7px 11px;color:var(--muted);font-size:11.5px}
+  /* 项目 ▸ 任务 树：项目行 + 缩进任务行（左侧引导线） */
+  .wb-proj-head{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 9px;border-radius:9px;font-size:12px;font-weight:600}
+  .wb-proj-head:hover{background:#f0ecdd}
+  .wb-proj-head .dot{width:8px;height:8px;border-radius:3px;flex:none}
+  .wb-proj-head .nm{flex:1;min-width:0}
+  .wb-proj-head .nm small{display:block;color:var(--muted);font-size:9.5px;margin-top:1px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wb-proj-head b{font-weight:400;color:#b3ab8f;font-size:10px}
+  .wb-proj-head .chev{color:var(--muted);transition:transform .18s;flex:none}
+  .wb-proj:not(.open) .chev{transform:rotate(-90deg)}
+  .wb-proj:not(.open) .wb-tasks{display:none}
+  .wb-tasks{margin:2px 0 6px 13px;padding-left:9px;border-left:1px solid #e2dcc6;display:flex;flex-direction:column;gap:2px}
+  .wb-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 9px;border-radius:8px;font-size:12px;border:1px solid transparent}
+  .wb-item:hover{background:#f0ecdd}
+  .wb-item.active{background:#f6e9ee;border-color:#e6c3cf;color:var(--rose-deep);font-weight:600}
+  .wb-item .dot{width:8px;height:8px;border-radius:3px;flex:none}
+  .wb-item small{display:block;color:var(--muted);font-size:9.5px;margin-top:1px;font-weight:400}
+  .wb-task{padding:6px 9px;font-size:11.5px;gap:7px}
+  .wb-task .st{width:6px;height:6px;border-radius:99px;flex:none;margin:0 1px}
+  .wb-arch{font-size:11px;color:var(--muted)}
+  .wb-arch summary{cursor:pointer;padding:6px 9px;list-style:none}
+  .wb-arch summary::-webkit-details-marker{display:none}
+  .wb-arch summary b{font-weight:400;color:#b3ab8f}
+  .wb-arch .wb-item{font-size:11px;padding:5px 9px;color:var(--muted)}
+  .wb-foot{margin-top:auto;border:1px dashed #d8d2ba;border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7}
+  .wb-foot b{color:var(--green)}
+  .wb-main{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--paper)}
+  .wb-head{display:flex;align-items:center;gap:14px;padding:13px 24px;border-bottom:1px solid var(--line)}
+  .wb-crumb{font-size:10px;color:var(--muted);letter-spacing:1px}
+  .wb-head h1{font:600 18px Georgia,"SimSun",serif;margin-top:2px}
+  .wb-head h1 em{font-style:normal;color:var(--rose)}
+  .wb-head .pills{display:flex;gap:8px;margin-left:auto}
+  .pill-d{font-size:9.5px;border-radius:99px;padding:4px 11px;border:1px solid var(--line);color:var(--muted)}
+  .pill-d.run{color:var(--green);border-color:#cfe0d4;background:var(--green-soft)}
+  .pill-d.wait{color:var(--amber);border-color:#e8d3ab;background:var(--amber-soft)}
+  .wb-timeline{padding:20px 28px;overflow-y:auto;display:flex;flex-direction:column;gap:15px}
+  .wb-timeline .cm{max-width:76%}
+  .wb-composer{margin:0 24px 16px}
+  .tool-d{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-left:3px solid var(--green);background:var(--paper);border-radius:10px;padding:9px 12px;font-size:11.5px;max-width:76%}
+  .tool-d code{font-family:Consolas,monospace;font-size:11px}
+  .tool-d .df{margin-left:auto;font-family:Consolas,monospace;font-size:10.5px;white-space:nowrap}
+  .tool-d .df b{color:#4c9464}.tool-d .df i{color:#c06a6a;font-style:normal}
+  .tool-d .ok{margin-left:auto;color:#4c9464;font-size:10.5px;white-space:nowrap}
+  .confirm-d{
+    margin-top:20px;border:1px solid #ecd3ae;background:linear-gradient(135deg,#fffdf6,#fbf4e4);
+    border-radius:var(--radius);padding:17px 20px;box-shadow:var(--shadow);
+  }
+  .confirm-d header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .confirm-d .flag{font-size:9.5px;font-weight:700;color:#fff;background:var(--amber);border-radius:6px;padding:3px 8px;letter-spacing:1px}
+  .confirm-d h3{font-size:14.5px}
+  .confirm-d>p{font-size:11px;color:var(--muted);line-height:1.75;max-width:720px}
+  .cd-grid{display:grid;grid-template-columns:repeat(4,140px);gap:10px;margin:13px 0}
+  .cd-grid div{border:1px solid var(--line);border-radius:10px;text-align:center;padding:8px 4px;background:var(--paper)}
+  .cd-grid b{display:block;font-size:15px}
+  .cd-grid b.up{color:#4c9464}.cd-grid b.down{color:#c06a6a}
+  .cd-grid span{font-size:9px;color:var(--muted)}
+  .cd-foot{display:flex;align-items:center;gap:11px}
+  .btn-y-d{background:var(--rose);color:#fff;border-radius:10px;padding:9px 24px;font-size:12.5px;font-weight:600;box-shadow:0 5px 14px rgba(194,78,110,.3)}
+  .btn-n-d{border:1px solid var(--line);border-radius:10px;padding:9px 18px;font-size:12.5px;color:var(--muted);background:var(--paper)}
+  .ckpt-d{margin-left:auto;font-size:10px;color:var(--muted)}
+  .ckpt-d code{font-family:Consolas,monospace;background:var(--green-soft);border-radius:6px;padding:2px 7px;color:var(--green)}
+
+  /* ============================================================
+     屏 3：能力（卡片架）
+  ============================================================ */
+  .cap-wrap{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 300px}
+  .cap-main{overflow-y:auto;padding:22px 28px 36px;background:var(--bg)}
+  .cap-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
+  .cap-head h1{font:600 20px Georgia,"SimSun",serif}
+  .cap-head h1 em{font-style:normal;color:var(--rose)}
+  .cap-head p{font-size:10.5px;color:var(--muted);margin-top:5px}
+  .cap-note{font-size:10px;color:var(--green);background:var(--green-soft);border:1px solid #cfe0d4;border-radius:99px;padding:5px 13px;white-space:nowrap}
+  .cap-group{margin-top:20px}
+  .cap-group>h2{font-size:11px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:11px}
+  .cap-group>h2::after{content:"";flex:1;height:1px;background:var(--line)}
+  .cap-group>h2 b{color:var(--rose);font-weight:600;letter-spacing:1px}
+  .cap-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+  .cap-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:13px;display:flex;flex-direction:column;gap:7px;min-height:168px;transition:.15s}
+  .cap-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:#e6c3cf}
+  .cap-card .top{display:flex;align-items:center;gap:9px}
+  .cap-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none;font-size:14px}
+  .cap-card h4{font-size:12.5px}
+  .cap-card .st{margin-left:auto}
+  .st{font-size:8.5px;border-radius:99px;padding:2px 8px;white-space:nowrap}
+  .st.on{color:var(--green);background:var(--green-soft);border:1px solid #cfe0d4}
+  .st.basic{color:#5a84a0;background:var(--mizu-soft);border:1px solid #cfdfea}
+  .st.rsv{color:var(--amber);background:var(--amber-soft);border:1px dashed #dec79b}
+  .cap-card p{font-size:10.5px;color:var(--muted);line-height:1.65;flex:1}
+  .cap-card .foot{display:flex;align-items:center;gap:8px;border-top:1px dashed var(--line);padding-top:9px}
+  .cap-card .foot .src{font-size:9px;color:#aba58c}
+  .sw2{width:32px;height:19px;border-radius:99px;background:#d8d4c2;position:relative;margin-left:auto}
+  .sw2::after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .sw2.on{background:var(--green)}.sw2.on::after{left:16px}
+  .cap-card.reserved{background:repeating-linear-gradient(-45deg,#fcfaf3,#fcfaf3 10px,#f7f4e9 10px,#f7f4e9 20px);border-style:dashed}
+  .cap-card.reserved h4,.cap-card.reserved p{color:#a39e8b}
+  .add-tile{border:1.5px dashed #dab9c6;border-radius:var(--radius);min-height:168px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:var(--rose);background:#fffafc}
+  .add-tile b{font-size:24px;font-weight:400}
+  .add-tile span{font-size:10.5px}
+  .cap-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
+  .panel{border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:12px 14px}
+  .panel h3{font-size:9.5px;color:var(--muted);letter-spacing:2px;margin-bottom:9px;display:flex;justify-content:space-between}
+  .panel h3 b{font-weight:400;color:#b3ab8f}
+  .kv{display:flex;justify-content:space-between;font-size:11px;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .kv:last-child{border-bottom:0}
+  .kv span{color:var(--muted)}.kv b{font-weight:500}
+  .kv b.ok{color:var(--green)}
+  .hero-d{border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:15px;text-align:center}
+  .hero-d .cap-ic{margin:0 auto 7px;width:40px;height:40px;border-radius:11px}
+  .hero-d h4{font-size:14px}
+  .hero-d p{font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6}
+  .st-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .st-grid div{border:1px solid var(--line);border-radius:10px;background:var(--paper-2);text-align:center;padding:8px 3px}
+  .st-grid b{display:block;font-size:15px;color:var(--rose-deep)}
+  .st-grid span{font-size:9px;color:var(--muted)}
+  .note-p{font-size:10px;color:var(--muted);line-height:1.8}
+
+  /* ============================================================
+     屏 4：设置
+  ============================================================ */
+  .set-wrap{height:100%;display:grid;grid-template-columns:208px minmax(0,1fr) 296px}
+  .set-nav{border-right:1px solid var(--line);background:var(--paper-2);padding:18px 12px;display:flex;flex-direction:column;gap:4px}
+  .set-nav h3{font-size:10px;color:var(--muted);letter-spacing:2px;margin:0 8px 10px;display:flex;justify-content:space-between}
+  .set-nav h3 b{font-weight:400;color:#b3ab8f}
+  .set-nav button{width:100%;text-align:left;padding:9px 12px;border-radius:10px;font-size:12.5px;color:var(--muted)}
+  .set-nav button:hover{background:#f0ecdd;color:var(--ink)}
+  .set-nav button.active{background:var(--rose-soft);color:var(--rose-deep);font-weight:600;box-shadow:inset 3px 0 0 var(--rose)}
+  .set-nav-foot{margin-top:auto;border:1px dashed #d8d2ba;border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7}
+  .set-main{overflow-y:auto;padding:22px 28px 36px;background:var(--bg)}
+  .set-group{margin-top:22px}
+  .set-group>h2{font-size:11px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:11px}
+  .set-group>h2::after{content:"";flex:1;height:1px;background:var(--line)}
+  .set-group>h2 b{color:var(--rose);font-weight:600;letter-spacing:1px}
+  .set-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:5px 17px}
+  .set-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+  .set-row:last-child{border-bottom:0}
+  .set-row small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+  .set-row .val{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--muted)}
+  .set-row .val b{color:var(--ink);font-weight:500}
+  .set-row .val b.ok{color:var(--green)}
+  .seg{display:flex;gap:6px;margin-left:auto}
+  .seg button{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:5px 13px;color:var(--muted);background:var(--paper)}
+  .seg button.active{color:var(--rose-deep);border-color:#e6c3cf;background:var(--rose-soft);font-weight:600}
+  .seg button:disabled{opacity:.55;cursor:default;border-style:dashed}
+  .mini-btn{font-size:11px;border:1px solid var(--line);border-radius:9px;padding:5px 13px;color:var(--ink);background:var(--paper)}
+  .mini-btn:hover{border-color:#e6c3cf;color:var(--rose-deep)}
+  .mini-btn.danger{color:var(--danger);border-color:#e0b3b3}
+  .rsv-tag{font-size:8.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:99px;padding:1px 7px}
+  .set-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="jp">晴日<em>部室</em></div>
+    <span class="ver">NEXT · P4-UI</span>
+  </div>
+  <nav class="gnav" id="gnav">
+    <button data-go="room" class="active">活动室</button>
+    <button data-go="board">工作台</button>
+    <button data-go="shelf">能力</button>
+    <button data-go="settings">设置</button>
+  </nav>
+  <div class="top-right">
+    <button class="back-btn" id="backBtn" style="display:none">← 回活动室</button>
+    <div class="model-chip"><i></i>DeepSeek V4 Pro ▾</div>
+    <span class="proto">设计原型 · 模拟数据</span>
+  </div>
+</header>
+
+<!-- ============ 屏 1：活动室 ============ -->
+<section class="screen show" id="screen-room">
+  <div class="room-wrap">
+
+    <!-- 部员名册：多角色排布演示 -->
+    <aside class="roster">
+      <h3>部员名册 <b id="memberCount">2</b></h3>
+      <button class="member active" data-name="澄花" data-sub="搭档 Lv.3 · 心情：专注" data-color="#c24e6e" data-soft="#f9e8ed"
+              data-speech="下午好～--dry-run 已经验收通过啦。今天想先做点什么？任务和能力都在顶栏，房间里这些陈设就是我的小天地。">
+        <span class="ava" style="background:linear-gradient(135deg,#c98a9e,#c24e6e)">花</span>
+        <span><span class="nm">澄花</span><span class="st">搭档 Lv.3 · 专注</span></span>
+      </button>
+      <button class="member" data-name="昴" data-sub="示例角色卡 · 心情：元气" data-color="#7aa8c7" data-soft="#e9f1f7"
+              data-speech="哟！我是昴，VRM 模型绑定演示位——以后从角色卡导入的伙伴，都会这样排在名册里。">
+        <span class="ava" style="background:linear-gradient(135deg,#9dbfd8,#7aa8c7)">昴</span>
+        <span><span class="nm">昴</span><span class="st">示例角色卡 · 元气</span></span>
+        <span class="bind">VRM</span>
+      </button>
+      <button class="member rsv" disabled>
+        <span class="ava">＋</span>
+        <span><span class="nm">角色卡 C</span><span class="st">预留 · P6 导入后列于此</span></span>
+      </button>
+      <div class="roster-note">名册 ≥6 人时折叠为头像列；活跃角色置顶。点名字即可切换在场角色，<b>不打断工作台任务</b>。</div>
+      <div class="roster-note">房间即镜头画面：<b>场景资源（书房 / 卧室 / 厨房…）随她的活动切换</b>，P6 开放。场景物件仅为陈设、不与功能绑定——功能入口统一在顶栏导航，与场景无关。</div>
+      <div class="roster-foot">
+        <span class="coop">多人同屏 <span class="tag">预留 · P6</span></span>
+        <span class="import-btn">＋ 导入角色卡 · 预留 P6</span>
+      </div>
+    </aside>
+
+    <!-- 舞台 = 看向「她的房间」的镜头窗口 -->
+    <main class="stage">
+      <div class="d-caption"><b id="roomOwner">澄花的房间</b> · 镜头画面<br><span class="act" id="actText">当前活动：房间待机</span></div>
+      <div class="vf"><i></i><i></i><i></i><i></i></div>
+      <div class="cam-chip"><i></i>镜头 · <b id="camModeText">跟随</b></div>
+      <div class="d-ctrls">
+        <div class="cam-modes">
+          <button data-cam="follow" class="active">跟随</button>
+          <button data-cam="fixed">固定</button>
+          <button data-cam="closeup">特写</button>
+        </div>
+        <span class="d-ctrl">视线跟随 <span class="on">ON</span></span>
+        <span class="d-ctrl">桌宠小窗 <span class="on">可拖动 · 跨页常驻</span></span>
+        <span class="d-ctrl rsv">独立桌宠窗口 <span class="on">预留 · P7</span></span>
+        <span class="d-ctrl rsv">全屏壁纸陪伴 <span class="on">预留 · P7</span></span>
+        <div class="act-demos">
+          <span class="lab">演示 · 她的活动</span>
+          <div class="row">
+            <button data-act="idle" class="active">待机</button>
+            <button data-act="work">工作</button>
+            <button data-act="rest">休息</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="cam-view" id="camView">
+      <div class="d-glow"></div>
+      <div class="d-win"></div>
+      <div class="d-curtain" style="right:calc(8% + 206px)"></div>
+      <div class="d-curtain" style="right:calc(8% - 20px)"></div>
+      <div class="d-light"></div>
+      <div class="d-scroll"></div>
+
+      <!-- 公告板：纯陈设 -->
+      <div class="d-board">
+        <div class="pn" style="left:12px;top:12px;width:44px;height:40px;background:#f6e3a8"></div>
+        <div class="pn" style="left:66px;top:20px;width:44px;height:40px;background:#f3c9d2"></div>
+        <div class="pn" style="left:120px;top:12px;width:44px;height:40px;background:#c9dfe9"></div>
+        <div class="pn" style="left:40px;top:74px;width:44px;height:40px;background:#d5e8d2"></div>
+        <div class="pn" style="left:104px;top:80px;width:44px;height:40px;background:#e2d9ef"></div>
+      </div>
+
+      <!-- 书桌与电脑椅：纯陈设（书房一角） -->
+      <div class="d-desk2">
+        <div class="mon"><div class="scr">
+          <i style="top:9px;width:56px;background:#a9c6d8"></i>
+          <i style="top:20px;width:78px;background:#b5d0bd"></i>
+          <i style="top:31px;width:44px;background:#ecd9a8"></i>
+          <i style="top:42px;width:66px;background:#e3b7c4"></i>
+        </div></div>
+        <div class="cup"></div>
+      </div>
+      <span class="obj3d" style="bottom:calc(12% + 100px);left:calc(5% + 206px)">3D · 电脑桌</span>
+      <div class="d-chair">
+        <div class="back"></div><div class="seat"></div>
+        <div class="leg" style="left:8px"></div><div class="leg" style="right:8px"></div>
+      </div>
+      <span class="obj3d" style="bottom:calc(9.5% + 30px);left:calc(5% + 30px)">3D · 电脑椅</span>
+
+      <!-- 书架：纯陈设 -->
+      <div class="d-shelf2">
+        <div class="sl" style="top:64px"></div>
+        <div class="sl" style="top:132px"></div>
+        <div class="sl" style="top:198px"></div>
+        <div class="brow" style="top:26px">
+          <i style="height:34px;background:#a8c4b0"></i><i style="height:30px;background:#a9c6d8"></i><i style="height:36px;background:#e3b7c4"></i><i style="height:28px;background:#ecd9a8"></i><i style="height:32px;background:#c9bcd9"></i>
+        </div>
+        <div class="brow" style="top:98px">
+          <i style="height:30px;background:#a9c6d8"></i><i style="height:34px;background:#ecd9a8"></i><i style="height:28px;background:#a8c4b0"></i>
+        </div>
+        <div class="brow" style="top:164px">
+          <i style="height:30px;background:#e3b7c4"></i><i style="height:33px;background:#a8c4b0"></i><i style="height:27px;background:#a9c6d8"></i><i style="height:31px;background:#c9bcd9"></i>
+        </div>
+      </div>
+
+      <!-- 挂钟：纯陈设 -->
+      <div class="d-clock"><i class="h"></i><i class="m"></i></div>
+
+      <div class="d-plant" style="left:47%">
+        <div class="leaf" style="width:26px;height:38px;left:4px;top:10px"></div>
+        <div class="leaf" style="width:22px;height:32px;right:5px;top:2px;background:#94b795"></div>
+        <div class="leaf" style="width:20px;height:28px;left:17px;top:24px"></div>
+        <div class="pot"></div>
+      </div>
+      <div class="d-rug"></div>
+
+      <!-- 次要角色站位（多人同屏预留） -->
+      <div class="standee">
+        <svg viewBox="0 0 120 130" aria-label="次要角色占位">
+          <circle cx="60" cy="34" r="22" fill="#e8e2d2" stroke="#cfc7ae" stroke-width="1.5"/>
+          <path d="M28 128 C28 92 42 74 60 74 C78 74 92 92 92 128 Z" fill="#efe9da" stroke="#cfc7ae" stroke-width="1.5"/>
+        </svg>
+        <span class="cap">角色 B · 多人同屏 预留 P6</span>
+      </div>
+
+      <!-- 角色层 · VRM -->
+      <div class="vport" id="vport">
+        <div class="vport-frame"></div>
+        <span class="vport-tag" id="vportTag"><i></i>角色层 · 立绘占位（未绑定 VRM）</span>
+        <span class="vport-ratio">3:4 · 标准头身</span>
+        <button class="vport-swap" id="vrmSwap" hidden>查看占位立绘</button>
+        <div class="vrm-live" id="vrmLive" aria-label="VRM 实机渲染视口"></div>
+        <svg class="chara-svg" viewBox="0 0 240 260" aria-label="在场角色示意立绘">
+          <path d="M42 128 C32 46 88 12 120 12 C152 12 208 46 198 128 L206 226 C207 244 192 252 180 246 L60 246 C48 252 33 244 34 226 Z" fill="#7a5c50"/>
+          <path d="M42 128 C32 46 88 12 120 12 C152 12 208 46 198 128 L200 170 C170 150 150 120 148 92 L92 92 C90 120 70 150 40 170 Z" fill="#6a4f45" opacity=".5"/>
+          <rect x="106" y="158" width="28" height="34" rx="10" fill="#ffe3d3"/>
+          <path d="M52 260 C52 214 84 192 120 192 C156 192 188 214 188 260 Z" fill="#fdfdf8"/>
+          <path d="M72 206 L120 236 L168 206 L178 218 L120 252 L62 218 Z" fill="#eef4ef"/>
+          <path d="M104 238 L120 226 L136 238 L120 258 Z" fill="#5f8f74"/>
+          <path d="M70 104 C70 62 92 40 120 40 C148 40 170 62 170 104 C170 138 148 170 120 170 C92 170 70 138 70 104 Z" fill="#ffe9dc"/>
+          <path d="M68 92 C58 136 64 176 56 210 C52 226 68 230 73 216 C81 184 78 134 82 96 Z" fill="#7a5c50"/>
+          <path d="M172 92 C182 136 176 176 184 210 C188 226 172 230 167 216 C159 184 162 134 158 96 Z" fill="#7a5c50"/>
+          <path d="M68 98 C62 44 92 24 120 24 C148 24 178 44 172 98 L164 104 C163 82 158 68 152 62 L149 84 L140 64 L132 88 L124 64 L116 90 L108 64 L100 88 L92 64 L85 84 L82 62 C76 70 72 84 76 104 Z" fill="#8a6a5c"/>
+          <path d="M120 24 C116 10 130 2 138 10" fill="none" stroke="#8a6a5c" stroke-width="5" stroke-linecap="round"/>
+          <g>
+            <ellipse cx="97" cy="116" rx="12" ry="15" fill="#fff"/>
+            <ellipse cx="97" cy="118" rx="9" ry="12" fill="#b8577a"/>
+            <ellipse cx="97" cy="121" rx="9" ry="9" fill="#8f3f5c"/>
+            <circle cx="97" cy="117" r="4" fill="#452634"/>
+            <circle cx="93.5" cy="112" r="3.4" fill="#fff"/><circle cx="100.5" cy="121" r="1.6" fill="#fff" opacity=".8"/>
+            <path d="M83 110 C88 101 106 101 111 110" fill="none" stroke="#4a332c" stroke-width="4" stroke-linecap="round"/>
+          </g>
+          <g>
+            <ellipse cx="143" cy="116" rx="12" ry="15" fill="#fff"/>
+            <ellipse cx="143" cy="118" rx="9" ry="12" fill="#b8577a"/>
+            <ellipse cx="143" cy="121" rx="9" ry="9" fill="#8f3f5c"/>
+            <circle cx="143" cy="117" r="4" fill="#452634"/>
+            <circle cx="139.5" cy="112" r="3.4" fill="#fff"/><circle cx="146.5" cy="121" r="1.6" fill="#fff" opacity=".8"/>
+            <path d="M129 110 C134 101 152 101 157 110" fill="none" stroke="#4a332c" stroke-width="4" stroke-linecap="round"/>
+          </g>
+          <path d="M86 96 Q97 91 108 96" fill="none" stroke="#8a6a5c" stroke-width="3" stroke-linecap="round"/>
+          <path d="M132 96 Q143 91 154 96" fill="none" stroke="#8a6a5c" stroke-width="3" stroke-linecap="round"/>
+          <ellipse cx="86" cy="134" rx="9" ry="5" fill="#f2a5b6" opacity=".5"/>
+          <ellipse cx="154" cy="134" rx="9" ry="5" fill="#f2a5b6" opacity=".5"/>
+          <path d="M113 148 Q120 155 127 148" fill="none" stroke="#b96a6a" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <div class="gshadow"></div>
+        <div class="chara-name-tag"><b id="stageChara">澄花</b><span id="stageCharaSub" style="color:var(--muted);font-size:9.5px">搭档 Lv.3 · 心情：专注</span></div>
+      </div>
+      </div><!-- /cam-view -->
+
+      <!-- 渲染图层图例（2D 背景 + 3D 关键物件 + VRM 角色） -->
+      <div class="layers">
+        <span class="l2d">图层① 背景 2D · 墙 / 窗 / 地板</span>
+        <span class="l3d">图层② 关键物件 3D · 桌椅电脑</span>
+        <span class="lvrm" id="layerVrmTag">图层③ 角色 VRM · 昴：实机渲染 / 其余：立绘占位</span>
+      </div>
+    </main>
+
+    <!-- 对话栏 -->
+    <aside class="chat">
+      <div class="chat-head">
+        <div>
+          <h2>与 <b id="chatChara">澄花</b> 的对话</h2>
+          <div class="sub">角色口吻仅在对话层 · 角色模型独立配置（P6）</div>
+        </div>
+      </div>
+      <div class="chat-msgs">
+        <div class="cm agent">
+          <span class="who"><b id="msgChara1">澄花</b> · 14:20</span>
+          <div class="bub" id="speechBub">下午好～--dry-run 已经验收通过啦。今天想先做点什么？任务和能力都在顶栏，房间里这些陈设就是我的小天地。</div>
+        </div>
+        <div class="cm user">
+          <span class="who">我 · 14:21</span>
+          <div class="bub">先陪我过一下多角色的排布方案。</div>
+        </div>
+        <div class="cm agent">
+          <span class="who"><b id="msgChara2">澄花</b> · 14:21</span>
+          <div class="bub">好呀。名册里的每位伙伴有自己的强调色和独立记忆；气泡左侧的色条会跟着在场角色变，试试点左侧「昴」。</div>
+        </div>
+      </div>
+      <div class="chat-composer">
+        <div class="input">说点什么，或 @ 某位伙伴…</div>
+        <footer>
+          <span class="voice">♪<span>P6</span></span>
+          <span class="at-chip" id="atChip">@澄花</span>
+          <span class="hint">Enter 发送</span>
+          <div class="send" id="sendBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12L20 4L14 20L11 13L4 12Z" fill="#fff"/></svg></div>
+        </footer>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 屏 2：工作台（Codex/ZCode 式布局） ============ -->
+<section class="screen" id="screen-board">
+  <div class="wb-wrap">
+    <!-- 项目 ▸ 任务 树状侧栏（任务作为项目子项嵌套，参照旧版 workbench-v2 侧栏语义） -->
+    <aside class="wb-side">
+      <button class="new-task-d">＋ 新建任务</button>
+      <div class="wb-search">⌕&nbsp; 搜索项目与任务…</div>
+
+      <div class="wb-proj open">
+        <button class="wb-proj-head" data-proj-toggle>
+          <i class="dot" style="background:var(--rose)"></i>
+          <span class="nm">sumika-next<small>D:\Code\Sumika · 当前项目</small></span>
+          <b>4</b>
+          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+        <div class="wb-tasks">
+          <button class="wb-item wb-task active"><i class="st" style="background:var(--green)"></i><div>receipt 增加 --dry-run<small>进行中 · 刚刚</small></div></button>
+          <button class="wb-item wb-task"><i class="st" style="background:var(--amber)"></i><div>P4-UI 设计稿评审<small>待确认 · 昨天</small></div></button>
+          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>修复 handoff 时区显示<small>已完成 · 昨天</small></div></button>
+          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>连续记录扩展验收<small>已完成 · 9 月 11 日</small></div></button>
+        </div>
+      </div>
+
+      <div class="wb-proj open">
+        <button class="wb-proj-head" data-proj-toggle>
+          <i class="dot" style="background:var(--green)"></i>
+          <span class="nm">personal-blog<small>~/blog · 昨天 22:14</small></span>
+          <b>2</b>
+          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+        <div class="wb-tasks">
+          <button class="wb-item wb-task"><i class="st" style="background:var(--green)"></i><div>首页重构为静态生成<small>进行中 · 昨天</small></div></button>
+          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>RSS 输出修复<small>已完成 · 9 月 12 日</small></div></button>
+        </div>
+      </div>
+
+      <div class="wb-proj">
+        <button class="wb-proj-head" data-proj-toggle>
+          <i class="dot" style="background:var(--amber)"></i>
+          <span class="nm">dsh-plugin-lab<small>9 月 10 日</small></span>
+          <b>3</b>
+          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+        <div class="wb-tasks">
+          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>插件清单校验脚本<small>已完成 · 9 月 10 日</small></div></button>
+          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>echo-provider 示例<small>已完成 · 9 月 9 日</small></div></button>
+          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>cordis patch 调研<small>已取消 · 9 月 8 日</small></div></button>
+        </div>
+      </div>
+
+      <details class="wb-arch"><summary>已归档 <b>2</b></summary>
+        <button class="wb-item wb-task"><div>sumika-legacy<small>已归档 · 8 月 30 日</small></div></button>
+        <button class="wb-item wb-task"><div>notes-migration<small>已归档 · 8 月 21 日</small></div></button>
+      </details>
+
+      <div class="wb-foot">本地优先 · 数据不出本机<br>运行数据 <b>.sumika-next/</b> · 已连接 <b>DSH 0.1.5-rc.2</b></div>
+    </aside>
+
+    <!-- 中央时间线 -->
+    <main class="wb-main">
+      <div class="wb-head">
+        <div>
+          <div class="wb-crumb">sumika-next / 工作台 / 任务 #1042</div>
+          <h1>receipt 增加 <em>--dry-run</em></h1>
+        </div>
+        <div class="pills">
+          <span class="pill-d wait">● 1 项待确认</span>
+          <span class="pill-d run">● 执行中</span>
+        </div>
+      </div>
+
+      <div class="wb-timeline">
+        <div class="cm user">
+          <span class="who">我 · 14:02</span>
+          <div class="bub">给 receipt 命令加一个 --dry-run 选项：只做校验和预览，不写任何文件，也不更新 handoff。</div>
+        </div>
+        <div class="cm agent">
+          <span class="who"><b>澄花</b> · DeepSeek V4 Pro · 14:02</span>
+          <div class="bub">好的，计划如下：<br>1. 在 <b>receipts.py</b> 增加 dry_run 分支，复用现有校验，跳过写盘与 handoff 追加；<br>2. 补 2 个单元测试（dry-run 不落盘 / 校验失败仍报错）；<br>3. 跑 tests_next 全量回归。</div>
+        </div>
+        <div class="tool-d"><div><code>sumika_next/receipts.py</code></div><div class="df"><b>+38</b> <i>−4</i></div></div>
+        <div class="tool-d"><div><code>tests_next/test_receipts.py</code></div><div class="df"><b>+24</b> <i>−0</i></div></div>
+        <div class="tool-d"><div><code>python -B -m unittest discover -s tests_next -v</code></div><div class="ok">✓ 47 项通过</div></div>
+
+        <div class="confirm-d">
+          <header><span class="flag">待确认</span><h3>将写入 2 个文件的变更</h3></header>
+          <p>已在沙箱预跑通过。确认后正式写入工作区并记录成果回执；取消则丢弃暂存变更，检查点保留，可随时恢复。</p>
+          <div class="cd-grid">
+            <div><b>2</b><span>变更文件</span></div>
+            <div><b class="up">+62</b><span>新增行</span></div>
+            <div><b class="down">−4</b><span>删除行</span></div>
+            <div><b>47/47</b><span>沙箱预跑</span></div>
+          </div>
+          <div class="cd-foot">
+            <button class="btn-y-d">确认执行</button>
+            <button class="btn-n-d">取消</button>
+            <span class="ckpt-d">检查点 <code>a3f9c21</code> 可回滚</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-composer wb-composer">
+        <div class="input">输入消息，或 / 唤起快捷指令…</div>
+        <footer>
+          <span class="hint" style="margin-left:0">Enter 发送 · Shift+Enter 换行</span>
+          <div class="send"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12L20 4L14 20L11 13L4 12Z" fill="#fff"/></svg></div>
+        </footer>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- ============ 屏 3：能力 ============ -->
+<section class="screen" id="screen-shelf">
+  <div class="cap-wrap">
+    <main class="cap-main">
+      <div class="cap-head">
+        <div>
+          <h1>能力 <em>模块</em></h1>
+          <p>模块化装配 · 关闭仅停用，本地数据与配置完整保留。</p>
+        </div>
+        <span class="cap-note">✓ 全部配置仅保存于本机</span>
+      </div>
+
+      <section class="cap-group">
+        <h2><b>开发工具</b> DSH 原生 · 已验收</h2>
+        <div class="cap-grid">
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">⌨</div><h4>终端执行</h4><span class="st on">已启用</span></div>
+            <p>受管终端命令、测试与构建，高危操作进入待确认。</p>
+            <div class="foot"><span class="src">DSH 原生</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">✎</div><h4>文件编辑</h4><span class="st on">已启用</span></div>
+            <p>代码搜索、阅读与补丁写入，写入前创建检查点。</p>
+            <div class="foot"><span class="src">DSH 原生</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">⧉</div><h4>子代理</h4><span class="st on">已启用</span></div>
+            <p>独立任务与代码审查交由原生子 Agent，可并行。</p>
+            <div class="foot"><span class="src">DSH 原生</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">❖</div><h4>Skills</h4><span class="st on">已启用</span></div>
+            <p>领域技能包，安装前经安全审查。</p>
+            <div class="foot"><span class="src">原生扩展</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">⬡</div><h4>MCP 连接</h4><span class="st on">已启用</span></div>
+            <p>第三方工具服务器，按来源与作用域显式授权。</p>
+            <div class="foot"><span class="src">原生扩展</span><span class="sw2 on"></span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cap-group">
+        <h2><b>办公与扩展</b> 独立扩展层</h2>
+        <div class="cap-grid">
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--mizu-soft)">▤</div><h4>Office 文档</h4><span class="st basic">基础可用</span></div>
+            <p>Word / Excel / PPT / PDF 读写修改已验收；版式渲染与公式重算未验收。</p>
+            <div class="foot"><span class="src">独立扩展 sumika-office</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">◑</div><h4>OCR · 截屏翻译</h4><span class="st rsv">预留 · P5</span></div>
+            <p>屏幕文字识别与翻译，同一能力可切换不同实现。</p>
+            <div class="foot"><span class="src">复用方案调研中</span><span class="sw2"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">▣</div><h4>桌面软件控制</h4><span class="st rsv">预留 · P5</span></div>
+            <p>通用桌面软件的观察、点击、输入与窗口控制。</p>
+            <div class="foot"><span class="src">复用方案调研中</span><span class="sw2"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">⧈</div><h4>内置浏览器</h4><span class="st rsv">预留 · P5</span></div>
+            <p>隔离 Profile 的网页 AI 咨询，页面统一管理。</p>
+            <div class="foot"><span class="src">独立 UI 层</span><span class="sw2"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">◔</div><h4>定时任务</h4><span class="st rsv">预留 · P5</span></div>
+            <p>一次性 / 每日 / 每周计划，区分提醒与真正执行。</p>
+            <div class="foot"><span class="src">复用方案调研中</span><span class="sw2"></span></div>
+          </div>
+          <div class="add-tile"><b>＋</b><span>添加模块</span></div>
+        </div>
+      </section>
+
+      <section class="cap-group">
+        <h2><b>陪伴与记录</b> 连续性 · 角色</h2>
+        <div class="cap-grid">
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--rose-soft)">✿</div><h4>连续记录</h4><span class="st on">已启用</span></div>
+            <p>continuity 扩展：自动捕获上下文，支持交接查询。</p>
+            <div class="foot"><span class="src">独立扩展</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card">
+            <div class="top"><div class="cap-ic" style="background:var(--rose-soft)">✓</div><h4>成果回执</h4><span class="st on">已启用</span></div>
+            <p>receipt 命令规范化成果 JSON，绑定 Git HEAD。</p>
+            <div class="foot"><span class="src">核心内置</span><span class="sw2 on"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">❈</div><h4>长期记忆</h4><span class="st rsv">预留 · P6</span></div>
+            <p>按角色隔离的长期回忆，优先接入社区插件方案。</p>
+            <div class="foot"><span class="src">插件选型中</span><span class="sw2"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">♪</div><h4>语音交流</h4><span class="st rsv">预留 · P6</span></div>
+            <p>语音对话与经授权的屏幕、摄像头感知。</p>
+            <div class="foot"><span class="src">角色系统配套</span><span class="sw2"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">✦</div><h4>角色卡 · 世界书</h4><span class="st rsv">预留 · P6</span></div>
+            <p>导入角色卡、模型与场景资源，管理背景设定与主题配色。</p>
+            <div class="foot"><span class="src">角色系统基础</span><span class="sw2"></span></div>
+          </div>
+          <div class="cap-card reserved">
+            <div class="top"><div class="cap-ic" style="background:#f4ecdc">❀</div><h4>桌宠模式</h4><span class="st rsv">预留 · P7</span></div>
+            <p>透明桌面形态，与主窗口共享会话与草稿。</p>
+            <div class="foot"><span class="src">桌面壳</span><span class="sw2"></span></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="cap-side">
+      <div class="hero-d">
+        <div class="cap-ic" style="background:var(--green-soft)">⌨</div>
+        <h4>终端执行</h4>
+        <p>模块详情 · 点选左侧卡片切换查看</p>
+      </div>
+      <div class="panel">
+        <h3>模块信息 <b>INFO</b></h3>
+        <div class="kv"><span>状态</span><b class="ok">已启用</b></div>
+        <div class="kv"><span>来源</span><b>DSH 原生</b></div>
+        <div class="kv"><span>版本</span><b>0.1.5-rc.2</b></div>
+        <div class="kv"><span>权限</span><b>高危命令需确认</b></div>
+        <div class="kv"><span>数据</span><b>本地 SQLite · 未上传</b></div>
+      </div>
+      <div class="panel">
+        <h3>启用状态 <b>16 个模块</b></h3>
+        <div class="st-grid">
+          <div><b>8</b><span>已启用</span></div>
+          <div><b>8</b><span>预留</span></div>
+          <div><b>0</b><span>异常</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>设计约定 <b>NOTES</b></h3>
+        <p class="note-p">① 预留模块仅占位，明确标识、不可开启；<br>② 关闭开关只停用能力，历史数据与授权记录保留；<br>③ 「配置」进入设置 · 连接与权限，不在卡片内直接改敏感项。</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 屏 4：设置 ============ -->
+<section class="screen" id="screen-settings">
+  <div class="set-wrap">
+    <aside class="set-nav">
+      <h3>设置 <b>SETTINGS</b></h3>
+      <button class="active">外观</button>
+      <button>模型与连接</button>
+      <button>能力模块</button>
+      <button>连接与权限</button>
+      <button>数据与存储</button>
+      <button>关于</button>
+      <div class="set-nav-foot">常用设置优先 · 高级项收纳于分组内<br>修改即时生效，仅保存于本机</div>
+    </aside>
+
+    <main class="set-main">
+      <div class="cap-head">
+        <div>
+          <h1>设置 <em>·</em> 外观</h1>
+          <p>常用项优先 · 敏感项集中在「连接与权限」。</p>
+        </div>
+        <span class="cap-note">✓ 全部配置仅保存于本机</span>
+      </div>
+
+      <section class="set-group">
+        <h2><b>外观</b> APPEARANCE</h2>
+        <div class="set-card">
+          <div class="set-row"><div>主题配色<small>当前原型即「晴日部室 · 清风日系」方向</small></div>
+            <div class="seg"><button class="active">晴日 · 浅</button><button disabled>夜间<span class="rsv-tag">预留</span></button></div>
+          </div>
+          <div class="set-row"><div>背景<small>沿用旧版本地背景图能力，图片不出本机</small></div>
+            <div class="seg"><button class="active">部室午后</button><button>本地背景图…</button></div>
+          </div>
+          <div class="set-row"><div>界面密度<small>影响列表与卡片间距</small></div>
+            <div class="seg"><button class="active">舒适</button><button>紧凑</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-group">
+        <h2><b>模型与连接</b> MODELS</h2>
+        <div class="set-card">
+          <div class="set-row"><div>工作模型<small>任务、编辑、文档处理均使用此模型</small></div>
+            <div class="val"><b class="ok">● 已连接</b><b>DeepSeek V4 Pro ▾</b></div>
+          </div>
+          <div class="set-row"><div>角色模型<small>陪伴对话口吻，按角色独立绑定</small></div>
+            <div class="val"><span class="rsv-tag">预留 · P6</span></div>
+          </div>
+          <div class="set-row"><div>API 凭据<small>本地加密保存，不上传、不进 Git</small></div>
+            <div class="val"><b>已配置 1 项</b><button class="mini-btn">管理…</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-group">
+        <h2><b>能力模块</b> MODULES</h2>
+        <div class="set-card">
+          <div class="set-row"><div>模块总览<small>关闭仅停用，数据与配置保留（enabled 契约）</small></div>
+            <div class="val"><b>8 已启用 · 8 预留 · 0 异常</b><button class="mini-btn" onclick="location.hash='shelf'">打开能力页 →</button></div>
+          </div>
+          <div class="set-row"><div>连续记录<small>会话交接自动摘要（continuity 扩展）</small></div><span class="sw2 on" style="margin-left:auto"></span></div>
+          <div class="set-row"><div>自动捕获<small>成果写入 receipts，绑定 Git HEAD</small></div><span class="sw2 on" style="margin-left:auto"></span></div>
+        </div>
+      </section>
+
+      <section class="set-group">
+        <h2><b>连接与权限</b> PERMISSIONS</h2>
+        <div class="set-card">
+          <div class="set-row"><div>MCP 服务器<small>按来源与作用域显式授权</small></div>
+            <div class="val"><b>2 项已授权</b><button class="mini-btn">管理…</button></div>
+          </div>
+          <div class="set-row"><div>高危操作<small>写盘、删改、外发统一进入待确认入口</small></div>
+            <div class="val"><b class="ok">始终确认</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-group">
+        <h2><b>数据与存储</b> DATA</h2>
+        <div class="set-card">
+          <div class="set-row"><div>运行数据目录<small>会话、回执、检查点均在本地</small></div>
+            <div class="val"><code style="font-family:Consolas,monospace;font-size:11px">.sumika-next/</code><b class="ok">本地优先</b></div>
+          </div>
+          <div class="set-row"><div>检查点<small>写入前自动创建，可随时回滚</small></div>
+            <div class="val"><b>最近 a3f9c21</b><button class="mini-btn">查看…</button></div>
+          </div>
+          <div class="set-row"><div>清除本地数据<small>删除全部会话与检查点，不可恢复</small></div>
+            <div class="val"><button class="mini-btn danger">清除…</button></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="set-side">
+      <div class="hero-d">
+        <div class="cap-ic" style="background:var(--rose-soft)">⚙</div>
+        <h4>设置</h4>
+        <p>常用设置优先 · 敏感项集中管理</p>
+      </div>
+      <div class="panel">
+        <h3>版本信息 <b>ABOUT</b></h3>
+        <div class="kv"><span>DSH</span><b>0.1.5-rc.2</b></div>
+        <div class="kv"><span>项目</span><b>sumika-next · P4-UI</b></div>
+        <div class="kv"><span>数据</span><b class="ok">本机 · 未上传</b></div>
+      </div>
+      <div class="panel">
+        <h3>设计约定 <b>NOTES</b></h3>
+        <p class="note-p">① 预留项虚线标识、不可开启；<br>② 设置改动不写 receipts，仅权限变更记录授权流水；<br>③ 角色相关配置 P6 开放后进入本页。</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<script>
+  const screens = { room: 'screen-room', board: 'screen-board', shelf: 'screen-shelf', settings: 'screen-settings' };
+  function applyHash(){
+    const key = (location.hash || '#room').slice(1);
+    const target = screens[key] || 'screen-room';
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('show', s.id === target));
+    document.getElementById('backBtn').style.display = (key === 'room' || !screens[key]) ? 'none' : 'flex';
+    document.querySelectorAll('#gnav button').forEach(b => b.classList.toggle('active', b.dataset.go === (screens[key] ? key : 'room')));
+    document.body.classList.toggle('on-room', target === 'screen-room'); /* 陪伴页显示镜头窗口，桌宠小窗自动隐藏 */
+  }
+  document.getElementById('backBtn').addEventListener('click', () => location.hash = 'room');
+  document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => location.hash = b.dataset.go));
+  window.addEventListener('hashchange', applyHash);
+  /* ---- 工作台侧栏：项目折叠/展开（任务作为项目子项） ---- */
+  document.querySelectorAll('[data-proj-toggle]').forEach(h => h.addEventListener('click', () => {
+    h.closest('.wb-proj').classList.toggle('open');
+  }));
+
+  applyHash();
+
+  /* ---- 桌宠小窗（L0）：全局浮动小窗，可自由拖动，跨页常驻，陪伴页自动隐藏 ---- */
+  const DP_TEXT = {
+    idle: '在房间里待着呢，有事叫我～',
+    work: 'tests_next 回归马上跑完，稍等～',
+    rest: '喝杯茶歇一下，有进展我叫你。',
+  };
+  function buildDeskpet(){
+    const svg = document.querySelector('#vport svg');
+    const el = document.createElement('div');
+    el.className = 'deskpet';
+    el.id = 'deskpet';
+    el.title = '桌宠小窗 · 按住拖动，可放到任意位置';
+    el.innerHTML =
+      '<div class="dp-main">' +
+      '<div class="dp-stage">' +
+      /* 气泡挂在「取景框行」内部并绝对定位，展开时向上生长、不推挤下方取景框 */
+      '<div class="dp-bubble" data-dp-bubble>' +
+      '<div class="st"><span data-dp-st></span><i data-dp-hint>悬停展开 · 最近 3 条</i></div>' +
+      '<div class="dp-log" data-dp-log></div>' +
+      '<span class="more"><span class="lbl-closed">点击展开更多记录</span><span class="lbl-open">收起记录</span></span>' +
+      '</div>' +
+      '<div class="dp-chara"></div>' +
+      '<div class="dp-ops">' +
+      '<button data-dp-min title="收起小窗">收起</button>' +
+      '</div></div></div>' +
+      '<div class="dp-chat">' +
+      '<input data-dp-input placeholder="和她聊两句…（回车发送）">' +
+      '<button data-dp-send title="发送">➤</button>' +
+      '</div>' +
+      '<button class="dp-mini" data-dp-restore title="展开桌宠小窗"></button>';
+    const c = svg.cloneNode(true);
+    c.removeAttribute('class');
+    c.setAttribute('width', '200');
+    c.setAttribute('height', '224');
+    el.querySelector('.dp-chara').appendChild(c);
+    /* 场景预览：以克隆的整间房作为「世界画布」（2D 背景 + 3D 陈设），
+       再在其中放入小窗专属的 VRM 容器与占位立绘。
+       关键：<canvas> 无法被 cloneNode 复制（只会得到一个空白节点），
+       所以小窗必须用容器里的 .dp-vrm 独立挂载一个自己的 VRM 渲染实例——
+       这也是渲染器原生支持的用法（实例按容器元素登记）。
+       于是小窗拥有与主持屏互不干扰的取景，为 P7「独立 OS 窗口」铺好了同一条路径。 */
+    const scene = document.createElement('div');
+    scene.className = 'dp-scene';
+    const cv = document.getElementById('camView');
+    if (cv) {
+      const clone = cv.cloneNode(true);
+      clone.removeAttribute('id');
+      clone.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+      /* 克隆体要呈现「未缩放的全屋世界」，因此必须清掉主持屏上随活动/镜头实时写入的 transform，
+         否则克隆体会复制「跟随/特写」的缩放与锚点，导致取景框里被二次放大 */
+      clone.style.transform = 'none';
+      clone.style.transformOrigin = '0 0';
+      /* 主持屏的 VRM 层与画布不参与克隆：小窗用自己的实例，避免拿到空白 canvas */
+      clone.querySelectorAll('.vrm-live, canvas').forEach(n => n.remove());
+      /* 小窗专属 VRM 容器：与主持屏 .vport 同位同尺寸，由取景逻辑统一驱动 */
+      const dpVrm = document.createElement('div');
+      dpVrm.className = 'dp-vrm';
+      const hostVport = clone.querySelector('.vport');
+      if (hostVport) hostVport.appendChild(dpVrm);
+      scene.appendChild(clone);
+    }
+    el.querySelector('.dp-chara').appendChild(scene);
+    el.querySelector('.dp-chara').appendChild(svg);   /* 占位立绘层（澄花等未绑定 VRM 的角色） */
+    document.body.appendChild(el);
+    el.querySelector('[data-dp-min]').addEventListener('click', () => el.classList.add('mini'));
+    el.querySelector('[data-dp-restore]').addEventListener('click', () => el.classList.remove('mini'));
+    layoutDeskpet();
+    /* ---- 闲聊记录：模拟对话，按活动状态切换语气（后续接入真实对话流） ---- */
+    const DP_REPLY = {
+      idle: ['嗯嗯，我在听～', '发呆被发现了？那陪你聊会儿。', '今天房间里阳光不错。'],
+      work: ['等我一下，回归跑完就回你！', '这个报错好烦……马上修好。', '别催别催，快好了～'],
+      rest: ['喝茶中，勿扰……开玩笑的，说吧。', '休息一下脑子更清楚。', '你也歇会儿嘛。'],
+    };
+    const MAX_LOG = 60;    /* 记录上限：原型里模拟长期可用的最近对话 */
+    const DP_RECENT = 3;   /* 收起态露出的最近条数，与 CSS 的 :nth-last-child(-n+3) 对应 */
+    /* 预置几条历史消息，让「悬停展开、最近三条、点击查看更早」在原型里可被真实感知 */
+    const dpLog = [
+      { who: 'her', text: '欢迎回来～今天打算先做哪件事？' },
+      { who: 'me',  text: '先把 tests_next 的回归跑一遍。' },
+      { who: 'her', text: '收到，我把它排到队首了。' },
+      { who: 'me',  text: '顺便看下上次那个超时的用例。' },
+      { who: 'her', text: '那个我标记过了，是网络抖动的偶发，不是回归问题。' },
+      { who: 'me',  text: '好，那就先不动它。' },
+    ];
+    const logEl = el.querySelector('[data-dp-log]');
+    function dpHerName(){ return document.getElementById('stageChara').textContent || '她'; }
+    const box = el.querySelector('[data-dp-bubble]');
+    function renderLog(){
+      logEl.innerHTML = dpLog.slice(-MAX_LOG).map(m =>
+        '<div class="dp-msg ' + (m.who === 'me' ? 'me' : 'her') + '">' +
+        '<b>' + (m.who === 'me' ? '我' : dpHerName()) + '</b><span></span></div>').join('');
+      /* 文本走 textContent 注入，避免消息内容里的特殊字符破坏结构 */
+      const spans = logEl.querySelectorAll('.dp-msg span');
+      dpLog.slice(-MAX_LOG).forEach((m, i) => { if (spans[i]) spans[i].textContent = m.text; });
+      /* 展开态（在翻历史）时保持底部对齐：新消息进来才滚到最新一条 */
+      if (!box.classList.contains('open')) logEl.scrollTop = logEl.scrollHeight;
+      /* 不足三条时没有「更早的记录」可看，收掉提示，避免点了没反应 */
+      box.classList.toggle('no-more', dpLog.length <= DP_RECENT);
+    }
+    function pushMsg(who, text){
+      dpLog.push({ who: who, text: text });
+      renderLog();
+    }
+    dpPush = pushMsg;   /* 暴露给 syncDeskpet：换活动时她会主动播报一句 */
+    renderLog();
+    /* 悬停展开、移开收起；点击在「固定展开」与「收起」之间切换
+       （点击态用于慢慢翻历史；细指针设备才有悬停，触屏靠点击） */
+    let dpPinned = false;
+    box.addEventListener('mouseenter', () => box.classList.add('open'));
+    box.addEventListener('mouseleave', () => { if (!dpPinned) box.classList.remove('open'); });
+    box.addEventListener('click', () => {
+      dpPinned = !dpPinned;
+      box.classList.toggle('open', dpPinned);
+      if (dpPinned) logEl.scrollTop = logEl.scrollHeight;   /* 固定展开时回到最新一条 */
+      el.querySelector('[data-dp-hint]').textContent = dpPinned ? '点击收起记录' : '悬停展开 · 最近 3 条';
+    });
+    const say = () => {
+      const inp = el.querySelector('[data-dp-input]');
+      const v = inp.value.trim();
+      if (!v) return;
+      inp.value = '';
+      pushMsg('me', v);
+      const pool = DP_REPLY[act];
+      /* 稍延迟再回，模拟「她在想」的节奏 */
+      setTimeout(() => pushMsg('her', pool[Math.floor(Math.random() * pool.length)]), 420);
+    };
+    el.querySelector('[data-dp-send]').addEventListener('click', say);
+    el.querySelector('[data-dp-input]').addEventListener('keydown', e => { if (e.key === 'Enter') say(); });
+    /* 自由拖动：首次拖动后切换为 left/top 定位并一直保持 */
+    el.addEventListener('pointerdown', e => {
+      /* 可交互区不参与拖动：按钮、输入框、聊天记录面板（要能点开翻历史、滚动） */
+      if (e.target.closest('button,input,[data-dp-log]')) return;
+      const r = el.getBoundingClientRect();
+      const ox = e.clientX - r.left, oy = e.clientY - r.top;
+      el.classList.add('dragging');
+      el.setPointerCapture(e.pointerId);
+      const move = ev => {
+        el.style.left = Math.min(Math.max(0, ev.clientX - ox), innerWidth - r.width) + 'px';
+        el.style.top = Math.min(Math.max(0, ev.clientY - oy), innerHeight - r.height) + 'px';
+        el.style.right = 'auto'; el.style.bottom = 'auto';
+      };
+      const up = () => {
+        el.classList.remove('dragging');
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+    dpEl = el;
+    addEventListener('resize', layoutDeskpet);
+    /* VRM 实例异步挂载后会改变角色本体尺寸，需重算取景（跨脚本解耦） */
+    window.addEventListener('sumika:reframe', () => layoutDeskpet());
+  }
+
+  /* ---- 桌宠取景（模块级，供 syncDeskpet / 活动切换 / 视口缩放复用） ----
+     L0 小窗只有一种构图：全景——看到角色全身 + 书桌 + 窗户一带，读得出「她在自己房间里」。
+     原先另有「角色半身」档，随「场景/角色」按钮一并下线：特写会把场景信息挤掉，
+     与 L0「小窗 = 她在房间里的摄像头视角」这一定位冲突（要看近景请走 L1 陪伴页 / L2 独立窗）。
+     做法：取景窗口只在「世界坐标」里位移，不缩放整间房——
+     既看得到她在房间里的位置，又不会因为把 888px 宽的舞台塞进 328px 小窗而变成一张大头照。 */
+  let dpEl = null, dpPush = null, dpLastAct = null, dpActKey = 'idle';
+  const DP_ZOOM = 1.0;                        /* L0 固定全景视角：小窗 1:1 呈现世界像素 */
+  const DP_BOX = { w: 300, h: 336 };          /* 小窗取景框尺寸 */
+  const DP_STAGE = { w: 888, h: 836 };        /* 舞台世界尺寸（.stage 的 CSS 固定尺寸） */
+  function layoutDeskpet(){
+    const el = dpEl;
+    if (!el) return;
+    const box = el.querySelector('.dp-chara');
+    const inner = el.querySelector('.dp-scene > *');
+    if (!box || !inner) return;
+    {
+      const W = DP_BOX.w, H = DP_BOX.h;       /* 小窗取景框尺寸 */
+      /* 舞台尺寸：.stage 常处于未激活的屏里（getBoundingClientRect 得 0），
+         因此以「舞台固定设计尺寸 888×836」为世界坐标系基准——这是 .stage 的实际 CSS 尺寸，
+         与是否可见无关，比量取 DOM 更稳定可靠 */
+      const stageW = DP_STAGE.w, stageH = DP_STAGE.h;
+      box.style.width = W + 'px'; box.style.height = H + 'px';
+      inner.style.width = stageW + 'px';
+      inner.style.height = stageH + 'px';
+      /* 取景窗口尺寸（世界坐标）——只在世界里位移窗口，不缩放整屋。
+         zoom 用于近景微调：远小近大，1.0 表示小窗 1:1 呈现世界像素。 */
+      /* 取景窗尺寸 = 小窗尺寸 / zoom，zoom 越大越靠近角色。
+         VRM 渲染器的透视相机不可调，因此「推近」只能靠收窄取景窗实现。
+         L0 固定 1.0：窗口 300×336 世界像素，人物约占框高六成，上下留出墙面与地板；
+         需要更近的构图请放到 L1/L2 去做，不要在 L0 抢同一件事。 */
+      const zoom = DP_ZOOM;
+      const vw = W / zoom;                    /* 世界窗口宽 */
+      const vh = H / zoom;                    /* 世界窗口高 */
+      /* 角色在舞台内的世界位置：克隆体本身已是 888×836 的世界画布，
+         其内部 .vport 的 offset* 与 style.left/bottom 直接给出世界坐标，
+         不受主持屏 transform / 可见性影响 —— 这是唯一可靠的取值口径 */
+      const charBox = charWorldBox(inner);
+      /* 世界锚点：小窗取景只认「世界坐标」，与主持屏那套 left:calc(88% - 300px) 无关。
+         这里按三种活动状态各自给出一组「房间里的机位」，而不是把窗口死锁在角色身上——
+         角色在房间里是会走动的，机位若完全跟随，画面里就只剩人、看不出她换了地方。
+         机位固定在世界里，人在画面内位移，才读得出「她在自己房间的某处」。
+
+         纵向：charBox.cy 已是「人物上下半身的中点」，
+         取景窗高 336，故 dy 取 0 时人物居中、上下各留 168 世界像素——
+         头顶不会被切，脚也不出框，同时上方留出墙、下方留出地板。
+         横向：idle/rest 偏右避开书桌；work 往左贴书桌一侧。 */
+      const ANCHOR = {
+        idle: { dx: 14, dy: 0 },
+        work: { dx: -240, dy: 8 },
+        rest: { dx: 34, dy: 6 },
+      };
+      const anchor = ANCHOR[dpActKey] || ANCHOR.idle;
+      /* 以「人物实际位置」为基准做偏移：模型换人、换高矮都能自适应，
+         不像写死世界坐标那样一旦模型尺寸变化就整体错位 */
+      const focusX = charBox.cx + anchor.dx;
+      const focusY = charBox.cy + anchor.dy;
+      let fx = focusX - vw / 2;
+      let fy = focusY - vh / 2;
+      /* 边界夹取：窗口不得越出舞台；若舞台比窗口小则居中 */
+      fx = stageW > vw ? Math.max(0, Math.min(fx, stageW - vw)) : (stageW - vw) / 2;
+      fy = stageH > vh ? Math.max(0, Math.min(fy, stageH - vh)) : (stageH - vh) / 2;
+      inner.style.transformOrigin = '0 0';
+      inner.style.transform = 'scale(' + zoom + ') translate(' + (-fx) + 'px,' + (-fy) + 'px)';
+    }
+  }
+  /* 角色在「世界坐标」中的包围盒。
+     口径说明：.vport 用 left/bottom + transform:scale 定位，offsetTop 不等于视觉位置，
+     因此这里以「克隆体内 .vport 与克隆画布的 rect 差」直接量取可视中心——
+     两者都在同一坐标系、同一渲染状态下，差值即世界坐标，不受主持屏隐藏/缩放影响。
+     再用 scale 把已缩放尺寸还原成世界尺寸（rect 已含缩放，除以 scale 即得世界尺寸）。 */
+  function charWorldBox(inner){
+    /* 优先用角色本体（VRM 画布 / 立绘 SVG），退化为角色层外框：
+       角色层的框比人物本体更高（含底部阴影与名牌），用框对齐会让人物偏上、脚被切 */
+    const innerRect = inner.getBoundingClientRect();
+    const scaleX = DP_STAGE.w / (innerRect.width || DP_STAGE.w);
+    const scaleY = DP_STAGE.h / (innerRect.height || DP_STAGE.h);
+    const boxOf = n => {
+      const r = n.getBoundingClientRect();
+      const left = (r.left - innerRect.left) * scaleX;
+      const top = (r.top - innerRect.top) * scaleY;
+      const w = r.width * scaleX, h = r.height * scaleY;
+      return { cx: left + w / 2, cy: top + h / 2, w: w, h: h };
+    };
+    /* VRM 实机：渲染器用的是固定透视相机（不可调）。
+       .dp-vrm 容器的位置是 CSS 定的（下移，只覆盖取景框下半），
+       因此这里要按容器的实际可见框取锚点：
+       横向取容器中心；纵向把「容器顶部略下」作为人物头部所在，用于构图对齐。
+       容器被取景框裁掉的部分（底部溢出的地板留白）不计入。 */
+    const vrmHost = inner.querySelector('.dp-vrm') || inner.querySelector('.vrm-live');
+    if (vrmHost) {
+      const b = boxOf(vrmHost);
+      /* 人物实际站在容器内：头约在容器 2% 高度处，脚约在 78% 高度处（实测取自 AvatarSample_A）。
+         以此推出「人物中心」而非用容器几何中心，才能让构图真正对准人。 */
+      const top = b.cy - b.h / 2;
+      const charTop = top + b.h * 0.02;
+      const charBottom = top + b.h * 0.78;
+      return { cx: b.cx, cy: (charTop + charBottom) / 2, w: b.w * 0.62, h: charBottom - charTop };
+    }
+    const vp = inner.querySelector('.vport .chara-svg') || inner.querySelector('.vport');
+    if (!vp) return { cx: DP_STAGE.w * 0.72, cy: DP_STAGE.h * 0.62, w: 300, h: 430 };
+    return boxOf(vp);
+  }
+  /* 把主持屏当前的「活动状态类 + 镜头缩放」同步到小窗克隆体：
+     .vport 的位置由 .pos-work / .pos-rest 决定，克隆体只复制了一次初始 DOM，
+     不同步的话小窗里角色永远待在初始位置，看不到她换地方活动 */
+  function syncDeskpetScene(clone){
+    if (!clone) return;
+    const liveVport = document.querySelector('#camView .vport');
+    const clVport = clone.querySelector('.vport');
+    if (liveVport && clVport) clVport.className = liveVport.className;
+    /* 克隆体作为「世界画布」始终不被主持屏的镜头缩放影响（那属于取景，不属于世界） */
+    clone.style.transform = 'none';
+  }
+  function syncDeskpet(){
+    const el = document.getElementById('deskpet');
+    if (!el) return;
+    const name = document.getElementById('stageChara').textContent;
+    el.querySelector('[data-dp-st]').textContent = name + ' · ' + ACT[act].label.replace('当前活动：', '');
+    /* 她换活动时，把当前状态口播成「最新一条消息」进记录里：
+       既让收起态的最近三条保持新鲜，也符合「她在跟你说话」的直觉。
+       同一活动重复触发（切角色回 idle、刷新各自生成概论等）不重复播报 */
+    if (dpPush && dpLastAct !== act) { dpLastAct = act; dpPush('her', DP_TEXT[act]); }
+    /* 记录活动档位：小窗取景按活动选取世界机位（见 layoutDeskpet 的 ANCHOR） */
+    dpActKey = act;
+    el.querySelector('[data-dp-restore]').textContent = name.slice(-1);
+    syncDeskpetScene(el.querySelector('.dp-scene > *'));
+    /* 是否绑定 VRM 决定小窗里显示实机渲染还是占位立绘（SVGElement 无 hidden 属性，用 style.display） */
+    const dpSvg = el.querySelector('.dp-chara > svg');
+    if (dpSvg) dpSvg.style.display = name === '昴' ? 'none' : '';
+    layoutDeskpet();
+  }
+
+  /* ---- 多角色切换演示：UI 全部绑定在场角色，不写死名字 ---- */
+  const root = document.documentElement;
+  const vport = document.getElementById('vport');
+  const camView = document.getElementById('camView');
+  const actText = document.getElementById('actText');
+  const camModeText = document.getElementById('camModeText');
+  document.querySelectorAll('.member[data-name]').forEach(m => m.addEventListener('click', () => {
+    document.querySelectorAll('.member').forEach(x => x.classList.remove('active'));
+    m.classList.add('active');
+    const { name, sub, color, soft, speech } = m.dataset;
+    root.style.setProperty('--chara', color);
+    root.style.setProperty('--chara-soft', soft);
+    document.getElementById('stageChara').textContent = name;
+    document.getElementById('stageCharaSub').textContent = sub;
+    document.getElementById('chatChara').textContent = name;
+    document.getElementById('msgChara1').textContent = name;
+    document.getElementById('msgChara2').textContent = name;
+    document.getElementById('speechBub').textContent = speech;
+    document.getElementById('atChip').textContent = '@' + name;
+    document.getElementById('roomOwner').textContent = name + '的房间';
+    setAct('idle'); // 切换在场角色后回到待机位
+  }));
+
+  /* ---- 镜头视角与自主生活演示（P7：虚拟房间 · 固定/跟随摄像头 · 自主生活） ---- */
+  const ACT = {
+    idle: { cls: '', origin: [73, 62], label: '当前活动：房间待机' },
+    work: { cls: 'pos-work', origin: [21, 70], label: '当前活动：书房 · 工作（任务 #1042）',
+            speech: '我在书桌这边帮你跑 tests_next 回归，47 项马上就好～' },
+    rest: { cls: 'pos-rest', origin: [50, 68], label: '当前活动：休息 · 喝茶',
+            speech: '休息一下，喝杯茶。任务有进展我会叫你。' },
+  };
+  const CAM = { follow: { scale: 1.06, label: '跟随' }, fixed: { scale: 1, label: '固定' }, closeup: { scale: 1.22, label: '特写' } };
+  let act = 'idle', cam = 'follow';
+  function applyCam(){
+    const a = ACT[act], c = CAM[cam];
+    camView.style.transformOrigin = a.origin[0] + '% ' + a.origin[1] + '%';
+    camView.style.transform = 'scale(' + c.scale + ')';
+    camModeText.textContent = c.label;
+  }
+  function setAct(key){
+    act = key;
+    document.querySelectorAll('[data-act]').forEach(x => x.classList.toggle('active', x.dataset.act === key));
+    vport.classList.remove('pos-work', 'pos-rest');
+    if (ACT[key].cls) vport.classList.add(ACT[key].cls);
+    actText.textContent = ACT[key].label;
+    if (ACT[key].speech) document.getElementById('speechBub').textContent = ACT[key].speech;
+    applyCam();
+    syncDeskpet();
+    /* 角色换位置是 1s 的 CSS transition；立即重算取景只会读到过渡中间态，
+       因此在过渡期间补几次重算，让小窗镜头平滑跟上（不用 rAF 循环，避免常驻开销） */
+    [120, 400, 800, 1100].forEach(t => setTimeout(layoutDeskpet, t));
+  }
+  document.querySelectorAll('[data-cam]').forEach(b => b.addEventListener('click', () => {
+    cam = b.dataset.cam;
+    document.querySelectorAll('[data-cam]').forEach(x => x.classList.toggle('active', x === b));
+    applyCam();
+  }));
+  document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => setAct(b.dataset.act)));
+  /* 支持 ?chara=昴&act=work&cam=closeup 直达指定状态（便于评审分享与截图）。
+     顺序注意：chara 必须先处理——角色点击会 setAct('idle') 重置活动，故 act/cam 在其后应用 */
+  const qs = new URLSearchParams(location.search);
+  const wantChara = qs.get('chara');
+  if (wantChara) document.querySelectorAll('.member[data-name]').forEach(x => { if (x.dataset.name === wantChara) x.click(); });
+  if (CAM[qs.get('cam')]) {
+    cam = qs.get('cam');
+    document.querySelectorAll('[data-cam]').forEach(x => x.classList.toggle('active', x.dataset.cam === cam));
+  }
+  if (ACT[qs.get('act')]) setAct(qs.get('act')); else applyCam();
+  buildDeskpet();
+  syncDeskpet();
+</script>
+<script type="module">
+  /* ---- VRM 实机渲染：昴（示例角色卡 · VRM 绑定演示位）挂载 AvatarSample_A 真实模型 ----
+     渲染链路复用旧版 frontend/public/vendor/sumika-vrm-viewer.js（three.js + @pixiv/three-vrm 打包）。
+     模型为 VRoid Studio 官方示例（许可见 assets/README.md），与安和昴属同一标准头身日漫 VRM 渲染路径；
+     用户本机的安和昴模型在运行时目录、不进源码库，接入时仅需替换模型路径。
+     注意：file:// 直开时浏览器禁止 fetch 本地模型，会回退占位立绘；经 HTTP 预览可见实机。 */
+  const VRM_SRC = './assets/AvatarSample_A.vrm';
+  const VRM_CHARA = '昴';
+  const vportEl = document.getElementById('vport');
+  const liveEl = document.getElementById('vrmLive');
+  const tagEl = document.getElementById('vportTag');
+  const swapBtn = document.getElementById('vrmSwap');
+  let mountPromise = null, mounted = false, failed = false;
+
+  function setTag(html, dot){
+    tagEl.innerHTML = '<i></i>' + html;
+    if (dot) tagEl.querySelector('i').style.background = dot;
+  }
+  /* 渲染器本身以 alpha:true + setClearColor(0,0) 创建上下文，画布是「透明」的。
+     因此不该给画布刷底色——透明画布才能让克隆进来的房间从画布后面透出来，
+     人真正站进房间里；一旦刷上不透明底色，就会在取景框里贴出一块纯色板，
+     把房间陈设全部盖住（这正是「小窗只有人、没有场景」的原因）。
+     若某个渲染器版本给画布加了不透明底色，用下面的兜底把它清成透明即可。 */
+  function ensureCanvasTransparent(container){
+    const cv = container.querySelector('canvas');
+    if (cv) cv.style.background = 'transparent';
+    return cv;
+  }
+  /* 小窗的 VRM 容器（位于克隆房间的 .vport 内）。
+     桌面端与主屏各持一个渲染实例，互不干扰 —— 渲染器按容器元素登记实例，天然支持多实例。 */
+  function deskpetVrmHost(){
+    return document.querySelector('#deskpet .dp-scene .dp-vrm');
+  }
+  async function ensureMounted(host){
+    const container = host || liveEl;
+    if (container !== liveEl && container.dataset.vrmMounted === '1') return true;
+    if (container === liveEl && (mounted || failed)) return mounted;
+    const run = async () => {
+      try {
+        const { mountVrmViewer } = await import('./vendor/sumika-vrm-viewer.js');
+        await mountVrmViewer(container, VRM_SRC, { naturalPose: true });
+        container.dataset.vrmMounted = '1';
+        ensureCanvasTransparent(container);
+        return true;
+      } catch (e) {
+        console.warn('VRM 加载失败：file:// 直开时浏览器禁止读取本地模型，请经 HTTP 预览。', e);
+        return false;
+      }
+    };
+    if (container === liveEl) {
+      mountPromise = mountPromise || run().then(ok => { mounted = ok; failed = !ok; return ok; });
+      return mountPromise;
+    }
+    return run();
+  }
+  /* 小窗的 VRM 显示与主屏同源：同一角色卡绑定，两处同时切换实机/立绘 */
+  async function syncDeskpetVrm(name){
+    const host = deskpetVrmHost();
+    const dp = document.getElementById('deskpet');
+    if (!host || !dp) return;
+    const showVrm = name === VRM_CHARA;
+    if (!showVrm) { dp.dataset.vrm = 'off'; layoutDeskpet(); return; }
+    const ok = await ensureMounted(host);
+    dp.dataset.vrm = ok ? 'on' : 'off';
+    layoutDeskpet();
+  }
+  async function updateFor(name){
+    /* 小窗与主屏共用同一套判定：谁是「绑定 VRM 的角色」，两处同时切到实机 */
+    await syncDeskpetVrm(name);
+    if (name !== VRM_CHARA) {
+      vportEl.classList.remove('show-vrm');
+      swapBtn.hidden = true;
+      setTag('角色层 · 立绘占位（未绑定 VRM）', '#c9a24a');
+      return;
+    }
+    setTag('角色层 · VRM 模型加载中…');
+    vportEl.classList.add('show-vrm');
+    const ok = await ensureMounted();
+    if (document.querySelector('.member.active')?.dataset.name !== VRM_CHARA) return;
+    if (ok) {
+      swapBtn.hidden = false;
+      swapBtn.textContent = '查看占位立绘';
+      setTag('角色层 · VRM 实机渲染（安和昴同型链路）');
+    } else {
+      vportEl.classList.remove('show-vrm');
+      setTag('角色层 · VRM 加载失败 · 请经 HTTP 预览查看实机', '#c05a5a');
+    }
+  }
+  /* 主屏「实机/立绘」互斥切换时，小窗跟随同一状态（同样只改 data 属性，交由 CSS 生效） */
+  function syncDeskpetVrmVisibility(){
+    const host = deskpetVrmHost();
+    const dp = document.getElementById('deskpet');
+    if (!host || !dp || host.dataset.vrmMounted !== '1') return;
+    dp.dataset.vrm = vportEl.classList.contains('show-vrm') ? 'on' : 'off';
+    layoutDeskpet();
+  }
+  swapBtn.addEventListener('click', () => {
+    const showing = vportEl.classList.toggle('show-vrm');
+    swapBtn.textContent = showing ? '查看占位立绘' : '切回 VRM 实机';
+    syncDeskpetVrmVisibility();
+  });
+  document.querySelectorAll('.member[data-name]').forEach(m => m.addEventListener('click', () => updateFor(m.dataset.name)));
+  updateFor(document.querySelector('.member.active')?.dataset.name || '');
+  /* VRM 实例挂载完成会改变角色本体的实际尺寸，需重算取景。
+     两段脚本作用域不同，用自定义事件解耦（普通脚本侧监听后调 layoutDeskpet）。 */
+  function refreshDeskpetLayout(){ window.dispatchEvent(new CustomEvent('sumika:reframe')); }
+  window.addEventListener('load', () => setTimeout(refreshDeskpetLayout, 300));
+</script>
+<!-- Sumika data binding: replaces the design mock data with the real backend. -->
+<script type="module" src="/app/bind.js"></script>
+</body>
+</html>

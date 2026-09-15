@@ -6,6 +6,7 @@ request at all.
 """
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,10 +52,11 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
 
 class Bridge:
     def __init__(self, settings_path=None, *, capability_database=None, workbench_root=None,
-                 schedule_directory=None):
+                 schedule_directory=None, shell_url=None):
         self.settings_path = Path(settings_path) if settings_path else default_path()
         self.capability_database = Path(capability_database) if capability_database else None
-        self.workbench = WorkbenchController(workbench_root or Path(__file__).resolve().parents[1])
+        self.workbench = WorkbenchController(workbench_root or Path(__file__).resolve().parents[1],
+                                             shell_url=shell_url)
         self.schedule = ScheduleController(schedule_directory)
         self.capability_bootstrap()
 
@@ -297,9 +299,27 @@ def _handler(bridge):
         def log_message(self, *args):
             pass
 
+        def _cors(self):
+            """Allow reads from other loopback pages only.
+
+            DSH renders the workbench on its own port, so its panels need to call
+            this bridge. Echoing the origin only for http://127.0.0.1[:port] and
+            http://localhost[:port] keeps every non-local site blocked while the
+            bridge stays loopback-only.
+            """
+            origin = self.headers.get("Origin")
+            if not origin:
+                return
+            if re.fullmatch(r"http://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?", origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
         def _json(self, status, payload):
             body = json.dumps(payload, ensure_ascii=False).encode("utf8")
             self.send_response(status)
+            self._cors()
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -394,6 +414,13 @@ def _handler(bridge):
             except (ValueError, OSError, KeyError) as error:
                 return self._json(400, {"error": str(error)})
 
+        def do_OPTIONS(self):
+            """CORS preflight for JSON POSTs from the workbench page."""
+            self.send_response(204)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def do_POST(self):
             route = urlparse(self.path).path
             if route in ("/api/workbench/start", "/api/workbench/stop"):
@@ -476,7 +503,8 @@ def serve(settings_path=None, *, host="127.0.0.1", port=8765, capability_databas
     if host != "127.0.0.1":
         raise ValueError("UI bridge must bind loopback")
     bridge = Bridge(settings_path, capability_database=capability_database,
-                    workbench_root=workbench_root, schedule_directory=schedule_directory)
+                    workbench_root=workbench_root, schedule_directory=schedule_directory,
+                    shell_url=f"http://{host}:{port}/")
     httpd = ThreadingHTTPServer((host, port), _handler(bridge))
     return httpd
 

@@ -1,0 +1,35 @@
+{
+  "checked_at": "2026-09-15T17:49:01.086Z",
+  "bridge": "http://127.0.0.1:8765",
+  "panel_rows": [
+    "能力"
+  ],
+  "panel": {
+    "present": true,
+    "rows": 11,
+    "switches": 7,
+    "ids": [
+      "ocr",
+      "desktop",
+      "asr",
+      "camera",
+      "microphone",
+      "office-render",
+      "voice",
+      "ready-browser",
+      "ready-office",
+      "ready-memory-semantic",
+      "ready-schedule"
+    ]
+  },
+  "toggle": {
+    "id": "camera",
+    "requested": false,
+    "registry_after": false,
+    "restored": true
+  },
+  "page_errors": [],
+  "console_errors": [],
+  "failures": [],
+  "status": "passed"
+}

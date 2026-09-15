@@ -17,6 +17,7 @@ export function apply(ctx, config = {}) {
   const shell = {
     harness: typeof config.harness === 'string' && config.harness ? config.harness : 'dsh',
     release: typeof config.release === 'string' ? config.release : null,
+    shellUrl: typeof config.shellUrl === 'string' && config.shellUrl ? config.shellUrl : null,
   };
   const text = `(() => {
   window.__sumikaShell = Object.freeze(${scriptLiteral(shell)});

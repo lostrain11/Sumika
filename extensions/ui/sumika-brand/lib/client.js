@@ -22,6 +22,7 @@ window.__ModuleLoader__.load({
 		const INK = '#2f3a34';
 		const MUTED = '#6e7a72';
 		const LINE = '#ddd9c8';
+		const GREEN_LINE = '#cfe0d4';
 
 		function SumikaBrandMark({ size }) {
 			const side = typeof size === 'number' ? size : 18;
@@ -72,6 +73,7 @@ window.__ModuleLoader__.load({
 			const shell = window.__sumikaShell;
 			const release = shell && typeof shell.release === 'string' ? shell.release : null;
 			const harness = shell && typeof shell.harness === 'string' ? shell.harness.toUpperCase() : '';
+			const shellUrl = shell && typeof shell.shellUrl === 'string' ? shell.shellUrl : null;
 			return jsx.jsxs('div', {
 				style: {
 					flex: '1 1 auto', minWidth: 0, boxSizing: 'border-box',
@@ -92,6 +94,17 @@ window.__ModuleLoader__.load({
 							}) : null,
 						],
 					}),
+					// This page *is* the workbench, so the way back to the shell's other
+					// screens (活动室 / 能力 / 设置) has to live in here.
+					shellUrl ? jsx.jsx('a', {
+						href: shellUrl,
+						'data-sumika-shell-link': shellUrl,
+						style: {
+							display: 'inline-block', marginTop: 4, color: GREEN,
+							textDecoration: 'none', borderBottom: `1px dashed ${GREEN_LINE}`,
+						},
+						children: '← 回 Sumika 活动室 / 能力 / 设置',
+					}) : null,
 				],
 			});
 		}
@@ -104,11 +117,16 @@ window.__ModuleLoader__.load({
 		 * without them simply shows the official brand.
 		 */
 		function apply(ctx) {
-			ctx.slots.inject('sidebar.brand.mark', () =>
-				ctx.slots.inject('sidebar.brand.name', function* () {
-					yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: -1 }, SumikaBrandMark);
-					yield ctx.slots.register({ name: 'sidebar.brand.name', priority: -1 }, SumikaBrandName);
-				}));
+			// Rendered inside the shell's workbench screen, the shell's own top bar
+			// already carries the brand, so the sidebar does not repeat it there.
+			const framed = window.self !== window.top;
+			if (!framed) {
+				ctx.slots.inject('sidebar.brand.mark', () =>
+					ctx.slots.inject('sidebar.brand.name', function* () {
+						yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: -1 }, SumikaBrandMark);
+						yield ctx.slots.register({ name: 'sidebar.brand.name', priority: -1 }, SumikaBrandName);
+					}));
+			}
 			// The New Session hero mark is a single-occupancy root slot whose default
 			// occupant is DSH's own fish, so it is shadowed the same way.
 			ctx.slots.inject('conversation.hero.brand.mark', function* () {

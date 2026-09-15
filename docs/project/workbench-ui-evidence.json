@@ -1,15 +1,17 @@
 {
-  "checked_at": "2026-09-15T17:38:51.644Z",
+  "checked_at": "2026-09-15T17:49:23.167Z",
   "url": "http://127.0.0.1:8765",
   "probe": {
     "skinMarker": "1",
     "shellGlobal": {
       "harness": "dsh",
-      "release": "0.1.5-rc.2"
+      "release": "0.1.5-rc.2",
+      "shellUrl": "http://127.0.0.1:8765/"
     },
     "brand": true,
     "footerStatus": true,
     "footerRelease": true,
+    "shellLink": "http://127.0.0.1:8765/",
     "heroMark": "linear-gradient(135deg, rgb(86, 127, 108) 0%, rgb(180, 73, 106) 100%)",
     "surfaces": {
       "frame": {
