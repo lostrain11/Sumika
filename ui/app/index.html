@@ -1506,8 +1506,22 @@
      模型为 VRoid Studio 官方示例（许可见 assets/README.md），与安和昴属同一标准头身日漫 VRM 渲染路径；
      用户本机的安和昴模型在运行时目录、不进源码库，接入时仅需替换模型路径。
      注意：file:// 直开时浏览器禁止 fetch 本地模型，会回退占位立绘；经 HTTP 预览可见实机。 */
-  const VRM_SRC = './assets/AvatarSample_A.vrm';
-  const VRM_CHARA = '昴';
+  /* 谁有 VRM 由角色清单决定，不再写死名字与文件：bind.js 选好角色后把
+     {id, name, modelUrl} 挂到 window.sumikaRoleVrm，这里只负责渲染。 */
+  /* 兜底也用真实可服务的地址，不再引用一份单独的静态副本。 */
+  const VRM_FALLBACK_SRC = '/api/roles/sampleA/asset/model_3d';
+  let vrmMountedSrc = null;
+  function sampleVrmFallback(){
+    return { url: VRM_FALLBACK_SRC, name: 'Sample A（内置示例）' };
+  }
+  /* 绑定之前保留设计稿的示例演示；bind.js 给出真实角色后，一律以角色资产为准——
+     没有 VRM 的角色就老老实实显示立绘占位，不借用别人的模型。 */
+  function activeRoleVrm(){
+    const active = window.sumikaRoleVrm;
+    if (active === undefined) return sampleVrmFallback();
+    if (!active || !active.modelUrl) return null;
+    return { url: active.modelUrl, name: active.name || '' };
+  }
   const vportEl = document.getElementById('vport');
   const liveEl = document.getElementById('vrmLive');
   const tagEl = document.getElementById('vportTag');
@@ -1535,13 +1549,22 @@
   }
   async function ensureMounted(host){
     const container = host || liveEl;
+    const wanted = activeRoleVrm();
+    if (!wanted) return false;
+    /* 角色切换 = 换模型：容器里已有的实例必须先清掉，否则新角色挂不上去。 */
+    if (container.dataset.vrmSrc && container.dataset.vrmSrc !== wanted.url) {
+      container.textContent = '';
+      delete container.dataset.vrmMounted;
+      if (container === liveEl) { mounted = false; failed = false; mountPromise = null; }
+    }
     if (container !== liveEl && container.dataset.vrmMounted === '1') return true;
     if (container === liveEl && (mounted || failed)) return mounted;
     const run = async () => {
       try {
         const { mountVrmViewer } = await import('./vendor/sumika-vrm-viewer.js');
-        await mountVrmViewer(container, VRM_SRC, { naturalPose: true });
+        await mountVrmViewer(container, wanted.url, { naturalPose: true });
         container.dataset.vrmMounted = '1';
+        container.dataset.vrmSrc = wanted.url;
         ensureCanvasTransparent(container);
         return true;
       } catch (e) {
@@ -1560,29 +1583,30 @@
     const host = deskpetVrmHost();
     const dp = document.getElementById('deskpet');
     if (!host || !dp) return;
-    const showVrm = name === VRM_CHARA;
+    /* 谁有 VRM 由角色资产决定（窗口挂的是真实模型地址或内置示例）。 */
+    const showVrm = !!activeRoleVrm();
     if (!showVrm) { dp.dataset.vrm = 'off'; layoutDeskpet(); return; }
     const ok = await ensureMounted(host);
     dp.dataset.vrm = ok ? 'on' : 'off';
     layoutDeskpet();
   }
   async function updateFor(name){
-    /* 小窗与主屏共用同一套判定：谁是「绑定 VRM 的角色」，两处同时切到实机 */
+    /* 小窗与主屏共用同一套判定：该角色是否有 VRM 资产，两处同时切到实机 */
     await syncDeskpetVrm(name);
-    if (name !== VRM_CHARA) {
+    const wanted = activeRoleVrm();
+    if (!wanted) {
       vportEl.classList.remove('show-vrm');
       swapBtn.hidden = true;
       setTag('角色层 · 立绘占位（未绑定 VRM）', '#c9a24a');
       return;
     }
-    setTag('角色层 · VRM 模型加载中…');
+    setTag(`角色层 · VRM 模型加载中…（${wanted.name || '未命名'}）`);
     vportEl.classList.add('show-vrm');
     const ok = await ensureMounted();
-    if (document.querySelector('.member.active')?.dataset.name !== VRM_CHARA) return;
     if (ok) {
       swapBtn.hidden = false;
       swapBtn.textContent = '查看占位立绘';
-      setTag('角色层 · VRM 实机渲染（安和昴同型链路）');
+      setTag(`角色层 · VRM 实机渲染 · ${wanted.name || '未命名'}`);
     } else {
       vportEl.classList.remove('show-vrm');
       setTag('角色层 · VRM 加载失败 · 请经 HTTP 预览查看实机', '#c05a5a');
@@ -1602,7 +1626,10 @@
     syncDeskpetVrmVisibility();
   });
   document.querySelectorAll('.member[data-name]').forEach(m => m.addEventListener('click', () => updateFor(m.dataset.name)));
-  updateFor(document.querySelector('.member.active')?.dataset.name || '');
+  /* 名册由 bind.js 用真实角色重建，重建后由它调用这个入口刷新舞台。 */
+  window.sumikaUpdateRoleView = () => updateFor(
+    document.querySelector('.member.active')?.dataset.name || '');
+  if (!window.sumikaRoleVrm) window.sumikaUpdateRoleView();
   /* VRM 实例挂载完成会改变角色本体的实际尺寸，需重算取景。
      两段脚本作用域不同，用自定义事件解耦（普通脚本侧监听后调 layoutDeskpet）。 */
   function refreshDeskpetLayout(){ window.dispatchEvent(new CustomEvent('sumika:reframe')); }

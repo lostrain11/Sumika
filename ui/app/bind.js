@@ -62,8 +62,15 @@ function bindRoster(payload) {
     button.dataset.soft = soft;
     button.dataset.speech = `${role.name}：准备好了。`;
     button.dataset.roleId = role.id;
-    button.innerHTML = `<i style="background:${color}"></i><span>${role.name}</span>`
-      + `<em>${button.dataset.sub}</em>`;
+    // Same element shape as the design's roster: avatar, name + status lines, and
+    // the VRM badge — so the stylesheet applies unchanged.
+    const initial = role.name.trim().slice(0, 1) || '角';
+    const sub = `${role.kind === 'user' ? '用户导入' : 'Sumika 内置'} · `
+      + (role.has_model_3d ? '已绑定 VRM' : '角色卡 · 立绘占位');
+    button.dataset.sub = sub;
+    button.innerHTML = `<span class="ava" style="background:linear-gradient(135deg,${soft},${color})">${initial}</span>`
+      + `<span><span class="nm">${role.name}</span><span class="st">${sub}</span></span>`
+      + (role.has_model_3d ? '<span class="bind">VRM</span>' : '');
     button.addEventListener('click', async () => {
       document.querySelectorAll('.roster .member').forEach(node => node.classList.remove('active'));
       button.classList.add('active');
@@ -73,6 +80,10 @@ function bindRoster(payload) {
         setText('#chatChara', role.name);
         setText('#atChip', `@${role.name}`);
         setText('#stageChara', role.name);
+        window.sumikaRoleVrm = {
+          id: role.id, name: role.name, modelUrl: role.model_3d_url || null,
+        };
+        window.sumikaUpdateRoleView?.();
         // Each role keeps its own session, so switching reloads that transcript.
         await loadRoomChat(role.id);
       } catch (error) {
@@ -84,6 +95,15 @@ function bindRoster(payload) {
   });
   const count = document.getElementById('memberCount');
   if (count) count.textContent = String(roles.length);
+  // The layer legend names the roles that actually have a VRM; the design's
+  // hard-coded "昴：实机渲染" is replaced by the real list.
+  const vrmRoles = roles.filter(role => role.has_model_3d).map(role => role.name);
+  const layerTag = document.getElementById('layerVrmTag');
+  if (layerTag) {
+    layerTag.textContent = vrmRoles.length
+      ? `图层③ 角色 VRM · 已绑定：${vrmRoles.join('、')} / 其余：立绘占位`
+      : '图层③ 角色 VRM · 当前没有角色绑定 VRM，全部显示立绘占位';
+  }
   // The design's placeholder assistant is called 澄花; every surface that shows
   // the speaking role must follow the active one instead.
   const active = roles.find(role => role.id === activeId);
@@ -93,8 +113,16 @@ function bindRoster(payload) {
     setText('#roomOwner', `${active.name}的房间`);
     setText('#atChip', `@${active.name}`);
     const sub = document.getElementById('stageCharaSub');
-    if (sub && active.has_model_3d) sub.textContent = '实机 VRM · 已绑定模型';
-    else if (sub) sub.textContent = '角色卡 · 立绘占位';
+    const origin = active.kind === 'user' ? '用户导入' : 'Sumika 内置';
+    if (sub) {
+      sub.textContent = `${origin} · ${active.has_model_3d ? '已绑定 VRM' : '立绘占位'}`;
+    }
+    // The stage renders the active role's own asset; a role without a VRM shows
+    // the placeholder illustration instead of borrowing another model.
+    window.sumikaRoleVrm = {
+      id: active.id, name: active.name, modelUrl: active.model_3d_url || null,
+    };
+    window.sumikaUpdateRoleView?.();
   }
   const hidden = (payload.roles || []).length - roles.length;
   if (hidden > 0) {

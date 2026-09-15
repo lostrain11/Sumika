@@ -81,3 +81,14 @@ python -B tools/verify_role_chat.py --settings <settings.json> --out <evidence.j
 两处修复：示例角色改为携带真正的 V2 卡 `card.json`；`RoleSession` 把"角色卡上下文"当作**客户端级偏好**而不是每角色断言——角色没有可用卡时保留其自身 persona 与世界书继续对话，并把原因记录在 `card_context_status`（`on` / `off` / `unavailable: <原因>`），而不是让整轮对话失败。测试 `tests_next/test_card_context.py` 覆盖这两点。
 
 验收：`node tools/verify_room_chat.mjs`（真实浏览器 + 一次真实角色模型调用）。证据 `docs/project/room-chat-evidence.json`：发送前为空态、名册/标题/舞台名均为真实角色名；发送后出现真实回答，无 pageerror / console error。
+
+## 用户导入角色：独立库 + 真正的 VRM 舞台（2026-09-16）
+
+「用户导入」以前没有独立位置：`_role_paths()` 把 `settings.role.role_dir` 的父目录当作用户库，而它默认就是仓库里的 `extensions/roles/defaults`。现在：
+
+- 用户库 = `%LOCALAPPDATA%\Sumika\roles`（可用 `SUMIKA_ROLE_STORE` 覆盖），内置库仍是 `extensions/roles/defaults`；`/api/roles` 每项带 `kind`（`builtin` / `user`），同 id 时用户角色优先。
+- 安和昴按用户角色导入：卡来自 `D:\Code\安和昴角色卡项目\交付\安和昴_ST_V2.json`（`import-card --id ando-subaru`），VRM 来自该项目 `安和昴资料库\3D模型\486desu\awa subaru（增加校徽）.vrm`，放进角色目录 `model_3d/` 并写入 `assets.model_3d` 与 `checksums.json`（`verify_role` 为 `ok`）。两者都不进仓库、不随 Sumika 发布。
+- 舞台不再写死模型：删掉 `VRM_SRC=./assets/AvatarSample_A.vrm` 与 `VRM_CHARA='昴'` 这套按名字匹配的逻辑，改为 `window.sumikaRoleVrm = {id, name, modelUrl}`（由 `bind.js` 按活动角色设置），模型地址是 `/api/roles/<id>/asset/model_3d`。**没有 VRM 的角色显示立绘占位，不借用别人的模型**；角色切换会清掉容器里的旧实例再挂新模型（主屏与桌宠各一个实例）。
+- 图层图例改成真实数据：`图层③ 角色 VRM · 已绑定：Sample A、安和昴 / 其余：立绘占位`，不再写死"昴：实机渲染"。
+
+验收：`node tools/verify_user_role.mjs http://127.0.0.1:8765 ando-subaru`（一次真实角色模型调用）。证据 `docs/project/user-role-evidence.json`：角色被标记 `kind=user`、3D 资产 200 且 16.5 MB 被页面真实请求、舞台切到 `show-vrm` 且 canvas 已挂载、名册/标题/舞台名均为安和昴、对话得到符合角色卡的回答，且**第二轮能引用第一轮**（同一会话历史生效）。

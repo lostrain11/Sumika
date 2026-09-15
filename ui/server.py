@@ -6,6 +6,7 @@ request at all.
 """
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -30,6 +31,14 @@ from ui.workbench import WorkbenchController, WorkbenchError
 
 UI_ROOT = Path(__file__).resolve().parent
 BUILTIN_ROLES = UI_ROOT.parent / "extensions" / "roles" / "defaults"
+# Roles the user imported live outside the source tree; the built-in store stays
+# pristine so "user-imported" really means user-imported.
+def user_role_store():
+    """Where imported roles live: beside the rest of this install's runtime data."""
+    override = os.environ.get("SUMIKA_ROLE_STORE")
+    if override:
+        return Path(override)
+    return default_path().parent / "roles"
 # Display-only labels for registered capabilities; an id absent here is shown
 # as-is and never described as available.
 CAPABILITY_LABELS = {
@@ -191,8 +200,15 @@ class Bridge:
         if not settings.get("configured"):
             return {}
         role_dir = Path(settings["role"]["role_dir"])
+        # Built-in roles ship with the client; imported ones stay in the runtime
+        # store. A user role with the same id as a built-in wins, which is what an
+        # explicit import means.
         return {item["id"]: item["path"] for item in
-                list_roles(BUILTIN_ROLES, role_dir.parent)}
+                list_roles(BUILTIN_ROLES, user_role_store())}
+
+    def _role_kinds(self):
+        return {item["id"]: item["kind"] for item in
+                list_roles(BUILTIN_ROLES, user_role_store())}
 
     def roles(self):
         result = []
@@ -204,7 +220,11 @@ class Bridge:
             result.append({"id": role_id, "name": role["name"], "enabled": role["enabled"],
                            "assets": sorted(role["assets"]), "verified": role["verified"]["status"],
                            "has_model_3d": "model_3d" in role["assets"],
-                           "has_thumbnail": "thumbnail" in role["assets"]})
+                           "has_thumbnail": "thumbnail" in role["assets"],
+                           # The asset route resolves by kind, not by file name.
+                           "model_3d_url": f"/api/roles/{role_id}/asset/model_3d"
+                           if "model_3d" in role["assets"] else None,
+                           "kind": self._role_kinds().get(role_id, "builtin")})
         return result
 
     def select_role(self, role_id):

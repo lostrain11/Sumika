@@ -1,0 +1,35 @@
+{
+  "checked_at": "2026-09-15T18:07:36.677Z",
+  "bridge": "http://127.0.0.1:8765",
+  "role": {
+    "id": "ando-subaru",
+    "name": "安和昴",
+    "kind": "user",
+    "model_3d_url": "/api/roles/ando-subaru/asset/model_3d"
+  },
+  "asset": {
+    "status": 200,
+    "bytes": 16523988,
+    "requested_by_page": 2
+  },
+  "stage": {
+    "active": "安和昴",
+    "activeSub": "用户导入 · 已绑定 VRM",
+    "stageName": "安和昴",
+    "stageSub": "用户导入 · 已绑定 VRM",
+    "layerTag": "图层③ 角色 VRM · 已绑定：Sample A、安和昴 / 其余：立绘占位",
+    "vrmVisible": true,
+    "canvas": true,
+    "header": "安和昴"
+  },
+  "reply": {
+    "count": 6,
+    "role": "role",
+    "text": "……ねえ。\n\n这是第三次了吧？我记得我数数还是没问题的。\n\nhmm，你是卡在开场动画里了吗？还是说我这边该说一句“按任意键继续”？\n\n嘛——你好。安和昴。鼓手。欢迎光临，请去下一句。",
+    "error": false
+  },
+  "page_errors": [],
+  "console_errors": [],
+  "failures": [],
+  "status": "passed"
+}
