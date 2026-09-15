@@ -181,11 +181,30 @@ def attach_asset(role_id, store, kind, source):
     if not isinstance(assets, dict): raise ValueError('invalid role assets')
     assets[kind] = relative
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
+    _refresh_checksums(role)
+    return target
+
+
+def _refresh_checksums(role):
+    """Rewrite a role's checksum manifest over every file it currently holds."""
     (role / 'checksums.json').write_text(json.dumps({
         path.relative_to(role).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(role.rglob('*'))
         if path.is_file() and path.name != 'checksums.json'}, indent=2) + '\n', encoding='utf8')
-    return target
+    return role / 'checksums.json'
+
+
+def rename_role(role_id, store, name):
+    """Replace the label the client shows; the card's own name is untouched."""
+    if not isinstance(name, str) or not name.strip(): raise ValueError('name required')
+    if len(name.strip()) > 60: raise ValueError('name too long')
+    role = _role_dir(role_id, store)
+    manifest_path = role / 'role.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf8'))
+    manifest['name'] = name.strip()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
+    _refresh_checksums(role)
+    return manifest['name']
 
 
 def remove_role(role_id, store):

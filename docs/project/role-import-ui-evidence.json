@@ -1,31 +1,58 @@
 {
-  "checked_at": "2026-09-15T18:14:01.372Z",
+  "checked_at": "2026-09-15T18:21:30.961Z",
   "bridge": "http://127.0.0.1:8765",
   "imported": {
-    "id": "ui-import-test",
-    "listed": {
-      "id": "ui-import-test",
-      "name": "导入流程测试角色",
-      "enabled": true,
-      "assets": [
-        "card"
-      ],
-      "verified": "ok",
-      "has_model_3d": false,
-      "has_thumbnail": false,
-      "model_3d_url": null,
-      "kind": "user"
+    "complete": {
+      "id": "ui-import-full",
+      "listed": {
+        "id": "ui-import-full",
+        "name": "导入流程测试角色",
+        "enabled": true,
+        "assets": [
+          "card",
+          "model_3d"
+        ],
+        "verified": "ok",
+        "has_model_3d": true,
+        "has_thumbnail": false,
+        "model_3d_url": "/api/roles/ui-import-full/asset/model_3d",
+        "kind": "user",
+        "complete": true,
+        "missing": []
+      },
+      "roster_entry": {
+        "name": "导入流程测试角色",
+        "status": "用户导入 · 已绑定 VRM",
+        "active": false
+      },
+      "status": "已导入（含 3D 模型）"
     },
-    "roster_entry": {
-      "name": "导入流程测试角色",
-      "status": "用户导入 · 角色卡 · 立绘占位",
-      "active": false
-    },
-    "status": "已导入（未带 3D 模型）"
+    "card_only": {
+      "id": "ui-import-card-only",
+      "listed": {
+        "id": "ui-import-card-only",
+        "name": "导入流程测试角色",
+        "enabled": true,
+        "assets": [
+          "card"
+        ],
+        "verified": "ok",
+        "has_model_3d": false,
+        "has_thumbnail": false,
+        "model_3d_url": null,
+        "kind": "user",
+        "complete": false,
+        "missing": [
+          "model_3d"
+        ]
+      },
+      "status": "已导入（未带 3D 模型）",
+      "unfinished_note": "未完整（不计入名册）：Sumika 示例助手（缺 3D 模型）；导入流程测试角色（缺 3D 模型）"
+    }
   },
   "cleanup": {
     "status": 200,
-    "body": "{\"removed\": \"D:\\\\WpSystem\\\\S-1-5-21-660873398-1225917889-595338839-1004\\\\AppData\\\\Local\\\\Packages\\\\OpenAI.Codex_2p2nqsd0c76g0\\\\LocalCache\\\\Local\\\\Sumika\\\\roles\\\\ui-import-test\"}"
+    "body": "{\"removed\": \"D:\\\\WpSystem\\\\S-1-5-21-660873398-1225917889-595338839-1004\\\\AppData\\\\Local\\\\Packages\\\\OpenAI.Codex_2p2nqsd0c76g0\\\\LocalCache\\\\Local\\\\Sumika\\\\roles\\\\ui-import-full\"}{\"removed\": \"D:\\\\WpSyst"
   },
   "page_errors": [],
   "console_errors": [],

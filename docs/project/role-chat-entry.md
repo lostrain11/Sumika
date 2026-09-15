@@ -103,3 +103,21 @@ python -B tools/verify_role_chat.py --settings <settings.json> --out <evidence.j
 - `extensions/roles/roles.py` 新增 `attach_asset`（复制资产、写 `assets.<kind>`、重算 `checksums.json`，限制路径与 256 MiB 上限）与 `remove_role`；`_role_dir` 统一做路径约束。
 
 验收：`node tools/verify_role_import_ui.mjs`。它在真实浏览器里打开表单、上传一张临时卡、断言新角色立刻出现在名册且 `kind=user`，然后**删除该测试角色**并把列表复原；证据 `docs/project/role-import-ui-evidence.json`。模型挂载路径由单测 `tests_next/test_role_import_ui.py` 覆盖（含路径越界与非法 kind 的拒绝）。
+
+## 完整角色的定义与"名字从哪来"（2026-09-16）
+
+名册只收**完整角色**：名字 + 角色卡 + 3D 模型，三者齐备。要点：
+
+- **名字不需要用户另起**：角色卡的 `data.name` 就是角色自己的名字，`import_card` 已经取用；导入表单在选中卡后会读出这个名字显示出来，并提供一个**可选的显示名覆盖**（`POST /api/roles/import {name}` → `rename_role`，只改客户端显示的名字与 `role.json`，不动卡内原文）。所以缺的不是"名字"，而是"卡"或"模型"。
+- API 每项返回 `complete` 与 `missing`；不完整的角色**不静默消失**：名册下方列出"未完整（不计入名册）：<角色>（缺 3D 模型）"。
+- 内置 `sampleA` 补上了自己的示例卡（VRoid 示例模型 + 示例卡），因此新装也至少有一个完整的内置角色；`sumika-guide` 只有卡没有模型，按规则列为未完整。
+- 若当前活动角色不完整，名册会提示"当前角色未完整，已切到 <完整角色>"并通过 `/api/roles/select` 真的切过去，避免名册外的角色在驱动房间。
+
+## 语言策略的第二层：回答落地的兜底（2026-09-16）
+
+角色卡里的输出语言策略是**提示词**，模型偶尔仍会滑出假名（本轮实测中安和昴答过一句 "ねえ"）。三层优先级不变（用户设置 > 角色卡声明 > Sumika 默认），但在最后加了确定性的兜底：
+
+- `card_context.kana_characters()` 检测回答里残留的假名；`RoleChat._language_guard()` 命中时**只重发一次**，附上"上一版出现了假名：X，请只用简体中文重写，语气词写罗马音"的纠正指令，并再次走 `localize_names`。
+- 重发后仍不干净时**不作弊**：返回原文并附带 `language_guard {retried, clean, kana_found, kana_remaining}`，调用方可据此报告，而不是假装干净。usage 会把两次调用都计入。
+- 单测 `tests_next/test_language_guard.py` 覆盖三种情形（干净不重发 / 一次纠正成功 / 纠正无效时如实标记）。
+- 验收（`verify_user_role.mjs` 实测）：回答为「你好，你好。来打招呼的吗——ah，这么正式……maa，我这边刚练完鼓……」——中文 + 罗马音语气词，无假名。

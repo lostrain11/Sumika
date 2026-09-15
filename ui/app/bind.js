@@ -48,7 +48,10 @@ function bindHeader(state) {
 function bindRoster(payload) {
   const roster = document.querySelector('.roster');
   if (!roster) return;
-  const roles = (payload.roles || []).filter(role => (role.assets || []).length > 0);
+  const all = payload.roles || [];
+  // A roster entry is a whole character: its name, its card and its model.
+  const roles = all.filter(role => role.complete === true);
+  const unfinished = all.filter(role => role.complete !== true);
   const activeId = payload.active?.id;
   roster.querySelectorAll('.member').forEach(node => node.remove());
   const anchor = roster.querySelector('h3');
@@ -124,13 +127,34 @@ function bindRoster(payload) {
     };
     window.sumikaUpdateRoleView?.();
   }
-  const hidden = (payload.roles || []).length - roles.length;
-  if (hidden > 0) {
+  roster.querySelectorAll('.sumika-unfinished').forEach(node => node.remove());
+  if (unfinished.length > 0) {
     const note = document.createElement('p');
-    note.className = 'hint';
-    note.style.margin = '4px 0 0';
-    note.textContent = `已隐藏 ${hidden} 个没有角色卡的导入记录`;
+    note.className = 'hint sumika-unfinished';
+    note.style.margin = '6px 0 0';
+    note.style.fontSize = '10px';
+    const labels = { card: '缺角色卡', model_3d: '缺 3D 模型' };
+    note.textContent = '未完整（不计入名册）：' + unfinished.map(role =>
+      `${role.name}（${(role.missing || []).map(kind => labels[kind] || kind).join('、') || '缺少资产'}）`
+    ).join('；');
     roster.appendChild(note);
+  }
+  // The active role must be one the roster can actually show; if it is not, say
+  // so and switch to the first whole character instead of leaving a hidden role
+  // driving the room.
+  if (roles.length > 0 && !roles.some(role => role.id === activeId) && !bindRoster.switching) {
+    bindRoster.switching = true;
+    const chosen = roles[0];
+    api('/api/roles/select', { method: 'POST', body: JSON.stringify({ id: chosen.id }) })
+      .then(() => api('/api/roles'))
+      .then(fresh => { bindRoster.switching = false; bindRoster(fresh); return loadRoomChat(fresh.active?.id); })
+      .catch(() => { bindRoster.switching = false; });
+    const hint = document.createElement('p');
+    hint.className = 'hint sumika-unfinished';
+    hint.style.margin = '6px 0 0';
+    hint.style.fontSize = '10px';
+    hint.textContent = `当前角色未完整，已切到 ${chosen.name}`;
+    roster.appendChild(hint);
   }
 }
 
@@ -278,6 +302,8 @@ function roleImportForm() {
     <input data-import="id" placeholder="例如 ando-subaru" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
     <label style="font-size:10px;color:var(--muted)">角色卡（Tavern V2/V3 JSON）</label>
     <input data-import="card" type="file" accept=".json,application/json" style="font-size:10px">
+    <label style="font-size:10px;color:var(--muted)">显示名（留空就用角色卡里的名字）</label>
+    <input data-import="name" placeholder="角色卡自带的名字" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
     <label style="font-size:10px;color:var(--muted)">3D 模型路径（可选，本机 .vrm）</label>
     <input data-import="model" placeholder="D:\\路径\\model.vrm" style="font-size:10px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
     <div style="display:flex;gap:6px;align-items:center">
@@ -311,9 +337,27 @@ async function bindRoleImport(rolesPayload) {
     form.style.display = 'none';
     status('');
   });
+  // The card carries the character's own name; show it so the user can see what
+  // will appear in the roster and only override it when they want to.
+  form.querySelector('[data-import="card"]').addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    const nameField = form.querySelector('[data-import="name"]');
+    if (!file || !nameField) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const cardName = parsed?.data?.name;
+      if (!nameField.value && typeof cardName === 'string') {
+        nameField.placeholder = cardName;
+        status(`角色卡名字：${cardName}`);
+      }
+    } catch {
+      status('这个文件不是有效的 JSON 角色卡');
+    }
+  });
   form.querySelector('[data-import="submit"]').addEventListener('click', async () => {
     const id = form.querySelector('[data-import="id"]').value.trim();
     const file = form.querySelector('[data-import="card"]').files?.[0];
+    const displayName = form.querySelector('[data-import="name"]').value.trim();
     const modelPath = form.querySelector('[data-import="model"]').value.trim();
     if (!id) { status('先填角色 id'); return; }
     if (!file) { status('先选择角色卡 JSON'); return; }
@@ -323,7 +367,8 @@ async function bindRoleImport(rolesPayload) {
       status('导入中…');
       const result = await api('/api/roles/import', {
         method: 'POST',
-        body: JSON.stringify({ id, card, modelPath: modelPath || null }),
+        body: JSON.stringify({ id, card, modelPath: modelPath || null,
+                               name: displayName || null }),
       });
       status(result.model_3d ? '已导入（含 3D 模型）' : '已导入（未带 3D 模型）');
       const fresh = await api('/api/roles');

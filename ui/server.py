@@ -23,7 +23,8 @@ from extensions.models.ollama import OllamaError
 from extensions.models.settings import default_path, load as load_settings, save as save_settings
 from extensions.roles.card_context import compile_card, resolve_language_policy
 from extensions.roles.chat import RoleChat, open_session
-from extensions.roles.roles import attach_asset, import_card, list_roles, load_role, remove_role
+from extensions.roles.roles import (attach_asset, import_card, list_roles, load_role,
+                                    remove_role, rename_role)
 from ui.state_snapshot import snapshot, validate_state
 from ui import startup as startup_registry
 from ui.readiness import probes as readiness_probes, service_capabilities
@@ -218,14 +219,18 @@ class Bridge:
                 role = load_role(path)
             except (OSError, ValueError, KeyError):
                 continue
+            # A roster entry is a whole character: a name, its card and its model.
+            # The name is the one the card carries; an incomplete role is still
+            # reported, with what it lacks, instead of silently disappearing.
+            missing = [kind for kind in ("card", "model_3d") if kind not in role["assets"]]
             result.append({"id": role_id, "name": role["name"], "enabled": role["enabled"],
                            "assets": sorted(role["assets"]), "verified": role["verified"]["status"],
                            "has_model_3d": "model_3d" in role["assets"],
                            "has_thumbnail": "thumbnail" in role["assets"],
-                           # The asset route resolves by kind, not by file name.
                            "model_3d_url": f"/api/roles/{role_id}/asset/model_3d"
                            if "model_3d" in role["assets"] else None,
-                           "kind": self._role_kinds().get(role_id, "builtin")})
+                           "kind": self._role_kinds().get(role_id, "builtin"),
+                           "complete": not missing, "missing": missing})
         return result
 
     def import_role(self, payload):
@@ -240,18 +245,28 @@ class Bridge:
         role_id = payload.get("id")
         card_text = payload.get("card")
         model_path = payload.get("modelPath")
+        display_name = payload.get("name")
         if not isinstance(role_id, str) or not role_id.strip():
             raise ValueError("role id required")
         if not isinstance(card_text, str) or not card_text.strip():
             raise ValueError("character card required")
         if len(card_text) > 4_000_000:
             raise ValueError("card too large")
+        if display_name is not None and (not isinstance(display_name, str)
+                                        or not display_name.strip()):
+            raise ValueError("invalid display name")
+        if isinstance(display_name, str) and len(display_name.strip()) > 60:
+            raise ValueError("display name too long")
         store = user_role_store()
         store.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="sumika-import-") as directory:
             card = Path(directory) / "card.json"
             card.write_text(card_text, encoding="utf8")
             path = import_card(card, store, role_id.strip())
+        if isinstance(display_name, str):
+            # The card already carries a name; this only replaces the label shown
+            # in the client when the user prefers their own wording.
+            rename_role(role_id.strip(), store, display_name)
         attached = None
         if isinstance(model_path, str) and model_path.strip():
             attached = attach_asset(role_id.strip(), store, "model_3d", model_path.strip())
