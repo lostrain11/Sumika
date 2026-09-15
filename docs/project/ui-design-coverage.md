@@ -37,7 +37,7 @@
 | 时间线 · 工具卡 / diff / 终端结果 | 皮肤规则已写（`_callRow` 3px 绿条 + 10px 圆角、`_diffBody`/`_codeBody`/`_terminalBody` 描边圆角、`_diffStat` 靠右） | **未验证**：当前会话没有工具调用，选择器命中数为 0；需一次真实工具调用才能确认 |
 | 时间线 · 状态行（"已思考 / 用时"） | 皮肤：`_turnStatus*` 字号与颜色 | **未验证**（当前会话无该节点） |
 | 审批卡（4 统计块 + 确认执行/取消） | DSH 原生审批组件 | 未核对（需真实审批场景） |
-| 输入区 | DSH 原生输入区 | 视觉未贴近 |
+| 输入区 | 皮肤：输入卡 1px 描边 + 10px 圆角 + 纸色底、底部控件行虚线分隔、占位符 muted、外边距 0 24px 16px；原生控件（+ / 权限模式 / 模型 / 发送 / 队列）全部保留 | **实测生效**（card: border 1px / radius 10px / rgb(255,253,248)；tools: border-top dashed） |
 | 侧栏"已归档 N" | DSH 原生归档 | 未核对 |
 
 **明确否决过的实现方式**：不 fork DSH 前端、不 iframe 内嵌 DSH 应用（工作台这一屏本身就是 DSH，见 `workbench-skin-plan.md`）、不新增与既有入口重复的导航（能力、项目面板均已删除，`tools/verify_dsh_panel.mjs` 反向守卫）。

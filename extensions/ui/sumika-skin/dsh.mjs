@@ -193,6 +193,30 @@ html[data-sumika-skin='1'] [class*='_turnStatusClock'] {
   color: var(--sumika-muted);
 }
 
+/* Composer, design's .wb-composer (+ the dashed control-row separator the
+   design uses in .chat-composer). Every native control stays where it is. */
+html[data-sumika-skin='1'] [class*='_composerStack'],
+html[data-sumika-skin='1'] [class*='_composerSeat'] {
+  margin-left: 24px;
+  margin-right: 24px;
+  margin-bottom: 16px;
+}
+/* Real DOM (measured): composerStack > root > card > scroll > grow > input, plus
+   placeholder / row / tools. Scoped to the composer so other _card elements
+   (approval, io cards) keep their own styling. */
+html[data-sumika-skin='1'] [class*='_composerStack'] [class*='_card'] {
+  border: 1px solid var(--sumika-line);
+  border-radius: 10px;
+  background: var(--sumika-paper);
+}
+html[data-sumika-skin='1'] [class*='_placeholder'] {
+  color: var(--sumika-muted);
+}
+html[data-sumika-skin='1'] [class*='_composerStack'] [class*='_tools'] {
+  border-top: 1px dashed var(--sumika-line);
+  padding-top: 9px;
+}
+
 /* Rail toggle: upstream swaps the brand mark for its own panel glyph on hover
    (.collapsed .toggle:hover .panelIcon{display:inline} plus a railMark hide), so
    the Sumika mark would disappear exactly while the pointer is on it. Keep the
