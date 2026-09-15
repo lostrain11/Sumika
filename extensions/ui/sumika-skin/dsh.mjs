@@ -96,6 +96,35 @@ html[data-sumika-skin='1'] [class*='_sectionLabel '] {
   color: var(--sumika-muted);
 }
 
+/* Sidebar tree, design's .wb-search / .wb-proj-head / .wb-task:
+   project row = name (+ path in the shell today is not rendered by DSH),
+   task row = status dot + title + relative time, with 8px rows and a soft hover. */
+html[data-sumika-skin='1'] [class*='_searchInput'] {
+  border: 1px solid var(--sumika-line);
+  border-radius: 9px;
+  background: var(--sumika-paper);
+  color: var(--sumika-ink);
+  font-size: 11.5px;
+  padding: 5px 9px;
+}
+html[data-sumika-skin='1'] [class*='_searchSlot'] {
+  border-radius: 9px;
+}
+html[data-sumika-skin='1'] [class*='_groupSection'] [class*='_root_'] {
+  font-size: 12px;
+}
+html[data-sumika-skin='1'] [class*='_sessionRow'] {
+  padding: 6px 9px;
+  font-size: 11.5px;
+  gap: 7px;
+}
+html[data-sumika-skin='1'] [class*='_sessionRow'] [class*='_root_'] {
+  font-size: 11.5px;
+}
+html[data-sumika-skin='1'] [class*='_groupSection'] {
+  border-radius: 9px;
+}
+
 /* Rail toggle: upstream swaps the brand mark for its own panel glyph on hover
    (.collapsed .toggle:hover .panelIcon{display:inline} plus a railMark hide), so
    the Sumika mark would disappear exactly while the pointer is on it. Keep the

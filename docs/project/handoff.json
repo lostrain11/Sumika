@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T19:32:38.237269+00:00",
+  "updated_at": "2026-09-15T19:35:32.630688+00:00",
   "current_goal": "D 方向 UI 收敛：工作台=DSH、能力与项目作为 DSH 主面板、活动室接真实角色服务，扩展开关与角色完整性均有验收",
   "current_phase": "P6",
   "phase_status": "in_progress",
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "界面改动按 docs/project/ui-design-coverage.md 推进：优先“视觉未贴近”项——DSH 侧栏（工作区行/会话行/搜索框）、会话时间线与工具卡、输入区；审批卡需真实场景。每次改动前先在该表登记对应关系。",
+  "next_action": "等用户决定侧栏路线后继续：(1) 接管 sidebar.workspaces 自绘设计稿的树（需重做搜索/归档/重命名/fork/拖拽）；(2) 保留原生仅微调。其它“视觉未贴近”项：会话时间线与工具卡、输入区；审批卡需真实场景。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -129,7 +129,8 @@
       "语气词改为一律中文：naturalize_reply 先映射假名语气词→中文、再映射罗马音语气词→中文、最后把残余假名转写为罗马音；策略文本（Sumika 默认 + 安和昴角色卡，项目文件与用户库副本）同步改为要求中文语气词并刷新校验；默认仍不重发（1 次调用）。实测安和昴回答：诶，你好。……嘛，今天先这样——无假名、无罗马音语气词。",
       "按用户优化的安和昴新卡重新导入（删旧副本→导入新卡→重挂同一 VRM→刷新校验，kind=user/complete=true/verified=ok）；Sumika 侧新增卡内语气词白名单：compile_card 编译校验 interjection_policy，select_context 暴露 interjection_allow，naturalize_reply(keep=...) 保护白名单 token —— hah 从默认映射表移除，她的招牌「hah？」保持原样，其余罗马音语气词仍落中文。",
       "DSH 内第二个 Sumika 主面板：sidebar 新增「项目」行，主区域读取 /api/tree 渲染阶段状态与任务完成数（P0-P4 完成 / P4-UI、P5、P6 进行中 / P7 计划中），并显示当前任务与下一步；验收脚本同时断言两个面板。",
-      "针对“为什么总走岔”建立两条长期约束：AGENTS.md 新增“防走岔（强制）”（界面改动前先定位设计稿或明确标注新增、单一入口、原型与产品分离、约束写成验收断言、维护覆盖表）；新建 docs/project/ui-design-coverage.md 逐屏列出设计稿元素与实现状态（照做/偏离/未做/未核对）。"
+      "针对“为什么总走岔”建立两条长期约束：AGENTS.md 新增“防走岔（强制）”（界面改动前先定位设计稿或明确标注新增、单一入口、原型与产品分离、约束写成验收断言、维护覆盖表）；新建 docs/project/ui-design-coverage.md 逐屏列出设计稿元素与实现状态（照做/偏离/未做/未核对）。",
+      "侧栏视觉贴近第一轮（仅皮肤层）：行距/圆角/字号/悬停与搜索框样式按设计稿令牌调整；覆盖表登记：项目行缺路径与计数、任务行缺状态点与状态·时间、常驻搜索框——三者需插件层改动；已把两条路线（接管 sidebar.workspaces vs 保留原生）写进覆盖表并标注待用户决策。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -142,7 +143,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "针对“为什么总走岔”建立两条长期约束：AGENTS.md 新增“防走岔（强制）”（界面改动前先定位设计稿或明确标注新增、单一入口、原型与产品分离、约束写成验收断言、维护覆盖表）；新建 docs/project/ui-design-coverage.md 逐屏列出设计稿元素与实现状态（照做/偏离/未做/未核对）。",
+    "current_task": "侧栏视觉贴近第一轮（仅皮肤层）：行距/圆角/字号/悬停与搜索框样式按设计稿令牌调整；覆盖表登记：项目行缺路径与计数、任务行缺状态点与状态·时间、常驻搜索框——三者需插件层改动；已把两条路线（接管 sidebar.workspaces vs 保留原生）写进覆盖表并标注待用户决策。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",
