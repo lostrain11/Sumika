@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-09-15T16:37:53.159Z",
+  "checked_at": "2026-09-15T16:51:01.792Z",
   "url": "http://127.0.0.1:8765",
   "probe": {
     "skinMarker": "1",
@@ -37,6 +37,11 @@
       "green": "#567f6c",
       "webRadius": "9px"
     }
+  },
+  "rail": {
+    "markDisplay": "flex",
+    "panelIconDisplay": "none",
+    "markGradient": "linear-gradient(135deg, rgb(86, 127, 108) 0%, rgb(180, 73, 106) 100%)"
   },
   "page_errors": [],
   "failures": [],

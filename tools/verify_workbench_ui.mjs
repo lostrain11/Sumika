@@ -6,7 +6,7 @@
 // error fired while the page rendered. Run it with the bridge already up.
 //
 // Usage:
-//   node tools/verify_workbench_ui.mjs [bridge] [evidence.json] [sidebar.png] [page.png]
+//   node tools/verify_workbench_ui.mjs [bridge] [evidence.json] [sidebar.png] [page.png] [rail.png]
 import { createRequire } from 'node:module';
 import { writeFile } from 'node:fs/promises';
 
@@ -19,6 +19,7 @@ const bridge = process.argv[2] || 'http://127.0.0.1:8765';
 const evidencePath = process.argv[3] || null;
 const sidebarPath = process.argv[4] || null;
 const pagePath = process.argv[5] || null;
+const railPath = process.argv[6] || null;
 
 const embed = await fetch(`${bridge}/api/workbench/embed`);
 if (!embed.ok) throw new Error(`bridge did not return an embed URL: HTTP ${embed.status}`);
@@ -90,6 +91,39 @@ if (sidebarPath) {
   await page.locator("[class$='_sidebarCol']").first()
     .screenshot({ path: sidebarPath }).catch(() => {});
 }
+
+// Rail check: DSH swaps the brand mark for its own panel glyph while the pointer
+// is on the collapsed toggle, which reads as "the icon reverts on hover". Collapse
+// the column, hover the toggle, and record what the skin actually leaves visible.
+let rail = null;
+const toggle = page.locator("[class*='_toggle']").first();
+if (await toggle.count().catch(() => 0)) {
+  await toggle.click().catch(() => {});
+  await page.waitForTimeout(700);
+  await toggle.hover().catch(() => {});
+  await page.waitForTimeout(300);
+  rail = await page.evaluate(() => {
+    const mark = document.querySelector("[class*='_railMark']");
+    const panelIcon = document.querySelector("[class*='_toggle'] [class*='_panelIcon']");
+    const painted = (root) => {
+      if (!root) return null;
+      for (const node of [root, ...root.querySelectorAll('*')]) {
+        const image = getComputedStyle(node).backgroundImage;
+        if (image && image !== 'none' && image.includes('gradient')) return image;
+      }
+      return null;
+    };
+    return {
+      markDisplay: mark ? getComputedStyle(mark).display : null,
+      panelIconDisplay: panelIcon ? getComputedStyle(panelIcon).display : null,
+      markGradient: painted(mark),
+    };
+  });
+  if (railPath) await page.screenshot({ path: railPath, fullPage: false }).catch(() => {});
+  await toggle.click().catch(() => {});
+  await page.waitForTimeout(700);
+}
+
 if (pagePath) await page.screenshot({ path: pagePath, fullPage: false });
 await browser.close();
 
@@ -106,8 +140,13 @@ if (probe.surfaces.sidebar?.background !== 'rgb(250, 248, 240)') {
   failures.push(`sidebar surface is ${probe.surfaces.sidebar?.background}`);
 }
 if (probe.tokens.rose !== '#b4496a') failures.push(`rose token is ${probe.tokens.rose}`);
+if (rail) {
+  if (rail.markDisplay === 'none') failures.push('rail toggle hides the Sumika mark on hover');
+  if (rail.panelIconDisplay !== 'none') failures.push('rail toggle swaps in the upstream panel glyph on hover');
+  if (!rail.markGradient) failures.push('rail mark does not paint the Sumika gradient');
+}
 
-const result = { checked_at: new Date().toISOString(), url: bridge, probe, page_errors: pageErrors,
+const result = { checked_at: new Date().toISOString(), url: bridge, probe, rail, page_errors: pageErrors,
                  failures, status: failures.length ? 'failed' : 'passed' };
 console.log(JSON.stringify(result, null, 2));
 if (evidencePath) await writeFile(evidencePath, JSON.stringify(result, null, 2) + '\n', 'utf8');

@@ -183,6 +183,7 @@ ctx.slots.inject("sidebar", () => ctx.slots.register({
 - 侧栏底部状态：同一个插件注册 `sidebar.footer.action`（`id: sumika-status`），显示「本地优先 · 数据不出本机 / 运行数据 `.sumika-next/` · 已连接 DSH <release>」。版本号不是写死的，由宿主半边 `lib/index.js` 经 `webserver/index-inject` 发布 `window.__sumikaShell`，其值来自 `ensure_skin()` 读取的 `runtime/dsh/release.json`。
 - 皮肤调色板：`extensions/ui/sumika-skin/dsh.mjs` 的令牌改为与设计稿 `:root` 一致（`--paper:#fffdf8`、`--paper-2:#faf8f0`、`--ink:#2f3a34`、`--line:#ddd9c8`、`--rose:#b4496a`、`--green:#567f6c`），并补上框架、侧栏列、新建会话按钮、会话行悬停/选中态、分节标题的结构覆盖。选择器使用语义后缀（`[class$='_sidebarCol']`）而不是整段哈希类名。
 - 皮肤不再注入右下角「Sumika 皮肤」调试徽章；`html[data-sumika-skin='1']` 标记保留，供自动化判定。
+- 折叠侧栏（轨道态）的悬停行为：上游规则 `.collapsed .toggle:hover .panelIcon{display:inline}` 与 `.collapsed .toggle:hover .railMark{display:none}` 会在鼠标悬停时把品牌标记换成 DSH 自己的面板图标，表现为「一悬停就变回原图标」。皮肤用更高优先级的选择器保持 `railMark` 可见、隐藏 `panelIcon`；验收脚本会在折叠态真实悬停后断言这一点。
 
 验收脚本 `tools/verify_workbench_ui.mjs`（真实 Edge + 受管实例，非模拟）断言：无客户端报错、侧栏品牌文案、底部状态与 Harness 版本、框架/侧栏/按钮的实际计算颜色、皮肤令牌值；结果写入 `docs/project/workbench-ui-evidence.json`。
 
@@ -202,6 +203,25 @@ ctx.slots.inject("sidebar", () => ctx.slots.register({
 | `tool.title.*` | — | 各类工具卡的标题 |
 
 设计稿工作台头部的「面包屑 + 任务标题 + 状态药丸」可以落在 `conversation.session.header.lineage` 与 `.utilities`；状态药丸的真实来源是 `conversationPhase(session, conversation)`（`blank` / `engaging` / `active`），不是自己推断的状态。
+
+## 会话级槽位的运行时 props（2026-09-15 真实客户端探针实测）
+
+会话区的槽位没有一个随发行版发布的类型包（`@deepseek-ai/dsh-client-ui-slots` 在安装里不存在，只有各插件在类型里 import 它），所以 props 只能实测。用一个临时诊断插件占位、把 props 形状写进 `data-` 属性，再由无头浏览器读取，得到会话级列表槽（以 `conversation.input.dock` 为样本）的真实签名：
+
+| prop | 类型 | 说明 |
+| --- | --- | --- |
+| `sessionId` | string | 当前会话 id |
+| `session` | object | `{sessionId, queue, pendingSubmissions, running, subagent, removed, openState, openError, hasMore, loadingOlder, promptError, blank, lastAgentError, promptAttempted, awaitingFirstTurn}` |
+| `useSession`、`useSessions`、`useWorkspaces`、`useConversation`、`useChat`、`useTrajectory`、`useProjection`、`useResource`、`usePanelInfo`、`useInput`、`useSessionPendingInteraction` | function | 框架全局 selector hooks |
+| `input`、`inputActions` | object | 仅占位输入区的槽位有（`draft`/`attachmentIds`/`draftRev`/`phase`/`occurrences`/`queue` 与 `setDraft`/`addAttachments`/`removeAttachment`/`pruneAttachments`/`submit`） |
+
+结论与边界：
+
+- 状态药丸可以只用真实信号：`session.running` → 「执行中」；`useSessionPendingInteraction((state) => state.get(sessionId)?.kind)` 取 `approval` / `plan-review` / `question`，对应原生侧栏行的「等待审批 / 计划审阅 / 等待回答」。**不要**照搬设计稿的「N 项待确认」计数——原生信号是单一种类的待交互，没有计数。
+- 列表槽注册需要 `id`（与 `sidebar.footer.action` 一致），可参考同样写法的 `dsh-session-log-export`（`id: 'session-log-download'`，props 里读 `sessionId` 与自己的 `hooks`）。
+- **会话头只在非空白会话挂载**：新会话视图走 hero（欢迎页），`conversation.session.header.*` 根本不渲染。因此头部药丸的落地必须在一个已有对话的会话里验证；本机受管 profile（`.sumika-next/daily/0.1.5-rc.2`）目前 `.credentials.yaml` 只有浏览器会话授权、没有模型凭据（网页也显示「添加一个 API Key 开始使用」），两个会话文件都是空白会话，所以这一项**暂缓到有非空白会话时再做**，不先写未验证的 UI。
+
+诊断方法保留在 `.sumika-next/probe/`（运行时目录，不入仓库）：`package.json` + `lib/index.js` + `lib/client.js` 是占位探针，`read.mjs`/`tree.mjs`/`stream.mjs` 是读取脚本。再次需要时把 `{"id": "sumika-probe", "name": "<路径>\\probe\\lib\\index.js"}` 加回 `cordis.patch.yml` 并重启受管 DSH 即可。`/plugins/events` 是网页实际获取插件清单与 bundle 的通道，可用来确认某个插件是否真的被下发。
 
 ```powershell
 node tools/verify_workbench_ui.mjs http://127.0.0.1:8765 docs/project/workbench-ui-evidence.json

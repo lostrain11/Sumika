@@ -95,6 +95,17 @@ html[data-sumika-skin='1'] [class$='_sectionLabel'],
 html[data-sumika-skin='1'] [class*='_sectionLabel '] {
   color: var(--sumika-muted);
 }
+
+/* Rail toggle: upstream swaps the brand mark for its own panel glyph on hover
+   (.collapsed .toggle:hover .panelIcon{display:inline} plus a railMark hide), so
+   the Sumika mark would disappear exactly while the pointer is on it. Keep the
+   mark and suppress the swap; the button stays a plain icon button either way. */
+html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle']:hover [class*='_panelIcon'] {
+  display: none;
+}
+html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle']:hover [class*='_railMark'] {
+  display: inline-flex;
+}
 `;
 
 const SKIN_SCRIPT = `(() => {
