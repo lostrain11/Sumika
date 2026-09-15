@@ -22,6 +22,7 @@ html[data-sumika-skin='1'] {
   --sumika-rose-deep: #9c3a56;
   --sumika-rose-soft: #f9e8ed;
   --sumika-water: #7aa8c7;
+  --sumika-mizu-soft: #e9f1f7;
   --sumika-line: #ddd9c8;
   --sumika-hover: #f0ecdd;
 }
@@ -145,6 +146,51 @@ html[data-sumika-skin='1'] [class*='_dot'] {
   height: 8px;
   border-radius: 3px;
   flex: none;
+}
+
+/* Timeline, design's .cm / .bub / .tool-d / .tool-d .df:
+   message bubble = 1px hairline + 8px radius on the panel tone, the tool card
+   carries the 3px green left rule and 10px radius, and the diff stat sits muted
+   on the right. Only DSH's own semantic suffixes are touched. */
+html[data-sumika-skin='1'] [class*='_bubble'] {
+  border: 1px solid var(--sumika-line);
+  border-radius: 8px;
+  background: var(--sumika-panel);
+  padding: 10px 13px;
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+html[data-sumika-skin='1'] [class*='_userRow'] [class*='_bubble'] {
+  background: var(--sumika-mizu-soft, #e9f1f7);
+  border-color: #cfdfea;
+}
+html[data-sumika-skin='1'] [class*='_callRow'] {
+  border: 1px solid var(--sumika-line);
+  border-left: 3px solid var(--sumika-green);
+  border-radius: 10px;
+  background: var(--sumika-paper);
+  padding: 9px 12px;
+  font-size: 11.5px;
+}
+html[data-sumika-skin='1'] [class*='_callRow'] code {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+}
+html[data-sumika-skin='1'] [class*='_diffBody'],
+html[data-sumika-skin='1'] [class*='_codeBody'],
+html[data-sumika-skin='1'] [class*='_terminalBody'] {
+  border: 1px solid var(--sumika-line);
+  border-radius: 10px;
+  background: var(--sumika-paper);
+}
+html[data-sumika-skin='1'] [class*='_diffStat'] {
+  margin-left: auto;
+  color: var(--sumika-muted);
+}
+html[data-sumika-skin='1'] [class*='_turnStatus'],
+html[data-sumika-skin='1'] [class*='_turnStatusClock'] {
+  font-size: 9.5px;
+  color: var(--sumika-muted);
 }
 
 /* Rail toggle: upstream swaps the brand mark for its own panel glyph on hover
