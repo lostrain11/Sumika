@@ -29,13 +29,14 @@ class _Session:
         pass
 
 
-def _chat(answers, directory):
+def _chat(answers, directory, *, language=None):
     settings = {
         "enabled": True, "provider": "openai-compatible", "model": "test",
         "endpoint": "http://127.0.0.1", "key_env": "NOPE", "timeout_seconds": 5,
         "max_tokens": 64, "temperature": 0.7, "context_length": 1024,
         "multimodal": {"enabled": False},
         "memory": {"auto_extract": False},
+        "language": language or {"target": "zh-Hans"},
     }
     chat = RoleChat(settings)
     chat._provider = lambda: chat.provider
@@ -64,17 +65,34 @@ class LanguageGuardTests(unittest.TestCase):
         chat, result = self._run(["嗯，我在。有事说就行。"])
         self.assertEqual(chat.provider.calls, 1)
         self.assertEqual(result["language_guard"],
-                         {"retried": False, "clean": True, "kana_found": [], "kana_remaining": []})
+                         {"retried": False, "clean": True, "transliterated": 0,
+                          "kana_found": [], "kana_remaining": []})
 
-    def test_kana_answer_is_corrected_once(self):
-        chat, result = self._run(["ねえ、在吗？", "hah？嗯，我在。"])
+    def test_kana_answer_is_rewritten_locally_without_a_second_call(self):
+        """A slipped syllable must not cost another generation."""
+        chat, result = self._run(["ねえ、在吗？"])
+        self.assertEqual(chat.provider.calls, 1)
+        self.assertFalse(result["language_guard"]["retried"])
+        self.assertTrue(result["language_guard"]["clean"])
+        self.assertEqual(result["language_guard"]["kana_remaining"], [])
+        self.assertEqual(result["language_guard"]["transliterated"], 2)
+        self.assertIn("nee", result["text"])
+        self.assertNotEqual(result["text"], "ねえ、在吗？")
+
+    def test_retry_still_available_when_explicitly_enabled(self):
+        chat = _chat(["ねえ、在吗？", "hah？嗯，我在。"], self.usage_dir,
+                     language={"retry_on_kana": True})
+        chat._record_usage = lambda *args, **kwargs: None
+        result = chat.reply("在吗")
         self.assertEqual(chat.provider.calls, 2)
         self.assertTrue(result["language_guard"]["retried"])
         self.assertTrue(result["language_guard"]["clean"])
-        self.assertEqual(result["language_guard"]["kana_remaining"], [])
 
-    def test_unclean_after_retry_is_reported_not_hidden(self):
-        chat, result = self._run(["ねえ、在吗？", "はい、いますよ。"])
+    def test_unclean_after_enabled_retry_is_reported_not_hidden(self):
+        chat = _chat(["ねえ、在吗？", "はい、いますよ。"], self.usage_dir,
+                     language={"retry_on_kana": True})
+        chat._record_usage = lambda *args, **kwargs: None
+        result = chat.reply("在吗")
         self.assertEqual(chat.provider.calls, 2)
         guard = result["language_guard"]
         self.assertTrue(guard["retried"])

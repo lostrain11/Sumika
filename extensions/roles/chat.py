@@ -15,7 +15,7 @@ from extensions.models.cloud import CloudError, CloudProvider
 from extensions.models.ollama import OllamaError, OllamaProvider
 from extensions.models.settings import load as load_settings
 from extensions.models.usage import UsageStore
-from extensions.roles.card_context import kana_characters
+from extensions.roles.card_context import kana_characters, transliterate_kana
 from extensions.memory.extraction_policy import ExtractionGate
 from extensions.memory.rules_proposer import propose as propose_facts
 from extensions.roles.card_context import localize_names, serialized
@@ -123,11 +123,10 @@ class RoleChat:
             # correction — the user asked for Chinese, not for a guess.
             guard = self._language_guard(session, provider, messages, localized["text"],
                                         max_tokens, images)
-            if guard["retried"]:
-                if guard["clean"]:
-                    localized = {"text": guard["text"], "applied": guard["applied"]}
-                else:
-                    localized = {"text": guard["text"], "applied": guard["applied"]}
+            if guard["retried"] or guard["transliterated"]:
+                # The guard is the last word on the visible text, whether it rewrote
+                # the kana locally or asked the model again.
+                localized = {"text": guard["text"], "applied": guard["applied"]}
                 elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
             totals = usage_counts(result)
             if guard.get("retry_usage"):
@@ -149,6 +148,7 @@ class RoleChat:
                     "auto_extracted": extracted,
                     "language_policy_source": context["selection"]["language_policy_source"],
                     "language_guard": {"retried": guard["retried"], "clean": guard["clean"],
+                                       "transliterated": guard["transliterated"],
                                        "kana_found": guard["kana_found"],
                                        "kana_remaining": guard["kana_remaining"]},
                     "role_tools": 0}
@@ -172,14 +172,24 @@ class RoleChat:
     def _language_guard(self, session, provider, messages, text, max_tokens, images):
         """Enforce the output language on the answer itself, not just in the prompt.
 
-        The policy is prompt text, so a model can still slip a kana syllable. When
-        it does, the answer is sent back once with an explicit correction. If kana
-        survives that, the fact is reported (`clean: False`) instead of being hidden.
+        Kana is rewritten locally: a second generation for one slipped syllable
+        costs tokens and time, so it is off by default and available only through
+        the explicit `language.retry_on_kana` setting. A retry that still leaves
+        kana is reported (`clean: False`) instead of being hidden.
         """
         present = kana_characters(text)
         if not present:
-            return {"retried": False, "clean": True, "text": text, "applied": [],
-                    "kana_found": [], "kana_remaining": []}
+            return {"retried": False, "clean": True, "transliterated": 0,
+                    "text": text, "applied": [], "kana_found": [], "kana_remaining": []}
+        language = self.settings.get("language") or {}
+        if not language.get("retry_on_kana"):
+            rewritten, replaced = transliterate_kana(text)
+            localized = session.request("localize_names", {"text": rewritten})
+            remaining = kana_characters(localized["text"])
+            return {"retried": False, "clean": not remaining,
+                    "transliterated": len(replaced), "text": localized["text"],
+                    "applied": localized["applied"], "kana_found": present,
+                    "kana_remaining": remaining}
         correction = list(messages) + [
             {"role": "assistant", "content": text},
             {"role": "user", "content":
@@ -192,6 +202,7 @@ class RoleChat:
         remaining = kana_characters(localized["text"])
         return {"retried": True, "clean": not remaining, "text": localized["text"],
                 "applied": localized["applied"], "kana_found": present,
+                "transliterated": 0,
                 "kana_remaining": remaining,
                 "retry_usage": retry.get("usage")}
 

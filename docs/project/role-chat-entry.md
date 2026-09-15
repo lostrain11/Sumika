@@ -115,9 +115,10 @@ python -B tools/verify_role_chat.py --settings <settings.json> --out <evidence.j
 
 ## 语言策略的第二层：回答落地的兜底（2026-09-16）
 
-角色卡里的输出语言策略是**提示词**，模型偶尔仍会滑出假名（本轮实测中安和昴答过一句 "ねえ"）。三层优先级不变（用户设置 > 角色卡声明 > Sumika 默认），但在最后加了确定性的兜底：
+角色卡里的输出语言策略是**提示词**，模型偶尔仍会滑出假名（本轮实测中安和昴答过一句 "ねえ"）。三层优先级不变（用户设置 > 角色卡声明 > Sumika 默认），但最后加了一层确定性兜底：
 
-- `card_context.kana_characters()` 检测回答里残留的假名；`RoleChat._language_guard()` 命中时**只重发一次**，附上"上一版出现了假名：X，请只用简体中文重写，语气词写罗马音"的纠正指令，并再次走 `localize_names`。
-- 重发后仍不干净时**不作弊**：返回原文并附带 `language_guard {retried, clean, kana_found, kana_remaining}`，调用方可据此报告，而不是假装干净。usage 会把两次调用都计入。
-- 单测 `tests_next/test_language_guard.py` 覆盖三种情形（干净不重发 / 一次纠正成功 / 纠正无效时如实标记）。
+- `card_context.kana_characters()` 检测回答里残留的假名，`transliterate_kana()` 把它**本地改写成罗马音**（片假名先折叠到平假名，拗音走二字表，小っ叠辅音，长音符变连字符；表里没有的一律保持原样，不猜）。
+- **默认不重发**：为一两个音节再生成一次既费 token 又慢，所以纠正走本地确定性转换；`localize_names` 之后再检查一次，正常结果里不会再有假名。
+- 只有显式打开 `settings.language.retry_on_kana`（默认 false）时才会"重发一次 + 纠正指令"；即便如此，纠正后仍不干净也会**如实标记** `language_guard {retried, clean, transliterated, kana_found, kana_remaining}`，usage 把两次调用都算进去，绝不假装干净。
+- 单测 `tests_next/test_language_guard.py` 覆盖四种情形：干净（1 次调用）、有假名（**仍只 1 次调用**，本地转写为罗马音）、显式开启后重发成功、显式开启后仍不干净时如实标记。
 - 验收（`verify_user_role.mjs` 实测）：回答为「你好，你好。来打招呼的吗——ah，这么正式……maa，我这边刚练完鼓……」——中文 + 罗马音语气词，无假名。

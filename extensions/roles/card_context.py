@@ -126,6 +126,95 @@ def kana_characters(text):
     return seen
 
 
+# Mechanical kana → Hepburn romaji. The reply-language policy forbids kana, so a
+# slip is rewritten locally instead of paying for a second generation. Readings
+# are the dictionary ones (は -> ha, を -> o); this is a script conversion, not a
+# translation, and callers report that they applied it.
+_ROMAJI = {
+    "あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+    "か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+    "さ": "sa", "し": "shi", "す": "su", "せ": "se", "そ": "so",
+    "た": "ta", "ち": "chi", "つ": "tsu", "て": "te", "と": "to",
+    "な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+    "は": "ha", "ひ": "hi", "ふ": "fu", "へ": "he", "ほ": "ho",
+    "ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+    "や": "ya", "ゆ": "yu", "よ": "yo",
+    "ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+    "わ": "wa", "を": "o", "ん": "n", "ゔ": "vu",
+    "が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+    "ざ": "za", "じ": "ji", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+    "だ": "da", "ぢ": "ji", "づ": "zu", "で": "de", "ど": "do",
+    "ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+    "ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+    "ぁ": "a", "ぃ": "i", "ぅ": "u", "ぇ": "e", "ぉ": "o",
+    "ゃ": "ya", "ゅ": "yu", "ょ": "yo",
+}
+
+_DIGRAPHS = {
+    "きゃ": "kya", "きゅ": "kyu", "きょ": "kyo",
+    "しゃ": "sha", "しゅ": "shu", "しょ": "sho",
+    "ちゃ": "cha", "ちゅ": "chu", "ちょ": "cho",
+    "にゃ": "nya", "にゅ": "nyu", "にょ": "nyo",
+    "ひゃ": "hya", "ひゅ": "hyu", "ひょ": "hyo",
+    "みゃ": "mya", "みゅ": "myu", "みょ": "myo",
+    "りゃ": "rya", "りゅ": "ryu", "りょ": "ryo",
+    "ぎゃ": "gya", "ぎゅ": "gyu", "ぎょ": "gyo",
+    "じゃ": "ja", "じゅ": "ju", "じょ": "jo",
+    "びゃ": "bya", "びゅ": "byu", "びょ": "byo",
+    "ぴゃ": "pya", "ぴゅ": "pyu", "ぴょ": "pyo",
+}
+
+
+def transliterate_kana(text):
+    """Rewrite kana as romaji; returns (text, replaced) with what it changed.
+
+    Katakana is folded onto hiragana first, a small tsu doubles the next
+    consonant, and the long-vowel mark becomes a hyphen. Anything the table does
+    not cover is kept as-is rather than guessed at.
+    """
+    if not isinstance(text, str):
+        raise ValueError("text required")
+    folded = []
+    for character in text:
+        code = ord(character)
+        if 0x30A1 <= code <= 0x30F6:
+            folded.append(chr(code - 0x60))
+        elif code == 0x30FC:
+            folded.append("-")
+        elif 0xFF66 <= code <= 0xFF9F:
+            folded.append(chr(code - 0xCF00))
+        else:
+            folded.append(character)
+    source = "".join(folded)
+    out = []
+    replaced = []
+    index = 0
+    while index < len(source):
+        pair = source[index:index + 2]
+        if pair in _DIGRAPHS:
+            out.append(_DIGRAPHS[pair])
+            replaced.append(pair)
+            index += 2
+            continue
+        character = source[index]
+        if character == "っ" or character == "ッ":
+            following = source[index + 1:index + 2]
+            head = _DIGRAPHS.get(source[index + 1:index + 3], _ROMAJI.get(following, ""))
+            if head:
+                out.append(head[0])
+            replaced.append(character)
+            index += 1
+            continue
+        if character in _ROMAJI:
+            out.append(_ROMAJI[character])
+            replaced.append(character)
+            index += 1
+            continue
+        out.append(character)
+        index += 1
+    return "".join(out), replaced
+
+
 def localize_names(text, name_map):
     """Deterministically map kana names to readable names in role-chat display text.
 
