@@ -10,6 +10,7 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +23,7 @@ from extensions.models.ollama import OllamaError
 from extensions.models.settings import default_path, load as load_settings, save as save_settings
 from extensions.roles.card_context import compile_card, resolve_language_policy
 from extensions.roles.chat import RoleChat, open_session
-from extensions.roles.roles import list_roles, load_role
+from extensions.roles.roles import attach_asset, import_card, list_roles, load_role, remove_role
 from ui.state_snapshot import snapshot, validate_state
 from ui import startup as startup_registry
 from ui.readiness import probes as readiness_probes, service_capabilities
@@ -226,6 +227,42 @@ class Bridge:
                            if "model_3d" in role["assets"] else None,
                            "kind": self._role_kinds().get(role_id, "builtin")})
         return result
+
+    def import_role(self, payload):
+        """Import a user role: card text from the browser, model from a local path.
+
+        The card is small enough to travel as JSON text. A model is not, so the
+        caller passes the path of a file that is already on this machine; copying
+        it through the browser would only add a needless 16 MB round trip.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError("invalid payload")
+        role_id = payload.get("id")
+        card_text = payload.get("card")
+        model_path = payload.get("modelPath")
+        if not isinstance(role_id, str) or not role_id.strip():
+            raise ValueError("role id required")
+        if not isinstance(card_text, str) or not card_text.strip():
+            raise ValueError("character card required")
+        if len(card_text) > 4_000_000:
+            raise ValueError("card too large")
+        store = user_role_store()
+        store.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="sumika-import-") as directory:
+            card = Path(directory) / "card.json"
+            card.write_text(card_text, encoding="utf8")
+            path = import_card(card, store, role_id.strip())
+        attached = None
+        if isinstance(model_path, str) and model_path.strip():
+            attached = attach_asset(role_id.strip(), store, "model_3d", model_path.strip())
+        return {"id": role_id.strip(), "path": str(path),
+                "model_3d": str(attached) if attached else None}
+
+    def remove_role(self, role_id):
+        """Undo an import: only roles in the user store can be removed here."""
+        if not isinstance(role_id, str) or not role_id.strip():
+            raise ValueError("role id required")
+        return str(remove_role(role_id.strip(), user_role_store()))
 
     def select_role(self, role_id):
         """Point the active role session at this role so switching is real."""
@@ -522,6 +559,16 @@ def _handler(bridge):
                 try:
                     payload = self._body()
                     return self._json(200, bridge.select_role(payload.get("id")))
+                except (ValueError, OSError, KeyError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/roles/import":
+                try:
+                    return self._json(200, bridge.import_role(self._body()))
+                except (ValueError, OSError, KeyError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/roles/remove":
+                try:
+                    return self._json(200, {"removed": bridge.remove_role(self._body().get("id"))})
                 except (ValueError, OSError, KeyError) as error:
                     return self._json(400, {"error": str(error)})
             if route in ("/api/schedule/toggle", "/api/schedule/remove", "/api/schedule/acknowledge"):

@@ -263,6 +263,79 @@ async function bindRoomChat(activeRoleId) {
   await loadRoomChat(activeRoleId);
 }
 
+// ---- 角色导入（用户自己的卡与模型） ------------------------------------------
+//
+// Imported roles belong to the user: the card travels as text, the model is a
+// path on this machine. Nothing is bundled, nothing is uploaded off the machine.
+
+function roleImportForm() {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'sumika-import';
+  wrapper.style.cssText = 'display:none;flex-direction:column;gap:6px;margin-top:8px;'
+    + 'padding:9px;border:1px dashed var(--line);border-radius:9px;background:var(--paper)';
+  wrapper.innerHTML = `
+    <label style="font-size:10px;color:var(--muted)">角色 id（字母/数字/-）</label>
+    <input data-import="id" placeholder="例如 ando-subaru" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
+    <label style="font-size:10px;color:var(--muted)">角色卡（Tavern V2/V3 JSON）</label>
+    <input data-import="card" type="file" accept=".json,application/json" style="font-size:10px">
+    <label style="font-size:10px;color:var(--muted)">3D 模型路径（可选，本机 .vrm）</label>
+    <input data-import="model" placeholder="D:\\路径\\model.vrm" style="font-size:10px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
+    <div style="display:flex;gap:6px;align-items:center">
+      <button data-import="submit" class="mini-btn" style="font-size:11px;white-space:nowrap">导入</button>
+      <button data-import="cancel" class="mini-btn" style="font-size:11px;white-space:nowrap">取消</button>
+      <span data-import="status" style="font-size:10px;color:var(--muted);line-height:1.4"></span>
+    </div>`;
+  return wrapper;
+}
+
+async function bindRoleImport(rolesPayload) {
+  const roster = document.querySelector('.roster');
+  if (!roster) return;
+  const footer = roster.querySelector('.roster-foot');
+  const trigger = footer?.querySelector('.import-btn');
+  if (!footer || !trigger) return;
+  const form = roleImportForm();
+  footer.appendChild(form);
+  trigger.removeAttribute('disabled');
+  trigger.style.cursor = 'pointer';
+  trigger.textContent = '＋ 导入角色卡 / 模型';
+  trigger.addEventListener('click', () => {
+    const open = form.style.display === 'flex';
+    form.style.display = open ? 'none' : 'flex';
+  });
+  const status = text => {
+    const node = form.querySelector('[data-import="status"]');
+    if (node) node.textContent = text;
+  };
+  form.querySelector('[data-import="cancel"]').addEventListener('click', () => {
+    form.style.display = 'none';
+    status('');
+  });
+  form.querySelector('[data-import="submit"]').addEventListener('click', async () => {
+    const id = form.querySelector('[data-import="id"]').value.trim();
+    const file = form.querySelector('[data-import="card"]').files?.[0];
+    const modelPath = form.querySelector('[data-import="model"]').value.trim();
+    if (!id) { status('先填角色 id'); return; }
+    if (!file) { status('先选择角色卡 JSON'); return; }
+    status('读取角色卡…');
+    try {
+      const card = await file.text();
+      status('导入中…');
+      const result = await api('/api/roles/import', {
+        method: 'POST',
+        body: JSON.stringify({ id, card, modelPath: modelPath || null }),
+      });
+      status(result.model_3d ? '已导入（含 3D 模型）' : '已导入（未带 3D 模型）');
+      const fresh = await api('/api/roles');
+      bindRoster(fresh);
+      await loadRoomChat(fresh.active?.id || null);
+    } catch (error) {
+      const detail = (error.payload || {}).error || error.message;
+      status(`导入失败：${detail}`);
+    }
+  });
+}
+
 function bindTree(tree) {
   const side = document.querySelector('.wb-side');
   if (!side || !tree.phases) return;
@@ -852,6 +925,7 @@ async function bindUnwiredSettings() {
     ]);
     bindHeader(state);
     bindRoster(roles);
+    await bindRoleImport(roles);
     await bindRoomChat(roles.active?.id || null);
     bindTree(tree);
     await bindCapabilityScreens();

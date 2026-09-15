@@ -92,3 +92,14 @@ python -B tools/verify_role_chat.py --settings <settings.json> --out <evidence.j
 - 图层图例改成真实数据：`图层③ 角色 VRM · 已绑定：Sample A、安和昴 / 其余：立绘占位`，不再写死"昴：实机渲染"。
 
 验收：`node tools/verify_user_role.mjs http://127.0.0.1:8765 ando-subaru`（一次真实角色模型调用）。证据 `docs/project/user-role-evidence.json`：角色被标记 `kind=user`、3D 资产 200 且 16.5 MB 被页面真实请求、舞台切到 `show-vrm` 且 canvas 已挂载、名册/标题/舞台名均为安和昴、对话得到符合角色卡的回答，且**第二轮能引用第一轮**（同一会话历史生效）。
+
+## 导入入口（2026-09-16）
+
+名册底部的「＋ 导入角色卡 · 预留 P6」原来是死文本，现在是真表单：
+
+- **角色 id**、**角色卡文件**（选择本机 Tavern V2/V3 JSON，浏览器读成文本上传）、**3D 模型路径**（可选，填本机 `.vrm` 路径）。
+- `POST /api/roles/import {id, card, modelPath?}`：卡以小体积文本传输；模型不走浏览器而由桥接从本机路径复制——16 MB 的模型绕浏览器一圈没有意义。导入后立即刷新名册并载入该角色的会话记录。
+- `POST /api/roles/remove {id}`：撤销导入，**只允许删用户库里的角色**；内置角色删不掉。
+- `extensions/roles/roles.py` 新增 `attach_asset`（复制资产、写 `assets.<kind>`、重算 `checksums.json`，限制路径与 256 MiB 上限）与 `remove_role`；`_role_dir` 统一做路径约束。
+
+验收：`node tools/verify_role_import_ui.mjs`。它在真实浏览器里打开表单、上传一张临时卡、断言新角色立刻出现在名册且 `kind=user`，然后**删除该测试角色**并把列表复原；证据 `docs/project/role-import-ui-evidence.json`。模型挂载路径由单测 `tests_next/test_role_import_ui.py` 覆盖（含路径越界与非法 kind 的拒绝）。

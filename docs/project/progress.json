@@ -22,7 +22,8 @@
     "工作台会话面包屑：lineage 槽用于工作区归属与上级会话链接；修复组件渲染崩溃；验收脚本覆盖 console error",
     "客户端形态：工作台屏内嵌受管 DSH（含回链、去重品牌、隐藏模拟浮窗）；能力屏作为 DSH 主面板原型；桥接本机来源 CORS + 预检",
     "活动室对话接线：真输入框+每角色会话+记录接口；桥接复用 RoleChat 实例并保留会话记录；修复示例角色无效 card 导致对话必失败；card context 无卡时降级并记录 card_context_status",
-    "用户角色独立库与 kind 标注；安和昴卡+VRM 以用户身份导入；舞台按角色资产渲染（无 VRM 则立绘占位、切换重建实例）；图层图例数据化"
+    "用户角色独立库与 kind 标注；安和昴卡+VRM 以用户身份导入；舞台按角色资产渲染（无 VRM 则立绘占位、切换重建实例）；图层图例数据化",
+    "角色导入入口：名册底部表单 + POST /api/roles/import（卡文本 + 本机模型路径）+ /api/roles/remove；attach_asset 校验路径/大小并刷新 checksums，新增 4 项单测"
   ],
   "verified": [
     "33 项自动化测试通过",
@@ -53,7 +54,8 @@
     "工作台会话头验收：面包屑文本为「工作区 · Sumika」且无标题重复；状态入口仍为 idle；验收脚本新增 console error 收集后依旧 0 错误",
     "工作台内嵌验收通过：该屏 frame 撑满、src 指向 5175、模拟标记移除、桌宠隐藏、无 pageerror/console error；DSH 主面板验收通过：侧栏出现「能力」行、面板渲染 7+4 行、面板开关写入注册表并恢复原值",
     "活动室真实对话验收：空态无编造消息；发送后得到真实角色回答（Sumika 示例助手），无 pageerror/console error；记录经 /api/role/chat/history 跨页面加载保持",
-    "用户导入角色验收：ando-subaru 标记为 user；模型资产 200（16.5MB）被页面请求；舞台 show-vrm + canvas 挂载；名册/标题/舞台名为安和昴；真实回答符合角色卡且第二轮引用第一轮"
+    "用户导入角色验收：ando-subaru 标记为 user；模型资产 200（16.5MB）被页面请求；舞台 show-vrm + canvas 挂载；名册/标题/舞台名为安和昴；真实回答符合角色卡且第二轮引用第一轮",
+    "角色导入界面验收：表单提交后角色立刻以「用户导入 · 角色卡 · 立绘占位」出现在名册，桥接 kind=user，测试角色经 /api/roles/remove 清理且不再列出；0 pageerror / console error"
   ],
   "partial": [
     "P5-1：基础文件操作可用；视觉渲染、公式重算、复杂特性与真实模型任务质量未验收",
@@ -72,7 +74,7 @@
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "UI 剩余：侧栏样式贴近、/api/tree 面板、外观分区接线、角色导入界面入口",
+  "next": "UI 剩余：侧栏样式贴近、/api/tree 面板、外观分区接线、导入表单扩展（缩略图/语音/进度）",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",
