@@ -16,7 +16,8 @@
     "UI 壳层接入：DSH 客户端 UI 插件接管品牌槽与侧栏底部列表槽；皮肤令牌与结构覆盖同步设计稿；验收脚本 tools/verify_workbench_ui.mjs",
     "UI 壳层第二轮：欢迎页品牌标记接管；会话区/输入区/工具卡槽位清单与 conversationPhase 状态来源写入方案文档",
     "UI 壳层第三轮：折叠态悬停不再回退图标；会话级槽位 props 契约与探针方法写入方案文档",
-    "工作台会话头状态：独立插件 extensions/ui/sumika-workbench（执行中/等待审批/计划审阅/等待回答），由 ensure_skin 登记；会话头三槽 props 契约写入方案文档"
+    "工作台会话头状态：独立插件 extensions/ui/sumika-workbench（执行中/等待审批/计划审阅/等待回答），由 ensure_skin 登记；会话头三槽 props 契约写入方案文档",
+    "扩展开关底座：ui/readiness.service_capabilities() 播种 + Bridge.capability_bootstrap() 只补缺；CapabilityStore 成为设备/桌面能力的执行门禁；新增 5 项测试"
   ],
   "verified": [
     "33 项自动化测试通过",
@@ -41,7 +42,8 @@
     "工作台壳层真实 UI 验收：无客户端报错；侧栏品牌=晴日部室、底部状态与 DSH 0.1.5-rc.2 来自宿主注入；frame=#fffdf8、sidebarCol=#faf8f0、新会话按钮=#b4496a/白字/8px（Edge 实测计算值）",
     "工作台壳层第二轮真实验收：欢迎页品牌标记为设计稿渐变（rgb(86,127,108)→rgb(180,73,106)）；验收脚本新增该断言并保持 0 客户端报错",
     "折叠侧栏真实悬停验收：railMark 计算 display=flex 且为设计稿渐变，上游 panelIcon display=none；同一脚本仍保持 0 客户端报错",
-    "工作台会话头状态药丸实时验收：新建会话发一条短消息，头部采样 idle→running 且文案为「执行中」，0 客户端报错；同一轮真实验证确认受管 profile 已可用真实模型（用户填入 key 后）"
+    "工作台会话头状态药丸实时验收：新建会话发一条短消息，头部采样 idle→running 且文案为「执行中」，0 客户端报错；同一轮真实验证确认受管 profile 已可用真实模型（用户填入 key 后）",
+    "能力注册表真实验收通过：7 项可服务能力全部登记；开关往返生效；停用后 desktop service 退出码2且含 disabled；启用后经同一入口对生成图片跑通 OCR（内容校验通过，不截屏）；脚本结束时恢复原 enabled"
   ],
   "partial": [
     "P5-1：基础文件操作可用；视觉渲染、公式重算、复杂特性与真实模型任务质量未验收",
@@ -59,7 +61,7 @@
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "UI 继续：会话头面包屑/标题、侧栏样式贴近、/api/tree 面板、设置页功能开关",
+  "next": "下一步 R-107/R-108：设置页与能力页接 /api/readiness + /api/modules + /api/capabilities/toggle；随后会话头面包屑、侧栏样式贴近、/api/tree 面板",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",

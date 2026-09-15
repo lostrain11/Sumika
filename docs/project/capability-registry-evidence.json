@@ -1,0 +1,102 @@
+{
+  "registered": {
+    "ocr": {
+      "enabled": true,
+      "provider": "rapidocr"
+    },
+    "desktop": {
+      "enabled": true,
+      "provider": "windows-uia"
+    },
+    "asr": {
+      "enabled": true,
+      "provider": "vosk"
+    },
+    "camera": {
+      "enabled": true,
+      "provider": "opencv"
+    },
+    "microphone": {
+      "enabled": true,
+      "provider": "sounddevice"
+    },
+    "office-render": {
+      "enabled": true,
+      "provider": "libreoffice"
+    },
+    "voice": {
+      "enabled": true,
+      "provider": "windows-sapi"
+    }
+  },
+  "ocr_text_via_service": "a OCR test 123\nSumika",
+  "readiness_ready": [
+    "browser",
+    "camera",
+    "desktop",
+    "memory-semantic",
+    "ocr",
+    "office",
+    "schedule",
+    "voice"
+  ],
+  "servable": [
+    "asr",
+    "camera",
+    "desktop",
+    "microphone",
+    "ocr",
+    "office-render",
+    "voice"
+  ],
+  "final_store": [
+    {
+      "id": "ocr",
+      "enabled": true,
+      "provider": "rapidocr",
+      "options": {}
+    },
+    {
+      "id": "desktop",
+      "enabled": true,
+      "provider": "windows-uia",
+      "options": {}
+    },
+    {
+      "id": "asr",
+      "enabled": true,
+      "provider": "vosk",
+      "options": {
+        "model": "D:\\Code\\Sumika\\.sumika-next\\voice-models\\vosk-model-small-cn-0.22"
+      }
+    },
+    {
+      "id": "camera",
+      "enabled": true,
+      "provider": "opencv",
+      "options": {}
+    },
+    {
+      "id": "microphone",
+      "enabled": true,
+      "provider": "sounddevice",
+      "options": {}
+    },
+    {
+      "id": "office-render",
+      "enabled": true,
+      "provider": "libreoffice",
+      "options": {
+        "executable": "D:\\Tools\\LibreOffice\\26.2.6\\program\\soffice.exe"
+      }
+    },
+    {
+      "id": "voice",
+      "enabled": true,
+      "provider": "windows-sapi",
+      "options": {}
+    }
+  ],
+  "failures": [],
+  "status": "passed"
+}

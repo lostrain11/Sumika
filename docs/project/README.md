@@ -59,3 +59,26 @@ python -B -m sumika_next.cli receipt --root <项目根> --input <project-relativ
 - `continuity-comparison.md`：P4 与 Codex/DSH 原生能力及社区方案的比较与限制。
 - `long-term-memory-plan.md`：P6 长期记忆的现成方案接入、可替换边界与实测选型。
 - `ui-design-plan.md`：插入 P5 前的 UI 设计阶段与旧版参考。
+- `capability-registry.md`：扩展能力注册表、开关语义、播种规则与真实验收。
+- `workbench-skin-plan.md`：工作台以 DSH 原生 Web 呈现时的皮肤/客户端插件方案与插槽契约。
+# Sumika Next 项目资料索引
+
+## 目录职责
+
+- `sumika_next/`：Harness 中立核心、DSH 适配、日用入口和交接命令。
+- `extensions/`：可替换的独立能力层；按 `desktop`、`memory`、`office`、`roles`、`continuity` 分域。
+- `runtime/`：随客户端发布或固定锁定的运行时；`runtime/dsh` 是 DSH，`runtime/browserskill` 是 BrowserSkill 客户端。
+- `tests_next/`：自动化测试与本地模型夹具，不保存真实凭据。
+- `tools/`：真实工具/DSH 验收脚本和评测脚本。
+- `docs/project/`：批准计划、当前状态、阶段验收、证据和恢复说明。
+- `.sumika-next/`：本机运行数据、模型缓存、profile、备份和临时验证目录；不提交 Git。
+
+## 文件放置规则
+
+新功能代码放入对应 `extensions/<domain>/`，只有 Harness 中立状态机或 DSH 通用入口才放入 `sumika_next/`。新的验收脚本放入 `tools/`，测试放入 `tests_next/`，证据 JSON 放入 `docs/project/`。不要把运行数据、凭据、下载缓存或临时工作目录放入源码目录。
+
+`runtime/dsh/node_modules` 和本机工具缓存不参与源码整理；不修改 DSH 上游源码。BrowserSkill 二进制由发布包放在 `runtime/browserskill/bsk.exe`，开发环境也优先使用该路径，只有显式覆盖时才使用外部安装。
+
+## 当前边界
+
+旧版源码不作为新版架构来源。UI 设计文件由独立模型维护；非 UI 扩展通过适配层接入。移动或重命名现有文件前必须先搜索引用并运行完整测试，避免破坏阶段证据和交接命令。
