@@ -22,10 +22,9 @@ def serialized(value):
 
 LANGUAGE_POLICIES = {
     "zh-Hans": (
-        "回复语言：默认使用简体中文，且回复中不得出现日文假名（平假名、片假名），也不得使用日语句尾或日语连接词。"
-        "语气词直接写成中文词：啊、诶、嗯、嘛、嘿、哈、哦、唔；不要用罗马音拼写语气词（ah、maa、nee 这类也不要），"
-        "也不要用假名。"
-        "人名和乐队名使用中文译名或拉丁写法，按 name_map 替换，不要输出假名姓名，也不要保留日语敬称后缀（san、chan、kun 这类）。"
+        "回复语言：默认简体中文，回复中不出现日文假名（平假名、片假名）、日语句尾或日语连接词。"
+        "语气词怎么写由角色卡决定：可以写中文词，也可以保留角色卡声明的罗马音写法；两者都算合格。"
+        "人名和乐队名用中文译名或拉丁写法，按 name_map 替换，不要输出假名姓名，也不要保留日语敬称后缀（san、chan、kun 这类）。"
         "歌曲名、作品名和引用原文可以保留原样，但不整句复用日语。"
         "角色卡示例、世界书和历史消息的语言只作语气参考，不继承其语言。"
     ),
@@ -230,32 +229,13 @@ _INTERJECTION_ZH = {
     "あら": "哎呀", "おや": "哦呀",
 }
 
-_ROMAJI_INTERJECTION_ZH = {
-    # "hah" is deliberately absent: it is the character's signature interjection and
-    # a card may keep it in romaji through interjection_policy.allow_romanized.
-    "ah": "啊", "eh": "诶", "hey": "嘿", "hmm": "嗯",
-    "maa": "嘛", "un": "嗯", "nee": "呐", "ee": "诶", "oh": "哦",
-}
-
-
-def interjection_allow_list(compiled):
-    """The latin interjections a card asks to keep verbatim, as bare tokens."""
-    policy = (compiled or {}).get("card_interjection_policy") or {}
-    allowed = policy.get("allow_romanized") or {}
-    core = []
-    for token in allowed:
-        letters = "".join(character for character in token if character.isalpha())
-        if letters:
-            core.append(letters.casefold())
-    return sorted(set(core))
-
-
-def naturalize_reply(text, *, keep=()):
-    """Rewrite interjections as Chinese words and any leftover kana as romaji.
+def naturalize_reply(text):
+    """Rewrite Japanese script only: kana interjections to Chinese, the rest to romaji.
 
     Returns ``(text, report)``. The report says which interjections were mapped
     and how many kana characters had to be transliterated, so the caller can show
-    what happened instead of silently rewriting the character's voice.
+    what happened instead of silently rewriting the character's voice. Romaji is
+    deliberately untouched — the user reads it fine and the card may rely on it.
     """
     if not isinstance(text, str):
         raise ValueError("text required")
@@ -265,12 +245,9 @@ def naturalize_reply(text, *, keep=()):
         if kana in out:
             out = out.replace(kana, chinese)
             interjections.append(f"{kana}→{chinese}")
-    protected = {token.casefold() for token in keep or ()}
-    candidates = [token for token in _ROMAJI_INTERJECTION_ZH if token not in protected]
-    out = re.sub(r"(?<![A-Za-z])(%s)(?![A-Za-z])"
-                 % "|".join(sorted(candidates, key=len, reverse=True)),
-                 lambda match: _ROMAJI_INTERJECTION_ZH[match.group(1).casefold()],
-                 out, flags=re.IGNORECASE)
+    # Romaji is left exactly as the card and model wrote it: "hah" is her
+    # signature, and a romaji band name is as readable as its Chinese form. Only
+    # Japanese script has to go.
     rewritten, replaced = transliterate_kana(out)
     return rewritten, {"interjections": interjections, "transliterated": len(replaced),
                        "changed": rewritten != text}
@@ -482,9 +459,6 @@ def select_context(compiled, user_text, *, budget_chars=8000, memory=(), recent=
                           "target_language": target_language,
                           "language_policy_source": policy_source,
                           "card_language_policy": compiled.get("card_language_policy", ""),
-                          # Latin interjections this card keeps verbatim; the local
-                          # rewrite must not touch them.
-                          "interjection_allow": interjection_allow_list(compiled),
                           "name_map_entries": len(compiled.get("name_map", {})),
                           "examples_language_filtered": foreign_skipped,
                           "warnings": compiled.get("warnings", [])},

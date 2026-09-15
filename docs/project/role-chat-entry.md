@@ -125,6 +125,12 @@ python -B tools/verify_role_chat.py --settings <settings.json> --out <evidence.j
 
 ## 卡内语气词白名单（2026-09-16，随安和昴新卡）
 
+**最终口径（2026-09-16，迭代痕迹已清理）**：Sumika 只强制一件事——**不出现日文假名**；语气词写中文还是写可读罗马音由角色卡决定，罗马音人名/乐队名同样保留。因此：
+
+- 删除"罗马音语气词一律转中文"的整条映射与 `interjection_allow_list` 白名单机制（不再需要），也删除"检测到假名就重发一次"的可选路径——**任何情况下都不为语言问题再生成一次**。
+- 一次本地处理、顺序固定：先 `localize_names`（否则假名名字会先被转写成罗马音，译名表就匹配不到了）→ 再 `naturalize_reply`（假名语气词→中文词，其余假名→罗马音兜底）→ 复查是否还有假名。`language_guard {clean, changed, transliterated, interjections, kana_found, kana_remaining}` 如实反映结果。
+- Sumika 默认 `zh-Hans` 策略同步改写：只要求中文与"不出现假名"，语气词写法交给角色卡。
+
 用户把安和昴的卡优化成 v1.4 并新增了结构化字段：
 
 ```json

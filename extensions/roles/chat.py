@@ -117,18 +117,14 @@ class RoleChat:
                 # Fail closed: the same provider is not retried and nothing is substituted.
                 raise
             elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-            localized = session.request("localize_names", {"text": result["text"]})
-            # The output-language policy is prompt text, so it is advisory. Check the
-            # answer itself and, if kana survived, ask once more with an explicit
-            # correction — the user asked for Chinese, not for a guess.
-            guard = self._language_guard(session, provider, messages, localized["text"],
-                                        max_tokens, images,
-                                        keep=context["selection"].get("interjection_allow") or ())
-            if guard["changed"]:
-                # The guard is the last word on the visible text, whether it rewrote
-                # the kana locally or asked the model again.
-                localized = {"text": guard["text"], "applied": guard["applied"]}
-                elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            # The output-language policy is prompt text, so it is advisory. One
+            # local pass checks the answer itself: kana becomes Chinese or romaji
+            # and the name map is applied exactly once. No second generation unless
+            # the caller explicitly asked for one.
+            guard = self._language_guard(session, result["text"])
+            # The guard is the last word on the visible text.
+            localized = {"text": guard["text"], "applied": guard["applied"]}
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
             totals = usage_counts(result)
             if guard.get("retry_usage"):
                 retry_totals = usage_counts({"usage": guard["retry_usage"]})
@@ -148,7 +144,8 @@ class RoleChat:
                     "images_used": len(images or []), "max_tokens_used": max_tokens,
                     "auto_extracted": extracted,
                     "language_policy_source": context["selection"]["language_policy_source"],
-                    "language_guard": {"retried": guard["retried"], "clean": guard["clean"],
+                    "language_guard": {"clean": guard["clean"],
+                                       "changed": guard["changed"],
                                        "transliterated": guard["transliterated"],
                                        "interjections": guard.get("interjections", []),
                                        "kana_found": guard["kana_found"],
@@ -171,52 +168,23 @@ class RoleChat:
             "num_predict": self.settings["max_tokens"],
             "temperature": self.settings["temperature"]})
 
-    def _language_guard(self, session, provider, messages, text, max_tokens, images, *,
-                        keep=()):
-        """Enforce the output language on the answer itself, not just in the prompt.
+    def _language_guard(self, session, text):
+        """The only thing Sumika enforces on the answer: no Japanese script.
 
-        Kana is rewritten locally: a second generation for one slipped syllable
-        costs tokens and time, so it is off by default and available only through
-        the explicit `language.retry_on_kana` setting. A retry that still leaves
-        kana is reported (`clean: False`) instead of being hidden.
+        Everything else belongs to the card: it may spell an interjection as a
+        Chinese word or as readable romaji (`hah？`), and romaji names are fine.
+        The name map runs first — a kana name must be replaced before any kana is
+        transliterated, otherwise the map would no longer match. This is local and
+        costs no model call.
         """
-        present = kana_characters(text)
-        language = self.settings.get("language") or {}
-        if language.get("retry_on_kana") and present:
-            return self._retry_language(session, provider, messages, text, present,
-                                        max_tokens, images)
-        # Cheap and local: interjections become Chinese words, leftover kana becomes
-        # romaji, and the name map is applied. Nothing here calls the model.
-        rewritten, report = naturalize_reply(text, keep=keep)
-        localized = session.request("localize_names", {"text": rewritten})
-        remaining = kana_characters(localized["text"])
-        return {"retried": False, "clean": not remaining,
+        localized = session.request("localize_names", {"text": text})
+        rewritten, report = naturalize_reply(localized["text"])
+        remaining = kana_characters(rewritten)
+        return {"clean": not remaining, "text": rewritten, "applied": localized["applied"],
                 "transliterated": report["transliterated"],
                 "interjections": report["interjections"],
                 "changed": report["changed"] or bool(localized["applied"]),
-                "text": localized["text"],
-                "applied": localized["applied"], "kana_found": present,
-                "kana_remaining": remaining}
-
-    def _retry_language(self, session, provider, messages, text, present, max_tokens, images):
-        """Opt-in path: ask the model once more instead of rewriting locally."""
-        correction = list(messages) + [
-            {"role": "assistant", "content": text},
-            {"role": "user", "content":
-                "上一版回复里出现了日文假名：" + "".join(present) + "。"
-                "请只用简体中文重写这段回复：语气词直接写成中文词（啊／诶／嗯／嘛／嘿／哈／哦／唔），不要写罗马音也不要写假名，"
-                "人名与乐队名用中文译名或拉丁写法，不要解释，直接给出改好的回复。"},
-        ]
-        retry = self._generate(provider, correction, max_tokens, images)
-        rewritten, report = naturalize_reply(retry["text"])
-        localized = session.request("localize_names", {"text": rewritten})
-        remaining = kana_characters(localized["text"])
-        return {"retried": True, "clean": not remaining, "text": localized["text"],
-                "applied": localized["applied"], "kana_found": present,
-                "transliterated": report["transliterated"], "changed": True,
-                "interjections": report["interjections"],
-                "kana_remaining": remaining,
-                "retry_usage": retry.get("usage")}
+                "kana_found": kana_characters(text), "kana_remaining": remaining}
 
     def _auto_extract(self, session, message, session_id):
         """Write gated facts from the user's own message; empty unless enabled."""

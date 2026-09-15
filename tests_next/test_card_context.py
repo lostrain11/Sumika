@@ -1,6 +1,6 @@
 import json, tempfile, unittest
 from pathlib import Path
-from extensions.roles.card_context import (compile_card, interjection_allow_list, language_policy_text, localize_names,
+from extensions.roles.card_context import (compile_card, language_policy_text, localize_names,
                                            resolve_language_policy, script_ratios, select_context,
                                            naturalize_reply, serialized)
 from extensions.roles.roles import import_card
@@ -23,12 +23,13 @@ class CardContextTests(unittest.TestCase):
                         'allow_romanized': {'hah？': '招牌反问，只能单独成句'},
                     }}}}}, ensure_ascii=False), encoding='utf8')
             compiled = compile_card(path)
-            self.assertEqual(interjection_allow_list(compiled), ['hah'])
-            kept, report = naturalize_reply('hah？ ah，好', keep=interjection_allow_list(compiled))
+            self.assertEqual(compiled['card_interjection_policy']['allow_romanized'],
+                             {'hah？': '招牌反问，只能单独成句'})
+            kept, report = naturalize_reply('hah？ ah，好')
             self.assertTrue(kept.startswith('hah？'))
-            self.assertIn('啊', kept)
-            self.assertNotIn('ah，', kept)
-            self.assertEqual(report['changed'], True)
+            # Romaji is the card's business now; only kana is rewritten.
+            self.assertIn('ah，', kept)
+            self.assertEqual(report['changed'], False)
 
     def test_interjection_policy_rejects_non_latin_tokens(self):
         with tempfile.TemporaryDirectory() as d:
