@@ -1,74 +1,12 @@
 {
-  "checked_at": "2026-09-15T19:20:32.822Z",
+  "checked_at": "2026-09-15T19:30:51.114Z",
   "bridge": "http://127.0.0.1:8765",
-  "panel_rows": [
-    "能力",
-    "项目"
-  ],
-  "panel": {
-    "present": true,
-    "rows": 11,
-    "switches": 7,
-    "ids": [
-      "ocr",
-      "desktop",
-      "asr",
-      "camera",
-      "microphone",
-      "office-render",
-      "voice",
-      "ready-browser",
-      "ready-office",
-      "ready-memory-semantic",
-      "ready-schedule"
-    ]
-  },
-  "toggle": {
-    "id": "camera",
-    "requested": false,
-    "registry_after": false,
-    "restored": true
-  },
-  "project_panel": {
-    "present": true,
-    "phases": [
-      {
-        "id": "P0",
-        "status": "complete"
-      },
-      {
-        "id": "P1",
-        "status": "complete"
-      },
-      {
-        "id": "P2",
-        "status": "complete"
-      },
-      {
-        "id": "P3",
-        "status": "complete"
-      },
-      {
-        "id": "P4",
-        "status": "complete"
-      },
-      {
-        "id": "P4-UI",
-        "status": "in_progress"
-      },
-      {
-        "id": "P5",
-        "status": "in_progress"
-      },
-      {
-        "id": "P6",
-        "status": "in_progress"
-      },
-      {
-        "id": "P7",
-        "status": "planned"
-      }
-    ]
+  "panel_rows": [],
+  "sidebar": {
+    "workspaceRows": [
+      "Sumika"
+    ],
+    "sessionRows": 4
   },
   "page_errors": [],
   "console_errors": [],

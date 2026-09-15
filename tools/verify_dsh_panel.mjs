@@ -1,7 +1,7 @@
-// A Sumika screen living inside DSH as a main panel.
-//
-// Opens the sidebar panel row, checks the panel renders real registry rows, and
-// flips one switch through the panel to confirm it writes to the bridge.
+// DSH's own sidebar is the project tree — the design's 项目 ▸ 任务 —
+// so Sumika must not add panel rows of its own on top of it (it did twice:
+// 能力 duplicated the shell's top bar, 项目 duplicated the workspace tree).
+// This guards both against coming back, and checks the sidebar really is there.
 //
 // Usage:
 //   node tools/verify_dsh_panel.mjs [bridge] [evidence.json] [shot.png]
@@ -17,7 +17,6 @@ const bridge = process.argv[2] || 'http://127.0.0.1:8765';
 const evidencePath = process.argv[3] || null;
 const shotPath = process.argv[4] || null;
 
-const registry = async () => (await (await fetch(`${bridge}/api/modules`)).json()).modules;
 const failures = [];
 const { url } = await (await fetch(`${bridge}/api/workbench/embed`)).json();
 
@@ -41,81 +40,16 @@ for (const label of ['稍后配置', 'Later']) {
 
 const panelRows = page.locator("[class*='_panelRow']");
 const labels = await panelRows.allInnerTexts().catch(() => []);
-let clicked = false;
-for (let index = 0; index < labels.length; index += 1) {
-  if (/能力/.test(labels[index])) {
-    await panelRows.nth(index).click().catch(() => {});
-    clicked = true;
-    break;
-  }
-}
-await page.waitForTimeout(4000);
-
-if (!clicked) failures.push(`no 能力 panel row in the sidebar: ${JSON.stringify(labels)}`);
-const panel = await page.evaluate(() => ({
-  present: !!document.querySelector('[data-sumika-panel]'),
-  rows: document.querySelectorAll('[data-sumika-panel-row]').length,
-  switches: document.querySelectorAll('[data-sumika-panel-switch]').length,
-  ids: Array.from(document.querySelectorAll('[data-sumika-panel-row]'))
-    .map(node => node.dataset.sumikaPanelRow),
+const sidebar = await page.evaluate(() => ({
+  workspaceRows: Array.from(document.querySelectorAll("[class*='_groupSection']"))
+    .map(node => (node.innerText || '').split('\n')[0]),
+  sessionRows: document.querySelectorAll("[class*='_root_1b2ny_3']").length,
 }));
-if (!panel.present) failures.push('the capabilities panel did not render');
-
-const before = await registry();
-const missing = before.map(item => item.id).filter(id => !panel.ids.includes(id));
-if (missing.length) failures.push(`panel is missing registered capabilities: ${missing}`);
-
-let toggle = null;
-const target = before.find(item => item.id === 'camera') || before[0];
-if (target) {
-  const wanted = target.enabled !== true;
-  await page.locator(`[data-sumika-panel-row='${target.id}'] [data-sumika-panel-switch]`)
-    .first().click().catch(() => {});
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const current = (await registry()).find(item => item.id === target.id);
-    if (current && current.enabled === wanted) break;
-    await page.waitForTimeout(250);
-  }
-  const after = (await registry()).find(item => item.id === target.id);
-  toggle = { id: target.id, requested: wanted, registry_after: after?.enabled };
-  if (after?.enabled !== wanted) failures.push(`panel toggle did not reach the bridge for ${target.id}`);
-  await page.locator(`[data-sumika-panel-row='${target.id}'] [data-sumika-panel-switch]`)
-    .first().click().catch(() => {});
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const current = (await registry()).find(item => item.id === target.id);
-    if (current && current.enabled === (target.enabled === true)) break;
-    await page.waitForTimeout(250);
-  }
-  const restored = (await registry()).find(item => item.id === target.id);
-  toggle.restored = restored?.enabled;
-  if (restored?.enabled !== (target.enabled === true)) {
-    failures.push(`panel switch for ${target.id} was not restored`);
-  }
+if (labels.length > 0) {
+  failures.push(`Sumika must not add sidebar panel rows: ${JSON.stringify(labels)}`);
 }
-
-// Second Sumika panel: the project's own plan, read from /api/tree.
-let projectPanel = null;
-for (let index = 0; index < labels.length; index += 1) {
-  if (/项目/.test(labels[index])) {
-    await panelRows.nth(index).click().catch(() => {});
-    await page.waitForTimeout(3500);
-    break;
-  }
-}
-projectPanel = await page.evaluate(() => ({
-  present: !!document.querySelector('[data-sumika-panel="project"]'),
-  phases: Array.from(document.querySelectorAll('[data-sumika-project-phase]'))
-    .map(node => ({ id: node.dataset.sumikaProjectPhase, status: node.dataset.phaseStatus })),
-}));
-const tree = await (await fetch(`${bridge}/api/tree`)).json();
-if (!projectPanel.present) failures.push('the 项目 panel did not render');
-const expectedPhases = (tree.phases || []).map(phase => phase.id);
-const missingPhases = expectedPhases.filter(id => !projectPanel.phases.some(p => p.id === id));
-if (missingPhases.length) {
-  failures.push(`the 项目 panel is missing phases: ${missingPhases.join(',')}`);
-}
-if (!labels.some(label => /项目/.test(label))) {
-  failures.push(`no 项目 panel row in the sidebar: ${JSON.stringify(labels)}`);
+if (sidebar.workspaceRows.length === 0) {
+  failures.push('the sidebar has no workspace row, so the project tree is missing');
 }
 
 if (pageErrors.length) failures.push(`client errors: ${pageErrors.join(' | ')}`);
@@ -127,9 +61,7 @@ const result = {
   checked_at: new Date().toISOString(),
   bridge,
   panel_rows: labels,
-  panel,
-  toggle,
-  project_panel: projectPanel,
+  sidebar,
   page_errors: pageErrors,
   console_errors: consoleErrors,
   failures,
