@@ -1,0 +1,95 @@
+{
+  "checked_at": "2026-09-15T17:31:25.714Z",
+  "bridge": "http://127.0.0.1:8765",
+  "shelf": {
+    "visible": true,
+    "cards": 16,
+    "switchable": [
+      {
+        "id": "ocr",
+        "checked": "true"
+      },
+      {
+        "id": "desktop",
+        "checked": "true"
+      },
+      {
+        "id": "asr",
+        "checked": "true"
+      },
+      {
+        "id": "camera",
+        "checked": "true"
+      },
+      {
+        "id": "microphone",
+        "checked": "true"
+      },
+      {
+        "id": "office-render",
+        "checked": "true"
+      },
+      {
+        "id": "voice",
+        "checked": "true"
+      }
+    ],
+    "groups": [
+      "扩展模块 独立扩展层 · 可开关",
+      "就绪视图 依赖检查 · 无独立开关",
+      "DSH 原生 由 Harness 自带 · 不由 Sumika 开关"
+    ],
+    "detail": {
+      "状态": "已启用",
+      "来源": "注册表 · rapidocr",
+      "版本": "—",
+      "权限": "执行前经授权与审批",
+      "数据": "仅本机 · 不上传"
+    },
+    "counts": [
+      "7",
+      "0",
+      "0"
+    ]
+  },
+  "toggle": {
+    "id": "camera",
+    "from": "true",
+    "requested": false,
+    "registry_after": false,
+    "aria_after": "false",
+    "restored": true
+  },
+  "settings": {
+    "visible": true,
+    "summary": "7 已启用 · 0 已停用 · 0 不可用",
+    "switches": 7,
+    "ids": [
+      "ocr",
+      "desktop",
+      "asr",
+      "camera",
+      "microphone",
+      "office-render",
+      "voice"
+    ],
+    "side": {
+      "DSH": "0.1.5-rc.2 · 已验收",
+      "项目": "D:\\Code\\Sumika",
+      "数据": "本机 · 未上传"
+    },
+    "models": {
+      "工作模型任务、编辑、文档处理均使用此模型": "由 DSH 工作台管理打开工作台 →",
+      "": "● 已启用deepseek-flash",
+      "API 凭据由 DSH 保存于本机 profile，不上传、不进 Git": "由 DSH 工作台管理"
+    },
+    "placeholders": {
+      "checkpoint": false,
+      "mcpCount": false,
+      "enabledButtons": []
+    }
+  },
+  "page_errors": [],
+  "failures": [],
+  "status": "passed"
+}
