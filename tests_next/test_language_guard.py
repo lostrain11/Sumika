@@ -66,18 +66,23 @@ class LanguageGuardTests(unittest.TestCase):
         self.assertEqual(chat.provider.calls, 1)
         self.assertEqual(result["language_guard"],
                          {"retried": False, "clean": True, "transliterated": 0,
-                          "kana_found": [], "kana_remaining": []})
+                          "interjections": [], "kana_found": [], "kana_remaining": []})
 
-    def test_kana_answer_is_rewritten_locally_without_a_second_call(self):
-        """A slipped syllable must not cost another generation."""
+    def test_kana_interjection_becomes_a_chinese_word_without_a_second_call(self):
+        """A slipped syllable is rewritten locally: no second generation."""
         chat, result = self._run(["ねえ、在吗？"])
         self.assertEqual(chat.provider.calls, 1)
         self.assertFalse(result["language_guard"]["retried"])
         self.assertTrue(result["language_guard"]["clean"])
         self.assertEqual(result["language_guard"]["kana_remaining"], [])
-        self.assertEqual(result["language_guard"]["transliterated"], 2)
-        self.assertIn("nee", result["text"])
+        self.assertIn("呐", result["text"])
         self.assertNotEqual(result["text"], "ねえ、在吗？")
+
+    def test_romanized_interjection_is_also_rewritten(self):
+        chat, result = self._run(["maa，我这边刚练完鼓。"])
+        self.assertEqual(chat.provider.calls, 1)
+        self.assertTrue(result["text"].startswith("嘛"))
+        self.assertNotIn("maa", result["text"])
 
     def test_retry_still_available_when_explicitly_enabled(self):
         chat = _chat(["ねえ、在吗？", "hah？嗯，我在。"], self.usage_dir,
@@ -89,7 +94,9 @@ class LanguageGuardTests(unittest.TestCase):
         self.assertTrue(result["language_guard"]["clean"])
 
     def test_unclean_after_enabled_retry_is_reported_not_hidden(self):
-        chat = _chat(["ねえ、在吗？", "はい、いますよ。"], self.usage_dir,
+        # ゐ is deliberately outside the conversion tables: when the local rewrite
+        # cannot cover a character, the result says so instead of inventing one.
+        chat = _chat(["ねえ、在吗？", "ゐ、いますよ。"], self.usage_dir,
                      language={"retry_on_kana": True})
         chat._record_usage = lambda *args, **kwargs: None
         result = chat.reply("在吗")
@@ -98,8 +105,8 @@ class LanguageGuardTests(unittest.TestCase):
         self.assertTrue(guard["retried"])
         self.assertFalse(guard["clean"])
         self.assertTrue(guard["kana_remaining"])
-        # The reply is whatever the model said; nothing is invented or stripped.
-        self.assertIn("はい、いますよ。", result["text"])
+        # The reply keeps the character the tables could not convert.
+        self.assertIn("ゐ", result["text"])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T18:27:20.613708+00:00",
-  "current_goal": "设计稿还原 + 真实数据：活动室完整角色规则、语言兜底（本地转写，默认不重发）到位",
+  "updated_at": "2026-09-15T18:33:10.444434+00:00",
+  "current_goal": "设计稿还原 + 真实数据：活动室完整角色规则、语气词中文化与本地语言兜底到位",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -125,7 +125,8 @@
       "用户导入角色独立化并跑通：用户库 %LOCALAPPDATA%\\Sumika\\roles，/api/roles 带 kind；安和昴（用户卡+用户 VRM）导入后作为活动角色实测通过（3D 资产 16.5MB 真实加载、舞台切到 VRM、对话符合角色卡且跨轮记忆生效）。舞台不再写死 sampleA/按名字匹配：模型地址来自角色资产，无 VRM 的角色显示立绘占位；图层图例改为真实绑定列表。",
       "角色导入界面打通：名册底部「＋ 导入角色卡 / 模型」打开表单（角色 id + 选择卡 JSON + 可选本机 .vrm 路径），经 POST /api/roles/import 写入用户库并即时刷新名册；新增 /api/roles/remove 用于撤销导入（仅限用户库）。新增 attach_asset/remove_role 与 4 项单测；真实浏览器验收：导入出现为「用户导入 · 角色卡 · 立绘占位」、桥接 kind=user、测试角色已清理。",
       "角色完整性与语言兜底：名册只收「名字+角色卡+模型」齐全的角色（API 给 complete/missing，不完整的在名册下方列明缺什么，活动角色不完整时自动切到完整角色）；名字取自角色卡，导入表单显示卡内名字并提供可选覆盖；回答落地新增假名兜底（检测→只重发一次纠正→仍不干净则如实标记 language_guard）。sampleA 补了自带示例卡，实测安和昴回答为中文+罗马音语气词、无假名。",
-      "语言兜底改为本地确定性转写：检测到假名默认不再重发（省 token），用 kana→罗马音表就地改写（片假名折叠、拗音、小っ、长音符），表外字符保持原样；只有显式设置 language.retry_on_kana=true 才重发一次，仍不干净则如实标记 language_guard。"
+      "语言兜底改为本地确定性转写：检测到假名默认不再重发（省 token），用 kana→罗马音表就地改写（片假名折叠、拗音、小っ、长音符），表外字符保持原样；只有显式设置 language.retry_on_kana=true 才重发一次，仍不干净则如实标记 language_guard。",
+      "语气词改为一律中文：naturalize_reply 先映射假名语气词→中文、再映射罗马音语气词→中文、最后把残余假名转写为罗马音；策略文本（Sumika 默认 + 安和昴角色卡，项目文件与用户库副本）同步改为要求中文语气词并刷新校验；默认仍不重发（1 次调用）。实测安和昴回答：诶，你好。……嘛，今天先这样——无假名、无罗马音语气词。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -138,7 +139,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "语言兜底改为本地确定性转写：检测到假名默认不再重发（省 token），用 kana→罗马音表就地改写（片假名折叠、拗音、小っ、长音符），表外字符保持原样；只有显式设置 language.retry_on_kana=true 才重发一次，仍不干净则如实标记 language_guard。",
+    "current_task": "语气词改为一律中文：naturalize_reply 先映射假名语气词→中文、再映射罗马音语气词→中文、最后把残余假名转写为罗马音；策略文本（Sumika 默认 + 安和昴角色卡，项目文件与用户库副本）同步改为要求中文语气词并刷新校验；默认仍不重发（1 次调用）。实测安和昴回答：诶，你好。……嘛，今天先这样——无假名、无罗马音语气词。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",
@@ -158,7 +159,7 @@
     "status": "in_progress",
     "evidence": "docs/project/local-model-comparison-evidence.json",
     "verification": "190 tests run, 189 passed, 1 skipped",
-    "current_task": "语言兜底改为本地确定性转写：检测到假名默认不再重发（省 token），用 kana→罗马音表就地改写（片假名折叠、拗音、小っ、长音符），表外字符保持原样；只有显式设置 language.retry_on_kana=true 才重发一次，仍不干净则如实标记 language_guard。",
+    "current_task": "语气词改为一律中文：naturalize_reply 先映射假名语气词→中文、再映射罗马音语气词→中文、最后把残余假名转写为罗马音；策略文本（Sumika 默认 + 安和昴角色卡，项目文件与用户库副本）同步改为要求中文语气词并刷新校验；默认仍不重发（1 次调用）。实测安和昴回答：诶，你好。……嘛，今天先这样——无假名、无罗马音语气词。",
     "next_action": "剩余：(1) 侧栏圆点/间距贴近设计；(2) /api/tree 阶段任务面板；(3) 外观分区接线；(4) 待确认药丸需真实审批场景；(5) 未完整角色补挂模型的界面入口。改活动室后重跑 verify_room_chat.mjs / verify_user_role.mjs / verify_role_import_ui.mjs。"
   },
   "ui_workbench": {
@@ -194,6 +195,6 @@
   "roles": {
     "complete_rule": "name (from the card) + card asset + model_3d",
     "name_override": "POST /api/roles/import {name} -> rename_role (display label only)",
-    "language_guard": "kana -> local romaji transliteration by default (no extra call); language.retry_on_kana=true opts into one corrective retry"
+    "language_guard": "interjections -> Chinese words (kana and romaji forms), then leftover kana -> romaji; no extra model call by default; language.retry_on_kana opts into one retry"
   }
 }

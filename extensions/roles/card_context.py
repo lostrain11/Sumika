@@ -23,7 +23,8 @@ def serialized(value):
 LANGUAGE_POLICIES = {
     "zh-Hans": (
         "回复语言：默认使用简体中文，且回复中不得出现日文假名（平假名、片假名），也不得使用日语句尾或日语连接词。"
-        "需要语气词时只写罗马音：ah、eh、hah、hey、hmm、maa、un、nee。"
+        "语气词直接写成中文词：啊、诶、嗯、嘛、嘿、哈、哦、唔；不要用罗马音拼写语气词（ah、maa、nee 这类也不要），"
+        "也不要用假名。"
         "人名和乐队名使用中文译名或拉丁写法，按 name_map 替换，不要输出假名姓名，也不要保留日语敬称后缀（san、chan、kun 这类）。"
         "歌曲名、作品名和引用原文可以保留原样，但不整句复用日语。"
         "角色卡示例、世界书和历史消息的语言只作语气参考，不继承其语言。"
@@ -213,6 +214,50 @@ def transliterate_kana(text):
         out.append(character)
         index += 1
     return "".join(out), replaced
+
+
+# Interjections written as kana or as romaji fall back to the Chinese word that
+# carries the same tone. The user reads Chinese; a romanized "nee" is no more
+# readable than "ねえ" for them.
+_INTERJECTION_ZH = {
+    "ねえ": "呐", "ねぇ": "呐", "ね": "呐",
+    "ああ": "啊", "あー": "啊", "あっ": "啊", "あ": "啊",
+    "ええ": "诶", "えー": "诶", "えっ": "诶", "え": "诶",
+    "うん": "嗯", "うーん": "唔", "ん": "嗯", "ふん": "哼",
+    "まあ": "嘛", "まー": "嘛", "ま": "嘛",
+    "はい": "嗯", "へえ": "哦", "ほお": "哦", "おお": "哦", "お": "哦",
+    "へへ": "嘿嘿", "はは": "哈哈", "ふふ": "呵呵",
+    "あら": "哎呀", "おや": "哦呀",
+}
+
+_ROMAJI_INTERJECTION_ZH = {
+    "ah": "啊", "eh": "诶", "hah": "哈", "hey": "嘿", "hmm": "嗯",
+    "maa": "嘛", "un": "嗯", "nee": "呐", "ee": "诶", "oh": "哦",
+}
+
+
+def naturalize_reply(text):
+    """Rewrite interjections as Chinese words and any leftover kana as romaji.
+
+    Returns ``(text, report)``. The report says which interjections were mapped
+    and how many kana characters had to be transliterated, so the caller can show
+    what happened instead of silently rewriting the character's voice.
+    """
+    if not isinstance(text, str):
+        raise ValueError("text required")
+    out = text
+    interjections = []
+    for kana, chinese in sorted(_INTERJECTION_ZH.items(), key=lambda item: -len(item[0])):
+        if kana in out:
+            out = out.replace(kana, chinese)
+            interjections.append(f"{kana}→{chinese}")
+    out = re.sub(r"(?<![A-Za-z])(%s)(?![A-Za-z])"
+                 % "|".join(sorted(_ROMAJI_INTERJECTION_ZH, key=len, reverse=True)),
+                 lambda match: _ROMAJI_INTERJECTION_ZH[match.group(1).casefold()],
+                 out, flags=re.IGNORECASE)
+    rewritten, replaced = transliterate_kana(out)
+    return rewritten, {"interjections": interjections, "transliterated": len(replaced),
+                       "changed": rewritten != text}
 
 
 def localize_names(text, name_map):

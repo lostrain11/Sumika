@@ -15,7 +15,7 @@ from extensions.models.cloud import CloudError, CloudProvider
 from extensions.models.ollama import OllamaError, OllamaProvider
 from extensions.models.settings import load as load_settings
 from extensions.models.usage import UsageStore
-from extensions.roles.card_context import kana_characters, transliterate_kana
+from extensions.roles.card_context import kana_characters, naturalize_reply
 from extensions.memory.extraction_policy import ExtractionGate
 from extensions.memory.rules_proposer import propose as propose_facts
 from extensions.roles.card_context import localize_names, serialized
@@ -123,7 +123,7 @@ class RoleChat:
             # correction — the user asked for Chinese, not for a guess.
             guard = self._language_guard(session, provider, messages, localized["text"],
                                         max_tokens, images)
-            if guard["retried"] or guard["transliterated"]:
+            if guard["changed"]:
                 # The guard is the last word on the visible text, whether it rewrote
                 # the kana locally or asked the model again.
                 localized = {"text": guard["text"], "applied": guard["applied"]}
@@ -149,6 +149,7 @@ class RoleChat:
                     "language_policy_source": context["selection"]["language_policy_source"],
                     "language_guard": {"retried": guard["retried"], "clean": guard["clean"],
                                        "transliterated": guard["transliterated"],
+                                       "interjections": guard.get("interjections", []),
                                        "kana_found": guard["kana_found"],
                                        "kana_remaining": guard["kana_remaining"]},
                     "role_tools": 0}
@@ -178,31 +179,40 @@ class RoleChat:
         kana is reported (`clean: False`) instead of being hidden.
         """
         present = kana_characters(text)
-        if not present:
-            return {"retried": False, "clean": True, "transliterated": 0,
-                    "text": text, "applied": [], "kana_found": [], "kana_remaining": []}
         language = self.settings.get("language") or {}
-        if not language.get("retry_on_kana"):
-            rewritten, replaced = transliterate_kana(text)
-            localized = session.request("localize_names", {"text": rewritten})
-            remaining = kana_characters(localized["text"])
-            return {"retried": False, "clean": not remaining,
-                    "transliterated": len(replaced), "text": localized["text"],
-                    "applied": localized["applied"], "kana_found": present,
-                    "kana_remaining": remaining}
+        if language.get("retry_on_kana") and present:
+            return self._retry_language(session, provider, messages, text, present,
+                                        max_tokens, images)
+        # Cheap and local: interjections become Chinese words, leftover kana becomes
+        # romaji, and the name map is applied. Nothing here calls the model.
+        rewritten, report = naturalize_reply(text)
+        localized = session.request("localize_names", {"text": rewritten})
+        remaining = kana_characters(localized["text"])
+        return {"retried": False, "clean": not remaining,
+                "transliterated": report["transliterated"],
+                "interjections": report["interjections"],
+                "changed": report["changed"] or bool(localized["applied"]),
+                "text": localized["text"],
+                "applied": localized["applied"], "kana_found": present,
+                "kana_remaining": remaining}
+
+    def _retry_language(self, session, provider, messages, text, present, max_tokens, images):
+        """Opt-in path: ask the model once more instead of rewriting locally."""
         correction = list(messages) + [
             {"role": "assistant", "content": text},
             {"role": "user", "content":
                 "上一版回复里出现了日文假名：" + "".join(present) + "。"
-                "请只用简体中文重写这段回复：语气词写罗马音（ah／eh／hah／hey／hmm／maa／un／nee），"
+                "请只用简体中文重写这段回复：语气词直接写成中文词（啊／诶／嗯／嘛／嘿／哈／哦／唔），不要写罗马音也不要写假名，"
                 "人名与乐队名用中文译名或拉丁写法，不要解释，直接给出改好的回复。"},
         ]
         retry = self._generate(provider, correction, max_tokens, images)
-        localized = session.request("localize_names", {"text": retry["text"]})
+        rewritten, report = naturalize_reply(retry["text"])
+        localized = session.request("localize_names", {"text": rewritten})
         remaining = kana_characters(localized["text"])
         return {"retried": True, "clean": not remaining, "text": localized["text"],
                 "applied": localized["applied"], "kana_found": present,
-                "transliterated": 0,
+                "transliterated": report["transliterated"], "changed": True,
+                "interjections": report["interjections"],
                 "kana_remaining": remaining,
                 "retry_usage": retry.get("usage")}
 
