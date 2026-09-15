@@ -227,6 +227,21 @@ html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle']:hover [class
 html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle']:hover [class*='_railMark'] {
   display: inline-flex;
 }
+
+/* The design's sidebar has no brand of its own - the wordmark lives in the
+   shell's top bar - so the identity button is hidden while the collapse toggle
+   beside it stays. In the collapsed rail the mark is shown again (railMark),
+   because there the toggle *is* the only affordance. */
+html[data-sumika-skin='1'] [class$='_brand'],
+html[data-sumika-skin='1'] [class*='_brand '] {
+  display: none;
+}
+/* With the identity gone that row only holds the collapse control, so it does
+   not need its original 60px; the design starts the column with 新建任务. */
+html[data-sumika-skin='1'] [class*='_logoRow'] {
+  height: 40px;
+  margin-bottom: 6px;
+}
 `;
 
 const SKIN_SCRIPT = `(() => {

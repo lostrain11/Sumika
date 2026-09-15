@@ -66,9 +66,17 @@ const probe = await page.evaluate(() => {
   return {
     skinMarker: document.documentElement.dataset.sumikaSkin || null,
     shellGlobal: window.__sumikaShell || null,
-    brand: text.includes('晴日部室'),
+    // The design's sidebar has no brand of its own; the wordmark belongs to the
+    // shell's top bar, so the identity button must be hidden here (and DSH's own
+    // wordmark must not show through either).
+    sidebarBrandHidden: (() => {
+      const node = document.querySelector("[class$='_brand'], [class*='_brand ']");
+      return node ? getComputedStyle(node).display === 'none' : 'absent';
+    })(),
+    sidebarWordmarks: ['晴日部室', 'HARNESS'].filter(word => text.includes(word)),
     footerStatus: text.includes('本地优先 · 数据不出本机'),
     footerRelease: /已连接\s*DSH\s*[0-9]/.test(text),
+    shellLink: document.querySelector('[data-sumika-shell-link]')?.getAttribute('href') || null,
     heroMark: (() => {
       // The slot hands its occupant the surrounding mark geometry class, so find
       // whichever element inside the headline actually paints a gradient.
@@ -174,9 +182,13 @@ const failures = [];
 if (pageErrors.length) failures.push(`client errors: ${pageErrors.join(' | ')}`);
 if (consoleErrors.length) failures.push(`client console errors: ${consoleErrors.join(' | ')}`);
 if (probe.skinMarker !== '1') failures.push('skin marker missing');
-if (!probe.brand) failures.push('sidebar brand is not 晴日部室');
+if (probe.sidebarBrandHidden === false) failures.push('the sidebar still shows a brand');
+if (probe.sidebarWordmarks.length) {
+  failures.push(`sidebar shows a wordmark: ${probe.sidebarWordmarks.join(', ')}`);
+}
 if (!probe.footerStatus) failures.push('footer status line missing');
 if (!probe.footerRelease) failures.push('footer harness release missing');
+if (!probe.shellLink) failures.push('no way back to the Sumika shell from the workbench');
 if (!probe.heroMark || !probe.heroMark.includes('linear-gradient')) {
   failures.push(`hero brand mark is ${probe.heroMark}`);
 }
