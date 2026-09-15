@@ -221,7 +221,9 @@ ctx.slots.inject("sidebar", () => ctx.slots.register({
 - 列表槽注册需要 `id`（与 `sidebar.footer.action` 一致），可参考同样写法的 `dsh-session-log-export`（`id: 'session-log-download'`，props 里读 `sessionId` 与自己的 `hooks`）。
 - **会话头只在非空白会话挂载**：新会话视图走 hero（欢迎页），`conversation.session.header.*` 根本不渲染。因此头部药丸的落地必须在一个已有对话的会话里验证；本机受管 profile（`.sumika-next/daily/0.1.5-rc.2`）目前 `.credentials.yaml` 只有浏览器会话授权、没有模型凭据（网页也显示「添加一个 API Key 开始使用」），两个会话文件都是空白会话，所以这一项**暂缓到有非空白会话时再做**，不先写未验证的 UI。
 
-诊断方法保留在 `.sumika-next/probe/`（运行时目录，不入仓库）：`package.json` + `lib/index.js` + `lib/client.js` 是占位探针，`read.mjs`/`tree.mjs`/`stream.mjs` 是读取脚本。再次需要时把 `{"id": "sumika-probe", "name": "<路径>\\probe\\lib\\index.js"}` 加回 `cordis.patch.yml` 并重启受管 DSH 即可。`/plugins/events` 是网页实际获取插件清单与 bundle 的通道，可用来确认某个插件是否真的被下发。
+诊断方法保留在 `.sumika-next/slot-probe/`（运行时目录，不入仓库）：`package.json` + `lib/index.js` + `lib/client.js` 是占位探针，`read.mjs`（读取占位报告）、`tree.mjs`（dump 侧栏树）、`stream.mjs`（列出实际下发的插件 id）、`rail_zoom.mjs`（折叠态放大截图）是读取脚本。再次需要时把 `{"id": "sumika-probe", "name": "<路径>\\lib\\index.js"}` 加回 `cordis.patch.yml` 并重启受管 DSH 即可。`/plugins/events` 是网页实际获取插件清单与 bundle 的通道，可用来确认某个插件是否真的被下发。
+
+注意：`.sumika-next/probe/` 是 2026-09-12 遗留的一个空 DSH profile 脚手架（只有 `profiles/web`、`storages` 与一份浏览器会话授权），与本方案无关，未再使用；它属于本机运行数据，可自行删除。
 
 ```powershell
 node tools/verify_workbench_ui.mjs http://127.0.0.1:8765 docs/project/workbench-ui-evidence.json
