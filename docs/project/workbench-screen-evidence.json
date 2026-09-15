@@ -1,10 +1,10 @@
 {
-  "checked_at": "2026-09-15T17:49:15.921Z",
+  "checked_at": "2026-09-15T19:57:56.604Z",
   "bridge": "http://127.0.0.1:8765",
   "screen": {
     "screenVisible": true,
     "framePresent": true,
-    "frameSrc": "http://127.0.0.1:5175/?token=WD2CumGVuitUZgvUtWrErVmMOV7RrVjJKmHkgkT2GNg",
+    "frameSrc": "http://127.0.0.1:5175/?token=FpKb-XNpca6vWKXaIQq0kQjMzhDIWzMleEsPEXtoKcI",
     "frameHeight": 836,
     "mockWrapPresent": false,
     "navVisible": true,

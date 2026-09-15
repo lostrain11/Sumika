@@ -17,6 +17,14 @@ style.textContent = `
   border: 1px solid var(--line, #e2dccd); border-radius: 9px; background: #fff; margin: 10px 0; }
 #screen-board { overflow: hidden; }
 #sumika-workbench-frame { position: absolute; inset: 0; }
+/* The shell must never be taller than the viewport: the design's
+   .screen{height:calc(100% - 64px)} resolved against a stale 100% and pushed the
+   composer and the sidebar footer out of reach under body{overflow:hidden}.
+   A fixed-viewport flex column makes the active screen take exactly what is left. */
+html, body { height: 100%; overflow: hidden; }
+body { display: flex; flex-direction: column; }
+.topbar { flex: 0 0 auto; }
+.screen { flex: 1 1 auto; min-height: 0; height: auto; }
 /* The design's floating deskpet still carries sample dialogue; it must not sit
    on top of the real workbench. */
 body.on-board #deskpet { display: none; }

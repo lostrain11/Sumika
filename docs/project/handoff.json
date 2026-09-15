@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T19:55:13.021939+00:00",
+  "updated_at": "2026-09-15T19:58:02.730468+00:00",
   "current_goal": "D 方向 UI 收敛：工作台=DSH、能力与项目作为 DSH 主面板、活动室接真实角色服务，扩展开关与角色完整性均有验收",
   "current_phase": "P6",
   "phase_status": "in_progress",
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "审批卡：等用户在 DSH 里把权限预设切到需要确认的档位（或授权我执行工作区外操作）后再验证；diff 正文/终端：需要展开态或产生 diff 的工具输出再采样。其余按覆盖表推进。",
+  "next_action": "审批卡：需用户切权限预设或授权工作区外操作；diff 正文/终端：需展开态。其余按覆盖表推进。每次改外壳/皮肤后重跑 verify_workbench_ui.mjs 与 verify_workbench_screen.mjs。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -135,7 +135,8 @@
       "时间线皮肤第一轮：按设计稿 .bub/.tool-d/.tool-d .df 写规则并实测——用户消息气泡已生效（1px/8px/水色浅底），助手消息有意不套气泡（DSH 是长文 markdown，套气泡更差）；工具卡/diff/终端规则已写但当前会话无该类节点，命中数 0，标为未验证。",
       "确立“设计稿=视觉参照、不是删功能授权”：DSH 原生额外能力（轨迹/用量用时/系统提示词/模型 chip 等）一律保留，写入 AGENTS.md 与覆盖表。时间线工具卡实测生效（_callRow: border-left 3px / radius 10px / paper 底），终端与 diff 仍未命中（本轮输出未展开渲染），保持未验证。",
       "输入区皮肤完成并实测：先 dump 出真实 DOM 链（composerStack > root > card > scroll > grow > input，底部是 tools），据此改正选择器——输入卡 1px 描边/10px 圆角/纸色底、控件行虚线分隔、占位符 muted、外边距与设计稿 .wb-composer 一致；原生控件全部保留。",
-      "审批/diff/终端场景实测：真实工具调用 2 次（跑测试、写并删除临时文件）——工具卡样式已生效；diffStat 节点存在；diff 正文与终端容器均未渲染（仍标未验证）；审批卡未出现，原因是权限为「工作区内修改」，工作区内写文件不弹审批，需要用户切权限预设或执行工作区外操作才能验证。"
+      "审批/diff/终端场景实测：真实工具调用 2 次（跑测试、写并删除临时文件）——工具卡样式已生效；diffStat 节点存在；diff 正文与终端容器均未渲染（仍标未验证）；审批卡未出现，原因是权限为「工作区内修改」，工作区内写文件不弹审批，需要用户切权限预设或执行工作区外操作才能验证。",
+      "修复外壳布局 bug：1160x800 视口下 body 被算成 900px 且 overflow:hidden，导致输入区控件行（含权限模式）与侧栏页脚永远看不到、也滚不到；改为 html/body 定高 + body flex 纵向 + .screen flex:1 min-height:0。实测两种尺寸 frame 底边都等于视口高度、scrollable=false。同时撤回“被框架加载时跳过品牌”——那会让侧栏露出 DSH 官方 deepseek HARNESS 字样，反而更差。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -148,7 +149,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "审批/diff/终端场景实测：真实工具调用 2 次（跑测试、写并删除临时文件）——工具卡样式已生效；diffStat 节点存在；diff 正文与终端容器均未渲染（仍标未验证）；审批卡未出现，原因是权限为「工作区内修改」，工作区内写文件不弹审批，需要用户切权限预设或执行工作区外操作才能验证。",
+    "current_task": "修复外壳布局 bug：1160x800 视口下 body 被算成 900px 且 overflow:hidden，导致输入区控件行（含权限模式）与侧栏页脚永远看不到、也滚不到；改为 html/body 定高 + body flex 纵向 + .screen flex:1 min-height:0。实测两种尺寸 frame 底边都等于视口高度、scrollable=false。同时撤回“被框架加载时跳过品牌”——那会让侧栏露出 DSH 官方 deepseek HARNESS 字样，反而更差。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",

@@ -117,16 +117,14 @@ window.__ModuleLoader__.load({
 		 * without them simply shows the official brand.
 		 */
 		function apply(ctx) {
-			// Rendered inside the shell's workbench screen, the shell's own top bar
-			// already carries the brand, so the sidebar does not repeat it there.
-			const framed = window.self !== window.top;
-			if (!framed) {
-				ctx.slots.inject('sidebar.brand.mark', () =>
-					ctx.slots.inject('sidebar.brand.name', function* () {
-						yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: -1 }, SumikaBrandMark);
-						yield ctx.slots.register({ name: 'sidebar.brand.name', priority: -1 }, SumikaBrandName);
-					}));
-			}
+			// Always occupy the brand slots: skipping them when framed only let DSH's
+			// own "deepseek HARNESS" wordmark show through, which is worse than the
+			// brand appearing in both the shell top bar and the sidebar.
+			ctx.slots.inject('sidebar.brand.mark', () =>
+				ctx.slots.inject('sidebar.brand.name', function* () {
+					yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: -1 }, SumikaBrandMark);
+					yield ctx.slots.register({ name: 'sidebar.brand.name', priority: -1 }, SumikaBrandName);
+				}));
 			// The New Session hero mark is a single-occupancy root slot whose default
 			// occupant is DSH's own fish, so it is shadowed the same way.
 			ctx.slots.inject('conversation.hero.brand.mark', function* () {
