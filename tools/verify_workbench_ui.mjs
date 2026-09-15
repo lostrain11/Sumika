@@ -124,7 +124,32 @@ if (await toggle.count().catch(() => 0)) {
   await page.waitForTimeout(700);
 }
 
+// Conversation header: the Session header only mounts for a non-blank Session, so
+// open one from the tree when the profile has any. The status marker reports
+// "wired but idle" against "not mounted".
+let sessionStatus = { state: 'no_non_blank_session' };
+let sessionStatusFailure = null;
+const treeRows = page.locator("[class*='_root_1b2ny_3']");
+const treeRowCount = await treeRows.count().catch(() => 0);
+for (let index = treeRowCount - 1; index >= 0; index -= 1) {
+  const text = (await treeRows.nth(index).innerText().catch(() => '')).trim();
+  if (!text || /^新会话/.test(text)) continue;
+  await treeRows.nth(index).click().catch(() => {});
+  await page.waitForTimeout(6000);
+  break;
+}
+if (await page.locator("[class*='_headerUtilities']").count().catch(() => 0)) {
+  const marked = page.locator('[data-sumika-session-status]');
+  sessionStatus = (await marked.count().catch(() => 0)) > 0
+    ? { state: await marked.first().getAttribute('data-sumika-session-status').catch(() => null) }
+    : { state: 'slot_rendered_without_our_entry' };
+}
+probe.sessionStatus = sessionStatus;
+if (sessionStatus.state === 'slot_rendered_without_our_entry') {
+  sessionStatusFailure = 'session header rendered but the Sumika status entry is missing';
+}
 if (pagePath) await page.screenshot({ path: pagePath, fullPage: false });
+
 await browser.close();
 
 const failures = [];
@@ -145,9 +170,10 @@ if (rail) {
   if (rail.panelIconDisplay !== 'none') failures.push('rail toggle swaps in the upstream panel glyph on hover');
   if (!rail.markGradient) failures.push('rail mark does not paint the Sumika gradient');
 }
+if (sessionStatusFailure) failures.push(sessionStatusFailure);
 
-const result = { checked_at: new Date().toISOString(), url: bridge, probe, rail, page_errors: pageErrors,
-                 failures, status: failures.length ? 'failed' : 'passed' };
+const result = { checked_at: new Date().toISOString(), url: bridge, probe, rail, session_status: sessionStatus,
+                 page_errors: pageErrors, failures, status: failures.length ? 'failed' : 'passed' };
 console.log(JSON.stringify(result, null, 2));
 if (evidencePath) await writeFile(evidencePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
 process.exit(failures.length ? 1 : 0);

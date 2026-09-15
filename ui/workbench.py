@@ -18,6 +18,7 @@ from sumika_next.dsh import Dsh, DshError
 
 SKIN_MODULE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-skin" / "dsh.mjs"
 BRAND_PACKAGE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-brand"
+WORKBENCH_PACKAGE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-workbench"
 
 
 def ensure_skin(home, *, enabled=True):
@@ -71,6 +72,20 @@ def ensure_skin(home, *, enabled=True):
                 brand_found = True
     if not brand_found:
         rows.append({"insert": [brand_entry]})
+    # The workbench additions ship a browser half too, so their loader entry has
+    # the same shape: a file path plus the enclosing package's dsh.client.
+    workbench_entry = {"id": "sumika-workbench",
+                       "name": str(WORKBENCH_PACKAGE / "lib" / "index.js"), "config": {}}
+    workbench_found = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for item in row.get("insert", []) or []:
+            if isinstance(item, dict) and item.get("id") == "sumika-workbench":
+                item.update(workbench_entry)
+                workbench_found = True
+    if not workbench_found:
+        rows.append({"insert": [workbench_entry]})
     patch.parent.mkdir(parents=True, exist_ok=True)
     patch.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf8")
     return {"registered": True, "enabled": bool(enabled), "path": str(patch)}

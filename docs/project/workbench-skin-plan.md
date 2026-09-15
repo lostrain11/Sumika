@@ -221,6 +221,33 @@ ctx.slots.inject("sidebar", () => ctx.slots.register({
 - 列表槽注册需要 `id`（与 `sidebar.footer.action` 一致），可参考同样写法的 `dsh-session-log-export`（`id: 'session-log-download'`，props 里读 `sessionId` 与自己的 `hooks`）。
 - **会话头只在非空白会话挂载**：新会话视图走 hero（欢迎页），`conversation.session.header.*` 根本不渲染。因此头部药丸的落地必须在一个已有对话的会话里验证；本机受管 profile（`.sumika-next/daily/0.1.5-rc.2`）目前 `.credentials.yaml` 只有浏览器会话授权、没有模型凭据（网页也显示「添加一个 API Key 开始使用」），两个会话文件都是空白会话，所以这一项**暂缓到有非空白会话时再做**，不先写未验证的 UI。
 
+### 会话头槽位的实测签名（2026-09-16，已用非空白会话复测）
+
+用户在受管 profile 里填入 key 并发出一条真实消息后，头部槽位可以打开了。实测三个头部槽位的 props：
+
+| 槽 | 实测 props |
+| --- | --- |
+| `conversation.session.header.utilities`（list） | `sessionId`、`inputActions`、`useSession`、`useSessions`、`useWorkspaces`、`useConversation`、`useChat`、`useTrajectory`、`useProjection`、`useResource`、`usePanelInfo`、`useInput`、`useSessionPendingInteraction` |
+| `conversation.session.header.actions`（list） | 同上 |
+| `conversation.session.header.lineage`（single，`priority: -1` 接管） | 追加 `lineageSessionId`、`displayTitle`（有祖先时才有 `openTitle`） |
+
+注意：头部槽位**没有** `session` 快照（只有输入区槽位才有），状态必须从 hooks 取——`useSessions((state) => state.byId[id]?.running)` 与 `useSessionPendingInteraction((state) => state.get(id)?.kind)`。
+
+## 会话状态药丸（2026-09-16 已落地）
+
+新增独立插件 `extensions/ui/sumika-workbench/`（host 半边空实现，浏览器半边注册到 `conversation.session.header.utilities`，`id: 'sumika-session-status'`），由 `ensure_skin()` 登记进受管 profile 的补丁层。行为：
+
+- `session.running` → 绿色药丸「执行中」（设计稿 `.pill-d.run`：`#567f6c` / `#e8f1ea` / `#c1d8c8` 边）。
+- `useSessionPendingInteraction` 的 `approval` / `plan-review` / `question` → 琥珀色药丸「等待审批 / 计划审阅 / 等待回答」（设计稿 `.pill-d.wait`）。
+- 其余情况只留一个零宽、带 `data-sumika-session-status="idle"` 的宿主元素，不占位、不显示文案；该属性同时是验收判定「已接线但空闲」与「没挂载」的依据。
+- **没有**照搬设计稿的「N 项待确认」计数：原生的待交互信号是单一种类，没有计数。
+
+验证：
+
+- `node tools/verify_workbench_ui.mjs` 打开一个真实非空白会话，断言状态入口存在（`idle`）且无客户端报错。
+- `node tools/verify_workbench_status_pill.mjs` 会新建一个会话、发出一条短消息并在轮次进行中采样头部；实测样本 `["idle", "running"]`，可见文案「执行中」，证据 `docs/project/workbench-status-pill-evidence.json`。脚本会消耗一次很小的模型调用，并把该会话留在工作区供人工查看。
+- **未验证**：琥珀色待确认药丸尚未在真实审批/计划审阅/提问场景中出现过，只做了分支实现。
+
 诊断方法保留在 `.sumika-next/slot-probe/`（运行时目录，不入仓库）：`package.json` + `lib/index.js` + `lib/client.js` 是占位探针，`read.mjs`（读取占位报告）、`tree.mjs`（dump 侧栏树）、`stream.mjs`（列出实际下发的插件 id）、`rail_zoom.mjs`（折叠态放大截图）是读取脚本。再次需要时把 `{"id": "sumika-probe", "name": "<路径>\\lib\\index.js"}` 加回 `cordis.patch.yml` 并重启受管 DSH 即可。`/plugins/events` 是网页实际获取插件清单与 bundle 的通道，可用来确认某个插件是否真的被下发。
 
 注意：`.sumika-next/probe/` 是 2026-09-12 遗留的一个空 DSH profile 脚手架（只有 `profiles/web`、`storages` 与一份浏览器会话授权），与本方案无关，未再使用；它属于本机运行数据，可自行删除。

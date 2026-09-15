@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T16:50:34.212400+00:00",
-  "current_goal": "继续还原 D 方向 UI：侧栏与欢迎页品牌已落地、悬停回退已修，下一步待会话头可验证后做面包屑/状态药丸",
+  "updated_at": "2026-09-15T17:05:03.672716+00:00",
+  "current_goal": "继续还原 D 方向 UI：品牌、侧栏、悬停与会话头状态药丸已落地并验证",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "UI 继续（按 docs/project/workbench-skin-plan.md 待办）：(1) 先让受管 profile 有一个非空白会话（在 Sumika 工作台里填一次 API Key 并发一条消息），然后用 conversation.session.header.lineage + .utilities 落面包屑/任务标题/状态药丸，状态取 conversationPhase 与 useSessionPendingInteraction，不要照搬设计稿的 N 项待确认计数；(2) 侧栏圆点/间距的皮肤级贴近；(3) 独立 main 面板 + sidebar.panellist 条目展示 /api/tree；(4) 设置页分区与 R-107/R-108 功能开关。每次 DSH 升级后重跑 tools/verify_workbench_ui.mjs。",
+  "next_action": "UI 继续（docs/project/workbench-skin-plan.md 待办）：(1) 会话头面包屑/标题可用 conversation.session.header.lineage（owner 给 lineageSessionId/displayTitle）；(2) 侧栏圆点/间距/时间文案的皮肤级贴近；(3) 独立 main 面板 + sidebar.panellist 条目接 /api/tree；(4) 设置页分区与 R-107/R-108 功能开关；(5) 待确认药丸需真实审批/计划/提问场景才算验证。每次 DSH 升级后重跑 tools/verify_workbench_ui.mjs。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -115,7 +115,8 @@
       "BrowserSkill授权数据边界完成：默认写入本机LOCALAPPDATA/Sumika/browser-authorizations.json，原子替换保存，支持站点撤销；不写入项目源文件或Git",
       "工作台壳层第一轮落地并真实验收：品牌槽用 priority:-1 shadow 接管（未停用官方插件），侧栏底部状态行读取宿主注入的真实 release，皮肤令牌同步设计稿新值并补结构覆盖；tools/verify_workbench_ui.mjs 在真实 Edge + 受管实例上通过，证据 docs/project/workbench-ui-evidence.json",
       "工作台壳层第二轮：欢迎页品牌槽 conversation.hero.brand.mark 以 priority:-1 接管（已实测渐变生效）；并核实会话区槽位（session.header.lineage/utilities/corner、input.*、tool.title.*）与 conversationPhase 状态来源。同时确认原生侧栏会话行已自带状态点+标题+相对时间+行菜单，整槽接管 sidebar.workspaces 是净损失，改为皮肤级贴近。",
-      "工作台壳层第三轮：修复折叠侧栏悬停时品牌标记被上游规则换回面板图标（皮肤覆盖 + 验收断言）；用临时探针实测会话级槽位 props 契约（sessionId/session/全局 hooks/input+inputActions）并写入方案文档。受阻记录：会话头只在非空白会话挂载，受管 profile 无模型凭据且两个会话均为空白，故头部面包屑/状态药丸暂缓，不写未验证 UI。"
+      "工作台壳层第三轮：修复折叠侧栏悬停时品牌标记被上游规则换回面板图标（皮肤覆盖 + 验收断言）；用临时探针实测会话级槽位 props 契约（sessionId/session/全局 hooks/input+inputActions）并写入方案文档。受阻记录：会话头只在非空白会话挂载，受管 profile 无模型凭据且两个会话均为空白，故头部面包屑/状态药丸暂缓，不写未验证 UI。",
+      "工作台壳层第四轮：新增独立插件 extensions/ui/sumika-workbench，在会话头 utilities 槽渲染真实状态的药丸（running→执行中；pendingInteraction approval/plan-review/question→等待审批/计划审阅/等待回答）；实测会话头三个槽位的 props 签名；实时验证脚本抓到 idle→running 与「执行中」文案。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -128,7 +129,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "工作台壳层第三轮：修复折叠侧栏悬停时品牌标记被上游规则换回面板图标（皮肤覆盖 + 验收断言）；用临时探针实测会话级槽位 props 契约（sessionId/session/全局 hooks/input+inputActions）并写入方案文档。受阻记录：会话头只在非空白会话挂载，受管 profile 无模型凭据且两个会话均为空白，故头部面包屑/状态药丸暂缓，不写未验证 UI。",
+    "current_task": "工作台壳层第四轮：新增独立插件 extensions/ui/sumika-workbench，在会话头 utilities 槽渲染真实状态的药丸（running→执行中；pendingInteraction approval/plan-review/question→等待审批/计划审阅/等待回答）；实测会话头三个槽位的 props 签名；实时验证脚本抓到 idle→running 与「执行中」文案。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",
@@ -148,17 +149,19 @@
     "status": "in_progress",
     "evidence": "docs/project/local-model-comparison-evidence.json",
     "verification": "190 tests run, 189 passed, 1 skipped",
-    "current_task": "工作台壳层第三轮：修复折叠侧栏悬停时品牌标记被上游规则换回面板图标（皮肤覆盖 + 验收断言）；用临时探针实测会话级槽位 props 契约（sessionId/session/全局 hooks/input+inputActions）并写入方案文档。受阻记录：会话头只在非空白会话挂载，受管 profile 无模型凭据且两个会话均为空白，故头部面包屑/状态药丸暂缓，不写未验证 UI。",
-    "next_action": "UI 继续（按 docs/project/workbench-skin-plan.md 待办）：(1) 先让受管 profile 有一个非空白会话（在 Sumika 工作台里填一次 API Key 并发一条消息），然后用 conversation.session.header.lineage + .utilities 落面包屑/任务标题/状态药丸，状态取 conversationPhase 与 useSessionPendingInteraction，不要照搬设计稿的 N 项待确认计数；(2) 侧栏圆点/间距的皮肤级贴近；(3) 独立 main 面板 + sidebar.panellist 条目展示 /api/tree；(4) 设置页分区与 R-107/R-108 功能开关。每次 DSH 升级后重跑 tools/verify_workbench_ui.mjs。"
+    "current_task": "工作台壳层第四轮：新增独立插件 extensions/ui/sumika-workbench，在会话头 utilities 槽渲染真实状态的药丸（running→执行中；pendingInteraction approval/plan-review/question→等待审批/计划审阅/等待回答）；实测会话头三个槽位的 props 签名；实时验证脚本抓到 idle→running 与「执行中」文案。",
+    "next_action": "UI 继续（docs/project/workbench-skin-plan.md 待办）：(1) 会话头面包屑/标题可用 conversation.session.header.lineage（owner 给 lineageSessionId/displayTitle）；(2) 侧栏圆点/间距/时间文案的皮肤级贴近；(3) 独立 main 面板 + sidebar.panellist 条目接 /api/tree；(4) 设置页分区与 R-107/R-108 功能开关；(5) 待确认药丸需真实审批/计划/提问场景才算验证。每次 DSH 升级后重跑 tools/verify_workbench_ui.mjs。"
   },
   "ui_workbench": {
     "design": "D:\\Code\\Sumika-UI-Designs\\direction-d-hiyori",
     "plugins": [
       "extensions/ui/sumika-brand",
-      "extensions/ui/sumika-skin"
+      "extensions/ui/sumika-skin",
+      "extensions/ui/sumika-workbench"
     ],
     "acceptance": "tools/verify_workbench_ui.mjs -> docs/project/workbench-ui-evidence.json",
+    "live_acceptance": "tools/verify_workbench_status_pill.mjs -> docs/project/workbench-status-pill-evidence.json",
     "plan": "docs/project/workbench-skin-plan.md",
-    "blocker": "受管 profile 无模型凭据 + 无历史非空白会话，会话头相关 UI 无法验证"
+    "blocker": null
   }
 }

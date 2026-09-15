@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-09-15T17:04:51.133Z",
+  "bridge": "http://127.0.0.1:8765",
+  "samples": [
+    "idle",
+    "running"
+  ],
+  "running_pill_text": "执行中",
+  "page_errors": [],
+  "failures": [],
+  "status": "passed"
+}

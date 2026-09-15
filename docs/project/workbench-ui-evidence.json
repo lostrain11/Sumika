@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-09-15T16:51:01.792Z",
+  "checked_at": "2026-09-15T17:03:57.572Z",
   "url": "http://127.0.0.1:8765",
   "probe": {
     "skinMarker": "1",
@@ -36,12 +36,18 @@
       "rose": "#b4496a",
       "green": "#567f6c",
       "webRadius": "9px"
+    },
+    "sessionStatus": {
+      "state": "idle"
     }
   },
   "rail": {
     "markDisplay": "flex",
     "panelIconDisplay": "none",
     "markGradient": "linear-gradient(135deg, rgb(86, 127, 108) 0%, rgb(180, 73, 106) 100%)"
+  },
+  "session_status": {
+    "state": "idle"
   },
   "page_errors": [],
   "failures": [],
