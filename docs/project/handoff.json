@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T19:10:13.731371+00:00",
-  "current_goal": "设计稿还原 + 真实数据：安和昴 v1.4 卡已重新导入，语气词策略读卡（hah 白名单保护）",
+  "updated_at": "2026-09-15T19:20:38.911726+00:00",
+  "current_goal": "D 方向 UI 收敛：工作台=DSH、能力与项目作为 DSH 主面板、活动室接真实角色服务，扩展开关与角色完整性均有验收",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "剩余：(1) 侧栏圆点/间距贴近设计；(2) /api/tree 阶段任务面板；(3) 外观分区接线；(4) 待确认药丸需真实审批场景；(5) 未完整角色补挂模型的界面入口。改活动室后重跑 verify_room_chat.mjs / verify_user_role.mjs / verify_role_import_ui.mjs。",
+  "next_action": "剩余 UI：(1) 外观分区（主题/背景/界面密度）接线；(2) 侧栏圆点与间距贴近设计；(3) 待确认药丸需真实审批场景。改工作台后重跑 verify_workbench_ui / verify_workbench_screen / verify_dsh_panel。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -127,7 +127,8 @@
       "角色完整性与语言兜底：名册只收「名字+角色卡+模型」齐全的角色（API 给 complete/missing，不完整的在名册下方列明缺什么，活动角色不完整时自动切到完整角色）；名字取自角色卡，导入表单显示卡内名字并提供可选覆盖；回答落地新增假名兜底（检测→只重发一次纠正→仍不干净则如实标记 language_guard）。sampleA 补了自带示例卡，实测安和昴回答为中文+罗马音语气词、无假名。",
       "语言兜底改为本地确定性转写：检测到假名默认不再重发（省 token），用 kana→罗马音表就地改写（片假名折叠、拗音、小っ、长音符），表外字符保持原样；只有显式设置 language.retry_on_kana=true 才重发一次，仍不干净则如实标记 language_guard。",
       "语气词改为一律中文：naturalize_reply 先映射假名语气词→中文、再映射罗马音语气词→中文、最后把残余假名转写为罗马音；策略文本（Sumika 默认 + 安和昴角色卡，项目文件与用户库副本）同步改为要求中文语气词并刷新校验；默认仍不重发（1 次调用）。实测安和昴回答：诶，你好。……嘛，今天先这样——无假名、无罗马音语气词。",
-      "按用户优化的安和昴新卡重新导入（删旧副本→导入新卡→重挂同一 VRM→刷新校验，kind=user/complete=true/verified=ok）；Sumika 侧新增卡内语气词白名单：compile_card 编译校验 interjection_policy，select_context 暴露 interjection_allow，naturalize_reply(keep=...) 保护白名单 token —— hah 从默认映射表移除，她的招牌「hah？」保持原样，其余罗马音语气词仍落中文。"
+      "按用户优化的安和昴新卡重新导入（删旧副本→导入新卡→重挂同一 VRM→刷新校验，kind=user/complete=true/verified=ok）；Sumika 侧新增卡内语气词白名单：compile_card 编译校验 interjection_policy，select_context 暴露 interjection_allow，naturalize_reply(keep=...) 保护白名单 token —— hah 从默认映射表移除，她的招牌「hah？」保持原样，其余罗马音语气词仍落中文。",
+      "DSH 内第二个 Sumika 主面板：sidebar 新增「项目」行，主区域读取 /api/tree 渲染阶段状态与任务完成数（P0-P4 完成 / P4-UI、P5、P6 进行中 / P7 计划中），并显示当前任务与下一步；验收脚本同时断言两个面板。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -140,7 +141,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "按用户优化的安和昴新卡重新导入（删旧副本→导入新卡→重挂同一 VRM→刷新校验，kind=user/complete=true/verified=ok）；Sumika 侧新增卡内语气词白名单：compile_card 编译校验 interjection_policy，select_context 暴露 interjection_allow，naturalize_reply(keep=...) 保护白名单 token —— hah 从默认映射表移除，她的招牌「hah？」保持原样，其余罗马音语气词仍落中文。",
+    "current_task": "DSH 内第二个 Sumika 主面板：sidebar 新增「项目」行，主区域读取 /api/tree 渲染阶段状态与任务完成数（P0-P4 完成 / P4-UI、P5、P6 进行中 / P7 计划中），并显示当前任务与下一步；验收脚本同时断言两个面板。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",

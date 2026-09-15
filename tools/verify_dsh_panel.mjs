@@ -93,6 +93,31 @@ if (target) {
   }
 }
 
+// Second Sumika panel: the project's own plan, read from /api/tree.
+let projectPanel = null;
+for (let index = 0; index < labels.length; index += 1) {
+  if (/项目/.test(labels[index])) {
+    await panelRows.nth(index).click().catch(() => {});
+    await page.waitForTimeout(3500);
+    break;
+  }
+}
+projectPanel = await page.evaluate(() => ({
+  present: !!document.querySelector('[data-sumika-panel="project"]'),
+  phases: Array.from(document.querySelectorAll('[data-sumika-project-phase]'))
+    .map(node => ({ id: node.dataset.sumikaProjectPhase, status: node.dataset.phaseStatus })),
+}));
+const tree = await (await fetch(`${bridge}/api/tree`)).json();
+if (!projectPanel.present) failures.push('the 项目 panel did not render');
+const expectedPhases = (tree.phases || []).map(phase => phase.id);
+const missingPhases = expectedPhases.filter(id => !projectPanel.phases.some(p => p.id === id));
+if (missingPhases.length) {
+  failures.push(`the 项目 panel is missing phases: ${missingPhases.join(',')}`);
+}
+if (!labels.some(label => /项目/.test(label))) {
+  failures.push(`no 项目 panel row in the sidebar: ${JSON.stringify(labels)}`);
+}
+
 if (pageErrors.length) failures.push(`client errors: ${pageErrors.join(' | ')}`);
 if (consoleErrors.length) failures.push(`client console errors: ${consoleErrors.join(' | ')}`);
 if (shotPath) await page.screenshot({ path: shotPath, fullPage: false });
@@ -104,6 +129,7 @@ const result = {
   panel_rows: labels,
   panel,
   toggle,
+  project_panel: projectPanel,
   page_errors: pageErrors,
   console_errors: consoleErrors,
   failures,

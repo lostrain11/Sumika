@@ -262,6 +262,102 @@ window.__ModuleLoader__.load({
 		}
 
 		/** Panel-list glyph for the sidebar's global panel row. */
+		const PHASE_TONE = {
+			complete: { color: GREEN, background: GREEN_SOFT, border: GREEN_LINE },
+			in_progress: { color: AMBER, background: AMBER_SOFT, border: AMBER_LINE },
+			planned: { color: MUTED, background: '#f2efe6', border: LINE },
+		};
+
+		/**
+		 * The project's own plan, read from the bridge's `/api/tree`: phases with
+		 * their real status and task counts. Nothing here is inferred — the numbers
+		 * come straight from the records the agent maintains.
+		 */
+		function ProjectPanel() {
+			const [state, setState] = react.useState({ tree: null, error: null });
+			react.useEffect(() => {
+				fetch(`${BRIDGE}/api/tree`).then(response => response.json())
+					.then(tree => setState({ tree, error: null }))
+					.catch(error => setState({ tree: null, error: String(error) }));
+			}, []);
+			const tree = state.tree;
+			const phases = (tree && tree.phases) || [];
+			const tone = status => PHASE_TONE[status] || PHASE_TONE.planned;
+			return jsx.jsxs('div', {
+				'data-sumika-panel': 'project',
+				style: { padding: '22px 26px', overflowY: 'auto', height: '100%', background: '#f7f4ec' },
+				children: [
+					jsx.jsx('div', { style: { fontSize: 20, fontWeight: 600, color: INK }, children: '项目进度' }),
+					jsx.jsx('div', {
+						style: { fontSize: 11, color: MUTED, margin: '4px 0 18px' },
+						children: tree?.project?.path || '读取中…',
+					}),
+					state.error ? jsx.jsx('div', {
+						style: { color: '#b04a4a', fontSize: 12 },
+						children: `读取失败：${state.error}`,
+					}) : null,
+					jsx.jsx('div', {
+						style: { display: 'flex', flexDirection: 'column', gap: 8 },
+						children: phases.map(phase => {
+							const palette = tone(phase.status);
+							const tasks = phase.tasks || [];
+							const done = tasks.filter(task => task.status === 'complete').length;
+							return jsx.jsxs('div', {
+								key: phase.id,
+								'data-sumika-project-phase': phase.id,
+								'data-phase-status': phase.status,
+								style: {
+									display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px',
+									border: `1px solid ${LINE}`, borderRadius: 9, background: '#fffdf8',
+								},
+								children: [
+									jsx.jsx('span', {
+										style: {
+											width: 8, height: 8, borderRadius: 3, flex: '0 0 auto',
+											background: palette.color,
+										},
+									}),
+									jsx.jsxs('div', {
+										style: { flex: 1, minWidth: 0 },
+										children: [
+											jsx.jsx('div', {
+												style: { fontSize: 13, fontWeight: 600, color: INK },
+												children: `${phase.id} · ${phase.name || ''}`,
+											}),
+											jsx.jsx('div', {
+												style: { fontSize: 11, color: MUTED, marginTop: 2 },
+												children: tasks.length === 0
+													? '暂无拆分任务'
+													: `${done}/${tasks.length} 任务已完成`,
+											}),
+										],
+									}),
+									jsx.jsx('span', {
+										style: {
+											fontSize: 9.5, padding: '3px 9px', borderRadius: 99,
+											whiteSpace: 'nowrap', color: palette.color,
+											background: palette.background, border: `1px solid ${palette.border}`,
+										},
+										children: phase.status === 'complete' ? '已完成'
+											: (phase.status === 'in_progress' ? '进行中' : '计划中'),
+									}),
+								],
+							});
+						}),
+					}),
+					tree?.current_task ? jsx.jsxs('div', {
+						style: { marginTop: 18, fontSize: 11, color: MUTED, lineHeight: 1.7 },
+						children: [
+							jsx.jsx('div', { style: { fontWeight: 600, color: INK }, children: '当前任务' }),
+							jsx.jsx('div', { children: tree.current_task }),
+							tree.next_action ? jsx.jsx('div', { children: `下一步：${tree.next_action}` }) : null,
+						],
+					}) : null,
+				],
+			});
+		}
+
+		/** Panel-list glyph for the sidebar's global panel row. */
 		function CapabilitiesGlyph({ active, size }) {
 			return jsx.jsx('span', {
 				style: {
@@ -306,6 +402,19 @@ window.__ModuleLoader__.load({
 					label: '能力',
 					order: 10,
 				}, CapabilitiesGlyph);
+				yield ctx.slots.register({
+					name: 'sidebar.panellist',
+					id: 'sumika-project',
+					label: '项目',
+					order: 11,
+				}, CapabilitiesGlyph);
+			});
+			ctx.slots.inject('main', function* () {
+				yield ctx.slots.register({
+					name: 'main',
+					key: 'sumika-project',
+					children: {},
+				}, ProjectPanel);
 			});
 		}
 

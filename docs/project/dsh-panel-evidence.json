@@ -1,8 +1,9 @@
 {
-  "checked_at": "2026-09-15T17:49:01.086Z",
+  "checked_at": "2026-09-15T19:20:32.822Z",
   "bridge": "http://127.0.0.1:8765",
   "panel_rows": [
-    "能力"
+    "能力",
+    "项目"
   ],
   "panel": {
     "present": true,
@@ -27,6 +28,47 @@
     "requested": false,
     "registry_after": false,
     "restored": true
+  },
+  "project_panel": {
+    "present": true,
+    "phases": [
+      {
+        "id": "P0",
+        "status": "complete"
+      },
+      {
+        "id": "P1",
+        "status": "complete"
+      },
+      {
+        "id": "P2",
+        "status": "complete"
+      },
+      {
+        "id": "P3",
+        "status": "complete"
+      },
+      {
+        "id": "P4",
+        "status": "complete"
+      },
+      {
+        "id": "P4-UI",
+        "status": "in_progress"
+      },
+      {
+        "id": "P5",
+        "status": "in_progress"
+      },
+      {
+        "id": "P6",
+        "status": "in_progress"
+      },
+      {
+        "id": "P7",
+        "status": "planned"
+      }
+    ]
   },
   "page_errors": [],
   "console_errors": [],
