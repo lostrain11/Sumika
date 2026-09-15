@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
 		const AMBER = '#9a7038';
 		const AMBER_SOFT = '#f7efdd';
 		const AMBER_LINE = '#e8d3ab';
+		const MUTED = '#6e7a72';
 
 		/**
 		 * Interaction kinds the shell treats as a user decision, mirroring the
@@ -76,6 +77,56 @@ window.__ModuleLoader__.load({
 			});
 		}
 
+		/**
+		 * Where this Session lives: the owning Workspace's own title, taken from
+		 * the registry snapshot. The shell keeps rendering the Session title
+		 * itself, so repeating it here would just print it twice; this seat only
+		 * adds the location the shell does not show, and a way up to the parent
+		 * Session when the shell offers `openTitle`.
+		 */
+		function SessionLineage(props) {
+			const { displayTitle, lineageSessionId, openTitle, useWorkspaces } = props;
+			const id = lineageSessionId === undefined ? undefined : String(lineageSessionId);
+			const workspaces = typeof useWorkspaces === 'function'
+				? useWorkspaces((state) => state?.items)
+				: undefined;
+			const owner = id === undefined || !Array.isArray(workspaces) ? undefined
+				: workspaces.find(item => (item.sessionIds || []).some(
+					sessionId => String(sessionId) === id));
+			const label = owner && typeof owner.title === 'string' && owner.title
+				? `工作区 · ${owner.title}`
+				: null;
+			if (label === null && openTitle === undefined) return null;
+			const children = [];
+			if (label !== null) {
+				children.push(jsx.jsx('span', {
+					style: {
+						fontSize: 10, letterSpacing: '1px', color: MUTED,
+						overflow: 'hidden', textOverflow: 'ellipsis',
+					},
+					children: label,
+				}, 'workspace'));
+			}
+			if (openTitle !== undefined) {
+				children.push(jsx.jsx('a', {
+					key: 'parent',
+					href: '#',
+					onClick: (event) => { event.preventDefault(); openTitle(); },
+					style: { fontSize: 10, color: MUTED, textDecoration: 'none', cursor: 'pointer' },
+					children: '↑ 上级会话',
+				}));
+			}
+			return jsx.jsxs('span', {
+				'data-sumika-lineage': label === null ? 'parent-only' : 'workspace',
+				title: typeof displayTitle === 'string' ? displayTitle : undefined,
+				style: {
+					display: 'inline-flex', alignItems: 'baseline', gap: 8, minWidth: 0,
+					marginLeft: 8, overflow: 'hidden', whiteSpace: 'nowrap',
+				},
+				children,
+			});
+		}
+
 		/** Right-aligned status in the Session header's utilities seat. */
 		function apply(ctx) {
 			ctx.slots.inject('conversation.session.header.utilities', function* () {
@@ -83,6 +134,17 @@ window.__ModuleLoader__.load({
 					name: 'conversation.session.header.utilities',
 					id: 'sumika-session-status',
 				}, SessionStatus);
+			});
+			ctx.slots.inject('conversation.session.header.lineage', function* () {
+				try {
+					yield ctx.slots.register({
+						name: 'conversation.session.header.lineage',
+						priority: -1,
+					}, SessionLineage);
+					delete document.documentElement.dataset.sumikaLineageError;
+				} catch (error) {
+					document.documentElement.dataset.sumikaLineageError = String(error && error.message || error);
+				}
 			});
 		}
 

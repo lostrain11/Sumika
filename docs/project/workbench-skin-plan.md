@@ -248,6 +248,25 @@ ctx.slots.inject("sidebar", () => ctx.slots.register({
 - `node tools/verify_workbench_status_pill.mjs` 会新建一个会话、发出一条短消息并在轮次进行中采样头部；实测样本 `["idle", "running"]`，可见文案「执行中」，证据 `docs/project/workbench-status-pill-evidence.json`。脚本会消耗一次很小的模型调用，并把该会话留在工作区供人工查看。
 - **未验证**：琥珀色待确认药丸尚未在真实审批/计划审阅/提问场景中出现过，只做了分支实现。
 
+## 会话面包屑（2026-09-16 已落地）
+
+`conversation.session.header.lineage` 不是「替换标题」，而是**追加**在原生标题后面的槽位：
+真实 DOM 是 `nav.crumbs > span.crumbSeg > [button.crumbCurrent(原生标题), div[data-slot=…lineage]]`。
+所以在这个槽里再渲染一遍会话标题会出现「问候语你好 Sumika / 工作台 / 问候语你好」这种重复。
+
+`extensions/ui/sumika-workbench` 现在只用它补原生不显示的信息：从 `useWorkspaces` 快照里
+找出包含当前会话的工作区，渲染成 `工作区 · <工作区名>`；当 shell 给了 `openTitle`
+（当前是子会话）时再补一个「↑ 上级会话」链接。没有工作区可归属且没有父会话时直接返回
+`null`，不占位。验收断言该槽位文本以 `工作区 · ` 开头且不含换行（换行说明标题又被重复渲染了）。
+
+## 排查经验：槽位渲染崩溃只报 console
+
+插件组件在渲染期间抛异常时，DSH 不会触发 `pageerror`，而是打一条
+`slot entry crashed in '<槽名>': <错误>` 的 console error，并且该条目静默不渲染。
+本次「面包屑一直不出现」就是这个原因（组件里漏了一个颜色常量）。
+因此 `tools/verify_workbench_ui.mjs` 现在同时收集 `pageerror` 与 console error，
+两者都会让验收失败；只监听 `pageerror` 会漏掉整类槽位故障。
+
 诊断方法保留在 `.sumika-next/slot-probe/`（运行时目录，不入仓库）：`package.json` + `lib/index.js` + `lib/client.js` 是占位探针，`read.mjs`（读取占位报告）、`tree.mjs`（dump 侧栏树）、`stream.mjs`（列出实际下发的插件 id）、`rail_zoom.mjs`（折叠态放大截图）是读取脚本。再次需要时把 `{"id": "sumika-probe", "name": "<路径>\\lib\\index.js"}` 加回 `cordis.patch.yml` 并重启受管 DSH 即可。`/plugins/events` 是网页实际获取插件清单与 bundle 的通道，可用来确认某个插件是否真的被下发。
 
 注意：`.sumika-next/probe/` 是 2026-09-12 遗留的一个空 DSH profile 脚手架（只有 `profiles/web`、`storages` 与一份浏览器会话授权），与本方案无关，未再使用；它属于本机运行数据，可自行删除。

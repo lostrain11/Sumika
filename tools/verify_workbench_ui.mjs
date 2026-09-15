@@ -32,7 +32,13 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 const pageErrors = [];
+// A crashing slot entry is reported as a console error ("slot entry crashed in
+// '<slot>'"), not as a page error, so both channels have to be watched.
+const consoleErrors = [];
 page.on('pageerror', (error) => pageErrors.push(String(error.message || error)));
+page.on('console', (message) => {
+  if (message.type() === 'error') consoleErrors.push(message.text().slice(0, 300));
+});
 await page.goto(url, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(9000);
 
@@ -143,6 +149,18 @@ if (await page.locator("[class*='_headerUtilities']").count().catch(() => 0)) {
   sessionStatus = (await marked.count().catch(() => 0)) > 0
     ? { state: await marked.first().getAttribute('data-sumika-session-status').catch(() => null) }
     : { state: 'slot_rendered_without_our_entry' };
+  const lineage = page.locator('[data-sumika-lineage]');
+  sessionStatus.lineage = await lineage.count().catch(() => 0) > 0
+    ? { kind: await lineage.first().getAttribute('data-sumika-lineage'),
+        text: (await lineage.first().innerText().catch(() => '')).trim() }
+    : null;
+  if (sessionStatus.lineage && sessionStatus.lineage.kind === 'workspace'
+      && !sessionStatus.lineage.text.startsWith('工作区 · ')) {
+    sessionStatusFailure = `session breadcrumb is not a workspace label: ${sessionStatus.lineage.text}`;
+  }
+  if (sessionStatus.lineage && sessionStatus.lineage.text.includes('\n')) {
+    sessionStatusFailure = `session breadcrumb repeats the title: ${JSON.stringify(sessionStatus.lineage.text)}`;
+  }
 }
 probe.sessionStatus = sessionStatus;
 if (sessionStatus.state === 'slot_rendered_without_our_entry') {
@@ -154,6 +172,7 @@ await browser.close();
 
 const failures = [];
 if (pageErrors.length) failures.push(`client errors: ${pageErrors.join(' | ')}`);
+if (consoleErrors.length) failures.push(`client console errors: ${consoleErrors.join(' | ')}`);
 if (probe.skinMarker !== '1') failures.push('skin marker missing');
 if (!probe.brand) failures.push('sidebar brand is not 晴日部室');
 if (!probe.footerStatus) failures.push('footer status line missing');
@@ -173,7 +192,8 @@ if (rail) {
 if (sessionStatusFailure) failures.push(sessionStatusFailure);
 
 const result = { checked_at: new Date().toISOString(), url: bridge, probe, rail, session_status: sessionStatus,
-                 page_errors: pageErrors, failures, status: failures.length ? 'failed' : 'passed' };
+                 page_errors: pageErrors, console_errors: consoleErrors, failures,
+                 status: failures.length ? 'failed' : 'passed' };
 console.log(JSON.stringify(result, null, 2));
 if (evidencePath) await writeFile(evidencePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
 process.exit(failures.length ? 1 : 0);

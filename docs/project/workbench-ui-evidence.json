@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-09-15T17:09:59.980Z",
+  "checked_at": "2026-09-15T17:38:51.644Z",
   "url": "http://127.0.0.1:8765",
   "probe": {
     "skinMarker": "1",
@@ -38,7 +38,11 @@
       "webRadius": "9px"
     },
     "sessionStatus": {
-      "state": "idle"
+      "state": "idle",
+      "lineage": {
+        "kind": "workspace",
+        "text": "工作区 · Sumika"
+      }
     }
   },
   "rail": {
@@ -47,9 +51,14 @@
     "markGradient": "linear-gradient(135deg, rgb(86, 127, 108) 0%, rgb(180, 73, 106) 100%)"
   },
   "session_status": {
-    "state": "idle"
+    "state": "idle",
+    "lineage": {
+      "kind": "workspace",
+      "text": "工作区 · Sumika"
+    }
   },
   "page_errors": [],
+  "console_errors": [],
   "failures": [],
   "status": "passed"
 }
