@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "current_phase": "P4-UI",
-  "phase_status": "planned",
+  "current_phase": "P6",
+  "phase_status": "in_progress",
   "implemented": [
     "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
     "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复",
@@ -12,7 +12,9 @@
     "P5-1基线：复用五个开源文件库的独立Skill、环境入口与enabled开关；未修改DSH上游或UI",
     "P6-1/P6-2/P6-4首批：角色配置契约、角色上下文隔离块、角色资源包安全导入/导出；无UI、无DSH耦合",
     "P6-3调整：新增完全内置 EmbeddedMemory（SQLite FTS5，标准库，无Docker/外部服务），作用域、来源、遗忘、导出已验证；MemMachine降为可选高效果provider候选。",
-    "P6-2正式接线：独立上下文构造器隔离用户原文、角色、记忆和任务块，深拷贝防下游污染；测试通过"
+    "P6-2正式接线：独立上下文构造器隔离用户原文、角色、记忆和任务块，深拷贝防下游污染；测试通过",
+    "UI 壳层接入：DSH 客户端 UI 插件接管品牌槽与侧栏底部列表槽；皮肤令牌与结构覆盖同步设计稿；验收脚本 tools/verify_workbench_ui.mjs",
+    "UI 壳层第二轮：欢迎页品牌标记接管；会话区/输入区/工具卡槽位清单与 conversationPhase 状态来源写入方案文档"
   ],
   "verified": [
     "33 项自动化测试通过",
@@ -33,7 +35,9 @@
     "用户安和昴 V2 角色卡作为外部导入资源测试通过：V2格式、9项世界书、原始卡保留、SHA-256、导入/导出往返与路径安全；未激活为内置角色",
     "角色上下文边界测试：来源块顺序、原文不可改写、对象隔离、非法输入拒绝通过",
     "EmbeddedMemory中文评测夹具5/5通过：事实召回、作用域隔离、事实更新、两跳关系和角色隔离；本地无外部模型调用",
-    "完整 tests_next 测试集 115 项通过，1 项权限相关跳过"
+    "完整 tests_next 测试集 115 项通过，1 项权限相关跳过",
+    "工作台壳层真实 UI 验收：无客户端报错；侧栏品牌=晴日部室、底部状态与 DSH 0.1.5-rc.2 来自宿主注入；frame=#fffdf8、sidebarCol=#faf8f0、新会话按钮=#b4496a/白字/8px（Edge 实测计算值）",
+    "工作台壳层第二轮真实验收：欢迎页品牌标记为设计稿渐变（rgb(86,127,108)→rgb(180,73,106)）；验收脚本新增该断言并保持 0 客户端报错"
   ],
   "partial": [
     "P5-1：基础文件操作可用；视觉渲染、公式重算、复杂特性与真实模型任务质量未验收",
@@ -50,7 +54,7 @@
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "继续P3/P6非UI：增强任务恢复与长期记忆 provider 评测",
+  "next": "UI 继续：会话头部面包屑/标题/状态药丸，其次侧栏样式贴近与 /api/tree 面板、设置页开关",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",
@@ -68,5 +72,76 @@
     "status": "baseline_verified",
     "evidence": "docs/project/phase-05-office-acceptance.md"
   },
-  "updated_at": "2026-09-13T22:09:33.210817+00:00"
+  "updated_at": "2026-09-14T19:36:13.626938+00:00",
+  "active_scope": {
+    "goal": "完成P5、P6和长期记忆所有不依赖UI的剩余任务",
+    "status": "in_progress",
+    "done_this_run": [
+      "记忆恢复预校验与事务、关系备份恢复、literal查询、fact_key迁移",
+      "能力模块启停/排序/移除/provider选择",
+      "定时任务tick、持久化去重和UNKNOWN不重放",
+      "真实OCR/隐藏窗口编辑/12页浏览器/文件语音闭环",
+      "LibreOffice转换和公式重算",
+      "混合中文检索13/14与真实DSH角色服务接线",
+      "记忆v3备份保留event_id与不可检索模型proposal；兼容v2/旧列表；普通导入不复活遗忘事件，显式恢复可恢复备份状态",
+      "独立角色模型原生preset接入完成：角色/工作会话分离、角色无工具、开关与不可用失败关闭；真实DSH本地模型验收通过",
+      "明确用户记忆指令已通过原生已准入RPC消息自动写入：独立开关、来源/事件绑定、同键更新、跨会话及重启召回通过；普通聊天自动提炼仍未实现",
+      "长期记忆本地质量评测完成：EmbeddedMemory关键词8/14，SemanticMemory混合检索13/14；作用域隔离与fact_key更新均通过，语义provider暂定默认但非AML结论",
+      "SemanticMemory恢复一致性补强：restore/reset按作用域清理embedding缓存，避免事实文本更新后命中旧向量；147项测试146通过1跳过",
+      "桌面UIA授权闭环补强：执行前可绑定窗口树快照哈希，状态变化即拒绝；执行后返回新的验证哈希，避免静默操作错误窗口",
+      "网页咨询响应状态机补强：每次提交生成request_id，区分submitted/completed/unknown/cancelled；超时保留UNKNOWN且禁止自动重试，取消明确仅为本地请求",
+      "实时语音会话协调层完成：统一 listening/transcribing/responding/playing/cancelled/error 状态，拒绝非法跃迁，取消不自动重试，独立于录音/识别/播放 provider",
+      "桌面操作OCR结果核验层完成：对指定截图识别期望文字，返回verified/unknown；识别失败或不匹配不伪称成功，独立于UIA与DSH",
+      "网页咨询流式完成判定补强：新增响应需连续稳定观察后才标记completed，文本仍变化则unknown且禁止重试；本地Chromium 12页验收通过",
+      "桌面授权操作编排完成：执行前快照哈希、UIA动作、可选截图OCR后验串联；OCR不确定则整体结果标记unknown并保留边界说明",
+      "BrowserSkill独立适配边界完成：健康检查、命名Profile、站点读写授权记录与权限查询；无自动启动、无网页内容转发、不可用时失败关闭",
+      "BrowserSkill默认安装策略明确：固定版本随客户端提供，适配器可替换；站点登录/read/send授权分开，未登录/未连接/验证码失败关闭，不自动启动或付费回退",
+      "复用本机已下载并校验的 BrowserSkill 0.1.11：适配器默认发现 D:/Tools/BrowserSkill/0.1.11/bsk.exe；status真实返回协议1.1及Edge扩展连接，无需重复下载",
+      "BrowserSkill 0.1.11已复制到Sumika运行目录 runtime/browserskill/bsk.exe，版本与SHA-256复核通过；发布时用户无需自行下载或指定路径",
+      "项目结构整理完成：清理测试临时文件，补充docs/project/README.md目录职责与放置规则；保留现有引用路径，BrowserSkill固定运行时归入runtime/browserskill",
+      "BrowserSkill会话适配补强：独立客户端支持显式session start/list/stop，失败关闭且不自动启动；真实daemon状态可探测，命名Profile/登录仍需用户首次授权",
+      "BrowserSkill咨询桥接层完成：导航要求站点read授权，发送要求send授权，复用命名session并调用真实CLI；无授权或CLI失败即停止，不自动切换后端",
+      "BrowserSkill咨询读取侧补齐：受read授权保护的observe调用、可配置输出预算和invalid observation未知边界；不持久化页面原文",
+      "BrowserSkill桥接修正：授权站点与实际origin匹配，显式Agent tab_id绑定，操作前后查tab来源；send明确只fill，未提交；CLI原子来源检查尚缺",
+      "UI首批接入完成：复制D方案方向D晴日部室静态原型及所需图片到ui/prototype-d，新增UI目录规范；未连接后端，原设计项目未修改",
+      "UI参考边界确认：D方案仅作为视觉/布局/交互参考，当前新版能力、DSH原生流程和独立扩展契约优先；设计目录中的功能假设不自动视为需求",
+      "UI状态快照投影完成：提供session/role/memory/modules/approvals的脱敏状态契约，拒绝未知状态、凭据和原始提示/页面内容；可交给DeepSeek做渲染接线",
+      "长期记忆治理评测扩展完成：关键词8/14、语义13/14；新增遗忘后拒绝召回和跨作用域清洁检查，两种provider均通过",
+      "BrowserSkill授权数据边界完成：默认写入本机LOCALAPPDATA/Sumika/browser-authorizations.json，原子替换保存，支持站点撤销；不写入项目源文件或Git"
+    ],
+    "pending": [
+      "角色与记忆调用入口/世界书接线",
+      "桌面输入/窗口控制/OCR翻译闭环",
+      "语音/授权感知真实工具验收",
+      "网页咨询浏览器接入",
+      "办公复杂文件验收",
+      "统一记忆效果评测及真实DSH接线"
+    ],
+    "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
+    "evidence": "docs/project/phase-05-06-backend-acceptance.md",
+    "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
+    "current_task": "BrowserSkill授权数据边界完成：默认写入本机LOCALAPPDATA/Sumika/browser-authorizations.json，原子替换保存，支持站点撤销；不写入项目源文件或Git",
+    "schedule_implemented": [
+      "时区与夏令时",
+      "持久化提醒及已读",
+      "受管DSH执行桥接",
+      "取消/禁用/UNKNOWN核对",
+      "CLI与宿主前台循环"
+    ],
+    "game_translation_design": "docs/project/game-translation-plan.md",
+    "schedule_evidence": "docs/project/schedule-dsh-evidence.json",
+    "game_translation_status": "deferred; 用户明确先不做",
+    "lifecycle_evidence": "docs/project/extension-host-evidence.json",
+    "handoff_design": "docs/project/extension-lifecycle.md",
+    "role_plugin_evidence": "docs/project/role-plugin-evidence.json",
+    "role_model_evidence": "docs/project/role-model-evidence.json"
+  },
+  "next_action": "Run the two decisive tests: (1) register a test component into an unoccupied slot that the official brand does not take (sidebar.footer.action or sidebar.workspace) - if it renders, the problem is slot occupancy and the fix is to remove the official occupant by its real id from the plugin graph; if it does not render, the problem is our React element/instance, so compare how react/jsx-runtime resolves in our bundle versus an official bundle and capture console/page errors during render.",
+  "local_model_evaluation": {
+    "status": "in_progress",
+    "evidence": "docs/project/local-model-comparison-evidence.json",
+    "verification": "190 tests run, 189 passed, 1 skipped",
+    "current_task": "Brand plugin narrowed to one remaining difference, with several causes ruled out by evidence. Verified: our module materialises, apply runs, both slots.inject callbacks fire (materialised/applied/slotFired all true); our apply is byte-for-byte the same shape as brand-official (nested slots.inject + generator yielding register calls, inject=[\"slots\"]); adding immediately:true to our dsh.client changed nothing; and with the official brand enabled the sidebar logo row (hHd-Xa_logoRow) renders 3 SVGs while our text never appears, while with the official row disabled the same row is empty. So the slot renders, but only the official occupant is accepted. Two remaining explanations, both cheap to test: (a) the slot accepts a single occupant and the official registration wins, or (b) our component is never accepted because the React element we build does not belong to the app renderer (react/jsx-runtime resolved differently in our bundle), which would fail silently. Also removed the earlier guessed disable row for dsh-client-ui-brand-official from both the code path and the profile patch, since disabling a plugin by a guessed id is exactly the kind of unverified guess this project forbids; the official brand is back on.",
+    "next_action": "UI 继续：工作台内嵌任务时间线（读取受管会话事件）与能力页剩余接线；随后继续剩余 pending 项（语音真实工具验收、办公复杂文件、记忆 DSH 真实接线）。"
+  }
 }

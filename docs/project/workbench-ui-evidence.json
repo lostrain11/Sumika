@@ -1,0 +1,44 @@
+{
+  "checked_at": "2026-09-15T16:37:53.159Z",
+  "url": "http://127.0.0.1:8765",
+  "probe": {
+    "skinMarker": "1",
+    "shellGlobal": {
+      "harness": "dsh",
+      "release": "0.1.5-rc.2"
+    },
+    "brand": true,
+    "footerStatus": true,
+    "footerRelease": true,
+    "heroMark": "linear-gradient(135deg, rgb(86, 127, 108) 0%, rgb(180, 73, 106) 100%)",
+    "surfaces": {
+      "frame": {
+        "className": "pI_x6G_frame",
+        "background": "rgb(255, 253, 248)",
+        "color": "rgb(47, 58, 52)",
+        "radius": "0px"
+      },
+      "sidebar": {
+        "className": "pI_x6G_sidebarCol",
+        "background": "rgb(250, 248, 240)",
+        "color": "rgb(47, 58, 52)",
+        "radius": "0px"
+      },
+      "newSession": {
+        "className": "hHd-Xa_newSession",
+        "background": "rgb(180, 73, 106)",
+        "color": "rgb(255, 255, 255)",
+        "radius": "8px"
+      }
+    },
+    "tokens": {
+      "paper": "#fffdf8",
+      "rose": "#b4496a",
+      "green": "#567f6c",
+      "webRadius": "9px"
+    }
+  },
+  "page_errors": [],
+  "failures": [],
+  "status": "passed"
+}
