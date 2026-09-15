@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T17:49:38.663052+00:00",
-  "current_goal": "Sumika 客户端形态收敛：工作台那屏即 DSH 前端，能力屏已可作为 DSH 主面板运行",
+  "updated_at": "2026-09-15T17:57:53.240659+00:00",
+  "current_goal": "还原设计稿并保证界面只说真实内容：工作台=DSH、能力/设置已接真实数据、活动室对话已接真实角色服务",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "待用户确认形态后继续：(A) 维持壳 + DSH 那一屏，把设置也做成 DSH 面板；(B) 整体收进 DSH —— 需先决定横向顶栏怎么处理（DSH 无顶栏槽，只能接管 sidebar 或自绘 shell.overlay）。其余 UI 待办：侧栏圆点/间距贴近、/api/tree 面板、外观分区接线、待确认药丸需真实审批场景。改工作台后重跑 verify_workbench_ui / verify_workbench_screen / verify_dsh_panel。",
+  "next_action": "剩余 UI：(1) 舞台立绘/层图例文案跟随真实角色（当前仍是设计稿占位立绘与固定图例）；(2) 侧栏圆点/间距贴近设计；(3) /api/tree 阶段任务面板；(4) 外观分区（主题/背景/密度）接线；(5) 待确认药丸需真实审批场景。改活动室后重跑 verify_room_chat.mjs。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -120,7 +120,8 @@
       "能力注册表补齐：ui/readiness.service_capabilities() 按真实依赖推导可服务能力，Bridge.capability_bootstrap() 只补缺不覆盖；本机注册表现在有 ocr/rapidocr、desktop/windows-uia、voice/windows-sapi、asr/vosk(带模型路径)、camera、microphone、office-render/libreoffice；真实验收通过：开关往返、停用被拒、启用后经 desktop service 跑通 OCR；证据 docs/project/capability-registry-evidence.json。",
       "R-107/R-108 界面接线完成：能力页三组（扩展模块可开关 / 就绪视图无开关 / DSH 原生不做开关）、设置页能力模块区真实总览与逐项开关、卡片点选填真实详情；模型与连接改为真实或明确交由 DSH；未接线分区加「原型·未接入」并禁用按钮，删除示例检查点哈希与 MCP 授权计数。真实验收：从 DOM 点击开关后端确实改变并恢复，0 客户端报错。",
       "工作台会话头补完：conversation.session.header.lineage 实为追加槽（原生标题仍由 shell 渲染），改为只补真实工作区归属「工作区 · Sumika」与子会话的上级链接；顺带修掉组件漏常量导致的渲染崩溃，并把「槽位崩溃只报 console」这条排查经验写进方案文档，验收脚本改为同时监听 pageerror 与 console error。",
-      "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。"
+      "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。",
+      "活动室对话栏改成真实对话：真输入框、每角色独立会话、记录来自 /api/role/chat/history、失败如实报错；名册/标题/舞台名跟随真实角色；桌宠只显示真实记录且活动切换不再播报预写台词。顺带修掉内置示例角色 assets.card 指向 role.json 导致每次对话必失败的故障（补真 V2 卡 + card context 降级并记录原因）。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -133,7 +134,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。",
+    "current_task": "活动室对话栏改成真实对话：真输入框、每角色独立会话、记录来自 /api/role/chat/history、失败如实报错；名册/标题/舞台名跟随真实角色；桌宠只显示真实记录且活动切换不再播报预写台词。顺带修掉内置示例角色 assets.card 指向 role.json 导致每次对话必失败的故障（补真 V2 卡 + card context 降级并记录原因）。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",
@@ -153,8 +154,8 @@
     "status": "in_progress",
     "evidence": "docs/project/local-model-comparison-evidence.json",
     "verification": "190 tests run, 189 passed, 1 skipped",
-    "current_task": "工作台那一屏改为内嵌受管 DSH（同一页面，壳顶栏保留；移除模拟工作台标记、board 屏隐藏桌宠、被框架加载时不重复品牌、侧栏底部回链地址由桥接注入）；并落地 DSH 主面板原型：能力页作为 main 面板 + sidebar.panellist 行，桥接新增仅限本机来源的 CORS 与 OPTIONS 预检，面板开关真实写入注册表。",
-    "next_action": "待用户确认形态后继续：(A) 维持壳 + DSH 那一屏，把设置也做成 DSH 面板；(B) 整体收进 DSH —— 需先决定横向顶栏怎么处理（DSH 无顶栏槽，只能接管 sidebar 或自绘 shell.overlay）。其余 UI 待办：侧栏圆点/间距贴近、/api/tree 面板、外观分区接线、待确认药丸需真实审批场景。改工作台后重跑 verify_workbench_ui / verify_workbench_screen / verify_dsh_panel。"
+    "current_task": "活动室对话栏改成真实对话：真输入框、每角色独立会话、记录来自 /api/role/chat/history、失败如实报错；名册/标题/舞台名跟随真实角色；桌宠只显示真实记录且活动切换不再播报预写台词。顺带修掉内置示例角色 assets.card 指向 role.json 导致每次对话必失败的故障（补真 V2 卡 + card context 降级并记录原因）。",
+    "next_action": "剩余 UI：(1) 舞台立绘/层图例文案跟随真实角色（当前仍是设计稿占位立绘与固定图例）；(2) 侧栏圆点/间距贴近设计；(3) /api/tree 阶段任务面板；(4) 外观分区（主题/背景/密度）接线；(5) 待确认药丸需真实审批场景。改活动室后重跑 verify_room_chat.mjs。"
   },
   "ui_workbench": {
     "design": "D:\\Code\\Sumika-UI-Designs\\direction-d-hiyori",

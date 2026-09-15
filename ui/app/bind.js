@@ -69,8 +69,12 @@ function bindRoster(payload) {
       button.classList.add('active');
       try {
         await api('/api/roles/select', { method: 'POST', body: JSON.stringify({ id: role.id }) });
-        setText('#roomOwner', role.name);
+        setText('#roomOwner', `${role.name}的房间`);
         setText('#chatChara', role.name);
+        setText('#atChip', `@${role.name}`);
+        setText('#stageChara', role.name);
+        // Each role keeps its own session, so switching reloads that transcript.
+        await loadRoomChat(role.id);
       } catch (error) {
         setText('#roomOwner', `切换失败：${error.message}`);
       }
@@ -80,6 +84,18 @@ function bindRoster(payload) {
   });
   const count = document.getElementById('memberCount');
   if (count) count.textContent = String(roles.length);
+  // The design's placeholder assistant is called 澄花; every surface that shows
+  // the speaking role must follow the active one instead.
+  const active = roles.find(role => role.id === activeId);
+  if (active) {
+    setText('#chatChara', active.name);
+    setText('#stageChara', active.name);
+    setText('#roomOwner', `${active.name}的房间`);
+    setText('#atChip', `@${active.name}`);
+    const sub = document.getElementById('stageCharaSub');
+    if (sub && active.has_model_3d) sub.textContent = '实机 VRM · 已绑定模型';
+    else if (sub) sub.textContent = '角色卡 · 立绘占位';
+  }
   const hidden = (payload.roles || []).length - roles.length;
   if (hidden > 0) {
     const note = document.createElement('p');
@@ -88,6 +104,135 @@ function bindRoster(payload) {
     note.textContent = `已隐藏 ${hidden} 个没有角色卡的导入记录`;
     roster.appendChild(note);
   }
+}
+
+// ---- 活动室对话（真实角色服务） ---------------------------------------------
+//
+// The design's chat column shipped with sample messages and an inert composer.
+// Both are replaced: the transcript comes from the bridge for this role's own
+// session, and a failure is shown as a failure instead of a plausible reply.
+
+let roomChatRoleId = null;
+
+function roomSessionId(roleId) {
+  return `room-${roleId || 'default'}`;
+}
+
+function roomMessageNode({ who, text, at, isError }) {
+  const mine = who === 'me';
+  const name = document.getElementById('chatChara')?.textContent || '她';
+  const node = document.createElement('div');
+  node.className = `cm ${mine ? 'user' : 'agent'}`;
+  if (isError) node.dataset.roomError = '1';
+  const label = document.createElement('span');
+  label.className = 'who';
+  label.textContent = mine ? `我 · ${(at || '').slice(11, 16)}` : `${name} · ${(at || '').slice(11, 16)}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bub';
+  bubble.textContent = text;
+  if (isError) {
+    bubble.style.color = '#b04a4a';
+    bubble.style.borderColor = '#e0b3b3';
+  }
+  node.append(label, bubble);
+  return node;
+}
+
+function renderRoomMessages(messages) {
+  const list = document.querySelector('#screen-room .chat-msgs');
+  if (!list) return;
+  list.textContent = '';
+  // The stage bubble repeats the latest real line instead of the design's
+  // invented greeting, so nothing on this screen speaks without a source.
+  const bubble = document.getElementById('speechBub');
+  const lastRole = [...(messages || [])].reverse().find(message => message.who !== 'me');
+  if (bubble) {
+    bubble.textContent = lastRole?.text
+      || '还没有对话。在下面发一句，她的回答会出现在这里和右侧对话栏。';
+  }
+  if (!messages || messages.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'cm agent';
+    empty.dataset.roomEmpty = '1';
+    const label = document.createElement('span');
+    label.className = 'who';
+    label.textContent = '还没有对话记录';
+    const bubble = document.createElement('div');
+    bubble.className = 'bub';
+    bubble.textContent = '在下面输入第一句话。角色模型没配置好时这里会如实报错，不会替她编答案。';
+    empty.append(label, bubble);
+    list.appendChild(empty);
+    return;
+  }
+  messages.forEach(message => list.appendChild(roomMessageNode(message)));
+  list.scrollTop = list.scrollHeight;
+}
+
+async function loadRoomChat(roleId) {
+  roomChatRoleId = roleId || null;
+  const session = encodeURIComponent(roomSessionId(roleId));
+  const payload = await api(`/api/role/chat/history?session=${session}`);
+  renderRoomMessages(payload.messages || []);
+  window.sumikaDeskpet?.reload?.();
+}
+
+async function sendRoomMessage(text) {
+  const list = document.querySelector('#screen-room .chat-msgs');
+  if (!list) return;
+  // The empty-state bubble is not a message: drop it before the first real one.
+  list.querySelector('[data-room-empty]')?.remove();
+  const stamp = new Date().toISOString();
+  list.appendChild(roomMessageNode({ who: 'me', text, at: stamp }));
+  list.scrollTop = list.scrollHeight;
+  try {
+    const result = await api('/api/role/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: text, session: roomSessionId(roomChatRoleId) }),
+    });
+    const reply = typeof result.text === 'string' ? result.text.trim() : '';
+    list.appendChild(roomMessageNode({
+      who: 'role', at: new Date().toISOString(),
+      text: reply || '（模型没有返回文本）', isError: !reply,
+    }));
+  } catch (error) {
+    const detail = (error.payload || {}).message || error.message;
+    list.appendChild(roomMessageNode({
+      who: 'role', at: new Date().toISOString(), text: `发送失败：${detail}`, isError: true,
+    }));
+  }
+  list.scrollTop = list.scrollHeight;
+  window.sumikaDeskpet?.reload?.();
+}
+
+async function bindRoomChat(activeRoleId) {
+  const composer = document.querySelector('#screen-room .chat-composer');
+  if (!composer) return;
+  // Shared with the floating deskpet so both surfaces speak to one session.
+  window.sumikaRoomSession = () => roomSessionId(roomChatRoleId);
+  window.sumikaRoomReload = () => loadRoomChat(roomChatRoleId);
+  const field = composer.querySelector('.input');
+  let input = field;
+  if (field && field.tagName !== 'INPUT') {
+    input = document.createElement('input');
+    input.type = 'text';
+    input.className = field.className;
+    input.placeholder = '说点什么…';
+    input.setAttribute('data-room-input', '');
+    input.style.cssText = 'border:none;background:transparent;outline:none;'
+      + 'font:inherit;color:inherit;width:100%;min-width:0';
+    field.replaceWith(input);
+  }
+  const submit = () => {
+    const text = (input?.value || '').trim();
+    if (!text) return;
+    if (input) input.value = '';
+    sendRoomMessage(text);
+  };
+  input?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); }
+  });
+  composer.querySelector('#sendBtn')?.addEventListener('click', submit);
+  await loadRoomChat(activeRoleId);
 }
 
 function bindTree(tree) {
@@ -679,6 +824,7 @@ async function bindUnwiredSettings() {
     ]);
     bindHeader(state);
     bindRoster(roles);
+    await bindRoomChat(roles.active?.id || null);
     bindTree(tree);
     await bindCapabilityScreens();
     await bindSettingsFacts(tree);

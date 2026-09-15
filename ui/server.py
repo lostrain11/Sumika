@@ -10,6 +10,7 @@ import re
 import sqlite3
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -254,12 +255,46 @@ class Bridge:
 
     def chat(self, message, session_id="ui-role-chat"):
         settings = load_settings(self.settings_path)
-        result = RoleChat(settings).reply(message, session_id=session_id)
+        chat = self._role_chat(settings)
+        result = chat.reply(message, session_id=session_id)
+        self._record_turn(session_id, message, result)
         if "usage" not in result:
             return result
         return {key: value for key, value in result.items() if key != "usage"} | {
             "usage": result.get("usage", {}),
             "usage_status": result.get("usage_status", "unknown")}
+
+    def _role_chat(self, settings):
+        """One live RoleChat per settings revision.
+
+        A fresh instance per request would drop the conversation history the model
+        needs, so the bridge keeps it and rebuilds only when the settings change.
+        """
+        try:
+            stat = self.settings_path.stat()
+            revision = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            revision = None
+        if getattr(self, "_role_chat_cache", None) is None or self._role_chat_revision != revision:
+            self._role_chat_cache = RoleChat(settings)
+            self._role_chat_revision = revision
+        return self._role_chat_cache
+
+    def _record_turn(self, session_id, message, result):
+        """Keep the visible transcript for this session; never invent entries."""
+        record = getattr(self, "_transcripts", None)
+        if record is None:
+            record = self._transcripts = {}
+        turns = record.setdefault(session_id, [])
+        stamp = datetime.now(timezone.utc).isoformat()
+        turns.append({"who": "me", "text": message, "at": stamp})
+        reply = result.get("text") if isinstance(result, dict) else None
+        if isinstance(reply, str) and reply.strip():
+            turns.append({"who": "role", "text": reply, "at": stamp})
+        del turns[:-60]
+
+    def transcript(self, session_id):
+        return list((getattr(self, "_transcripts", None) or {}).get(session_id, []))
 
     # ---- long-term memory ------------------------------------------------------
     def _with_session(self, handler):
@@ -394,6 +429,13 @@ def _handler(bridge):
                     return self._json(200, bridge.tree())
                 if path == "/api/workbench/embed":
                     return self._json(200, bridge.workbench.embed_url())
+                if path == "/api/role/chat/history":
+                    query = parse_qs(urlparse(self.path).query)
+                    session = (query.get("session") or ["ui-role-chat"])[0]
+                    if not isinstance(session, str) or not session.strip():
+                        raise ValueError("invalid session")
+                    return self._json(200, {"session": session,
+                                            "messages": bridge.transcript(session)})
                 if path.startswith("/api/roles/"):
                     parts = path.split("/")
                     if len(parts) == 6 and parts[1] == "api" and parts[2] == "roles" and parts[4] == "asset":

@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-09-15T17:57:35.929Z",
+  "bridge": "http://127.0.0.1:8765",
+  "prompt": "你好，用一句话打个招呼就好。",
+  "before": {
+    "text": "我 · 17:57\n你好，用一句话打个招呼就好。\nSumika 示例助手 · 17:57\n你好，我是 Sumika 示例助手，在晴日部室陪着你，有事随时说就好。",
+    "empty": false,
+    "input": true,
+    "header": "Sumika 示例助手",
+    "stage": "Sumika 示例助手"
+  },
+  "after": {
+    "count": 4,
+    "lastRole": "role",
+    "lastText": "你好，我是 Sumika 示例助手，在晴日部室陪着你，有事随时说就好。",
+    "error": false
+  },
+  "session_hint": "room-unknown",
+  "page_errors": [],
+  "console_errors": [],
+  "failures": [],
+  "status": "passed"
+}

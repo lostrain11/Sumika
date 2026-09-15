@@ -1117,11 +1117,7 @@
   applyHash();
 
   /* ---- 桌宠小窗（L0）：全局浮动小窗，可自由拖动，跨页常驻，陪伴页自动隐藏 ---- */
-  const DP_TEXT = {
-    idle: '在房间里待着呢，有事叫我～',
-    work: 'tests_next 回归马上跑完，稍等～',
-    rest: '喝杯茶歇一下，有进展我叫你。',
-  };
+  /* 活动状态不再对应任何预写台词：桌宠只说真实对话内容。 */
   function buildDeskpet(){
     const svg = document.querySelector('#vport svg');
     const el = document.createElement('div');
@@ -1183,27 +1179,22 @@
     el.querySelector('[data-dp-min]').addEventListener('click', () => el.classList.add('mini'));
     el.querySelector('[data-dp-restore]').addEventListener('click', () => el.classList.remove('mini'));
     layoutDeskpet();
-    /* ---- 闲聊记录：模拟对话，按活动状态切换语气（后续接入真实对话流） ---- */
-    const DP_REPLY = {
-      idle: ['嗯嗯，我在听～', '发呆被发现了？那陪你聊会儿。', '今天房间里阳光不错。'],
-      work: ['等我一下，回归跑完就回你！', '这个报错好烦……马上修好。', '别催别催，快好了～'],
-      rest: ['喝茶中，勿扰……开玩笑的，说吧。', '休息一下脑子更清楚。', '你也歇会儿嘛。'],
-    };
-    const MAX_LOG = 60;    /* 记录上限：原型里模拟长期可用的最近对话 */
+    /* ---- 记录区：只显示真实对话，不再预置任何编造内容 ---- */
+    const MAX_LOG = 60;
     const DP_RECENT = 3;   /* 收起态露出的最近条数，与 CSS 的 :nth-last-child(-n+3) 对应 */
-    /* 预置几条历史消息，让「悬停展开、最近三条、点击查看更早」在原型里可被真实感知 */
-    const dpLog = [
-      { who: 'her', text: '欢迎回来～今天打算先做哪件事？' },
-      { who: 'me',  text: '先把 tests_next 的回归跑一遍。' },
-      { who: 'her', text: '收到，我把它排到队首了。' },
-      { who: 'me',  text: '顺便看下上次那个超时的用例。' },
-      { who: 'her', text: '那个我标记过了，是网络抖动的偶发，不是回归问题。' },
-      { who: 'me',  text: '好，那就先不动它。' },
-    ];
+    const dpLog = [];
     const logEl = el.querySelector('[data-dp-log]');
     function dpHerName(){ return document.getElementById('stageChara').textContent || '她'; }
     const box = el.querySelector('[data-dp-bubble]');
     function renderLog(){
+      if (dpLog.length === 0) {
+        logEl.innerHTML = '<div class="dp-msg her"><b>' + dpHerName()
+          + '</b><span></span></div>';
+        logEl.querySelector('span').textContent =
+          '还没有对话记录。右边输入框发一句，这里的记录就是真实回答。';
+        box.classList.add('no-more');
+        return;
+      }
       logEl.innerHTML = dpLog.slice(-MAX_LOG).map(m =>
         '<div class="dp-msg ' + (m.who === 'me' ? 'me' : 'her') + '">' +
         '<b>' + (m.who === 'me' ? '我' : dpHerName()) + '</b><span></span></div>').join('');
@@ -1221,6 +1212,25 @@
     }
     dpPush = pushMsg;   /* 暴露给 syncDeskpet：换活动时她会主动播报一句 */
     renderLog();
+    /* 真实对话流：与活动室对话栏共用同一个会话，因此两边看到同一份记录 */
+    window.sumikaDeskpet = {
+      push: pushMsg,
+      reload: async () => {
+        try {
+          const session = encodeURIComponent(window.sumikaRoomSession?.() || 'room-default');
+          const response = await fetch('/api/role/chat/history?session=' + session);
+          const payload = await response.json();
+          dpLog.length = 0;
+          (payload.messages || []).forEach(message => dpLog.push({
+            who: message.who === 'me' ? 'me' : 'her',
+            text: message.text,
+          }));
+        } catch (error) {
+          dpLog.length = 0;
+        }
+        renderLog();
+      },
+    };
     /* 悬停展开、移开收起；点击在「固定展开」与「收起」之间切换
        （点击态用于慢慢翻历史；细指针设备才有悬停，触屏靠点击） */
     let dpPinned = false;
@@ -1238,9 +1248,22 @@
       if (!v) return;
       inp.value = '';
       pushMsg('me', v);
-      const pool = DP_REPLY[act];
-      /* 稍延迟再回，模拟「她在想」的节奏 */
-      setTimeout(() => pushMsg('her', pool[Math.floor(Math.random() * pool.length)]), 420);
+      /* 走真实角色服务：失败就在记录里如实显示，不替她编一句话 */
+      const session = encodeURIComponent(window.sumikaRoomSession?.() || 'room-default');
+      fetch('/api/role/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: v, session: decodeURIComponent(session) }),
+      }).then(response => response.json().then(payload => ({ ok: response.ok, payload })))
+        .then(({ ok, payload }) => {
+          const reply = ok && typeof payload.text === 'string' ? payload.text.trim() : '';
+          pushMsg('her', reply || `发送失败：${payload?.error || payload?.message || '模型没有返回文本'}`);
+          window.sumikaRoomReload?.();
+        })
+        .catch(error => {
+          pushMsg('her', `发送失败：${error.message}`);
+          window.sumikaRoomReload?.();
+        });
     };
     el.querySelector('[data-dp-send]').addEventListener('click', say);
     el.querySelector('[data-dp-input]').addEventListener('keydown', e => { if (e.key === 'Enter') say(); });
@@ -1393,7 +1416,9 @@
     /* 她换活动时，把当前状态口播成「最新一条消息」进记录里：
        既让收起态的最近三条保持新鲜，也符合「她在跟你说话」的直觉。
        同一活动重复触发（切角色回 idle、刷新各自生成概论等）不重复播报 */
-    if (dpPush && dpLastAct !== act) { dpLastAct = act; dpPush('her', DP_TEXT[act]); }
+    /* 活动切换不再让桌宠"说话"：那些台词是编的。活动只影响她的姿态/取景，
+       记录区里只保留真实对话。 */
+    if (dpLastAct !== act) dpLastAct = act;
     /* 记录活动档位：小窗取景按活动选取世界机位（见 layoutDeskpet 的 ANCHOR） */
     dpActKey = act;
     el.querySelector('[data-dp-restore]').textContent = name.slice(-1);
