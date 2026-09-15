@@ -231,12 +231,26 @@ _INTERJECTION_ZH = {
 }
 
 _ROMAJI_INTERJECTION_ZH = {
-    "ah": "啊", "eh": "诶", "hah": "哈", "hey": "嘿", "hmm": "嗯",
+    # "hah" is deliberately absent: it is the character's signature interjection and
+    # a card may keep it in romaji through interjection_policy.allow_romanized.
+    "ah": "啊", "eh": "诶", "hey": "嘿", "hmm": "嗯",
     "maa": "嘛", "un": "嗯", "nee": "呐", "ee": "诶", "oh": "哦",
 }
 
 
-def naturalize_reply(text):
+def interjection_allow_list(compiled):
+    """The latin interjections a card asks to keep verbatim, as bare tokens."""
+    policy = (compiled or {}).get("card_interjection_policy") or {}
+    allowed = policy.get("allow_romanized") or {}
+    core = []
+    for token in allowed:
+        letters = "".join(character for character in token if character.isalpha())
+        if letters:
+            core.append(letters.casefold())
+    return sorted(set(core))
+
+
+def naturalize_reply(text, *, keep=()):
     """Rewrite interjections as Chinese words and any leftover kana as romaji.
 
     Returns ``(text, report)``. The report says which interjections were mapped
@@ -251,8 +265,10 @@ def naturalize_reply(text):
         if kana in out:
             out = out.replace(kana, chinese)
             interjections.append(f"{kana}→{chinese}")
+    protected = {token.casefold() for token in keep or ()}
+    candidates = [token for token in _ROMAJI_INTERJECTION_ZH if token not in protected]
     out = re.sub(r"(?<![A-Za-z])(%s)(?![A-Za-z])"
-                 % "|".join(sorted(_ROMAJI_INTERJECTION_ZH, key=len, reverse=True)),
+                 % "|".join(sorted(candidates, key=len, reverse=True)),
                  lambda match: _ROMAJI_INTERJECTION_ZH[match.group(1).casefold()],
                  out, flags=re.IGNORECASE)
     rewritten, replaced = transliterate_kana(out)
@@ -339,12 +355,34 @@ def compile_card(card_path):
             not isinstance(k, str) or not k or not isinstance(v, str) or not v
             for k, v in card_name_map.items()):
         raise ValueError("card name map must map nonempty text to nonempty text")
+    # `interjection_policy` lets a card keep a signature interjection in romaji
+    # ("hah？") while everything else has to read as Chinese. It is data, not
+    # authority: the only effect is which tokens the local rewrite leaves alone.
+    interjection_policy = sumika_extension.get("interjection_policy") or {}
+    if not isinstance(interjection_policy, dict):
+        raise ValueError("card interjection policy must be an object")
+    allowed_romaji = interjection_policy.get("allow_romanized") or {}
+    if not isinstance(allowed_romaji, dict) or any(
+            not isinstance(k, str) or not k.strip() or not isinstance(v, str)
+            for k, v in allowed_romaji.items()):
+        raise ValueError("card interjection allow list must map text to text")
+    if len(allowed_romaji) > 12:
+        raise ValueError("card interjection allow list is too long")
+    for token in allowed_romaji:
+        if len(token) > 24 or any(
+                not (character.isascii() and character.isalpha()) and character not in "?？!"
+                for character in token):
+            raise ValueError("card interjection token must be a short latin interjection")
     compiled = {
         "schema_version": 2, "source_spec": value["spec"],
         "source_sha256": hashlib.sha256(raw).hexdigest(), "name": data["name"],
         "examples": [x.strip() for x in examples.split("<START>") if x.strip()],
         "worldbook": entries, "warnings": warnings,
         "card_language_policy": card_language_policy.strip(),
+        "card_interjection_policy": {
+            "default": _text(interjection_policy.get("default", ""), "interjection default"),
+            "allow_romanized": {token: note for token, note in allowed_romaji.items()},
+        },
         "name_map": dict(card_name_map),
     }
     for target, source in (("identity", "description"), ("personality", "personality"),
@@ -444,6 +482,9 @@ def select_context(compiled, user_text, *, budget_chars=8000, memory=(), recent=
                           "target_language": target_language,
                           "language_policy_source": policy_source,
                           "card_language_policy": compiled.get("card_language_policy", ""),
+                          # Latin interjections this card keeps verbatim; the local
+                          # rewrite must not touch them.
+                          "interjection_allow": interjection_allow_list(compiled),
                           "name_map_entries": len(compiled.get("name_map", {})),
                           "examples_language_filtered": foreign_skipped,
                           "warnings": compiled.get("warnings", [])},

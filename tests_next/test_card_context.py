@@ -1,14 +1,47 @@
 import json, tempfile, unittest
 from pathlib import Path
-from extensions.roles.card_context import (compile_card, language_policy_text, localize_names,
+from extensions.roles.card_context import (compile_card, interjection_allow_list, language_policy_text, localize_names,
                                            resolve_language_policy, script_ratios, select_context,
-                                           serialized)
+                                           naturalize_reply, serialized)
 from extensions.roles.roles import import_card
 from extensions.roles.service import RoleSession
 from tools.evaluate_card_compiled import messages_for
 
 
 class CardContextTests(unittest.TestCase):
+    def test_interjection_policy_keeps_the_signature_token_only(self):
+        """A card may keep one romaji interjection; Sumika must not rewrite it."""
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'card.json'
+            path.write_text(json.dumps({'spec': 'chara_card_v2', 'data': {
+                'name': '昴', 'description': '鼓手', 'personality': '嘴硬',
+                'character_book': {'entries': []},
+                'extensions': {'sumika': {
+                    'language_policy': '简体中文，语气词写中文。',
+                    'interjection_policy': {
+                        'default': '中文字词：啊、诶、嗯',
+                        'allow_romanized': {'hah？': '招牌反问，只能单独成句'},
+                    }}}}}, ensure_ascii=False), encoding='utf8')
+            compiled = compile_card(path)
+            self.assertEqual(interjection_allow_list(compiled), ['hah'])
+            kept, report = naturalize_reply('hah？ ah，好', keep=interjection_allow_list(compiled))
+            self.assertTrue(kept.startswith('hah？'))
+            self.assertIn('啊', kept)
+            self.assertNotIn('ah，', kept)
+            self.assertEqual(report['changed'], True)
+
+    def test_interjection_policy_rejects_non_latin_tokens(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'card.json'
+            path.write_text(json.dumps({'spec': 'chara_card_v2', 'data': {
+                'name': 'x', 'description': '', 'personality': '', 'scenario': '',
+                'character_book': {'entries': []},
+                'extensions': {'sumika': {'interjection_policy': {
+                    'allow_romanized': {'ねえ': 'should not be here'}}}}}},
+                ensure_ascii=False), encoding='utf8')
+            with self.assertRaises(ValueError):
+                compile_card(path)
+
     def test_role_without_a_usable_card_keeps_talking(self):
         """The card switch is client-wide; a role that has no real card must not
         break every reply. The reason is recorded instead of hidden."""

@@ -122,7 +122,8 @@ class RoleChat:
             # answer itself and, if kana survived, ask once more with an explicit
             # correction — the user asked for Chinese, not for a guess.
             guard = self._language_guard(session, provider, messages, localized["text"],
-                                        max_tokens, images)
+                                        max_tokens, images,
+                                        keep=context["selection"].get("interjection_allow") or ())
             if guard["changed"]:
                 # The guard is the last word on the visible text, whether it rewrote
                 # the kana locally or asked the model again.
@@ -170,7 +171,8 @@ class RoleChat:
             "num_predict": self.settings["max_tokens"],
             "temperature": self.settings["temperature"]})
 
-    def _language_guard(self, session, provider, messages, text, max_tokens, images):
+    def _language_guard(self, session, provider, messages, text, max_tokens, images, *,
+                        keep=()):
         """Enforce the output language on the answer itself, not just in the prompt.
 
         Kana is rewritten locally: a second generation for one slipped syllable
@@ -185,7 +187,7 @@ class RoleChat:
                                         max_tokens, images)
         # Cheap and local: interjections become Chinese words, leftover kana becomes
         # romaji, and the name map is applied. Nothing here calls the model.
-        rewritten, report = naturalize_reply(text)
+        rewritten, report = naturalize_reply(text, keep=keep)
         localized = session.request("localize_names", {"text": rewritten})
         remaining = kana_characters(localized["text"])
         return {"retried": False, "clean": not remaining,

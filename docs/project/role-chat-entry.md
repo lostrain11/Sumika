@@ -122,4 +122,23 @@ python -B tools/verify_role_chat.py --settings <settings.json> --out <evidence.j
 - **默认不重发**：为一两个音节再生成一次既费 token 又慢，所以纠正走本地确定性转换；`localize_names` 之后再检查一次，正常结果里不会再有假名。
 - 只有显式打开 `settings.language.retry_on_kana`（默认 false）时才会"重发一次 + 纠正指令"；即便如此，纠正后仍不干净也会**如实标记** `language_guard {retried, clean, transliterated, kana_found, kana_remaining}`，usage 把两次调用都算进去，绝不假装干净。
 - 单测 `tests_next/test_language_guard.py` 覆盖五种情形：干净（1 次调用）、假名语气词（**仍只 1 次调用**，本地变中文）、罗马音语气词（同样本地变中文）、显式开启后重发成功、显式开启且表外字符无法转换时如实标记（例如 ゐ 保持原样并计入 `kana_remaining`）。
+
+## 卡内语气词白名单（2026-09-16，随安和昴新卡）
+
+用户把安和昴的卡优化成 v1.4 并新增了结构化字段：
+
+```json
+"interjection_policy": {
+  "default": "中文字词：啊、诶、嗯、嘛、嘿、哈、哦、唔",
+  "allow_romanized": {"hah？": "她招牌的短促反问：惊讶＋疑惑＋难以置信……只能单独成句、句末带问号"}
+}
+```
+
+Sumika 侧据此调整：
+
+- `compile_card` 校验并编译 `interjection_policy`（允许 `allow_romanized`，要求短拉丁语气词、最多 12 条，非拉丁 token 直接拒绝），`select_context` 把 `interjection_allow`（取拉丁词干，如 `hah`）放进 selection 供改写层使用。
+- `naturalize_reply(text, keep=...)`：`hah` **不在**默认罗马音→中文表里，且卡声明的白名单 token 一律原样保留；其余罗马音语气词仍转中文、假名仍转中文或罗马音兜底。
+- 因此她的招牌 `hah？` 不会被改写成"哈"，而 `ah／maa／nee` 这类照样落成"啊／嘛／呐"。
+
+验收：重新从 `D:\Code\安和昴角色卡项目\交付\安和昴_ST_V2.json` 导入（先删旧副本、再导入新卡、重新挂载同一个 VRM 并刷新校验），`/api/roles` 显示 `kind=user, complete=True, verified=ok`；实测回答为「你好。嗯——来得正好，我刚从牛丼店下班……」，无假名、无多余罗马音，`hah` 白名单生效。
 - 验收（`verify_user_role.mjs` 实测）：回答为「你好，你好。来打招呼的吗——ah，这么正式……maa，我这边刚练完鼓……」——中文 + 罗马音语气词，无假名。
