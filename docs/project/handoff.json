@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T19:42:03.488432+00:00",
+  "updated_at": "2026-09-15T19:45:42.508379+00:00",
   "current_goal": "D 方向 UI 收敛：工作台=DSH、能力与项目作为 DSH 主面板、活动室接真实角色服务，扩展开关与角色完整性均有验收",
   "current_phase": "P6",
   "phase_status": "in_progress",
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "时间线待验证项需要一次真实工具调用（跑一条命令）来确认工具卡/diff/终端/状态行的样式是否命中；其余未贴近项：输入区（composer）、审批卡（需真实审批场景）。改工作台后重跑 verify_workbench_ui.mjs。",
+  "next_action": "输入区（composer）皮肤；终端/diff 样式待展开态出现后再测；审批卡需真实审批场景。",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -132,7 +132,8 @@
       "针对“为什么总走岔”建立两条长期约束：AGENTS.md 新增“防走岔（强制）”（界面改动前先定位设计稿或明确标注新增、单一入口、原型与产品分离、约束写成验收断言、维护覆盖表）；新建 docs/project/ui-design-coverage.md 逐屏列出设计稿元素与实现状态（照做/偏离/未做/未核对）。",
       "侧栏视觉贴近第一轮（仅皮肤层）：行距/圆角/字号/悬停与搜索框样式按设计稿令牌调整；覆盖表登记：项目行缺路径与计数、任务行缺状态点与状态·时间、常驻搜索框——三者需插件层改动；已把两条路线（接管 sidebar.workspaces vs 保留原生）写进覆盖表并标注待用户决策。",
       "用户选路线2（保留原侧栏浏览器）：侧栏按皮肤上限收口并实测记录——能做到按钮/行态/选中/页脚/底色/圆角；做不到项目行圆点与路径计数（工作区行是基础件 root span，无语义后缀，且 DSH 未渲染这些内容）、任务行状态词、常驻搜索框（只用 CSS 显示会变成打字不搜索的假控件）。结论写入覆盖表：这部分要达设计稿必须换渲染方（路线1）。",
-      "时间线皮肤第一轮：按设计稿 .bub/.tool-d/.tool-d .df 写规则并实测——用户消息气泡已生效（1px/8px/水色浅底），助手消息有意不套气泡（DSH 是长文 markdown，套气泡更差）；工具卡/diff/终端规则已写但当前会话无该类节点，命中数 0，标为未验证。"
+      "时间线皮肤第一轮：按设计稿 .bub/.tool-d/.tool-d .df 写规则并实测——用户消息气泡已生效（1px/8px/水色浅底），助手消息有意不套气泡（DSH 是长文 markdown，套气泡更差）；工具卡/diff/终端规则已写但当前会话无该类节点，命中数 0，标为未验证。",
+      "确立“设计稿=视觉参照、不是删功能授权”：DSH 原生额外能力（轨迹/用量用时/系统提示词/模型 chip 等）一律保留，写入 AGENTS.md 与覆盖表。时间线工具卡实测生效（_callRow: border-left 3px / radius 10px / paper 底），终端与 diff 仍未命中（本轮输出未展开渲染），保持未验证。"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -145,7 +146,7 @@
     "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
     "evidence": "docs/project/phase-05-06-backend-acceptance.md",
     "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
-    "current_task": "时间线皮肤第一轮：按设计稿 .bub/.tool-d/.tool-d .df 写规则并实测——用户消息气泡已生效（1px/8px/水色浅底），助手消息有意不套气泡（DSH 是长文 markdown，套气泡更差）；工具卡/diff/终端规则已写但当前会话无该类节点，命中数 0，标为未验证。",
+    "current_task": "确立“设计稿=视觉参照、不是删功能授权”：DSH 原生额外能力（轨迹/用量用时/系统提示词/模型 chip 等）一律保留，写入 AGENTS.md 与覆盖表。时间线工具卡实测生效（_callRow: border-left 3px / radius 10px / paper 底），终端与 diff 仍未命中（本轮输出未展开渲染），保持未验证。",
     "schedule_implemented": [
       "时区与夏令时",
       "持久化提醒及已读",
