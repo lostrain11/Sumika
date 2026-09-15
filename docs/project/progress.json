@@ -28,7 +28,8 @@
     "kana→罗马音本地转写（默认路径，不重发）；重发改由 language.retry_on_kana 显式开启",
     "naturalize_reply（假名/罗马音语气词→中文，残余假名→罗马音）+ 策略文本与安和昴卡同步更新",
     "卡内 interjection_policy（编译+校验+白名单保护）；hah 移出默认罗马音映射；安和昴新卡重导入",
-    "DSH 主面板之二：项目进度（/api/tree 阶段与任务计数、当前任务、下一步）"
+    "DSH 主面板之二：项目进度（/api/tree 阶段与任务计数、当前任务、下一步）",
+    "防走岔约束：AGENTS.md 强制条款 + docs/project/ui-design-coverage.md 逐屏覆盖表（含已否决的实现方式）"
   ],
   "verified": [
     "33 项自动化测试通过",
@@ -85,7 +86,7 @@
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "UI 剩余：外观分区接线、侧栏样式贴近、待确认药丸真实场景验证",
+  "next": "按覆盖表推进 DSH 侧栏/时间线/输入区的皮肤级贴近；每项先登记设计稿对应关系",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",
