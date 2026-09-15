@@ -125,6 +125,28 @@ html[data-sumika-skin='1'] [class*='_groupSection'] {
   border-radius: 9px;
 }
 
+/* Project row (design .wb-proj-head) and the status dot (design .dot 8×3px).
+   The dot colour stays DSH's own real state; rows without a state keep no dot
+   rather than showing an invented one. */
+html[data-sumika-skin='1'] [class*='_projectRow'] {
+  border-radius: 9px;
+  padding: 8px 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+html[data-sumika-skin='1'] [class*='_projectRow']:hover {
+  background: var(--sumika-hover);
+}
+html[data-sumika-skin='1'] [class*='_projectRow'] [class*='_title'] {
+  font-weight: 600;
+}
+html[data-sumika-skin='1'] [class*='_dot'] {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  flex: none;
+}
+
 /* Rail toggle: upstream swaps the brand mark for its own panel glyph on hover
    (.collapsed .toggle:hover .panelIcon{display:inline} plus a railMark hide), so
    the Sumika mark would disappear exactly while the pointer is on it. Keep the
