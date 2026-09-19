@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "scope": "Reviewed binary/media selection; not a complete dependency or license audit",
+  "files": {
+    "runtime/browserskill/bsk.exe": "5aefca2ee990fe54de387894d23bcb0e0b21cfb98d59fa0d7700d5ac63f72c2e",
+    "ui/vendor/sumika-vrm-viewer.js": "b3fa67be87edd1cf1da594519da0b45ae35ee01f7ad076483469b002bbb00d80",
+    "extensions/roles/defaults/sampleA/AvatarSample_A.vrm": "b86b0b8a66d48911431d6f920a5211a974226f83aa672eca3f3dfade58ac346e",
+    "extensions/roles/defaults/sampleA/AvatarSample_A.thumbnail.png": "fb842ac062564ccb199555c20170dad502c63d87007d4f602712c194175349d8"
+  }
+}

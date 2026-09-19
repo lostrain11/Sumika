@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "status": "candidate_inventory",
+  "candidates": [
+    {
+      "id": "openbmb/MiniCPM5-2B",
+      "kind": "official-baseline",
+      "license": "Apache-2.0",
+      "runtime": "ollama-or-llama.cpp",
+      "default": false,
+      "status": "tested",
+      "evidence": "docs/project/local-model-comparison-evidence.json"
+    },
+    {
+      "id": "Abiray/MiniCPM5-2B-heretic-abliterated-GGUF",
+      "kind": "third-party-abliterated",
+      "license": "verify-before-use",
+      "runtime": "llama.cpp-or-ollama",
+      "default": false
+    },
+    {
+      "id": "Qwen3-8B-Heretic",
+      "kind": "role-candidate",
+      "license": "verify-before-use",
+      "default": false,
+      "status": "tested-not-selected",
+      "evidence": "docs/project/local-model-comparison-evidence.json",
+      "reason": "tool-free false completion claim"
+    },
+    {
+      "id": "OpenElla-NovelWriter-8B-V2",
+      "kind": "role-candidate",
+      "license": "verify-before-use",
+      "default": false,
+      "status": "download-verified-not-tested",
+      "reason": "model card says BORKED and license is null"
+    },
+    {
+      "id": "Neon Veil v2",
+      "kind": "role-candidate",
+      "license": "GPL-3.0",
+      "default": false,
+      "status": "tested-not-selected",
+      "source": "titan087/gemma4-e2b-neon-veil-rp-v2",
+      "evidence": "docs/project/local-model-comparison-evidence.json",
+      "reason": "all compiled Chinese card cases hit output length limit"
+    },
+    {
+      "id": "Ministral-3-8B-Nymphaea-RP",
+      "kind": "role-candidate",
+      "license": "Apache-2.0",
+      "default": false,
+      "status": "tested-not-selected",
+      "source": "mradermacher/Ministral-3-8B-Nymphaea-RP-GGUF",
+      "evidence": "docs/project/local-model-comparison-evidence.json",
+      "reason": "Chinese card style is natural but claimed unperformed file deletion"
+    },
+    {
+      "id": "Stheno v3.4",
+      "kind": "role-candidate",
+      "license": "CC-BY-NC-4.0",
+      "default": false,
+      "status": "tested-not-selected",
+      "source": "bartowski/Llama-3.1-8B-Stheno-v3.4-GGUF",
+      "evidence": "docs/project/local-model-comparison-evidence.json",
+      "reason": "Chinese card style is fluent but fabricated unknown episode facts"
+    }
+  ],
+  "selection_rule": "Choose only after the same Chinese role benchmark, resource measurement, source/hash/license review, and tool-isolation acceptance."
+}

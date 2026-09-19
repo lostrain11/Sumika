@@ -1,7 +1,9 @@
 // DSH rc.2 adapter only. Storage and report semantics live in continuity.py.
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { realpathSync } from 'node:fs';
+import { realpathSync, lstatSync, mkdirSync, readFileSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 export const name = 'sumika-continuity';
@@ -74,15 +76,83 @@ export async function apply(ctx, config) {
     tail = result.catch(() => {});
     return result;
   }
+  function fencePath(session, root) {
+    if (typeof session.header.id !== 'string' || !session.header.id) throw Error('session identity required');
+    const id = createHash('sha256').update(session.header.id).digest('hex');
+    const base = path.join(root, '.sumika-continuity');
+    const directory = path.join(base, 'adapter-state');
+    const target = path.join(directory, id+'.json');
+    for (const entry of [base, directory, target]) {
+      try {
+        const stat = lstatSync(entry);
+        if (stat.isSymbolicLink() || (entry === target && stat.nlink !== 1)) throw Error('linked continuity state');
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    return target;
+  }
+  function assertSettled(session, root) {
+    try {
+      const state = JSON.parse(readFileSync(fencePath(session, root), 'utf8'));
+      const reconciled = state.status === 'reconciled' && state.disposition === 'allow-storage-sync-no-task-replay'
+        && state.original_outcome === 'unknown' && typeof state.receipt === 'string';
+      if (state.schema_version !== 1 || (state.status !== 'settled' && !reconciled)) throw Error('unsettled continuity operation');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  function writeFence(session, root, status, operation) {
+    const target = fencePath(session, root);
+    mkdirSync(path.dirname(target), {recursive: true});
+    const temporary = target+'.'+randomUUID()+'.tmp';
+    const fd = openSync(temporary, 'wx');
+    try {
+      writeFileSync(fd, JSON.stringify({schema_version: 1, status, operation}));
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    renameSync(temporary, target);
+  }
+  function unavailable(session) {
+    const failure = new Error('Continuity outcome unknown; automatic retries disabled');
+    failure.code = 'CONTINUITY_UNAVAILABLE';
+    failures.set(session, failure);
+    return failure;
+  }
+  // Called only within the serialized queue. Latch before the next queued
+  // operation can run, including tool/recovery operations (not only capture).
+  async function checkedCall(session, root, request) {
+    if (failures.has(session)) throw failures.get(session);
+    try {
+      assertSettled(session, root);
+      // Persist before spawning: termination/timeout cannot erase uncertainty.
+      // No request text, credentials or model output enters this sidecar.
+      writeFence(session, root, 'pending', request.action);
+      const state = await call(root, request);
+      if (!state || typeof state !== 'object' || state.status === 'unknown') {
+        throw Error('unavailable continuity result');
+      }
+      writeFence(session, root, 'settled', request.action);
+      return state;
+    } catch {
+      // Never propagate subprocess stderr, paths, payloads or arbitrary codes.
+      throw unavailable(session);
+    }
+  }
   function sync(session) {
     return enqueue(async () => {
       const root = project(session);
       if (!root) return;
+      // A failed write has an unknown outcome. Do not replay the same batch
+      // automatically, including after process restart or database repair.
+      if (failures.has(session)) throw failures.get(session);
+      if (session.header.id) {
+        try { assertSettled(session, root); }
+        catch { throw unavailable(session); }
+      }
       const start = cursors.get(session) ?? 0;
       const events = session.snapshotEvents(start);
       const selected = events.flatMap(observation).filter(Boolean);
       // Ordinary model/tool traffic stays in DSH. Avoid an empty subprocess/write cycle.
-      const state = selected.length ? await call(root, { action: 'ingest', harness: 'dsh',
+      const state = selected.length ? await checkedCall(session, root, { action: 'ingest', harness: 'dsh',
         session: session.header.id, events: selected }) : undefined;
       cursors.set(session, start + events.length);
       failures.delete(session);
@@ -93,7 +163,7 @@ export async function apply(ctx, config) {
     if (!project(session)) return;
     sync(session).catch(error => {
       failures.set(session, error);
-      ctx.logger.warn('continuity capture failed; next step will retry persisted events');
+      ctx.logger.warn('continuity capture failed; session fenced with unknown write outcome');
     });
   }
   // Restored logs are backfilled; stable source sequence makes retries idempotent.
@@ -113,7 +183,7 @@ export async function apply(ctx, config) {
     if (failures.has(agent.session)) throw failures.get(agent.session);
     if (injectedTurn.get(agent.session) === turn) return downstream;
     // Read fresh project state only when injecting; another session may have changed it.
-    state ??= await enqueue(() => call(project(agent.session), { action: 'recover' }));
+    state ??= await enqueue(() => checkedCall(agent.session, project(agent.session), { action: 'recover' }));
     const serialized = JSON.stringify(state);
     const context = serialized.length <= 16000 ? serialized : JSON.stringify({
       boundary: state.boundary, project: state.project,
@@ -144,7 +214,7 @@ export async function apply(ctx, config) {
     async execute(args, exec) {
       const root = rootFor(exec);
       await sync(exec.agent.session);
-      const result = await enqueue(() => call(root, args.query
+      const result = await enqueue(() => checkedCall(exec.agent.session, root, args.query
         ? { action: 'query', query: JSON.parse(args.query) } : { action: 'recover' }));
       return JSON.stringify(result);
     }, presentCall: () => ({ card: 'generic', title: 'Read continuity', kind: 'read' }) }));
@@ -157,7 +227,7 @@ export async function apply(ctx, config) {
       await sync(exec.agent.session);
       const step = exec.agent.session.snapshotEvents().findLast(e => e.type === 'step/start');
       if (!step) throw Error('continuity report requires a live native execution step');
-      return JSON.stringify(await enqueue(() => call(root, { action: 'report',
+      return JSON.stringify(await enqueue(() => checkedCall(exec.agent.session, root, { action: 'report',
         session: exec.agent.session.header.id,
         report_id: JSON.stringify([step.data.turn, step.data.step, exec.callId]),
         report: JSON.parse(args.report) })));

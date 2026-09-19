@@ -41,7 +41,24 @@ python -m venv .sumika-next/verify-env
 
 Windows 测试工作区使用普通 `mkdir` 继承项目 ACL。Python 3.14 的 `mkdtemp()` 使用专门的受保护 ACL，与正常项目权限不同，会导致受限令牌无法读取文件、PowerShell 工作目录回落；不要为此关闭沙箱。既有特殊 ACL 工作区需单独评估，不能宣称所有 ACL 布局均受支持。
 
+可复现命令：`python -B tools/verify_development_sandbox.py --python-temp`。
+证据 `.sumika-next/development-sandbox-795d8b9407d54bb9bbc46a7c594e3438/report.json`
+确认同一原生 `workspace-write` 调用内，私有临时目录拒绝读写，普通工作目录可读写。
+测试夹具参考 `tools/development_tasks/audit_cli_tests.py` 的 `evidence_directory()`：
+只在已授权工作目录内创建唯一目录，保留结果，不修改 ACL、不扩大沙箱权限。
+
 ## P3 日用与浏览器验收
+
+开发迭代接线可运行 `python -B tools/verify_development_sandbox.py --iteration`。
+复用真实 DSH、原生 workspace-write 与本机确定性模型夹具，在独立目录创建两个
+关联模块，验证失败测试、未读编辑拒绝、重新读取后修正、测试通过，以及重启后
+工具历史和源文件保留、无模型重放。测试文件不可变，不安装窄范围 probe guard。
+它不是实际模型智能、交互审批或中等规模开发验收；测试脚本失败返回非零退出码。
+
+注意：原生 `write` 成功并不建立 `edit` 所需的已读版本。修改前先 `read`；
+遇到 `FS_STALE_VERSION` 应重新读取并重新判断修改，不关闭原生版本保护。
+首轮失败证据保留在 `.sumika-next/development-sandbox-221bc45d5ccc42359061a0cd79c76ab5/`；
+修正夹具后的通过证据在 `.sumika-next/development-sandbox-aa276220443b4df99cd29882cb7f5edc/report.json`。
 
 在项目根运行 `python -B -m sumika_next.cli run`，默认使用 `.sumika-next/daily/<version>`；工作区、恢复和成果记录见 [日用流程](../../docs/project/daily-workflow.md)。
 

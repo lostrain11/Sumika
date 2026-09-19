@@ -1,0 +1,118 @@
+/* Adapt the D prototype's fixed review canvas to the real client viewport. */
+html[data-theme='dark'] {
+  color-scheme:dark;
+  --bg:#191d1d;--paper:#222727;--paper-2:#292f2e;--ink:#e7e9df;--muted:#acb7b0;--line:#47524d;
+  --rose:#e299af;--rose-deep:#e7aec0;--rose-soft:#403039;
+  --green:#a0cbb1;--green-soft:#2e4137;--mizu:#a0c8e2;--mizu-soft:#283c49;
+  --amber:#dfbf88;--amber-soft:#423b2c;--danger:#eea0a5;--shadow:0 4px 14px #0003;
+}
+html[data-theme='dark'] .add-tile,
+html[data-theme='dark'] .cam-chip,
+html[data-theme='dark'] .d-caption { background:var(--paper);color:var(--ink); }
+html[data-theme='dark'] .member.active { background:var(--rose-soft); }
+html[data-theme='dark'] .model-chip { background:var(--green-soft); color:var(--green); border-color:var(--line); }
+html[data-theme='dark'] .d-ctrl,
+html[data-theme='dark'] .act-demos,
+html[data-theme='dark'] .cam-modes button { background:var(--paper);color:var(--ink);border-color:var(--line); }
+html[data-theme='dark'] .cam-modes button.active { background:var(--mizu-soft);color:var(--mizu); }
+html[data-theme='dark'] .act-demos button.active { background:var(--rose-soft);color:var(--rose); }
+.sumika-network-notice { position:fixed; top:68px; left:50%; transform:translateX(-50%); z-index:1000; max-width:calc(100vw - 32px); padding:10px 16px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); box-shadow:0 3px 14px #0001; font-size:12px; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body { display: flex; flex-direction: column; }
+.topbar { flex: 0 0 64px; min-width: 0; }
+.screen { flex: 1 1 auto; min-height: 0; height: auto; }
+.room-wrap, .cap-wrap, .set-wrap { min-width: 0; min-height: 0; }
+.room-wrap > *, .cap-wrap > *, .set-wrap > * { min-width: 0; min-height: 0; }
+.cap-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.cap-card .top { flex-wrap: wrap; }
+.cap-card p, .kv b, .set-row small { overflow-wrap: anywhere; }
+.cap-side, .set-side, .set-nav { overflow-y: auto; }
+.set-row { flex-wrap: wrap; }
+.set-row .val { flex-wrap: wrap; min-width: 0; }
+.roster .member > span:nth-child(2) { flex: 1; min-width: 0; }
+.roster .member .nm { overflow-wrap: anywhere; }
+.roster .member .bind, .roster .member .ava { flex-shrink: 0; }
+.chat, .chat-msgs { min-height: 0; min-width: 0; }
+.chat-msgs { overflow-y: auto; }
+.cm .room-playback { align-self: flex-start; font-size: 11px; }
+.cm .room-playback[aria-pressed="true"] { color: var(--chara); border-color: var(--chara); }
+.chat .bub { overflow-wrap: anywhere; }
+.chat pre { max-width: 100%; overflow-x: auto; }
+/* Restore discoverable scrollbars; the prototype globally suppressed them. */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #d8cfba; border-radius: 9px; }
+button:focus-visible, [role='switch']:focus-visible, a:focus-visible {
+  outline: 2px solid var(--green); outline-offset: 2px;
+}
+.sumika-region-error { padding: 12px; color: var(--danger); font-size: 12px; }
+.sumika-loading { padding: 12px; color: var(--muted); font-size: 12px; }
+.sumika-field { margin-left:auto; min-width:0; max-width:100%; border:1px solid var(--line); border-radius:7px; padding:7px 9px; background:var(--paper); color:var(--ink); font:inherit; }
+.sumika-form-note { font-size:11px; color:var(--muted); padding:10px 0; line-height:1.7; }
+.sumika-settings-actions, .sumika-action-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 0; }
+.sumika-dialog { margin:auto; width:min(720px,calc(100vw - 32px)); max-height:85vh; overflow:auto; padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); }
+.sumika-dialog::backdrop { background:rgba(47,58,52,.28); }
+.sumika-dialog header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.sumika-dialog h2 { font:600 18px Georgia,"SimSun",serif; }
+.sumika-dialog h3 { margin-top:18px; font-size:13px; color:var(--rose); }
+.sumika-record { border-bottom:1px dashed var(--line); padding:10px 0; overflow-wrap:anywhere; }
+.sumika-record p { font-size:12px; line-height:1.6; }
+.sumika-record small { font-size:10px; color:var(--muted); margin-right:8px; }
+.sumika-record button { margin:5px; }
+.cap-card.selected { border-color:var(--rose); box-shadow:0 0 0 1px var(--rose-soft); }
+html[data-density='compact'] .set-row { padding-top:7px; padding-bottom:7px; }
+html[data-density='compact'] .cap-card { min-height:145px; padding:10px; }
+html[data-density='compact'] .roster .member { padding:6px 8px; }
+@media (max-width: 1250px) {
+  .topbar { gap: 12px; padding: 0 16px; }
+  .gnav { gap: 20px; }
+  .top-right { gap: 6px; min-width: 0; }
+  .model-chip { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .room-wrap { grid-template-columns: 196px minmax(0,1fr) 300px; }
+  .cap-wrap { grid-template-columns: minmax(0,1fr) 270px; }
+  .set-wrap { grid-template-columns: 184px minmax(0,1fr) 250px; }
+  .cap-main, .set-main { padding: 18px; }
+}
+@media (max-width: 960px) {
+  .topbar { gap: 8px; padding: 0 10px; }
+  .brand .ver, .topbar .crumb { display: none; }
+  .gnav { gap: 12px; }
+  .top-right .proto { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model-chip { max-width: 140px; }
+  .room-wrap { grid-template-columns: 170px minmax(0,1fr) 260px; }
+  .cap-wrap { grid-template-columns: minmax(0,1fr) 240px; }
+  .set-wrap { grid-template-columns: 160px minmax(0,1fr); overflow-y: auto; }
+  .set-side { grid-column: 2; }
+  .set-main { overflow-y: visible; }
+  .set-nav { grid-row: 1 / span 2; }
+}
+
+/* Narrow windows keep navigation readable, with status on a separate row. */
+.topbar .brand, .gnav button, .top-right .back-btn { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 680px) {
+  .topbar { height: auto; min-height: 64px; flex-wrap: wrap; padding: 10px 12px; gap: 8px 16px; }
+  .topbar .brand .jp { font-size: 20px; }
+  .gnav { margin: 0; flex: 1 0 auto; gap: 12px; min-height: 38px; }
+  .gnav button { min-height: 38px; }
+  .top-right { flex: 1 0 100%; justify-content: flex-end; flex-wrap: wrap; }
+}
+@media (max-width: 380px) {
+  .gnav { flex-basis: 100%; justify-content: space-between; }
+}
+
+.chat-head { flex-wrap: wrap; }
+.room-history-controls { display:flex; gap:6px; flex-wrap:wrap; margin-left:auto; align-items:center; }
+.room-history-controls small { flex-basis:100%; color:var(--muted); font-size:11px; }
+
+/* Capability configuration reuses the design detail panels. */
+.sumika-capability-settings .set-row { display:flex; flex-wrap:wrap; gap:8px; padding:12px 0; position:relative; }
+.sumika-capability-settings .set-row > span:first-child { flex:1; }
+.sumika-capability-settings .sumika-field:not([type="checkbox"]) { flex-basis:100%; width:100%; min-width:0; box-sizing:border-box; }
+.sumika-capability-settings h3 { margin:12px 0; }
+.sumika-field-help { position:relative; display:inline-flex; flex:none; align-items:center; }
+.sumika-help-trigger { border:1px solid var(--line); border-radius:50%; width:22px; height:22px; background:var(--paper); color:var(--muted); cursor:help; font-size:12px; }
+.sumika-tooltip { display:none; position:absolute; z-index:50; right:0; top:calc(100% + 7px); width:260px; max-width:70vw; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); box-shadow:var(--shadow); font-size:12px; line-height:1.7; font-weight:normal; }
+.set-row:hover .sumika-tooltip,.set-row:focus-within .sumika-tooltip,.sumika-field-help.open .sumika-tooltip { display:block; }
+.sumika-help-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+.sumika-capability-settings .sumika-field:not([type="checkbox"]) { order:2; }
+.sumika-capability-settings > .mini-btn { margin:6px 6px 0 0; }

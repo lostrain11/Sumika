@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "auto_injection": true,
+  "explicit_memory_write": true,
+  "cross_session_recall": true,
+  "restart_recall": true,
+  "write_switch_independent": true,
+  "original_unchanged": true,
+  "disabled_no_injection": true,
+  "external_model_calls": 0,
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\role-plugin-c079280f177049a88a4c1bae61230435"
+}

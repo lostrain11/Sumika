@@ -1,0 +1,783 @@
+{
+  "status": "native_component_review_pending",
+  "package": "@img/sharp-win32-x64",
+  "version": "0.35.4",
+  "evidence": {
+    "readme_sha256": "280e7d164420cfc1a1b192a582bf53e3dba97b86a5c3575f878b674ad1d41e13",
+    "versions_sha256": "d551c859958f06b8088957f679c29be1ff53760191f7401e8183460fc5f58cf4",
+    "manifest_sha256": "b4fc98ec709b31a80e8450259c3d5ed2fc1e2b8f8355ced4bfd4d75db45f8a87"
+  },
+  "components": [
+    {
+      "name": "aom",
+      "version": "3.14.1",
+      "upstream_readme_terms": "BSD 2-Clause + [Alliance for Open Media Patent License 1.0](https://aomedia.org/license/patent-license/)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "archive",
+      "version": "3.8.9",
+      "upstream_readme_terms": "BSD 2-Clause",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "cairo",
+      "version": "1.18.4",
+      "upstream_readme_terms": "Mozilla Public License 2.0",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "cgif",
+      "version": "0.5.3",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "exif",
+      "version": "0.6.26",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "expat",
+      "version": "2.8.3",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "ffi",
+      "version": "3.8.0",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "fontconfig",
+      "version": "2.18.3",
+      "upstream_readme_terms": "[fontconfig License](https://gitlab.freedesktop.org/fontconfig/fontconfig/blob/main/COPYING) (BSD-like)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "freetype",
+      "version": "2.14.3",
+      "upstream_readme_terms": "[freetype License](https://git.savannah.gnu.org/cgit/freetype/freetype2.git/tree/docs/FTL.TXT) (BSD-like)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "fribidi",
+      "version": "1.0.16",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "glib",
+      "version": "2.89.4",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "harfbuzz",
+      "version": "14.3.1",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "heif",
+      "version": "1.23.2",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "highway",
+      "version": "1.4.0",
+      "upstream_readme_terms": "BSD 3-Clause",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "imagequant",
+      "version": "2.4.1",
+      "upstream_readme_terms": "[BSD 2-Clause](https://github.com/lovell/libimagequant/blob/main/COPYRIGHT)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "lcms",
+      "version": "2.19.1",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "mozjpeg",
+      "version": "0826579",
+      "upstream_readme_terms": "[zlib License, IJG License, BSD 3-Clause](https://github.com/mozilla/mozjpeg/blob/master/LICENSE.md)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "pango",
+      "version": "1.58.2",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "pixman",
+      "version": "0.46.4",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "png",
+      "version": "1.6.58",
+      "upstream_readme_terms": "[libpng License](https://github.com/pnggroup/libpng/blob/master/LICENSE)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "proxy-libintl",
+      "version": "0.5",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "rsvg",
+      "version": "2.62.91",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "tiff",
+      "version": "4.7.2",
+      "upstream_readme_terms": "[libtiff License](https://gitlab.com/libtiff/libtiff/blob/master/LICENSE.md) (BSD-like)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "uhdr",
+      "version": "2.0.2",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "vips",
+      "version": "8.18.6",
+      "upstream_readme_terms": "LGPLv3",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "webp",
+      "version": "1.6.0",
+      "upstream_readme_terms": "New BSD License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "xml2",
+      "version": "2.15.3",
+      "upstream_readme_terms": "MIT License",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    },
+    {
+      "name": "zlib-ng",
+      "version": "2.3.3",
+      "upstream_readme_terms": "[zlib License](https://github.com/zlib-ng/zlib-ng/blob/develop/LICENSE.md)",
+      "review_status": "source_archive_hash_verified_original_notice_preserved_relinking_pending"
+    }
+  ],
+  "boundary": "Fixed Windows build/source chain and exact libvips DLL identity established; C++ DLL ABI rebuild recipe located but not reproduced; complete dependencies/source/relinking acceptance remains pending.",
+  "coverage": {
+    "components": [
+      {
+        "name": "aom",
+        "declared_name": "aom",
+        "terms": "BSD 2-Clause + [Alliance for Open Media Patent License 1.0](https://aomedia.org/license/patent-license/)",
+        "version": "3.14.1"
+      },
+      {
+        "name": "cairo",
+        "declared_name": "cairo",
+        "terms": "Mozilla Public License 2.0",
+        "version": "1.18.4"
+      },
+      {
+        "name": "cgif",
+        "declared_name": "cgif",
+        "terms": "MIT License",
+        "version": "0.5.3"
+      },
+      {
+        "name": "expat",
+        "declared_name": "expat",
+        "terms": "MIT License",
+        "version": "2.8.3"
+      },
+      {
+        "name": "fontconfig",
+        "declared_name": "fontconfig",
+        "terms": "[fontconfig License](https://gitlab.freedesktop.org/fontconfig/fontconfig/blob/main/COPYING) (BSD-like)",
+        "version": "2.18.3"
+      },
+      {
+        "name": "freetype",
+        "declared_name": "freetype",
+        "terms": "[freetype License](https://git.savannah.gnu.org/cgit/freetype/freetype2.git/tree/docs/FTL.TXT) (BSD-like)",
+        "version": "2.14.3"
+      },
+      {
+        "name": "fribidi",
+        "declared_name": "fribidi",
+        "terms": "LGPLv3",
+        "version": "1.0.16"
+      },
+      {
+        "name": "glib",
+        "declared_name": "glib",
+        "terms": "LGPLv3",
+        "version": "2.89.4"
+      },
+      {
+        "name": "harfbuzz",
+        "declared_name": "harfbuzz",
+        "terms": "MIT License",
+        "version": "14.3.1"
+      },
+      {
+        "name": "highway",
+        "declared_name": "highway",
+        "terms": "BSD 3-Clause",
+        "version": "1.4.0"
+      },
+      {
+        "name": "lcms",
+        "declared_name": "lcms",
+        "terms": "MIT License",
+        "version": "2.19.1"
+      },
+      {
+        "name": "archive",
+        "declared_name": "libarchive",
+        "terms": "BSD 2-Clause",
+        "version": "3.8.9"
+      },
+      {
+        "name": "exif",
+        "declared_name": "libexif",
+        "terms": "LGPLv3",
+        "version": "0.6.26"
+      },
+      {
+        "name": "ffi",
+        "declared_name": "libffi",
+        "terms": "MIT License",
+        "version": "3.8.0"
+      },
+      {
+        "name": "heif",
+        "declared_name": "libheif",
+        "terms": "LGPLv3",
+        "version": "1.23.2"
+      },
+      {
+        "name": "imagequant",
+        "declared_name": "libimagequant",
+        "terms": "[BSD 2-Clause](https://github.com/lovell/libimagequant/blob/main/COPYRIGHT)",
+        "version": "2.4.1"
+      },
+      {
+        "name": "libnsgif",
+        "declared_name": "libnsgif",
+        "terms": "MIT License",
+        "version": null
+      },
+      {
+        "name": "png",
+        "declared_name": "libpng",
+        "terms": "[libpng License](https://github.com/pnggroup/libpng/blob/master/LICENSE)",
+        "version": "1.6.58"
+      },
+      {
+        "name": "rsvg",
+        "declared_name": "librsvg",
+        "terms": "LGPLv3",
+        "version": "2.62.91"
+      },
+      {
+        "name": "tiff",
+        "declared_name": "libtiff",
+        "terms": "[libtiff License](https://gitlab.com/libtiff/libtiff/blob/master/LICENSE.md) (BSD-like)",
+        "version": "4.7.2"
+      },
+      {
+        "name": "uhdr",
+        "declared_name": "libultrahdr",
+        "terms": "MIT License",
+        "version": "2.0.2"
+      },
+      {
+        "name": "vips",
+        "declared_name": "libvips",
+        "terms": "LGPLv3",
+        "version": "8.18.6"
+      },
+      {
+        "name": "webp",
+        "declared_name": "libwebp",
+        "terms": "New BSD License",
+        "version": "1.6.0"
+      },
+      {
+        "name": "xml2",
+        "declared_name": "libxml2",
+        "terms": "MIT License",
+        "version": "2.15.3"
+      },
+      {
+        "name": "mozjpeg",
+        "declared_name": "mozjpeg",
+        "terms": "[zlib License, IJG License, BSD 3-Clause](https://github.com/mozilla/mozjpeg/blob/master/LICENSE.md)",
+        "version": "0826579"
+      },
+      {
+        "name": "pango",
+        "declared_name": "pango",
+        "terms": "LGPLv3",
+        "version": "1.58.2"
+      },
+      {
+        "name": "pixman",
+        "declared_name": "pixman",
+        "terms": "MIT License",
+        "version": "0.46.4"
+      },
+      {
+        "name": "proxy-libintl",
+        "declared_name": "proxy-libintl",
+        "terms": "LGPLv3",
+        "version": "0.5"
+      },
+      {
+        "name": "zlib-ng",
+        "declared_name": "zlib-ng",
+        "terms": "[zlib License](https://github.com/zlib-ng/zlib-ng/blob/develop/LICENSE.md)",
+        "version": "2.3.3"
+      }
+    ],
+    "declared_without_version": [
+      "libnsgif"
+    ],
+    "version_without_declaration": [],
+    "table_found": true,
+    "boundary": "Shipped metadata comparison only; not binary/source or license compliance verification.",
+    "vendored_component_identity": {
+      "libnsgif": {
+        "version": null,
+        "identity": "vendored in libvips 8.18.6 at pinned commit; source README last updated 2023-01-22; locally patched by update.sh",
+        "license": "MIT",
+        "license_sha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c",
+        "update_script_url": "https://raw.githubusercontent.com/libvips/libvips/426af3f44246fce9cfa8dd51a353aa4dfd48c553/libvips/foreign/libnsgif/update.sh",
+        "update_script_sha256": "f1b7a91827246887386006fe1bff912f0b1c536aaec18aacb2842ea388cff9fd",
+        "binary_source_match_verified": false
+      }
+    }
+  },
+  "findings": [
+    "native_component_licenses_require_review",
+    "native_component_metadata_incomplete",
+    "terms_require_specific_review"
+  ],
+  "standalone_license_scope": "Shipped LICENSE inspected: Apache-2.0 text only; declared LGPL terms and corresponding source/relinking obligations not completed.",
+  "coverage_evidence": ".sumika-next/package/license-audit-candidate-g-components.json",
+  "source_chain": {
+    "status": "source_chain_located_not_distribution_clearance",
+    "assets_reused": [
+      "docs/project/native-component-review.json",
+      ".sumika-next/package/product-candidate-20260919-g/runtime/dsh/node_modules/@img/sharp-win32-x64/README.md"
+    ],
+    "asset_decision": "Use existing shipped metadata and audit as baseline; investigate official matching source rather than invent versions.",
+    "commits": {
+      "sharp_0.35.4": "7f1a0a22cc285fe180766f4935d50b55af6e8432",
+      "sharp_libvips_1.3.3": "6e5971d333377743163edc3ad9e5d0b897abcbc9",
+      "libvips_8.18.6": "426af3f44246fce9cfa8dd51a353aa4dfd48c553",
+      "build_win64_mxe_8.18.6": "09cfccf20b91b441fbe97fa7a7ed8a597e55e830"
+    },
+    "nsgif": {
+      "version": null,
+      "identity": "vendored in libvips 8.18.6 at pinned commit; source README last updated 2023-01-22; locally patched by update.sh",
+      "license": "MIT",
+      "license_sha256": "1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c",
+      "update_script_url": "https://raw.githubusercontent.com/libvips/libvips/426af3f44246fce9cfa8dd51a353aa4dfd48c553/libvips/foreign/libnsgif/update.sh",
+      "update_script_sha256": "f1b7a91827246887386006fe1bff912f0b1c536aaec18aacb2842ea388cff9fd",
+      "binary_source_match_verified": false
+    },
+    "windows_build_chain": {
+      "script": "build-win.sh",
+      "artifact_url": "https://github.com/libvips/build-win64-mxe/releases/download/v8.18.6/vips-dev-x64-web-8.18.6-static.zip",
+      "source_tarball_sha256_from_build_recipe": "3c41e1d5458081bfa4a5bc54e116c46259c75c6760a18027764555632b9dda3e",
+      "source_tarball_url": "https://github.com/libvips/libvips/releases/download/v8.18.6/vips-8.18.6.tar.xz",
+      "source_tarball_downloaded": true,
+      "important": "libvips itself built shared even in static variant; dependencies linked statically. No relinking verification performed."
+    },
+    "findings": [
+      "libnsgif has no standalone semantic version in shipped metadata; pinned vendored source identifies it without fabricating a version. README declares a local modification; exact modified source matters.",
+      "sharp-libvips versions.properties AOM 3.15.0 differs from Windows shipped 3.14.1: use Windows MXE recipe/versions, not POSIX dependency table.",
+      "Windows script downloads THIRD-PARTY-NOTICES from mutable main; do not substitute pinned tag text as binary notice proof.",
+      "Correct source/build chain found, but no downloaded release binary comparison, full dependency source/licenses, LGPL3+GPL3 conveyance terms or relinking proof.",
+      "libvips pinned LICENSE contains LGPL2.1; distribution README elects LGPL3 via or-later; copying upstream LICENSE alone does not complete combined-work requirements."
+    ],
+    "network_limit": "GitHub unauthenticated API returned rate limit403; official raw/git endpoints used read-only; small MXE build-scripts source archive64592 bytes.",
+    "product_changed": false,
+    "next": "Record vendored revision and fixed source links in native review; gather exact Windows dependency notices/source and investigate DLL replacement/relinking before public release."
+  },
+  "windows_binary_comparison": {
+    "archive_url": "https://github.com/libvips/build-win64-mxe/releases/download/v8.18.6/vips-dev-x64-web-8.18.6-static.zip",
+    "archive_sha256": "42ceea0c2f53d1244f3cb54c059881487b37452ee46c1c98c0d4b47480b20588",
+    "archive_size": 9322134,
+    "comparisons": [
+      {
+        "release_file": "bin/libvips-42.dll",
+        "candidate_file": ".sumika-next\\package\\product-candidate-20260919-h\\runtime\\dsh\\node_modules\\@img\\sharp-win32-x64\\lib\\libvips-42.dll",
+        "release_size": 18614784,
+        "candidate_size": 18614784,
+        "release_sha256": "e6cc51bbc763e7deda536c6f56ce96b4c51ea769690ce4f4ed07607527b81dae",
+        "candidate_sha256": "e6cc51bbc763e7deda536c6f56ce96b4c51ea769690ce4f4ed07607527b81dae",
+        "exact_match": true
+      },
+      {
+        "release_file": "bin/libvips-cpp-42.dll",
+        "candidate_file": ".sumika-next\\package\\product-candidate-20260919-h\\runtime\\dsh\\node_modules\\@img\\sharp-win32-x64\\lib\\libvips-cpp-8.18.6.dll",
+        "release_size": 536576,
+        "candidate_size": 333312,
+        "release_sha256": "0dbce86b29f48a1dd708744bcea32d0bb7ab19bcb68feac4c8768ff380fdb440",
+        "candidate_sha256": "4f458afdb7b8a4290dbda3f287d7db037b239b8a9d21f0b87333f92192cdee76",
+        "exact_match": false
+      },
+      {
+        "release_file": "versions.json",
+        "candidate_file": ".sumika-next\\package\\product-candidate-20260919-h\\runtime\\dsh\\node_modules\\@img\\sharp-win32-x64\\versions.json",
+        "release_size": 597,
+        "candidate_size": 597,
+        "release_sha256": "d551c859958f06b8088957f679c29be1ff53760191f7401e8183460fc5f58cf4",
+        "candidate_sha256": "d551c859958f06b8088957f679c29be1ff53760191f7401e8183460fc5f58cf4",
+        "exact_match": true
+      }
+    ],
+    "notice_files": [
+      "vips-dev-8.18/LICENSE"
+    ],
+    "nsgif_notice_in_archive": false,
+    "complete_dependency_licenses": false,
+    "corresponding_source_in_archive": false,
+    "boundary": "Exact DLL equality proves only the matching DLL came from this downloaded release, not complete source compliance. C++ DLL differs and requires sharp-specific build provenance. Raw fixed source COPYING not original binary-bundled notice.",
+    "cpp_difference_explanation": {
+      "verified_recipe_url": "https://raw.githubusercontent.com/lovell/sharp/7f1a0a22cc285fe180766f4935d50b55af6e8432/src/binding.gyp",
+      "sha256": "9d0a43b5db5db4e6a4a662ff059d8bf30e57ea403d2e207fc408a8c6aa0ab8c8",
+      "lines": "16-35",
+      "reason_in_source": "Build libvips C++ binding for Windows due to MSVC std library ABI changes",
+      "source_files": [
+        "VConnection.cpp",
+        "VError.cpp",
+        "VImage.cpp",
+        "VInterpolate.cpp",
+        "VRegion.cpp"
+      ],
+      "boundary": "Explains expected binary difference only; not reproducible-build equality."
+    }
+  },
+  "source_material_checkpoint": {
+    "status": "all_28_declared_versioned_source_archives_recipe_hash_verified",
+    "evidence": ".sumika-next\\native-source-review-20260919\\component-sources\\report.json",
+    "recipe_index": ".sumika-next\\native-source-review-20260919\\windows-component-recipes.json",
+    "versions_matched": 28,
+    "cached_sources": [
+      {
+        "component": "exif",
+        "version": "0.6.26",
+        "url": "https://github.com/libexif/libexif/releases/download/v0.6.26/libexif-0.6.26.tar.xz",
+        "sha256": "4a055ed6575e61ca46c3172be3c753cc16c9becd0f99ec71d58dd0e471476c0c",
+        "bytes": 1335488
+      },
+      {
+        "component": "fribidi",
+        "version": "1.0.16",
+        "url": "https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz",
+        "sha256": "1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c",
+        "bytes": 1098260
+      },
+      {
+        "component": "glib",
+        "version": "2.89.4",
+        "url": "https://download.gnome.org/sources/glib/2.89/glib-2.89.4.tar.xz",
+        "sha256": "1cdbb799f558832e6f14b8337b5fd599c6918ab144977b55e05e00a5e2e84a2c",
+        "bytes": 5830980
+      },
+      {
+        "component": "pango",
+        "version": "1.58.2",
+        "url": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+        "sha256": "342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a",
+        "bytes": 1918112
+      },
+      {
+        "component": "rsvg",
+        "version": "2.62.91",
+        "url": "https://download.gnome.org/sources/librsvg/2.62/librsvg-2.62.91.tar.xz",
+        "sha256": "6caeae129d40dd88f8ec49436fd89bfe4ada716a125187a7fa0def8fcaa0b250",
+        "bytes": 6766696
+      },
+      {
+        "component": "heif",
+        "version": "1.23.2",
+        "url": "https://github.com/strukturag/libheif/releases/download/v1.23.2/libheif-1.23.2.tar.gz",
+        "sha256": "8bd5d41d19dc84536d118b04774709f244df6104ef66d623dad5fa4650143405",
+        "bytes": 2111195
+      },
+      {
+        "component": "proxy-libintl",
+        "version": "0.5",
+        "url": "https://codeload.github.com/frida/proxy-libintl/tar.gz/0.5",
+        "sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303",
+        "bytes": 13056
+      },
+      {
+        "component": "cairo",
+        "version": "1.18.4",
+        "url": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+        "sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+        "bytes": 32578804
+      }
+    ],
+    "supplemental_notices": [
+      "native-exif-0.6.26-COPYING.txt",
+      "native-fribidi-1.0.16-COPYING.txt",
+      "native-glib-2.89.4-LGPL-2.1-or-later.txt.txt",
+      "native-pango-1.58.2-COPYING.txt",
+      "native-rsvg-2.62.91-COPYING.LIB.txt",
+      "native-heif-1.23.2-COPYING.txt",
+      "native-proxy-libintl-0.5-COPYING.txt",
+      "native-cairo-1.18.4-COPYING.txt",
+      "native-cairo-1.18.4-COPYING-LGPL-2.1.txt",
+      "native-cairo-1.18.4-COPYING-MPL-1.1.txt",
+      "native-vips-8.18.6-LICENSE.txt"
+    ],
+    "limits": [
+      "Resolved base MXE branch not proved identical to original release container",
+      "Patch application, full transitive sources and rebuild/relinking unverified",
+      "Cairo source offers LGPL2.1/MPL1.1 while binary README elects MPL2.0; election/compatibility still needs verification",
+      "No final package rebuild or public clearance"
+    ],
+    "source_manifest": "packaging/notices/native-source-materials.json",
+    "remaining": [
+      "Full transitive dependency sources, including Rust crates and toolchain/system-library scope",
+      "Apply and review effective patches and preserve modified-source notices",
+      "Verify build and supported replacement/relinking process",
+      "Finalize source-distribution bundle and delivery alongside binary; cached materials are not a public source offer"
+    ],
+    "additional_source_notices": 37
+  },
+  "rust_source_checkpoint": {
+    "status": "346_patched_lock_registry_archives_verified",
+    "original_lock_packages": 350,
+    "effective_lock_packages": 346,
+    "patch_applied_fuzz": 0,
+    "patch_evidence": ".sumika-next\\native-source-review-20260919\\librsvg-patch-verification.json",
+    "source_evidence": ".sumika-next\\native-source-review-20260919\\rsvg-crates\\effective-report.json",
+    "material_index": "packaging/notices/native-rust-source-materials.json",
+    "missing_notice_file_count": 13,
+    "limits": [
+      "Target-specific dependency selection and build evidence",
+      "Review missing full license files against exact package source notices",
+      "Rust toolchain/build-std source and system-library boundary",
+      "No claim complete corresponding source bundle or releasable binary"
+    ]
+  },
+  "rust_target_review": {
+    "status": "offline_candidate_windows_capi_normal_build_graph_and_notices_reviewed",
+    "packages": 162,
+    "notice_bindings": 279,
+    "evidence": ".sumika-next\\native-source-review-20260919\\rsvg-c-windows-tree-review.json",
+    "offline_workspace": ".sumika-next\\native-source-review-20260919\\offline-rust-workspace.json",
+    "limits": [
+      "Includes build dependencies; not binary link proof",
+      "Based on capi, with pixbuf disabled by recipe and no optional AVIF feature; original build feature detection remains unverified",
+      "Actual cross-build and Rust build-std/toolchain provenance remain pending"
+    ]
+  },
+  "native_patch_checkpoint": {
+    "status": "candidate_effective_patches_applied_zero_fuzz",
+    "components": 28,
+    "patches": 16,
+    "evidence": ".sumika-next\\native-source-review-20260919\\patch-check-c8e1008083b64541ac83cc8123edc557\\report.json",
+    "index": "packaging\\notices\\native-patch-materials.json",
+    "assets_reused": [
+      "Existing exact component source archives",
+      "Pinned build-win64-mxe/MXE recipe archives",
+      "Existing Windows GNU patch at D:/Tools/Git/usr/bin/patch.exe"
+    ],
+    "implementation": "tools/verify_native_source_patches.py; copies affected source files to fresh retained directories; executes patch only, not upstream build scripts",
+    "verification": "All 16 selected patches dry-run and apply exit 0 with --fuzz=0; no offset diagnostics. Existing librsvg Cargo.lock patch independently agrees with previous evidence.",
+    "retained_failure": "First run stopped before mozjpeg patching because obsolete codeload archive failed hash; corrected lookup to existing mozjpeg.recipe-source, without download/replacement.",
+    "limits": [
+      "Affected-file subsets verified only; no full native compilation or relink",
+      "Original release container identity and optional feature choices not proved",
+      "Full original recipe archives retained; index is not a corresponding-source delivery offer"
+    ],
+    "next": "Real native compilation/replacement and final source-delivery package still needed; clean Windows approval and ordinary model-development acceptance remain."
+  },
+  "material_bundle": {
+    "status": "internal_material_bundle_verified_not_release_clearance",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\native-source-materials-20260919.zip",
+    "sha256": "6bad42a3ec84714bb97044cabda6ee49a1fbf5bd709e0234e3c31a8698598d69",
+    "bytes": 185909111,
+    "counts": {
+      "native_archives": 28,
+      "rust_archives": 346,
+      "recipe_archives": 2
+    },
+    "verified_entries": 545,
+    "remaining": [
+      "Historical container/toolchain/build-std provenance and source scope",
+      "Actual compilation, binary replacement/relinking validation",
+      "Final applicable source/license scope and delivery review"
+    ]
+  },
+  "cairo_license_upgrade_review": {
+    "status": "upgrade_route_supported_delivery_review_remaining",
+    "component": "cairo",
+    "version": "1.18.4",
+    "source_terms": "LGPL-2.1 OR MPL-1.1 per original COPYING; individual implementation file terms must remain respected",
+    "distributor_election": "MPL-2.0 in pinned build-win64-mxe README",
+    "official_guidance": {
+      "url": "https://www.mozilla.org/en-US/MPL/2.0/Revision-FAQ/",
+      "question": 6,
+      "excerpt": "6. I am distributing code written by someone else under the terms of MPL 1.1. Can I distribute that code under the terms of MPL 2.0 instead of MPL 1.1? If so, how? Yes, you can, because MPL 1.1 allows anyone who received code under the terms of MPL 1.1 to distribute under the terms of a later version of the MPL. To do this, replace the old license header with the new header from MPL 2.0 Exhibit A. If you received the code under only MPL 1.1, and not a combination of the MPL plus a member of the GNU family of licenses (such as the Mozilla Tri-License), then you must also add the text of Exhibit B to the license header. Changes from MPL 1.1",
+      "evidence": ".sumika-next\\native-source-review-20260919\\mozilla-mpl-revision-faq.html",
+      "sha256": "5b518c24545ef2fa448bbc7c9872f9a45a1116d450373355ada740cdc8e28871"
+    },
+    "license_clause": "Original MPL-1.1 section 6.2 permits a subsequent version. Mozilla FAQ Q6 confirms 1.1 to 2.0 distribution route and header requirements.",
+    "conclusion": "The version difference alone does not establish a conflict. This does not prove distributor performed required notices or complete source delivery.",
+    "remaining": [
+      "Verify effective modified source and distribution notices against MPL requirements",
+      "Include source access and appropriate license notices in actual delivery",
+      "Keep broader native source/build/relinking gate open"
+    ]
+  },
+  "toolchain_source_review": {
+    "status": "all_four_sources_verified_and_bundled",
+    "index": ".sumika-next\\native-source-review-20260919\\toolchain-materials.json",
+    "components": [
+      "rust nightly 2026-06-05",
+      "LLVM 22.1.7",
+      "mingw-w64 14.0.0",
+      "llvm-mingw 20260602"
+    ],
+    "reason": "Pinned recipe rebuilds std/panic_abort and compiler runtimes; crate-only inventory is insufficient.",
+    "build_blocker": "No working Docker/Podman or installed WSL Linux environment detected; current D free approximately 7GB. No OS installation authorized beyond Sandbox.",
+    "exec_session": 75951,
+    "llvm_mingw_evidence": ".sumika-next\\native-source-review-20260919\\llvm-mingw-recipe-source.json",
+    "next": "Poll live exec 75951 for Rust/LLVM; use exact tags archive for llvm-mingw, not GitHub API tarball. Inspect report before adopting sources.",
+    "verified_so_far": [
+      "mingw-w64 14.0.0",
+      "llvm-mingw 20260602"
+    ],
+    "preserved_notices": [
+      {
+        "file": "native-toolchain-llvm-mingw-20260602-LICENSE.txt",
+        "sha256": "8e5db0129069005be2a07be3297e198888fd72fad62a13a611504660c6b7e3c7",
+        "url": "https://github.com/mstorsjo/llvm-mingw/archive/20260602.tar.gz",
+        "archive_sha256": "ac037f1ccb45bbff9ae202baa6840ebb6e178b56e2ea72d501486288548d92e9",
+        "source_member": "llvm-mingw-20260602/LICENSE.txt",
+        "component": "llvm-mingw 20260602",
+        "verification": "Exact original notice from checksum-verified candidate toolchain source. Does not prove original binary build identity or complete relinking obligations."
+      },
+      {
+        "file": "native-toolchain-mingw-w64-14.0.0-runtime.txt",
+        "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+        "url": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2",
+        "archive_sha256": "6eaf921d9eb987d3820b364ea9775bc19b965ec81490b6fdd716526c28e1995c",
+        "source_member": "mingw-w64-v14.0.0/COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt",
+        "component": "mingw-w64 14.0.0",
+        "verification": "Exact original notice from checksum-verified candidate toolchain source. Does not prove original binary build identity or complete relinking obligations."
+      }
+    ],
+    "bundle_report": ".sumika-next\\package\\native-source-materials-20260919-toolchain.report.json"
+  },
+  "toolchain_bundle_checkpoint": {
+    "status": "all_four_sources_verified_and_bundled",
+    "report": ".sumika-next\\package\\native-source-materials-20260919-toolchain.report.json",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\native-source-materials-20260919-toolchain.zip",
+    "sha256": "b749c176fc3c2e5c2f9703914c2a0ea5993cd1c6f2fff7933807122633395b80",
+    "bytes": 607941251,
+    "verified_entries": 563,
+    "counts": {
+      "native_archives": 28,
+      "rust_archives": 346,
+      "recipe_archives": 2,
+      "toolchain_archives": 4
+    },
+    "notice_tests_passed": 14,
+    "download_terminal": true,
+    "remaining": [
+      "Historical container/toolchain/build-std provenance and source scope",
+      "Actual compilation, binary replacement/relinking validation",
+      "Final applicable source/license scope and delivery review"
+    ],
+    "boundary": "Internal source materials only. C++ wrapper rebuild/replacement passed separately; core C DLL and complete transitive rebuild pending."
+  },
+  "toolchain_patch_selection": {
+    "evidence": ".sumika-next\\native-source-review-20260919\\toolchain-patch-selection.json",
+    "patch_count": 0,
+    "override_count": 1,
+    "conclusion": "No patch files for these four components in pinned recipe archives. mingw-w64 has an explicit build patch wildcard override whose result is empty; preserve that override rather than falling back to base patches. Generated wrapper edits remain part of build recipe.",
+    "boundary": "Recipe review only, not source compilation or original container identity."
+  },
+  "cpp_rebuild_checkpoint": {
+    "status": "cpp_wrapper_rebuilt_and_replacement_loaded",
+    "passed": true,
+    "compiler": "MSVC 14.44.35207 x64 via existing Visual Studio 2022",
+    "recipe_reference": ".sumika-next/native-source-review-20260919/sharp-binding.gyp",
+    "source_inputs": "Checksum-verified libvips 8.18.6 release and official Windows development ZIP",
+    "build_command": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\build-utf8.cmd",
+    "build_log": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\build-utf8.log",
+    "baseline": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\baseline-verified.json",
+    "replacement": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\replacement-verified.json",
+    "built_cpp_sha256": "0bb98fa86e933703f0cd6a88cd33ce527bcb357ea92bbe9d2b5758743f8061f0",
+    "original_cpp_sha256": "4f458afdb7b8a4290dbda3f287d7db037b239b8a9d21f0b87333f92192cdee76",
+    "unchanged_binding_copy": true,
+    "unchanged_c_library_copy": true,
+    "checks": [
+      "PNG exact pixel roundtrip",
+      "JPEG resize encode and decode dimensions",
+      "SVG red pixel rasterization",
+      "Native process DLL path proves rebuilt wrapper was loaded"
+    ],
+    "limits": [
+      "C dependency DLL reused, not rebuilt",
+      "Not byte-identical upstream compiler reproduction",
+      "Test-only Module._load routing; no node_modules or daily binary modification",
+      "Full corresponding source and Linux/MXE build remain pending"
+    ],
+    "retained_failures": [
+      "Initial build missing included vips-operators.cpp; extracted exact source and added UTF-8 compiler option",
+      "First probe rejected Windows extended path spelling; normalized both sides using path.toNamespacedPath"
+    ]
+  },
+  "rust_source_completion_checkpoint": {
+    "status": "archive_verified_staged_root_notices_preserved",
+    "bytes": 243562908,
+    "sha256": "89e9769b66c61eca90b885c852fbe34e952081c0e3332a7921eabfc7990d2afe",
+    "source": ".sumika-next\\native-source-review-20260919\\toolchain\\rust-nightly.source",
+    "notices": ".sumika-next\\native-source-review-20260919\\rust-toolchain-notices.json",
+    "remaining": "Third-party standard-library/build-std scope must be reviewed; root MIT/Apache alone does not cover every bundled source. LLVM download exec 75951 still live."
+  },
+  "linux_build_environment_checkpoint": {
+    "status": "prepared_pending_explicit_wsl_install_authorization",
+    "script": ".sumika-next/package/linux-build-preflight/install-wsl-runtime.ps1",
+    "requested_scope": "WSL runtime install only via --install --no-distribution; no distro, no automatic restart",
+    "existing_assets": [
+      "Pinned MXE recipe and original source material bundle",
+      "Existing MSVC build already used successfully for C++ wrapper",
+      "Official Microsoft WSL command documentation captured under linux-build-preflight"
+    ],
+    "evidence": "wsl --help exposes installation stub only; no Linux runtime or Docker/Podman detected",
+    "disk": {
+      "D_free_approx_GB": 5.2,
+      "E_free_approx_GB": 1018,
+      "E_type": "fixed NTFS"
+    },
+    "future_distro_location": "Proposed E:/SumikaBuild after separate concrete distro preparation; not created or installed",
+    "next": "Await runtime installation authorization; do not install on generic goal continuation alone."
+  }
+}

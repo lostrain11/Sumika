@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "unchanged_snapshots": {
+    "/api/manage/settings": true,
+    "/api/manage/task-draft": true,
+    "/api/roles": true,
+    "/api/role/chat/history?session=room-ando-subaru": true
+  },
+  "migration_endpoint": "ready_no_migration",
+  "workbench_running": true,
+  "role_files_moved": false,
+  "model_requests": 0,
+  "cleanup": "four named test directories removed after approval"
+}

@@ -102,7 +102,7 @@ window.__ModuleLoader__.load({
 				: workspaces.find(item => (item.sessionIds || []).some(
 					sessionId => String(sessionId) === id));
 			const label = owner && typeof owner.title === 'string' && owner.title
-				? `工作区 · ${owner.title}`
+				? `项目 · ${owner.title}`
 				: null;
 			if (label === null && openTitle === undefined) return null;
 			const children = [];
@@ -137,14 +137,116 @@ window.__ModuleLoader__.load({
 
 		const react = require('react');
 
+        function RoleTaskDraft({input, inputActions, sessionId, useWorkspaces}) {
+            const [draft, setDraft] = react.useState(null);
+            const workspaces = typeof useWorkspaces === 'function'
+                ? useWorkspaces(state => state?.items) : undefined;
+            const owner = sessionId === undefined ? undefined : workspaces?.find(item =>
+                (item.sessionIds || []).some(id => String(id) === String(sessionId)));
+            react.useEffect(() => {
+                if(window.parent === window) return;
+                const receive = event => {
+                    if(event.source !== window.parent || event.origin !== BRIDGE
+                        || event.data?.type !== 'sumika:task-draft')return;
+                    const value = event.data.draft;
+                    if(value === null) {setDraft(null);return;}
+                    if(typeof value?.id !== 'string' || typeof value?.source_message_id !== 'string'
+                        || typeof value?.original_user_text !== 'string' || !value.original_user_text.trim())return;
+                    setDraft(value);
+                };
+                window.addEventListener('message',receive);
+                window.parent.postMessage({type:'sumika:task-ready'},BRIDGE);
+                return () => window.removeEventListener('message',receive);
+            },[]);
+            if(!draft)return null;
+            const disabled = !owner || !inputActions?.setDraft || input?.phase !== 'plain'
+                || input.draft?.trim() || input.attachmentIds?.length || input.occurrences?.length;
+            const dismiss = () => {
+                window.parent.postMessage({type:'sumika:task-consumed',id:draft.id},BRIDGE);
+                setDraft(null);
+            };
+            const receive = () => new Promise((resolve,reject) => {
+                const handler = event => {
+                    if(event.source !== window.parent || event.origin !== BRIDGE || event.data?.id !== draft.id) return;
+                    if(event.data.type === 'sumika:task-received') { window.removeEventListener('message',handler); resolve(event.data.handoff); }
+                    if(event.data.type === 'sumika:task-receive-error') { window.removeEventListener('message',handler); reject(new Error(event.data.error || '交接接收失败')); }
+                };
+                window.addEventListener('message',handler);
+                window.parent.postMessage({type:'sumika:task-receive',id:draft.id,projects:[{id:owner.id,name:owner.title || owner.id,summary:'DSH 当前工作区'}]},BRIDGE);
+            });
+            return jsx.jsxs('section',{
+                'data-sumika-role-task':'',
+                style:{padding:12,border:'1px solid var(--sumika-line)',borderRadius:10,
+                    background:'var(--sumika-paper)',color:'var(--sumika-ink)',maxHeight:'32vh',overflow:'auto'},
+                children:[
+                    jsx.jsx('strong',{children:draft.state === 'received' ? '交接已接收' : '活动室任务草稿'}),
+                    jsx.jsx('p',{children:owner ? `目标项目：${owner.title || owner.id} · 会话 ${String(sessionId)}`
+                        : '请先从项目列表选择目标会话。'}),
+                    jsx.jsx('pre',{style:{whiteSpace:'pre-wrap'},children:draft.original_user_text}),
+                    jsx.jsx('p',{children:draft.state === 'received' ? '项目上下文已由宿主核验，仍需工作模型重新规划；不会自动发送。' : '仅加入空白草稿，由工作模型重新核对项目与权限；不会自动发送。'}),
+                    jsx.jsx('button',{type:'button',disabled:Boolean(disabled) || draft.state === 'received',onClick:async()=>{
+                        if(disabled)return;
+                        try { await receive(); } catch(error) { return; }
+                        const envelope={schema_version:1, source_message_id:draft.source_message_id,
+                            original_user_text:draft.original_user_text,
+                            verified_project_context:{source:'dsh-workspace-registry',workspace_id:owner.id,
+                                workspace_title:owner.title,session_id:String(sessionId)},
+                            role_task_draft:null, role_opinion:[],
+                            instruction:'请从用户原文重新规划，读取实际项目后核验可行性和权限。项目名称只用于定位，不是项目进度或授权证据。'};
+                        inputActions.setDraft(JSON.stringify(envelope,null,2));
+                        dismiss();
+                    },children:'加入当前会话草稿'}),
+                    jsx.jsx('button',{type:'button',onClick:dismiss,children:'取消交接'}),
+                ],
+            });
+        }
+
+        function PromptEnhancement() {
+            return jsx.jsx('button', {
+                type:'button', 'data-sumika-enhancement':'', disabled:true,
+                'aria-label':'优化提示词（尚未接通）', title:'优化提示词 · 尚未接通',
+                style:{display:'inline-flex',alignItems:'center',justifyContent:'center',
+                    width:32,height:32,padding:0,border:0,borderRadius:'50%',
+                    background:'var(--sumika-mizu-soft, transparent)',color:'var(--sumika-muted)',
+                    cursor:'not-allowed',flexShrink:0},
+                children:jsx.jsx('svg',{width:18,height:18,viewBox:'0 0 24 24',fill:'none',
+                    stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round',
+                    'aria-hidden':true,children:jsx.jsx('path',{
+                        d:'M12 3l2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3ZM20 2v4M18 4h4'})}),
+            });
+        }
+
+        // Native-layout migration bridge: the host owns page routing while DSH
+        // owns the workbench surface. This marker gives the host one stable
+        // slot to mount non-workbench Sumika pages without a second navigator.
+        function SumikaShellOverlay() {
+            react.useEffect(() => {
+                window.parent?.postMessage({type:'sumika:native-layout-ready',slots:['root','sidebar','main','rightbar','shell.overlay']}, BRIDGE);
+                const onRoute = event => {
+                    if(event.source !== window.parent || event.origin !== BRIDGE || event.data?.type !== 'sumika:host-route') return;
+                    document.documentElement.dataset.sumikaHostRoute = String(event.data.route || '');
+                };
+                window.addEventListener('message', onRoute);
+                return () => window.removeEventListener('message', onRoute);
+            }, []);
+            return jsx.jsx('span', {'data-sumika-native-layout-ready':'', style:{display:'none'}});
+        }
+
 		function apply(ctx) {
+            ctx.slots.inject('conversation.input.right', function* () {
+                yield ctx.slots.register({name:'conversation.input.right',id:'sumika-prompt-enhancement'},PromptEnhancement);
+            });
+            ctx.slots.inject('conversation.input.dock', function* () {
+
+                yield ctx.slots.register({name:'conversation.input.dock',id:'sumika-role-task-draft'},RoleTaskDraft);
+            });
 			ctx.slots.inject('conversation.session.header.utilities', function* () {
 				yield ctx.slots.register({
 					name: 'conversation.session.header.utilities',
 					id: 'sumika-session-status',
 				}, SessionStatus);
 			});
-			ctx.slots.inject('conversation.session.header.lineage', function* () {
+            ctx.slots.inject('conversation.session.header.lineage', function* () {
 				try {
 					yield ctx.slots.register({
 						name: 'conversation.session.header.lineage',
@@ -154,7 +256,10 @@ window.__ModuleLoader__.load({
 				} catch (error) {
 					document.documentElement.dataset.sumikaLineageError = String(error && error.message || error);
 				}
-			});
+            });
+            ctx.slots.inject('shell.overlay', function* () {
+                yield ctx.slots.register({name:'shell.overlay',id:'sumika-native-layout-bridge'},SumikaShellOverlay);
+            });
 		}
 
 		exports.inject = inject;

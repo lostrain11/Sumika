@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>方向 D · 晴日部室 — Sumika Next UI 设计原型</title>
+<title>晴日部室 · Sumika</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23567f6c'/%3E%3Cstop offset='1' stop-color='%23b4496a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3C/svg%3E">
 <style>
   /* ============ 设计令牌（旧版清爽日系：米白 / 墨绿 / 玫红 / 水色） ============ */
@@ -495,6 +495,7 @@
   .rsv-tag{font-size:8.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:99px;padding:1px 7px}
   .set-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
 </style>
+<link rel="stylesheet" href="/app/layout.css">
 </head>
 <body>
 
@@ -538,8 +539,7 @@
         <span class="ava">＋</span>
         <span><span class="nm">角色卡 C</span><span class="st">预留 · P6 导入后列于此</span></span>
       </button>
-      <div class="roster-note">名册 ≥6 人时折叠为头像列；活跃角色置顶。点名字即可切换在场角色，<b>不打断工作台任务</b>。</div>
-      <div class="roster-note">房间即镜头画面：<b>场景资源（书房 / 卧室 / 厨房…）随她的活动切换</b>，P6 开放。场景物件仅为陈设、不与功能绑定——功能入口统一在顶栏导航，与场景无关。</div>
+      <div class="roster-note">角色卡与视觉模型绑定完整后出现在名册中。点名字切换角色，<b>不打断工作台任务</b>。</div>
       <div class="roster-foot">
         <span class="coop">多人同屏 <span class="tag">预留 · P6</span></span>
         <span class="import-btn">＋ 导入角色卡 · 预留 P6</span>
@@ -557,12 +557,12 @@
           <button data-cam="fixed">固定</button>
           <button data-cam="closeup">特写</button>
         </div>
-        <span class="d-ctrl">视线跟随 <span class="on">ON</span></span>
+        <span class="d-ctrl">视线跟随 <span class="on">未接入</span></span>
         <span class="d-ctrl">桌宠小窗 <span class="on">可拖动 · 跨页常驻</span></span>
         <span class="d-ctrl rsv">独立桌宠窗口 <span class="on">预留 · P7</span></span>
         <span class="d-ctrl rsv">全屏壁纸陪伴 <span class="on">预留 · P7</span></span>
         <div class="act-demos">
-          <span class="lab">演示 · 她的活动</span>
+          <span class="lab">活动</span>
           <div class="row">
             <button data-act="idle" class="active">待机</button>
             <button data-act="work">工作</button>
@@ -598,12 +598,10 @@
         </div></div>
         <div class="cup"></div>
       </div>
-      <span class="obj3d" style="bottom:calc(12% + 100px);left:calc(5% + 206px)">3D · 电脑桌</span>
       <div class="d-chair">
         <div class="back"></div><div class="seat"></div>
         <div class="leg" style="left:8px"></div><div class="leg" style="right:8px"></div>
       </div>
-      <span class="obj3d" style="bottom:calc(9.5% + 30px);left:calc(5% + 30px)">3D · 电脑椅</span>
 
       <!-- 书架：纯陈设 -->
       <div class="d-shelf2">
@@ -631,15 +629,6 @@
         <div class="pot"></div>
       </div>
       <div class="d-rug"></div>
-
-      <!-- 次要角色站位（多人同屏预留） -->
-      <div class="standee">
-        <svg viewBox="0 0 120 130" aria-label="次要角色占位">
-          <circle cx="60" cy="34" r="22" fill="#e8e2d2" stroke="#cfc7ae" stroke-width="1.5"/>
-          <path d="M28 128 C28 92 42 74 60 74 C78 74 92 92 92 128 Z" fill="#efe9da" stroke="#cfc7ae" stroke-width="1.5"/>
-        </svg>
-        <span class="cap">角色 B · 多人同屏 预留 P6</span>
-      </div>
 
       <!-- 角色层 · VRM -->
       <div class="vport" id="vport">
@@ -687,12 +676,6 @@
       </div>
       </div><!-- /cam-view -->
 
-      <!-- 渲染图层图例（2D 背景 + 3D 关键物件 + VRM 角色） -->
-      <div class="layers">
-        <span class="l2d">图层① 背景 2D · 墙 / 窗 / 地板</span>
-        <span class="l3d">图层② 关键物件 3D · 桌椅电脑</span>
-        <span class="lvrm" id="layerVrmTag">图层③ 角色 VRM · 昴：实机渲染 / 其余：立绘占位</span>
-      </div>
     </main>
 
     <!-- 对话栏 -->
@@ -700,7 +683,6 @@
       <div class="chat-head">
         <div>
           <h2>与 <b id="chatChara">澄花</b> 的对话</h2>
-          <div class="sub">角色口吻仅在对话层 · 角色模型独立配置（P6）</div>
         </div>
       </div>
       <div class="chat-msgs">
@@ -720,7 +702,7 @@
       <div class="chat-composer">
         <div class="input">说点什么，或 @ 某位伙伴…</div>
         <footer>
-          <span class="voice">♪<span>P6</span></span>
+          <button type="button" class="voice" title="录音 5 秒，识别后填入草稿" aria-label="语音输入">♪</button>
           <span class="at-chip" id="atChip">@澄花</span>
           <span class="hint">Enter 发送</span>
           <div class="send" id="sendBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12L20 4L14 20L11 13L4 12Z" fill="#fff"/></svg></div>
@@ -731,116 +713,7 @@
 </section>
 
 <!-- ============ 屏 2：工作台（Codex/ZCode 式布局） ============ -->
-<section class="screen" id="screen-board">
-  <div class="wb-wrap">
-    <!-- 项目 ▸ 任务 树状侧栏（任务作为项目子项嵌套，参照旧版 workbench-v2 侧栏语义） -->
-    <aside class="wb-side">
-      <button class="new-task-d">＋ 新建任务</button>
-      <div class="wb-search">⌕&nbsp; 搜索项目与任务…</div>
-
-      <div class="wb-proj open">
-        <button class="wb-proj-head" data-proj-toggle>
-          <i class="dot" style="background:var(--rose)"></i>
-          <span class="nm">sumika-next<small>D:\Code\Sumika · 当前项目</small></span>
-          <b>4</b>
-          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </button>
-        <div class="wb-tasks">
-          <button class="wb-item wb-task active"><i class="st" style="background:var(--green)"></i><div>receipt 增加 --dry-run<small>进行中 · 刚刚</small></div></button>
-          <button class="wb-item wb-task"><i class="st" style="background:var(--amber)"></i><div>P4-UI 设计稿评审<small>待确认 · 昨天</small></div></button>
-          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>修复 handoff 时区显示<small>已完成 · 昨天</small></div></button>
-          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>连续记录扩展验收<small>已完成 · 9 月 11 日</small></div></button>
-        </div>
-      </div>
-
-      <div class="wb-proj open">
-        <button class="wb-proj-head" data-proj-toggle>
-          <i class="dot" style="background:var(--green)"></i>
-          <span class="nm">personal-blog<small>~/blog · 昨天 22:14</small></span>
-          <b>2</b>
-          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </button>
-        <div class="wb-tasks">
-          <button class="wb-item wb-task"><i class="st" style="background:var(--green)"></i><div>首页重构为静态生成<small>进行中 · 昨天</small></div></button>
-          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>RSS 输出修复<small>已完成 · 9 月 12 日</small></div></button>
-        </div>
-      </div>
-
-      <div class="wb-proj">
-        <button class="wb-proj-head" data-proj-toggle>
-          <i class="dot" style="background:var(--amber)"></i>
-          <span class="nm">dsh-plugin-lab<small>9 月 10 日</small></span>
-          <b>3</b>
-          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </button>
-        <div class="wb-tasks">
-          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>插件清单校验脚本<small>已完成 · 9 月 10 日</small></div></button>
-          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>echo-provider 示例<small>已完成 · 9 月 9 日</small></div></button>
-          <button class="wb-item wb-task"><i class="st" style="background:#c9c3ac"></i><div>cordis patch 调研<small>已取消 · 9 月 8 日</small></div></button>
-        </div>
-      </div>
-
-      <details class="wb-arch"><summary>已归档 <b>2</b></summary>
-        <button class="wb-item wb-task"><div>sumika-legacy<small>已归档 · 8 月 30 日</small></div></button>
-        <button class="wb-item wb-task"><div>notes-migration<small>已归档 · 8 月 21 日</small></div></button>
-      </details>
-
-      <div class="wb-foot">本地优先 · 数据不出本机<br>运行数据 <b>.sumika-next/</b> · 已连接 <b>DSH 0.1.5-rc.2</b></div>
-    </aside>
-
-    <!-- 中央时间线 -->
-    <main class="wb-main">
-      <div class="wb-head">
-        <div>
-          <div class="wb-crumb">sumika-next / 工作台 / 任务 #1042</div>
-          <h1>receipt 增加 <em>--dry-run</em></h1>
-        </div>
-        <div class="pills">
-          <span class="pill-d wait">● 1 项待确认</span>
-          <span class="pill-d run">● 执行中</span>
-        </div>
-      </div>
-
-      <div class="wb-timeline">
-        <div class="cm user">
-          <span class="who">我 · 14:02</span>
-          <div class="bub">给 receipt 命令加一个 --dry-run 选项：只做校验和预览，不写任何文件，也不更新 handoff。</div>
-        </div>
-        <div class="cm agent">
-          <span class="who"><b>澄花</b> · DeepSeek V4 Pro · 14:02</span>
-          <div class="bub">好的，计划如下：<br>1. 在 <b>receipts.py</b> 增加 dry_run 分支，复用现有校验，跳过写盘与 handoff 追加；<br>2. 补 2 个单元测试（dry-run 不落盘 / 校验失败仍报错）；<br>3. 跑 tests_next 全量回归。</div>
-        </div>
-        <div class="tool-d"><div><code>sumika_next/receipts.py</code></div><div class="df"><b>+38</b> <i>−4</i></div></div>
-        <div class="tool-d"><div><code>tests_next/test_receipts.py</code></div><div class="df"><b>+24</b> <i>−0</i></div></div>
-        <div class="tool-d"><div><code>python -B -m unittest discover -s tests_next -v</code></div><div class="ok">✓ 47 项通过</div></div>
-
-        <div class="confirm-d">
-          <header><span class="flag">待确认</span><h3>将写入 2 个文件的变更</h3></header>
-          <p>已在沙箱预跑通过。确认后正式写入工作区并记录成果回执；取消则丢弃暂存变更，检查点保留，可随时恢复。</p>
-          <div class="cd-grid">
-            <div><b>2</b><span>变更文件</span></div>
-            <div><b class="up">+62</b><span>新增行</span></div>
-            <div><b class="down">−4</b><span>删除行</span></div>
-            <div><b>47/47</b><span>沙箱预跑</span></div>
-          </div>
-          <div class="cd-foot">
-            <button class="btn-y-d">确认执行</button>
-            <button class="btn-n-d">取消</button>
-            <span class="ckpt-d">检查点 <code>a3f9c21</code> 可回滚</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="chat-composer wb-composer">
-        <div class="input">输入消息，或 / 唤起快捷指令…</div>
-        <footer>
-          <span class="hint" style="margin-left:0">Enter 发送 · Shift+Enter 换行</span>
-          <div class="send"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12L20 4L14 20L11 13L4 12Z" fill="#fff"/></svg></div>
-        </footer>
-      </div>
-    </main>
-  </div>
-</section>
+<section class="screen" id="screen-board"><div class="sumika-loading">打开工作台时连接 DSH</div></section>
 
 <!-- ============ 屏 3：能力 ============ -->
 <section class="screen" id="screen-shelf">
@@ -977,7 +850,7 @@
         </div>
       </div>
       <div class="panel">
-        <h3>设计约定 <b>NOTES</b></h3>
+        <h3>使用提示</h3>
         <p class="note-p">① 预留模块仅占位，明确标识、不可开启；<br>② 关闭开关只停用能力，历史数据与授权记录保留；<br>③ 「配置」进入设置 · 连接与权限，不在卡片内直接改敏感项。</p>
       </div>
     </aside>
@@ -991,18 +864,15 @@
       <h3>设置 <b>SETTINGS</b></h3>
       <button class="active">外观</button>
       <button>模型与连接</button>
-      <button>能力模块</button>
       <button>连接与权限</button>
       <button>数据与存储</button>
       <button>关于</button>
-      <div class="set-nav-foot">常用设置优先 · 高级项收纳于分组内<br>修改即时生效，仅保存于本机</div>
     </aside>
 
     <main class="set-main">
       <div class="cap-head">
         <div>
           <h1>设置 <em>·</em> 外观</h1>
-          <p>常用项优先 · 敏感项集中在「连接与权限」。</p>
         </div>
         <span class="cap-note">✓ 全部配置仅保存于本机</span>
       </div>
@@ -1037,16 +907,6 @@
         </div>
       </section>
 
-      <section class="set-group">
-        <h2><b>能力模块</b> MODULES</h2>
-        <div class="set-card">
-          <div class="set-row"><div>模块总览<small>关闭仅停用，数据与配置保留（enabled 契约）</small></div>
-            <div class="val"><b>8 已启用 · 8 预留 · 0 异常</b><button class="mini-btn" onclick="location.hash='shelf'">打开能力页 →</button></div>
-          </div>
-          <div class="set-row"><div>连续记录<small>会话交接自动摘要（continuity 扩展）</small></div><span class="sw2 on" style="margin-left:auto"></span></div>
-          <div class="set-row"><div>自动捕获<small>成果写入 receipts，绑定 Git HEAD</small></div><span class="sw2 on" style="margin-left:auto"></span></div>
-        </div>
-      </section>
 
       <section class="set-group">
         <h2><b>连接与权限</b> PERMISSIONS</h2>
@@ -1080,7 +940,6 @@
       <div class="hero-d">
         <div class="cap-ic" style="background:var(--rose-soft)">⚙</div>
         <h4>设置</h4>
-        <p>常用设置优先 · 敏感项集中管理</p>
       </div>
       <div class="panel">
         <h3>版本信息 <b>ABOUT</b></h3>
@@ -1088,14 +947,22 @@
         <div class="kv"><span>项目</span><b>sumika-next · P4-UI</b></div>
         <div class="kv"><span>数据</span><b class="ok">本机 · 未上传</b></div>
       </div>
-      <div class="panel">
-        <h3>设计约定 <b>NOTES</b></h3>
-        <p class="note-p">① 预留项虚线标识、不可开启；<br>② 设置改动不写 receipts，仅权限变更记录授权流水；<br>③ 角色相关配置 P6 开放后进入本页。</p>
-      </div>
     </aside>
   </div>
 </section>
 
+<script>
+  document.querySelectorAll('.roster .member').forEach(node => node.remove());
+  document.querySelector('#screen-room .chat-msgs').replaceChildren();
+  for (const id of ['roomOwner', 'stageChara', 'chatChara']) {
+    document.getElementById(id).textContent = '正在加载角色';
+  }
+  document.getElementById('memberCount').textContent = '—';
+  document.querySelectorAll('#screen-shelf .cap-group').forEach(node => node.remove());
+  document.querySelectorAll('#screen-settings .set-card .val').forEach(node => {
+    node.textContent = '正在加载…';
+  });
+</script>
 <script>
   const screens = { room: 'screen-room', board: 'screen-board', shelf: 'screen-shelf', settings: 'screen-settings' };
   function applyHash(){
@@ -1121,7 +988,7 @@
   function buildDeskpet(){
     const svg = document.querySelector('#vport svg');
     const el = document.createElement('div');
-    el.className = 'deskpet';
+    el.className = 'deskpet mini';
     el.id = 'deskpet';
     el.title = '桌宠小窗 · 按住拖动，可放到任意位置';
     el.innerHTML =
@@ -1435,30 +1302,22 @@
   const camView = document.getElementById('camView');
   const actText = document.getElementById('actText');
   const camModeText = document.getElementById('camModeText');
-  document.querySelectorAll('.member[data-name]').forEach(m => m.addEventListener('click', () => {
-    document.querySelectorAll('.member').forEach(x => x.classList.remove('active'));
-    m.classList.add('active');
-    const { name, sub, color, soft, speech } = m.dataset;
+  window.sumikaSyncRolePresentation = ({name, sub, color, soft}) => {
     root.style.setProperty('--chara', color);
     root.style.setProperty('--chara-soft', soft);
     document.getElementById('stageChara').textContent = name;
     document.getElementById('stageCharaSub').textContent = sub;
     document.getElementById('chatChara').textContent = name;
-    document.getElementById('msgChara1').textContent = name;
-    document.getElementById('msgChara2').textContent = name;
-    document.getElementById('speechBub').textContent = speech;
     document.getElementById('atChip').textContent = '@' + name;
     document.getElementById('roomOwner').textContent = name + '的房间';
-    setAct('idle'); // 切换在场角色后回到待机位
-  }));
+    setAct('idle');
+  };
 
   /* ---- 镜头视角与自主生活演示（P7：虚拟房间 · 固定/跟随摄像头 · 自主生活） ---- */
   const ACT = {
     idle: { cls: '', origin: [73, 62], label: '当前活动：房间待机' },
-    work: { cls: 'pos-work', origin: [21, 70], label: '当前活动：书房 · 工作（任务 #1042）',
-            speech: '我在书桌这边帮你跑 tests_next 回归，47 项马上就好～' },
-    rest: { cls: 'pos-rest', origin: [50, 68], label: '当前活动：休息 · 喝茶',
-            speech: '休息一下，喝杯茶。任务有进展我会叫你。' },
+    work: { cls: 'pos-work', origin: [21, 70], label: '场景位置：书桌' },
+    rest: { cls: 'pos-rest', origin: [50, 68], label: '场景位置：休息区' },
   };
   const CAM = { follow: { scale: 1.06, label: '跟随' }, fixed: { scale: 1, label: '固定' }, closeup: { scale: 1.22, label: '特写' } };
   let act = 'idle', cam = 'follow';
@@ -1474,7 +1333,6 @@
     vport.classList.remove('pos-work', 'pos-rest');
     if (ACT[key].cls) vport.classList.add(ACT[key].cls);
     actText.textContent = ACT[key].label;
-    if (ACT[key].speech) document.getElementById('speechBub').textContent = ACT[key].speech;
     applyCam();
     syncDeskpet();
     /* 角色换位置是 1s 的 CSS transition；立即重算取景只会读到过渡中间态，
@@ -1518,7 +1376,7 @@
      没有 VRM 的角色就老老实实显示立绘占位，不借用别人的模型。 */
   function activeRoleVrm(){
     const active = window.sumikaRoleVrm;
-    if (active === undefined) return sampleVrmFallback();
+    if (active === undefined) return null;
     if (!active || !active.modelUrl) return null;
     return { url: active.modelUrl, name: active.name || '' };
   }
@@ -1529,7 +1387,8 @@
   let mountPromise = null, mounted = false, failed = false;
 
   function setTag(html, dot){
-    tagEl.innerHTML = '<i></i>' + html;
+    tagEl.style.display = html ? '' : 'none';
+    tagEl.replaceChildren(document.createElement('i'), document.createTextNode(html));
     if (dot) tagEl.querySelector('i').style.background = dot;
   }
   /* 渲染器本身以 alpha:true + setClearColor(0,0) 创建上下文，画布是「透明」的。
@@ -1597,19 +1456,19 @@
     if (!wanted) {
       vportEl.classList.remove('show-vrm');
       swapBtn.hidden = true;
-      setTag('角色层 · 立绘占位（未绑定 VRM）', '#c9a24a');
+      setTag('未绑定视觉模型', '#c9a24a');
       return;
     }
-    setTag(`角色层 · VRM 模型加载中…（${wanted.name || '未命名'}）`);
+    setTag(`模型加载中…（${wanted.name || '未命名'}）`);
     vportEl.classList.add('show-vrm');
     const ok = await ensureMounted();
     if (ok) {
       swapBtn.hidden = false;
       swapBtn.textContent = '查看占位立绘';
-      setTag(`角色层 · VRM 实机渲染 · ${wanted.name || '未命名'}`);
+      setTag('');
     } else {
       vportEl.classList.remove('show-vrm');
-      setTag('角色层 · VRM 加载失败 · 请经 HTTP 预览查看实机', '#c05a5a');
+      setTag('模型加载失败，请检查角色资源', '#c05a5a');
     }
   }
   /* 主屏「实机/立绘」互斥切换时，小窗跟随同一状态（同样只改 data 属性，交由 CSS 生效） */
@@ -1637,5 +1496,7 @@
 </script>
 <!-- Sumika data binding: replaces the design mock data with the real backend. -->
 <script type="module" src="/app/bind.js"></script>
+<script type="module" src="/app/management.js"></script>
+<script type="module" src="/app/handoff.js"></script>
 </body>
 </html>

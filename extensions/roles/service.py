@@ -13,7 +13,7 @@ from extensions.roles.roles import load_role
 
 
 class RoleSession:
-    def __init__(self, role_dir, database, *, user_id, project_id, work_model, role_model, enabled=True, memory_provider='embedded', embedding_cache=None, card_context_enabled=False, card_context_budget_chars=8000, target_language='zh-Hans', language_policy=None, allow_card_policy=True):
+    def __init__(self, role_dir, database, *, user_id, project_id, work_model, role_model, enabled=True, memory_provider='embedded', embedding_cache=None, embedding_python=None, memory_enabled=True, card_context_enabled=False, card_context_budget_chars=8000, target_language='zh-Hans', language_policy=None, allow_card_policy=True):
         if type(enabled) is not bool: raise ValueError('invalid enabled')
         if type(card_context_enabled) is not bool: raise ValueError('invalid card context switch')
         if type(allow_card_policy) is not bool: raise ValueError('invalid card policy switch')
@@ -50,11 +50,13 @@ class RoleSession:
                     self.card_context_status='unavailable: '+str(error)
         self.scope=dict(user_id=user_id,role_id=self.role['id'],project_id=project_id)
         if any(not isinstance(x,str) or not x.strip() for x in (*self.scope.values(),work_model,role_model)):raise ValueError('invalid session configuration')
-        if memory_provider=='embedded':self.memory=EmbeddedMemory(database)
+        if type(memory_enabled) is not bool:raise ValueError('invalid memory switch')
+        if not memory_enabled:self.memory=EmbeddedMemory(database,enabled=False)
+        elif memory_provider=='embedded':self.memory=EmbeddedMemory(database)
         elif memory_provider=='semantic':
             from extensions.memory.semantic_memory import SemanticMemory
             if embedding_cache is None:raise ValueError('embedding_cache required')
-            self.memory=SemanticMemory(database,cache_dir=embedding_cache)
+            self.memory=SemanticMemory(database,cache_dir=embedding_cache,embedding_python=embedding_python)
         else:raise ValueError('unsupported memory provider; no fallback')
         self.work_model=work_model;self.role_model=role_model
 
@@ -83,13 +85,17 @@ class RoleSession:
                     keys=item.get('keys',[])
                     if item.get('constant') or any(isinstance(k,str) and k and k.casefold() in words for k in keys):
                         worldbook.append(item.get('content',''))
-            context=build(user_content=user,role_block=dict(name=self.role['name'],persona=self.role['persona'],worldbook=worldbook),memory_records=self.memory.search(data.get('query',user),**self.scope),task_context=data.get('task_context'))
-            return dict(context=context,model=self.work_model if mode=='work' else self.role_model,mode=mode)
+            memories=self.memory.search(data.get('query',user),**self.scope)
+            role_block=dict(name=self.role['name'],persona=self.role['persona'],worldbook=worldbook)
+            context=build(user_content=user,role_block=role_block,memory_records=memories,task_context=data.get('task_context'))
+            return dict(context=context,role_context={**role_block,'memory':memories,'recent':[]},
+                        model=self.work_model if mode=='work' else self.role_model,mode=mode)
         if operation=='remember':return self.memory.add(data['text'],source=data.get('source','user'),fact_key=data.get('fact_key'),event_id=data.get('event_id'),**self.scope)
         if operation=='localize_names':
-            if self.compiled_card is None:raise ValueError('card context required for name localization')
             from extensions.roles.card_context import localize_names
             if not isinstance(data.get('text'),str):raise ValueError('text required')
+            if self.compiled_card is None:
+                raise ValueError('card context required')
             return localize_names(data['text'],self.compiled_card.get('name_map',{}))
         if operation=='search':return self.memory.search(data['query'],**self.scope)
         if operation=='relations_all':return self.memory.list_relations(**self.scope,limit=data.get('limit',100))

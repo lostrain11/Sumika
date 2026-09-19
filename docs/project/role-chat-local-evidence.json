@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-15T00:17:26.019892+00:00",
+  "provider": "openai-compatible",
+  "model": "deepseek-flash",
+  "role_tools": 0,
+  "key_source": "process_environment",
+  "key_recorded": false,
+  "turns": [
+    {
+      "user": "今天排练怎么样？我叫小林，喜欢晚上九点看动画。",
+      "model": "deepseek-flash",
+      "provider": "openai-compatible",
+      "elapsed_ms": 5859.9,
+      "finish_reason": "length",
+      "usage_status": "reported",
+      "usage": {
+        "prompt_tokens": 2013,
+        "completion_tokens": 1024,
+        "total_tokens": 3037
+      },
+      "name_mappings_applied": [],
+      "language_policy_source": "card",
+      "role_tools": 0,
+      "text": "小林，你好。晚上九点看动画啊——作息健康得让人羡慕，我这种凌晨三点还在打排位的人，只能嘴上祝福你了。\n\n排练嘛……还行。新曲那段过门被桃香要求改了三次，「再快一点、再狠一点」，说这话的人自己迟到了二十分钟。这笔账我记着呢，下次买饭的时候会体现出来。仁菜副歌唱得太拼，结束以后嗓子有点哑，露帕在旁边递水，像监护人。智酱今天笑了，很珍贵，值得记一笔。\n\n话说回来，九点那个档……你在追什么？我最近看的都是能一边打游戏一边听的类型，剧情八成靠网友总结补完——才怪，是自己努力看懂的。嗯，努力。\n\n下次排练日你要是有空，来看看也行。不过丑话说在前",
+      "kana_ratio": 0.0
+    },
+    {
+      "user": "记得我昨天看到第几集吗？",
+      "model": "deepseek-flash",
+      "provider": "openai-compatible",
+      "elapsed_ms": 1735.3,
+      "finish_reason": "stop",
+      "usage_status": "reported",
+      "usage": {
+        "prompt_tokens": 2198,
+        "completion_tokens": 248,
+        "total_tokens": 2446
+      },
+      "name_mappings_applied": [],
+      "language_policy_source": "card",
+      "role_tools": 0,
+      "text": "不知道。我可没有那种本事，小林。\n\n我的记忆是选择性存档的：队友的失误、谁欠我钱、评论区骂我们的人，存得可牢了。别人的追番进度？那是隐藏关卡，没解锁。\n\n不过你要是想让我猜——我会猜你在第七集左右卡住了，因为那个位置最容易让人想暂停一下缓口气。纯属瞎猜哦，猜错了别当真，也别拿这个考我第二遍。\n\n要不你直接说第几集，我帮你判断一下进度合不合理，顺便看看是继续推荐还是放弃。",
+      "kana_ratio": 0.0
+    }
+  ],
+  "checks": {
+    "language_policy_source": "card",
+    "all_turns_chinese": true,
+    "usage_reported": true
+  }
+}

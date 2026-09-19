@@ -9,6 +9,7 @@ class ModelFixture:
         self.requests = []
         self.recipe = []
         self.responses = 0
+        self.call_id_prefix = 'call'
         self.block = False
         self.hold = threading.Event()
         self.waiting = threading.Event()
@@ -36,7 +37,7 @@ class ModelFixture:
                     if name == '$mcp':
                         names = [t['function']['name'] for t in body.get('tools',[]) if 'echo' in t.get('function',{}).get('name','')]
                         name = names[0] if len(names)==1 else 'missing_mcp_fixture'
-                    delta = {"role":"assistant", "content":None, "tool_calls":[{"index":0,"id":f"call-{index}","type":"function","function":{"name":name,"arguments":json.dumps(args)}}]}
+                    delta = {"role":"assistant", "content":None, "tool_calls":[{"index":0,"id":f"{fixture.call_id_prefix}-{index}","type":"function","function":{"name":name,"arguments":json.dumps(args)}}]}
                     reason = 'tool_calls'
                 else:
                     delta = {"role":"assistant","content":"P2_CHILD_DONE" if child else "P2_FIXTURE_DONE"}

@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "pdf_pages": {
+    "docx": 1,
+    "pptx": 2,
+    "xlsx": 1
+  },
+  "recalculated_value": 7,
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\office-render-o5_1ymt9",
+  "visual_layout_review": "ran_via_ocr",
+  "visual_evidence": "docs/project/office-visual-evidence.json",
+  "visual_pages": {
+    "docx": {
+      "pages": 1,
+      "ink_ratio": [
+        0.00459
+      ],
+      "hits": [
+        [
+          "项目周报",
+          "任务",
+          "状态"
+        ]
+      ]
+    },
+    "xlsx": {
+      "pages": 1,
+      "ink_ratio": [
+        0.00165
+      ],
+      "hits": [
+        [
+          "项目",
+          "完成量",
+          "保留合并单元格"
+        ]
+      ]
+    },
+    "pptx": {
+      "pages": 2,
+      "ink_ratio": [
+        0.00914,
+        0.00694
+      ],
+      "hits": [
+        [
+          "阶段进度",
+          "读取"
+        ],
+        [
+          "保留页面"
+        ]
+      ]
+    }
+  }
+}

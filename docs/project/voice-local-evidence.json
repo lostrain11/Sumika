@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-15T08:23:21.658681+00:00",
+  "chain": "Windows SAPI synthesis -> 16-bit PCM WAV -> Vosk recognition",
+  "microphone_used": false,
+  "cloud_used": false,
+  "voice": "Microsoft Huihui Desktop - Chinese (Simplified)",
+  "tts_provider": "windows-sapi",
+  "asr_provider": "vosk",
+  "asr_model": "vosk-model-small-cn-0.22",
+  "expected_text": "今天排练很顺利，我们晚上九点看动画吧",
+  "recognized_text": "今天 排练 很 顺利 我们 晚上 九点 看重 话 吧",
+  "char_recall": 0.8824,
+  "threshold": 0.6,
+  "tts_ms": 249.4,
+  "asr_ms": 2147.1,
+  "wav": "D:\\Code\\Sumika\\.sumika-next\\voice-acceptance\\sentence.wav",
+  "wav_bytes": 231684,
+  "passed": true
+}

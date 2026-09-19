@@ -1,0 +1,256 @@
+{
+  "dataset": "sumika-chinese-regression-v1",
+  "boundary": "14 synthetic retrieval cases; not AML and not evidence of best provider; no answer model",
+  "keyword": {
+    "cases": [
+      {
+        "query": "花生",
+        "passed": true,
+        "expected": 0,
+        "retrieved": [
+          "用户对花生过敏，吃含花生的食物会身体不适。"
+        ],
+        "milliseconds": 0.67
+      },
+      {
+        "query": "哪些食材是我不能吃的",
+        "passed": false,
+        "expected": 0,
+        "retrieved": [],
+        "milliseconds": 0.51
+      },
+      {
+        "query": "牙医",
+        "passed": true,
+        "expected": 1,
+        "retrieved": [
+          "用户下周二下午三点预约了牙医，需要提前半小时出发。"
+        ],
+        "milliseconds": 0.52
+      },
+      {
+        "query": "看牙的预约是什么时候",
+        "passed": false,
+        "expected": 1,
+        "retrieved": [],
+        "milliseconds": 0.48
+      },
+      {
+        "query": "成都",
+        "passed": true,
+        "expected": 2,
+        "retrieved": [
+          "用户最近搬到了成都，以前居住在北京。"
+        ],
+        "milliseconds": 0.48
+      },
+      {
+        "query": "我现在住在哪座城市",
+        "passed": false,
+        "expected": 2,
+        "retrieved": [],
+        "milliseconds": 0.48
+      },
+      {
+        "query": "深夜",
+        "passed": true,
+        "expected": 3,
+        "retrieved": [
+          "用户每晚十点半睡觉，不希望深夜收到提醒。"
+        ],
+        "milliseconds": 0.48
+      },
+      {
+        "query": "几点以后不要打扰我休息",
+        "passed": false,
+        "expected": 3,
+        "retrieved": [],
+        "milliseconds": 0.5
+      },
+      {
+        "query": "Windows",
+        "passed": true,
+        "expected": 4,
+        "retrieved": [
+          "用户使用 Windows 电脑，项目保存在 D 盘。"
+        ],
+        "milliseconds": 0.4
+      },
+      {
+        "query": "我的开发文件放在哪个磁盘",
+        "passed": false,
+        "expected": 4,
+        "retrieved": [],
+        "milliseconds": 0.56
+      },
+      {
+        "query": "鼓手",
+        "passed": true,
+        "expected": 5,
+        "retrieved": [
+          "角色喜欢打鼓，是乐队的鼓手。"
+        ],
+        "milliseconds": 0.5
+      },
+      {
+        "query": "她在乐队负责什么乐器",
+        "passed": false,
+        "expected": 5,
+        "retrieved": [],
+        "milliseconds": 0.47
+      },
+      {
+        "query": "银河系中心的黑洞质量是多少",
+        "passed": true,
+        "expected": null,
+        "retrieved": [],
+        "milliseconds": 0.5
+      },
+      {
+        "query": "明天彩票中奖号码是什么",
+        "passed": true,
+        "expected": null,
+        "retrieved": [],
+        "milliseconds": 0.48
+      }
+    ],
+    "passed": 8,
+    "total": 14,
+    "scope_isolated": true,
+    "update_correct": true,
+    "forgotten_rejected": true,
+    "other_scope_clean": true,
+    "elapsed_seconds": 0.05
+  },
+  "semantic": {
+    "cases": [
+      {
+        "query": "花生",
+        "passed": true,
+        "expected": 0,
+        "retrieved": [
+          "用户对花生过敏，吃含花生的食物会身体不适。"
+        ],
+        "milliseconds": 34.53
+      },
+      {
+        "query": "哪些食材是我不能吃的",
+        "passed": false,
+        "expected": 0,
+        "retrieved": [],
+        "milliseconds": 5.76
+      },
+      {
+        "query": "牙医",
+        "passed": true,
+        "expected": 1,
+        "retrieved": [
+          "用户下周二下午三点预约了牙医，需要提前半小时出发。"
+        ],
+        "milliseconds": 4.97
+      },
+      {
+        "query": "看牙的预约是什么时候",
+        "passed": true,
+        "expected": 1,
+        "retrieved": [
+          "用户下周二下午三点预约了牙医，需要提前半小时出发。"
+        ],
+        "milliseconds": 4.93
+      },
+      {
+        "query": "成都",
+        "passed": true,
+        "expected": 2,
+        "retrieved": [
+          "用户最近搬到了成都，以前居住在北京。"
+        ],
+        "milliseconds": 4.88
+      },
+      {
+        "query": "我现在住在哪座城市",
+        "passed": true,
+        "expected": 2,
+        "retrieved": [
+          "用户最近搬到了成都，以前居住在北京。"
+        ],
+        "milliseconds": 4.99
+      },
+      {
+        "query": "深夜",
+        "passed": true,
+        "expected": 3,
+        "retrieved": [
+          "用户每晚十点半睡觉，不希望深夜收到提醒。"
+        ],
+        "milliseconds": 4.51
+      },
+      {
+        "query": "几点以后不要打扰我休息",
+        "passed": true,
+        "expected": 3,
+        "retrieved": [
+          "用户每晚十点半睡觉，不希望深夜收到提醒。"
+        ],
+        "milliseconds": 5.02
+      },
+      {
+        "query": "Windows",
+        "passed": true,
+        "expected": 4,
+        "retrieved": [
+          "用户使用 Windows 电脑，项目保存在 D 盘。"
+        ],
+        "milliseconds": 5.55
+      },
+      {
+        "query": "我的开发文件放在哪个磁盘",
+        "passed": true,
+        "expected": 4,
+        "retrieved": [
+          "用户使用 Windows 电脑，项目保存在 D 盘。"
+        ],
+        "milliseconds": 5.63
+      },
+      {
+        "query": "鼓手",
+        "passed": true,
+        "expected": 5,
+        "retrieved": [
+          "角色喜欢打鼓，是乐队的鼓手。"
+        ],
+        "milliseconds": 4.89
+      },
+      {
+        "query": "她在乐队负责什么乐器",
+        "passed": true,
+        "expected": 5,
+        "retrieved": [
+          "角色喜欢打鼓，是乐队的鼓手。"
+        ],
+        "milliseconds": 4.89
+      },
+      {
+        "query": "银河系中心的黑洞质量是多少",
+        "passed": true,
+        "expected": null,
+        "retrieved": [],
+        "milliseconds": 5.62
+      },
+      {
+        "query": "明天彩票中奖号码是什么",
+        "passed": true,
+        "expected": null,
+        "retrieved": [],
+        "milliseconds": 5.2
+      }
+    ],
+    "passed": 13,
+    "total": 14,
+    "scope_isolated": true,
+    "update_correct": true,
+    "forgotten_rejected": true,
+    "other_scope_clean": true,
+    "elapsed_seconds": 1.7
+  }
+}

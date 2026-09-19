@@ -7,6 +7,7 @@ class CapabilityStore:
     def __init__(self, path):
         self.db = sqlite3.connect(path)
         self.db.execute('CREATE TABLE IF NOT EXISTS capabilities (id TEXT PRIMARY KEY, position INTEGER NOT NULL, enabled INTEGER NOT NULL, provider TEXT NOT NULL, options TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS removed_capabilities (id TEXT PRIMARY KEY)')
         self.db.commit()
 
     def configure(self, capability, provider, *, enabled=True, options=None):
@@ -14,6 +15,7 @@ class CapabilityStore:
             raise ValueError('invalid capability')
         encoded = json.dumps(options or {}, ensure_ascii=False)
         with self.db:
+            self.db.execute('DELETE FROM removed_capabilities WHERE id=?', (capability,))
             self.db.execute('INSERT INTO capabilities VALUES (?, (SELECT COALESCE(MAX(position),-1)+1 FROM capabilities),?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,provider=excluded.provider,options=excluded.options', (capability,int(enabled),provider,encoded))
 
     def list(self):
@@ -33,6 +35,11 @@ class CapabilityStore:
             self.db.executemany('UPDATE capabilities SET position=? WHERE id=?',enumerate(ids))
 
     def remove(self, capability):
-        with self.db: self.db.execute('DELETE FROM capabilities WHERE id=?',(capability,))
+        with self.db:
+            self.db.execute('DELETE FROM capabilities WHERE id=?',(capability,))
+            self.db.execute('INSERT OR IGNORE INTO removed_capabilities VALUES (?)',(capability,))
+
+    def removed(self):
+        return {row[0] for row in self.db.execute('SELECT id FROM removed_capabilities')}
 
     def close(self): self.db.close()

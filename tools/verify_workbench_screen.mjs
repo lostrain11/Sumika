@@ -29,14 +29,14 @@ page.on('pageerror', (error) => pageErrors.push(String(error.message || error)))
 page.on('console', (message) => {
   if (message.type() === 'error') {
     const where = message.location();
-    consoleErrors.push(`${message.text().slice(0, 200)} @ ${where.url || 'unknown'}`);
+    consoleErrors.push(`${message.text().slice(0, 200)} @ ${where.url?.split('?')[0] || 'unknown'}`);
   }
 });
 page.on('request', (request) => {
   if (request.url().includes(':5175')) frameRequests.push(request.url().split('?')[0]);
 });
 page.on('response', (response) => {
-  if (response.status() >= 400) badResponses.push({ status: response.status(), url: response.url() });
+  if (response.status() >= 400) badResponses.push({ status: response.status(), url: response.url().split('?')[0] });
 });
 
 await page.goto(`${bridge}/#board`, { waitUntil: 'domcontentloaded' });
@@ -49,7 +49,7 @@ const state = await page.evaluate(() => {
   return {
     screenVisible: screen?.classList.contains('show') || false,
     framePresent: !!frame,
-    frameSrc: frame?.getAttribute('src') || null,
+    frameSrc: frame?.getAttribute('src')?.split('?')[0] || null,
     frameHeight: box ? Math.round(box.height) : 0,
     mockWrapPresent: !!document.querySelector('#screen-board .wb-wrap'),
     navVisible: !!document.querySelector('#gnav button[data-go="board"]'),
@@ -63,7 +63,7 @@ const state = await page.evaluate(() => {
 
 if (!state.screenVisible) failures.push('workbench screen is not the active screen');
 if (!state.framePresent) failures.push('the workbench screen does not frame the DSH front end');
-if (state.frameSrc && !/:5175\/?\?/.test(state.frameSrc)) {
+if (state.frameSrc && !/:5175\/?$/.test(state.frameSrc)) {
   failures.push(`frame source is not the managed instance: ${state.frameSrc.split('?')[0]}`);
 }
 if (state.frameHeight < 400) failures.push(`frame is only ${state.frameHeight}px tall`);

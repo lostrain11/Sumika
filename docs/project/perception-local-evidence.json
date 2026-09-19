@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-15T08:37:03.438922+00:00",
+  "privacy": "metadata only; no image or audio is printed, uploaded or committed",
+  "kept_files": false,
+  "results": {
+    "microphone": {
+      "status": "ok",
+      "elapsed_ms": 2604.9,
+      "channels": 1,
+      "sample_width": 2,
+      "sample_rate": 16000,
+      "seconds": 2.0,
+      "rms": 60.5,
+      "peak": 833,
+      "silent": false,
+      "bytes": 64044,
+      "usable": true
+    }
+  },
+  "passed": true,
+  "capture_api_works": true
+}

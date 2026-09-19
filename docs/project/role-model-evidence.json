@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "role_model": "deepseek-v4-pro",
+  "work_model": "deepseek-flash",
+  "work_default_unchanged": true,
+  "disabled_no_request": true,
+  "unavailable_no_fallback": true,
+  "role_tools": 0,
+  "separate_sessions": true,
+  "external_model_calls": 0,
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\role-model-62228b48ed6c4c5ab2dc9ea37a17c241"
+}

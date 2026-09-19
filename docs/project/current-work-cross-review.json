@@ -1,0 +1,52 @@
+{
+  "status": "completed_actual_work_cross_review_with_main_agent_adjudication",
+  "request_evidence": ".sumika-next/web-review-acceptance/current-work-review-20260919/report.json",
+  "response_evidence": ".sumika-next/web-review-acceptance/current-work-review-20260919/reloaded-snapshot.json",
+  "scope": "User approved one original draft recovery; submitted once, reloaded same thread read-only, native result readback and managed restart without replay verified. Deterministic native model fixture tests plumbing; main Agent selected and judged real work.",
+  "findings": [
+    {
+      "id": 1,
+      "judgment": "confirmed_and_fixed",
+      "issue": "Archive hash followed by reopen admitted replacement race",
+      "fix": "Retain original FileShare.Read handle through ZipArchive extraction; release on all exits",
+      "validation": ".sumika-next/package/installer-check-126a19ffa520423e8b1f773ffd5c8856/report.json"
+    },
+    {
+      "id": 2,
+      "judgment": "partly_already_covered_remaining_threat_limit",
+      "issue": "Archive path traversal / reparse risks",
+      "evidence": "Existing entry validation refuses traversal, absolute paths, ADS, reserved names and archive symlinks; fixture path tests passed. Concurrent malicious local mutation of destination ancestors is not proven safe and not an OS sandbox guarantee."
+    },
+    {
+      "id": 3,
+      "judgment": "confirmed_and_fixed",
+      "issue": "Unbounded start/stop API wait",
+      "fix": "15 second request deadline preserves unknown and ownership; no replay. Late start ID supports explicit stop. Hung cancel becomes retryable. Timeout is not proof playback stopped.",
+      "validation": ".sumika-next/playback-ui-55519620-a138-4e24-a19f-83dcb61b7c68/report.json"
+    },
+    {
+      "id": 4,
+      "judgment": "existing_guard_verified_by_code",
+      "issue": "Late polling contaminates next role",
+      "evidence": "Controller checks active request identity and stopRequested before and after status await; no unguarded old status application found. No claim every transport race tested."
+    },
+    {
+      "id": 5,
+      "judgment": "accepted_existing_pending_work",
+      "issue": "Current real integration not covered by historical hashes or fixtures",
+      "action": "Keep active work package A pending; historical P3 remains complete."
+    }
+  ],
+  "validation": [
+    "31 consultation/journal/bridge/playback Python tests passed",
+    "11 browser playback checks passed, hardware_used=false",
+    "Actual PowerShell installer fixtures passed, including archive write/rename denial after hash",
+    "Native web result hash and restart without replay passed"
+  ],
+  "limits": [
+    "No daily deployment or final candidate rebuild",
+    "No audio hardware test",
+    "No clean Windows acceptance or public redistribution clearance"
+  ],
+  "known_recovery": "A stalled ChatGPT stream can persist only an incomplete UI fragment; reloading the exact same thread read-only recovered the saved full message. Never click regenerate or send again for readback recovery."
+}

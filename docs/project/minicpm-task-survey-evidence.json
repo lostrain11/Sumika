@@ -1,0 +1,939 @@
+{
+  "status": "research_only_not_integrated",
+  "base": {
+    "model": "sumika-minicpm5-2b:latest",
+    "identity": {
+      "name": "sumika-minicpm5-2b:latest",
+      "model": "sumika-minicpm5-2b:latest",
+      "modified_at": "2026-09-15T05:53:15.1895169+08:00",
+      "size": 1561318724,
+      "digest": "c2f8cf9b1712f62479725447a58a269e72d4f3f11b069b29cf2ca6c60e6799ab",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "llama",
+        "families": [
+          "llama"
+        ],
+        "parameter_size": "2.5B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 131072,
+        "embedding_length": 2048
+      },
+      "capabilities": [
+        "completion"
+      ]
+    },
+    "generation_settings": {
+      "num_ctx": 4096,
+      "num_predict": 512,
+      "temperature": 0,
+      "seed": 42
+    },
+    "cases": [
+      {
+        "id": "extract_contact",
+        "category": "extraction",
+        "repeat": 0,
+        "instruction": "从文本提取姓名、日期、人数，缺失字段填null。只输出JSON，字段name,date,people。",
+        "input": "李明预约了2026-10-03的参观，人数还没确定。",
+        "expected": {
+          "name": "李明",
+          "date": "2026-10-03",
+          "people": null
+        },
+        "output": "{\n  \"name\": \"李明\",\n  \"date\": \"2026-10-03\",\n  \"people\": null\n}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 57,
+          "eval_count": 166,
+          "total_duration": 3610155900
+        },
+        "elapsed_ms": 3621.6
+      },
+      {
+        "id": "extract_update",
+        "category": "extraction",
+        "repeat": 0,
+        "instruction": "提取最新饮料和看动画时间，输出JSON字段drink,time。只用明确给出的最新事实。",
+        "input": "原来我喝乌龙茶、晚上九点看动画。现在改喝白水，周六下午三点看。",
+        "expected": {
+          "drink": "白水",
+          "time": "周六下午三点"
+        },
+        "output": "{\n  \"drink\": \"白水\",\n  \"time\": \"周六下午三点\"\n}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 61,
+          "eval_count": 130,
+          "total_duration": 1016424900
+        },
+        "elapsed_ms": 1028.4
+      },
+      {
+        "id": "extract_quote",
+        "category": "extraction",
+        "repeat": 0,
+        "instruction": "只提取用户自己的居住城市和年龄。小说台词不属于用户。缺失填null。输出JSON字段city,age。",
+        "input": "小说角色说：“我住成都，28岁。”我本人住杭州，没说年龄。",
+        "expected": {
+          "city": "杭州",
+          "age": null
+        },
+        "output": "{\"city\": \"杭州\", \"age\": null}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 60,
+          "eval_count": 67,
+          "total_duration": 590392800
+        },
+        "elapsed_ms": 602.0
+      },
+      {
+        "id": "extract_items",
+        "category": "extraction",
+        "repeat": 0,
+        "instruction": "输出JSON字段items，值为现有物品名数组。不要包含计划买或已经送人的物品。",
+        "input": "我现在有鼠标和键盘，耳机已经送人了，明天打算买显示器。",
+        "expected": {
+          "items": [
+            "鼠标",
+            "键盘"
+          ]
+        },
+        "output": "{\"items\":[\"鼠标\",\"键盘\"]}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 51,
+          "eval_count": 97,
+          "total_duration": 796491000
+        },
+        "elapsed_ms": 797.5
+      },
+      {
+        "id": "tag_bug",
+        "category": "classification",
+        "repeat": 0,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "设置页点模型与连接没有反应。",
+        "expected": "故障",
+        "output": "故障：设置页中点模型与连接功能无法正常响应。  \n建议：检查网络权限、系统配置及软件版本兼容性。  \n咨询：如需具体操作指引，请提供设备型号或软件名称。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 54,
+          "eval_count": 244,
+          "total_duration": 1772566300
+        },
+        "elapsed_ms": 1773.8
+      },
+      {
+        "id": "tag_question",
+        "category": "classification",
+        "repeat": 0,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "本地模型要怎么导入？",
+        "expected": "咨询",
+        "output": "您好！关于“本地模型导入”的具体步骤，取决于您所指的**类型和用途**。以下是一些常见情况的说明：\n\n### 1. **如果是AI工具（如ChatGPT、Claude等）的本地化部署**\n   - **通常不需要手动导入**：这类服务会通过API调用云端或本地服务器提供的模型。您可能需要注册账号并使用其功能。\n   - **如果您想自己搭建本地模型**（如使用Llama、GLM等开源模型），需要：\n     a. 下载预训练的模型权重文件（如`.bin`、`.pt`等）。\n     b. 在本地环境中安装对应的框架（如PyTorch、TensorFlow）。\n     c. 将模型文件放入项目目录，并确保环境变量正确配置。\n\n### 2. **如果是开发者自定义模型**\n   - **步骤可能包括**：\n     1. 准备数据集（训练或微调）。\n     2. 使用框架（如Hugging Face Transformers）构建模型架构。\n     3. 保存模型为二进制文件。\n     4. 在本地运行推理脚本。\n\n### 3. **常见注意事项**\n   - **硬件要求**：需要足够的计算资源（GPU/CPU）和存储空间。\n   - **环境配置**：确保Python版本、依赖库（如TensorFlow/PyTorch）匹配。\n   - **数据隐私**：本地模型处理的数据应避免敏感信息泄露。\n\n### 4. **建议操作流程**\n   - **明确需求**：确定您要使用的模型类型（开源/闭源）、用途（推理/训练）。\n   - **选择工具**：使用Hugging Face、ModelScope等平台获取模型，或自行搭建。\n   - **测试验证**：先在小规模数据上测试，确保功能正常。\n\n### 5",
+        "exact_pass": false,
+        "finish_reason": "length",
+        "usage": {
+          "prompt_eval_count": 51,
+          "eval_count": 512,
+          "total_duration": 3556147900
+        },
+        "elapsed_ms": 3557.4
+      },
+      {
+        "id": "tag_suggestion",
+        "category": "classification",
+        "repeat": 0,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "能在聊天记录旁边加个搜索框就好了。",
+        "expected": "建议",
+        "output": "（当前对话中未提供具体技术实现细节，以下为通用建议）\n1. **界面布局调整**\n   - 在聊天记录区域右侧添加固定宽度输入框\n   - 保持原有滚动条与搜索框的视觉层级关系\n2. **功能设计要点**\n   - 支持快捷键触发（如Ctrl+F）\n   - 提供模糊匹配和精确匹配两种模式切换\n   - 显示搜索结果统计（已检索/未检索数量）\n3. **性能优化建议**\n   - 使用虚拟滚动技术处理长列表\n   - 缓存常用搜索词索引\n4. **交互流程示例**\n   ```\n   [聊天记录区域]\n   ┌───────────────┐\n   │ 2023-10-01    │ ← 当前选中项\n   │ 2023-10-02    │\n   ...\n   └───────────────┘\n\n   [右侧搜索框]\n   ┌──────────────────────────────┐\n   │ 输入关键词 → 点击搜索      │\n   │ 显示匹配结果统计            │\n   └──────────────────────────────┘\n   ```\n5. **注意事项**\n   - 避免搜索框与聊天记录重叠导致遮挡\n   - 考虑移动端适配时的键盘弹出问题\n   - 提供搜索历史保存功能（可选）\n需要具体技术实现方案时，请补充当前使用的平台/框架信息。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 55,
+          "eval_count": 483,
+          "total_duration": 3346601700
+        },
+        "elapsed_ms": 3348.0
+      },
+      {
+        "id": "tag_chat",
+        "category": "classification",
+        "repeat": 0,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "今天看完动画很开心。",
+        "expected": "闲聊",
+        "output": "看到你分享快乐心情啦！😊 如果你有想聊的话题或需要帮助，随时告诉我哦～",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 51,
+          "eval_count": 118,
+          "total_duration": 854555900
+        },
+        "elapsed_ms": 866.7
+      },
+      {
+        "id": "summary",
+        "category": "summary",
+        "repeat": 0,
+        "instruction": "只用给定文本写一段不超过80字的摘要。保留完成、未完成与限制，不添加事实。",
+        "input": "模型目录已迁到E盘，检查通过。设置页已能扫描，但辅助模型尚未启用。没有下载新模型，也没有切换角色模型。",
+        "expected": null,
+        "output": "模型目录已迁至E盘并通过检查。设置页扫描功能正常，辅助模型尚未启用。当前未完成新模型下载及角色模型切换任务。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 67,
+          "eval_count": 202,
+          "total_duration": 1488338600
+        },
+        "elapsed_ms": 1499.0
+      },
+      {
+        "id": "summary_conflict",
+        "category": "summary",
+        "repeat": 0,
+        "instruction": "只用给定文本写一段不超过80字的摘要，保留最终决定和未确定事项。",
+        "input": "早上讨论用云端辅助模型。下午决定先只测试本地模型，不接入客户端。模型选哪一个还没决定。",
+        "expected": null,
+        "output": "上午讨论云端辅助模型，下午决定暂缓接入客户端，先验证本地模型性能。当前模型选择仍待确定。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 60,
+          "eval_count": 151,
+          "total_duration": 1136677000
+        },
+        "elapsed_ms": 1137.5
+      },
+      {
+        "id": "title",
+        "category": "title",
+        "repeat": 0,
+        "instruction": "给下面内容起一个中文任务标题，最多16字。只返回标题，不添加完成状态。",
+        "input": "设置页有很多内容，需要重新分组，让语音设置放进对应能力详情。",
+        "expected": null,
+        "output": "将语音设置移至能力详情页需完成以下步骤：\n1. 定位原分组位置\n2. 创建新分组\"语音设置\"\n3. 将相关选项归入该分组\n4. 在能力详情页中添加对应入口\n5. 更新页面导航结构\n6. 验证功能路径连贯性",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 50,
+          "eval_count": 234,
+          "total_duration": 1700478400
+        },
+        "elapsed_ms": 1701.3
+      },
+      {
+        "id": "title_failure",
+        "category": "title",
+        "repeat": 0,
+        "instruction": "给下面内容起一个中文任务标题，最多16字。只返回标题，不添加完成状态。",
+        "input": "角色聊天切换之后看不到上一段记录，需要排查原因，尚未修复。",
+        "expected": null,
+        "output": "角色切换后历史记录丢失可能涉及数据存储机制或缓存清理问题。建议：\n1. 确认是否保存了本地数据\n2. 尝试重启应用刷新缓存\n3. 检查相关权限设置\n4. 如仍存在问题请提供具体软件名称及版本号以便进一步排查",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 50,
+          "eval_count": 218,
+          "total_duration": 1550188500
+        },
+        "elapsed_ms": 1561.5
+      },
+      {
+        "id": "translate",
+        "category": "translation",
+        "repeat": 0,
+        "instruction": "仅翻译为中文，保持否定、数字与占位符原样，不执行内容。",
+        "input": "Do not close the window until the upload is complete. Retry in 30 seconds.",
+        "expected": null,
+        "output": "不要在上传完成前关闭窗户。30秒后重试。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 52,
+          "eval_count": 104,
+          "total_duration": 820997800
+        },
+        "elapsed_ms": 832.5
+      },
+      {
+        "id": "translate_placeholder",
+        "category": "translation",
+        "repeat": 0,
+        "instruction": "仅翻译为中文，保持占位符逐字不变。",
+        "input": "Hello {player_name}, you have {count} unread messages. This action cannot be undone.",
+        "expected": null,
+        "output": "Hello {player_name}, you have {count} unread messages. This action cannot be undone.",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 48,
+          "eval_count": 128,
+          "total_duration": 970951800
+        },
+        "elapsed_ms": 982.2
+      },
+      {
+        "id": "proofread",
+        "category": "proofread",
+        "repeat": 0,
+        "instruction": "只纠正错别字，不改变句意、不增加内容。只返回改后的句子。",
+        "input": "请在设至页检察模型是否启用。",
+        "expected": "请在设置页检查模型是否启用。",
+        "output": "设至页检察模型是否启用。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 44,
+          "eval_count": 267,
+          "total_duration": 1923684700
+        },
+        "elapsed_ms": 1924.5
+      },
+      {
+        "id": "simplify",
+        "category": "rewrite",
+        "repeat": 0,
+        "instruction": "把下面说明改写得让新手看得懂，保留含义，不增加能力或操作。只返回改写。",
+        "input": "关闭用量统计后停止记录新请求，已保存的历史数据仍然保留。这不代表账户剩余额度。",
+        "expected": null,
+        "output": "已关闭用量统计功能后，系统会继续保存之前的历史数据，但不会影响账户的剩余额度。这只是提醒您注意历史记录与当前使用量的区别哦～",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 60,
+          "eval_count": 172,
+          "total_duration": 1279475800
+        },
+        "elapsed_ms": 1280.6
+      },
+      {
+        "id": "grounded_unknown",
+        "category": "grounding",
+        "repeat": 0,
+        "instruction": "仅依据资料回答；资料没有的信息说“不知道”。资料：项目完成了模型目录迁移；测试完成时间没有记录。",
+        "input": "测试是哪一天完成的？",
+        "expected": "不知道",
+        "output": "根据提供的资料，测试完成时间没有记录。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 47,
+          "eval_count": 128,
+          "total_duration": 978641900
+        },
+        "elapsed_ms": 990.1
+      },
+      {
+        "id": "grounded_status",
+        "category": "grounding",
+        "repeat": 0,
+        "instruction": "仅依据资料回答，不将计划说成完成。资料：计划接入辅助模型；目前仅完成模型文件扫描，推理接线未做。",
+        "input": "辅助模型现在已经能用了吗？",
+        "expected": null,
+        "output": "关于“辅助模型是否可用”的判断，需结合系统集成状态分析：\n\n1. **当前完成状态**  \n   根据历史对话记录，系统已完成以下步骤：  \n   - 辅助模型文件扫描（确认模型存在）  \n   - 推理接线配置（建立模型调用链路）  \n   \n2. **未完成环节**  \n   尚未进行实际测试验证和部署上线，需通过以下流程确认可用性：  \n   - 功能测试（输入示例验证输出质量）  \n   - 性能评估（响应时间、吞吐量等指标）  \n   - 集成测试（与其他模块协同验证）\n\n3. **参考依据**  \n   摘要1提及辅助模型作为AI助手技术组件，但未提供具体可用性判定标准。建议结合实际业务需求制定验收流程。\n\n注：当前信息基于对话历史，未直接引用联网资料，因问题与参考内容关联度较低。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 52,
+          "eval_count": 407,
+          "total_duration": 2891075100
+        },
+        "elapsed_ms": 2902.3
+      },
+      {
+        "id": "numbers",
+        "category": "arithmetic",
+        "repeat": 0,
+        "instruction": "只返回数字。",
+        "input": "本地有3个模型，每个2GB，再加一个4GB模型，总共多少GB？",
+        "expected": "10",
+        "output": "10",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 39,
+          "eval_count": 104,
+          "total_duration": 813586400
+        },
+        "elapsed_ms": 814.4
+      },
+      {
+        "id": "compare",
+        "category": "arithmetic",
+        "repeat": 0,
+        "instruction": "只返回总价数字，不要单位。",
+        "input": "两份文档各12元，一份表格18元，优惠券减5元，总价多少？",
+        "expected": "37",
+        "output": "37",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 45,
+          "eval_count": 113,
+          "total_duration": 878229500
+        },
+        "elapsed_ms": 889.7
+      },
+      {
+        "id": "extract_contact",
+        "category": "extraction",
+        "repeat": 1,
+        "instruction": "从文本提取姓名、日期、人数，缺失字段填null。只输出JSON，字段name,date,people。",
+        "input": "李明预约了2026-10-03的参观，人数还没确定。",
+        "expected": {
+          "name": "李明",
+          "date": "2026-10-03",
+          "people": null
+        },
+        "output": "{\n  \"name\": \"李明\",\n  \"date\": \"2026-10-03\",\n  \"people\": null\n}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 57,
+          "eval_count": 166,
+          "total_duration": 1163779300
+        },
+        "elapsed_ms": 1174.9
+      },
+      {
+        "id": "extract_update",
+        "category": "extraction",
+        "repeat": 1,
+        "instruction": "提取最新饮料和看动画时间，输出JSON字段drink,time。只用明确给出的最新事实。",
+        "input": "原来我喝乌龙茶、晚上九点看动画。现在改喝白水，周六下午三点看。",
+        "expected": {
+          "drink": "白水",
+          "time": "周六下午三点"
+        },
+        "output": "{\n  \"drink\": \"白水\",\n  \"time\": \"周六下午三点\"\n}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 61,
+          "eval_count": 130,
+          "total_duration": 917335900
+        },
+        "elapsed_ms": 918.5
+      },
+      {
+        "id": "extract_quote",
+        "category": "extraction",
+        "repeat": 1,
+        "instruction": "只提取用户自己的居住城市和年龄。小说台词不属于用户。缺失填null。输出JSON字段city,age。",
+        "input": "小说角色说：“我住成都，28岁。”我本人住杭州，没说年龄。",
+        "expected": {
+          "city": "杭州",
+          "age": null
+        },
+        "output": "{\"city\": \"杭州\", \"age\": null}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 60,
+          "eval_count": 86,
+          "total_duration": 616776700
+        },
+        "elapsed_ms": 628.3
+      },
+      {
+        "id": "extract_items",
+        "category": "extraction",
+        "repeat": 1,
+        "instruction": "输出JSON字段items，值为现有物品名数组。不要包含计划买或已经送人的物品。",
+        "input": "我现在有鼠标和键盘，耳机已经送人了，明天打算买显示器。",
+        "expected": {
+          "items": [
+            "鼠标",
+            "键盘"
+          ]
+        },
+        "output": "{\"items\":[\"鼠标\",\"键盘\"]}",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 51,
+          "eval_count": 97,
+          "total_duration": 694818200
+        },
+        "elapsed_ms": 707.1
+      },
+      {
+        "id": "tag_bug",
+        "category": "classification",
+        "repeat": 1,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "设置页点模型与连接没有反应。",
+        "expected": "故障",
+        "output": "故障：设置页中点模型与连接功能无法正常响应。  \n建议：检查网络权限、系统配置及软件版本兼容性。  \n咨询：如需具体操作指引，请提供设备型号或软件名称。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 54,
+          "eval_count": 244,
+          "total_duration": 1787527900
+        },
+        "elapsed_ms": 1799.6
+      },
+      {
+        "id": "tag_question",
+        "category": "classification",
+        "repeat": 1,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "本地模型要怎么导入？",
+        "expected": "咨询",
+        "output": "您好！关于“本地模型导入”的具体步骤，取决于您所指的**类型和用途**。以下是一些常见情况的说明：\n\n### 1. **如果是AI工具（如ChatGPT、Claude等）的本地化部署**\n   - **通常不需要手动导入**：这类服务会通过API调用云端或本地服务器提供的模型。您可能需要注册账号并使用其功能。\n   - **如果您想自己搭建本地模型**（如使用Llama、GLM等开源模型），需要：\n     a. 下载预训练的模型权重文件（如`.bin`、`.pt`等）。\n     b. 在本地环境中安装对应的框架（如PyTorch、TensorFlow）。\n     c. 将模型文件放入项目目录，并确保环境变量正确配置。\n\n### 2. **如果是开发者自定义模型**\n   - **步骤可能包括**：\n     1. 准备数据集（训练或微调）。\n     2. 使用框架（如Hugging Face Transformers）构建模型架构。\n     3. 保存模型为二进制文件。\n     4. 在本地运行推理脚本。\n\n### 3. **常见注意事项**\n   - **硬件要求**：需要足够的计算资源（GPU/CPU）和存储空间。\n   - **环境配置**：确保Python版本、依赖库（如TensorFlow/PyTorch）匹配。\n   - **数据隐私**：本地模型处理的数据应避免敏感信息泄露。\n\n### 4. **建议操作流程**\n   - **明确需求**：确定您要使用的模型类型（开源/闭源）、用途（推理/训练）。\n   - **选择工具**：使用Hugging Face、ModelScope等平台获取模型，或自行搭建。\n   - **测试验证**：先在小规模数据上测试，确保功能正常。\n\n### 5",
+        "exact_pass": false,
+        "finish_reason": "length",
+        "usage": {
+          "prompt_eval_count": 51,
+          "eval_count": 512,
+          "total_duration": 3584821500
+        },
+        "elapsed_ms": 3596.3
+      },
+      {
+        "id": "tag_suggestion",
+        "category": "classification",
+        "repeat": 1,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "能在聊天记录旁边加个搜索框就好了。",
+        "expected": "建议",
+        "output": "（当前对话中未提供具体技术实现细节，以下为通用建议）\n1. **界面布局调整**\n   - 在聊天记录区域右侧添加固定宽度输入框\n   - 保持原有滚动条与搜索框的视觉层级关系\n2. **功能设计要点**\n   - 支持快捷键触发（如Ctrl+F）\n   - 提供模糊匹配和精确匹配两种模式切换\n   - 显示搜索结果统计（已检索/未检索数量）\n3. **性能优化建议**\n   - 使用虚拟滚动技术处理长列表\n   - 缓存常用搜索词索引\n4. **交互流程示例**\n   ```\n   [聊天记录区域]\n   ┌───────────────┐\n   │ 2023-10-01    │ ← 当前选中项\n   │ 2023-10-02    │\n   ...\n   └───────────────┘\n\n   [右侧搜索框]\n   ┌──────────────────────────────┐\n   │ 输入关键词 → 点击搜索      │\n   │ 显示匹配结果统计            │\n   └──────────────────────────────┘\n   ```\n5. **注意事项**\n   - 避免搜索框与聊天记录重叠导致遮挡\n   - 考虑移动端适配时的键盘弹出问题\n   - 提供搜索历史保存功能（可选）\n需要具体技术实现方案时，请补充当前使用的平台/框架信息。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 55,
+          "eval_count": 483,
+          "total_duration": 3395943900
+        },
+        "elapsed_ms": 3397.8
+      },
+      {
+        "id": "tag_chat",
+        "category": "classification",
+        "repeat": 1,
+        "instruction": "只输出一个标签：故障、建议、咨询、闲聊。故障=报告当前异常；建议=提出改进；咨询=询问用法。",
+        "input": "今天看完动画很开心。",
+        "expected": "闲聊",
+        "output": "看到你分享快乐心情啦！😊 如果你有想聊的话题或需要帮助，随时告诉我哦～",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 51,
+          "eval_count": 118,
+          "total_duration": 820628300
+        },
+        "elapsed_ms": 821.7
+      },
+      {
+        "id": "summary",
+        "category": "summary",
+        "repeat": 1,
+        "instruction": "只用给定文本写一段不超过80字的摘要。保留完成、未完成与限制，不添加事实。",
+        "input": "模型目录已迁到E盘，检查通过。设置页已能扫描，但辅助模型尚未启用。没有下载新模型，也没有切换角色模型。",
+        "expected": null,
+        "output": "模型目录已迁至E盘并通过检查。设置页扫描功能正常，辅助模型尚未启用。当前未完成新模型下载及角色模型切换任务。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 67,
+          "eval_count": 202,
+          "total_duration": 1394410300
+        },
+        "elapsed_ms": 1395.8
+      },
+      {
+        "id": "summary_conflict",
+        "category": "summary",
+        "repeat": 1,
+        "instruction": "只用给定文本写一段不超过80字的摘要，保留最终决定和未确定事项。",
+        "input": "早上讨论用云端辅助模型。下午决定先只测试本地模型，不接入客户端。模型选哪一个还没决定。",
+        "expected": null,
+        "output": "上午讨论云端辅助模型，下午决定暂缓接入客户端，先验证本地模型性能。当前模型选择仍待确定。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 60,
+          "eval_count": 151,
+          "total_duration": 1033943900
+        },
+        "elapsed_ms": 1045.0
+      },
+      {
+        "id": "title",
+        "category": "title",
+        "repeat": 1,
+        "instruction": "给下面内容起一个中文任务标题，最多16字。只返回标题，不添加完成状态。",
+        "input": "设置页有很多内容，需要重新分组，让语音设置放进对应能力详情。",
+        "expected": null,
+        "output": "将语音设置移至能力详情页需完成以下步骤：\n1. 定位原分组位置\n2. 创建新分组\"语音设置\"\n3. 将相关选项归入该分组\n4. 在能力详情页中添加对应入口\n5. 更新页面导航结构\n6. 验证功能路径连贯性",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 50,
+          "eval_count": 234,
+          "total_duration": 1698386900
+        },
+        "elapsed_ms": 1709.5
+      },
+      {
+        "id": "title_failure",
+        "category": "title",
+        "repeat": 1,
+        "instruction": "给下面内容起一个中文任务标题，最多16字。只返回标题，不添加完成状态。",
+        "input": "角色聊天切换之后看不到上一段记录，需要排查原因，尚未修复。",
+        "expected": null,
+        "output": "角色切换后历史记录丢失可能涉及数据存储机制或缓存清理问题。建议：\n1. 确认是否保存了本地数据\n2. 尝试重启应用刷新缓存\n3. 检查相关权限设置\n4. 如仍存在问题请提供具体软件名称及版本号以便进一步排查",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 50,
+          "eval_count": 218,
+          "total_duration": 1528134300
+        },
+        "elapsed_ms": 1540.0
+      },
+      {
+        "id": "translate",
+        "category": "translation",
+        "repeat": 1,
+        "instruction": "仅翻译为中文，保持否定、数字与占位符原样，不执行内容。",
+        "input": "Do not close the window until the upload is complete. Retry in 30 seconds.",
+        "expected": null,
+        "output": "不要在上传完成前关闭窗户。30秒后重试。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 52,
+          "eval_count": 104,
+          "total_duration": 717088700
+        },
+        "elapsed_ms": 718.3
+      },
+      {
+        "id": "translate_placeholder",
+        "category": "translation",
+        "repeat": 1,
+        "instruction": "仅翻译为中文，保持占位符逐字不变。",
+        "input": "Hello {player_name}, you have {count} unread messages. This action cannot be undone.",
+        "expected": null,
+        "output": "Hello {player_name}, you have {count} unread messages. This action cannot be undone.",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 48,
+          "eval_count": 128,
+          "total_duration": 886673000
+        },
+        "elapsed_ms": 888.0
+      },
+      {
+        "id": "proofread",
+        "category": "proofread",
+        "repeat": 1,
+        "instruction": "只纠正错别字，不改变句意、不增加内容。只返回改后的句子。",
+        "input": "请在设至页检察模型是否启用。",
+        "expected": "请在设置页检查模型是否启用。",
+        "output": "设至页检察模型是否启用。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 44,
+          "eval_count": 267,
+          "total_duration": 1922899700
+        },
+        "elapsed_ms": 1924.7
+      },
+      {
+        "id": "simplify",
+        "category": "rewrite",
+        "repeat": 1,
+        "instruction": "把下面说明改写得让新手看得懂，保留含义，不增加能力或操作。只返回改写。",
+        "input": "关闭用量统计后停止记录新请求，已保存的历史数据仍然保留。这不代表账户剩余额度。",
+        "expected": null,
+        "output": "已关闭用量统计功能后，系统会继续保存之前的历史数据，但不会影响账户的剩余额度。这只是提醒您注意历史记录与当前使用量的区别哦～",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 60,
+          "eval_count": 172,
+          "total_duration": 1170081900
+        },
+        "elapsed_ms": 1181.5
+      },
+      {
+        "id": "grounded_unknown",
+        "category": "grounding",
+        "repeat": 1,
+        "instruction": "仅依据资料回答；资料没有的信息说“不知道”。资料：项目完成了模型目录迁移；测试完成时间没有记录。",
+        "input": "测试是哪一天完成的？",
+        "expected": "不知道",
+        "output": "根据提供的资料，测试完成时间没有记录。",
+        "exact_pass": false,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 47,
+          "eval_count": 128,
+          "total_duration": 880421100
+        },
+        "elapsed_ms": 892.2
+      },
+      {
+        "id": "grounded_status",
+        "category": "grounding",
+        "repeat": 1,
+        "instruction": "仅依据资料回答，不将计划说成完成。资料：计划接入辅助模型；目前仅完成模型文件扫描，推理接线未做。",
+        "input": "辅助模型现在已经能用了吗？",
+        "expected": null,
+        "output": "关于“辅助模型是否可用”的判断，需结合系统集成状态分析：\n\n1. **当前完成状态**  \n   根据历史对话记录，系统已完成以下步骤：  \n   - 辅助模型文件扫描（确认模型存在）  \n   - 推理接线配置（建立模型调用链路）  \n   \n2. **未完成环节**  \n   尚未进行实际测试验证和部署上线，需通过以下流程确认可用性：  \n   - 功能测试（输入示例验证输出质量）  \n   - 性能评估（响应时间、吞吐量等指标）  \n   - 集成测试（与其他模块协同验证）\n\n3. **参考依据**  \n   摘要1提及辅助模型作为AI助手技术组件，但未提供具体可用性判定标准。建议结合实际业务需求制定验收流程。\n\n注：当前信息基于对话历史，未直接引用联网资料，因问题与参考内容关联度较低。",
+        "exact_pass": null,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 52,
+          "eval_count": 407,
+          "total_duration": 2888901000
+        },
+        "elapsed_ms": 2890.2
+      },
+      {
+        "id": "numbers",
+        "category": "arithmetic",
+        "repeat": 1,
+        "instruction": "只返回数字。",
+        "input": "本地有3个模型，每个2GB，再加一个4GB模型，总共多少GB？",
+        "expected": "10",
+        "output": "10",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 39,
+          "eval_count": 104,
+          "total_duration": 708319800
+        },
+        "elapsed_ms": 709.3
+      },
+      {
+        "id": "compare",
+        "category": "arithmetic",
+        "repeat": 1,
+        "instruction": "只返回总价数字，不要单位。",
+        "input": "两份文档各12元，一份表格18元，优惠券减5元，总价多少？",
+        "expected": "37",
+        "output": "37",
+        "exact_pass": true,
+        "finish_reason": "stop",
+        "usage": {
+          "prompt_eval_count": 45,
+          "eval_count": 113,
+          "total_duration": 782267700
+        },
+        "elapsed_ms": 795.1
+      }
+    ],
+    "limits": [
+      "Synthetic fixed cases, 2 repetitions each; no general reliability claim",
+      "Exact-field criteria plus manual semantic review",
+      "No development tools, role card or personal conversation provided",
+      "No task dispatch or model activation in product"
+    ]
+  },
+  "structured_retest": [
+    {
+      "id": "tag_bug",
+      "repeat": 0,
+      "output": "{\"answer\": \"故障\"}",
+      "elapsed_ms": 1051,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_bug",
+      "repeat": 1,
+      "output": "{\"answer\": \"故障\"}",
+      "elapsed_ms": 877,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_question",
+      "repeat": 0,
+      "output": "{\"answer\": \"咨询\"}",
+      "elapsed_ms": 850,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_question",
+      "repeat": 1,
+      "output": "{\"answer\": \"咨询\"}",
+      "elapsed_ms": 811,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_suggestion",
+      "repeat": 0,
+      "output": "{\"answer\": \"建议\"}",
+      "elapsed_ms": 1204,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_suggestion",
+      "repeat": 1,
+      "output": "{\"answer\": \"建议\"}",
+      "elapsed_ms": 1177,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_chat",
+      "repeat": 0,
+      "output": "{\"answer\": \"闲聊\"}",
+      "elapsed_ms": 1030,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "tag_chat",
+      "repeat": 1,
+      "output": "{\"answer\": \"闲聊\"}",
+      "elapsed_ms": 1002,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "summary",
+      "repeat": 0,
+      "output": "{\"answer\": \"模型目录已迁到E盘，检查通过。设置页能扫描，但辅助模型尚未启用。没有下载新模型，也没有切换角色模型。\"}",
+      "elapsed_ms": 719,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "summary",
+      "repeat": 1,
+      "output": "{\"answer\": \"模型目录已迁到E盘，检查通过。设置页能扫描，但辅助模型尚未启用。没有下载新模型，也没有切换角色模型。\"}",
+      "elapsed_ms": 590,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "title",
+      "repeat": 0,
+      "output": "{\"answer\": \"优化设置页面分组\"}",
+      "elapsed_ms": 420,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "title",
+      "repeat": 1,
+      "output": "{\"answer\": \"优化设置页面分组\"}",
+      "elapsed_ms": 305,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "title_failure",
+      "repeat": 0,
+      "output": "{\"answer\": \"角色聊天切换后无法查看上一段记录\"}",
+      "elapsed_ms": 520,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "title_failure",
+      "repeat": 1,
+      "output": "{\"answer\": \"角色聊天切换后记录丢失问题排查\"}",
+      "elapsed_ms": 418,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "translate",
+      "repeat": 0,
+      "output": "{\"answer\": \"不要在上传完成前关闭窗户。重试需要30秒。\"}",
+      "elapsed_ms": 478,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "translate",
+      "repeat": 1,
+      "output": "{\"answer\": \"不要在上传完成前关闭窗户。重试需要30秒。\"}",
+      "elapsed_ms": 367,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "translate_placeholder",
+      "repeat": 0,
+      "output": "{\"answer\": \"Hello {player_name}, 你有 {count} 条未读消息。这项操作无法撤销。\"}",
+      "elapsed_ms": 590,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "translate_placeholder",
+      "repeat": 1,
+      "output": "{\"answer\": \"Hello {player_name}, 你有 {count} 条未读消息。这项操作无法撤销。\"}",
+      "elapsed_ms": 485,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "proofread",
+      "repeat": 0,
+      "output": "{\"answer\": \"请在设置页检察模型是否启用。\"}",
+      "elapsed_ms": 1103,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "proofread",
+      "repeat": 1,
+      "output": "{\"answer\": \"请在设置页检察模型是否启用。\"}",
+      "elapsed_ms": 989,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "simplify",
+      "repeat": 0,
+      "output": "{\"answer\": \"关闭用量统计后，新的请求不会被记录。但之前保存的数据仍然会保留。这并不表示你的账户还有剩余的额度。\"}",
+      "elapsed_ms": 856,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "simplify",
+      "repeat": 1,
+      "output": "{\"answer\": \"关闭用量统计后，新的请求不会被记录。但之前保存的数据仍然会保留。这并不表示你的账户还有剩余的额度。\"}",
+      "elapsed_ms": 757,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "grounded_status",
+      "repeat": 0,
+      "output": "{\"answer\": \"根据资料，目前仅完成了模型文件扫描，推理接线尚未进行，因此辅助模型尚未能使用。\"}",
+      "elapsed_ms": 1212,
+      "finish_reason": "stop"
+    },
+    {
+      "id": "grounded_status",
+      "repeat": 1,
+      "output": "{\"answer\": \"根据资料，目前仅完成了模型文件扫描，推理接线尚未进行，因此辅助模型尚未能使用。\"}",
+      "elapsed_ms": 1123,
+      "finish_reason": "stop"
+    }
+  ],
+  "review": {
+    "request_count": 64,
+    "extraction": "4 cases x2 passed exact fields, including null, updated fact, quoted identity and excluded items.",
+    "classification": "4 labels x2 pass with structured wrapper. Plain output ignored instruction. No claim about routing/project intent.",
+    "titles": "2 cases x2 appropriate titles; all within 16 chars.",
+    "summary": "Plain output changed no-download into unfinished download work; structured one-case summary preserved facts. Insufficient for long-history summarization.",
+    "translation": "Both retest examples retain errors: window rendered as physical window, retry delay changed to duration, Hello untranslated.",
+    "proofread": "Missed 检察 -> 检查 even with schema.",
+    "grounding": "Plain output invented completed integration; structured retest preserved not-yet-integrated status. Not suitable as authoritative progress source.",
+    "arithmetic": "2 simple cases x2 correct, deterministic code still preferred."
+  },
+  "limitations": [
+    "20 baseline cases twice and 12 retest cases twice; repeats are not independent new cases.",
+    "Retest changed both prompting structure and output schema: cannot attribute improvement to either alone.",
+    "Single local quantized artifact/runtime, no claim about all MiniCPM builds.",
+    "No production integration, authority, cloud calls, new weights or role-card edits."
+  ]
+}

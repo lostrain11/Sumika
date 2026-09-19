@@ -33,6 +33,7 @@ class Dsh:
         self.process = None
         self.instance = HarnessInstance("dsh", secrets.token_hex(16), Trust.UNVERIFIED)
         self.sessions = set()
+        self.diagnostic_sessions = set()
         self.workspaces = {}
         self.startup_messages = deque(maxlen=20)
         self._browser_url = None
@@ -41,7 +42,9 @@ class Dsh:
             urllib.request.ProxyHandler({}),
             urllib.request.HTTPCookieProcessor(self._cookies))
 
-    def start(self, timeout=60):
+    def start(self, timeout=60, port=0):
+        if type(port) is not int or not 0 <= port <= 65535:
+            raise DshError("invalid port")
         if self.process is not None and self.process.poll() is None:
             raise DshError("instance is already running")
         release = json.loads((self.root / "runtime/dsh/release.json").read_text(encoding="utf-8"))
@@ -53,7 +56,13 @@ class Dsh:
         package = json.loads((cli.parent.parent / "package.json").read_text(encoding="utf-8"))
         if package["version"] != release["version"]:
             raise DshError("installed DSH version mismatch")
-        node = shutil.which("node")
+        bundled_node = self.root / 'runtime/node'
+        if bundled_node.exists():
+            node = str(bundled_node / 'node.exe')
+            if not Path(node).is_file():
+                raise DshError('bundled Node runtime is incomplete')
+        else:
+            node = shutil.which("node")
         if not node:
             raise DshError("node is required")
         self.home.mkdir(parents=True, exist_ok=True)
@@ -62,7 +71,7 @@ class Dsh:
             or k.endswith(("_API_KEY", "_API_TOKEN")))}
         env["DSH_HOME"] = str(self.home)
         self.process = subprocess.Popen(
-            [node, str(cli), "--profile", "web", "--host", "127.0.0.1", "--port", "0", "--no-open"],
+            [node, str(cli), "--profile", "web", "--host", "127.0.0.1", "--port", str(port), "--no-open"],
             cwd=self.home, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
@@ -114,7 +123,7 @@ class Dsh:
     def _rpc(self, method, arguments):
         rpc_id = secrets.token_hex(16)
         # Native command/event services use named parameters, not request DTOs.
-        direct = {"settings/describe", "commands/execute", "commands/list", "$events/result"}
+        direct = {"settings/describe", "commands/execute", "commands/list", "$events/result", "session/list"}
         body = json.dumps({"type": "client-request", "rpcId": rpc_id,
                            "method": method, "payload": {"args": arguments if method in direct else {"request": arguments}}}).encode()
         request = urllib.request.Request(self.url + "/api/" + method, data=body,
@@ -187,6 +196,68 @@ class Dsh:
         # History availability alone proves neither task completion nor safe replay.
         return Recovery(binding, TaskState.UNKNOWN)
 
+    def list_sessions(self):
+        """List sessions from this managed profile without exposing message text."""
+        if self.instance.trust != Trust.MANAGED:
+            raise AuthorizationError("unverified instance")
+        self._check_owner(int(self.url.rsplit(":", 1)[1]))
+        # This direct RPC is wired through the client as args._request.
+        value = self._rpc("session/list", {"_request": {}})
+        if not isinstance(value, dict) or not isinstance(value.get("items"), list):
+            raise DshError("invalid session list response")
+        result = []
+        for item in value["items"]:
+            if not isinstance(item, dict) or not isinstance(item.get("sessionId"), str):
+                raise DshError("invalid session list entry")
+            result.append({"sessionId": item["sessionId"],
+                           "updatedAt": item.get("updatedAt") if type(item.get("updatedAt")) is int else None,
+                           "running": item.get("running") if type(item.get("running")) is bool else None,
+                           "blank": item.get("blank") if type(item.get("blank")) is bool else None})
+        return result
+
+    def adopt_existing_session(self, session_id):
+        """Explicitly bind a listed session for read-only inspection."""
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("invalid session id")
+        if any(item["sessionId"] == session_id for item in self.list_sessions()):
+            self.diagnostic_sessions.add(session_id)
+            return session_id
+        raise DshError("session is not present in the managed profile")
+
+    def diagnostic_page(self, binding, *, through_seq=None, before_seq=None, max_messages=20):
+        """Read metadata for an already-owned session; never attach by port guess."""
+        from extensions.diagnostics.dsh import project_page
+        if (self.instance.trust != Trust.MANAGED
+                or binding.instance_id != self.instance.instance_id
+                or binding.session_id not in self.sessions | self.diagnostic_sessions):
+            raise AuthorizationError('unknown diagnostic session binding')
+        if type(max_messages) is not int or not 1 <= max_messages <= 100:
+            raise ValueError('invalid message limit')
+        for cursor in (through_seq, before_seq):
+            if cursor is not None and (type(cursor) is not int or cursor < 0):
+                raise ValueError('invalid diagnostic cursor')
+        if before_seq is not None and through_seq is None:
+            raise ValueError('pagination requires the original snapshot cursor')
+        self._check_owner(int(self.url.rsplit(':', 1)[1]))
+        address = {'kind': 'session', 'sessionId': binding.session_id}
+        if through_seq is None:
+            stream = self.stream('session/follow', {'address': address, 'maxMessages': 1})
+            try:
+                snapshot = next(stream)
+            finally:
+                stream.close()
+            if (snapshot.get('type') != 'snapshot' or snapshot.get('header', {}).get('id') != binding.session_id
+                    or type(snapshot.get('cursor')) is not int or snapshot['cursor'] < 0):
+                raise DshError('invalid diagnostic snapshot')
+            through_seq = snapshot['cursor']
+        args = {'address': address, 'throughSeq': through_seq, 'maxMessages': max_messages}
+        if before_seq is not None:
+            args['beforeSeq'] = before_seq
+        page = self._rpc('session/page', args)
+        release = json.loads((self.root / 'runtime/dsh/release.json').read_text(encoding='utf8'))
+        return project_page(page, session=binding.session_id, version=release['version'],
+                            through_seq=through_seq, before_seq=before_seq)
+
     def stream(self, endpoint, arguments, timeout=15):
         """Read native Remote streams; iteration errors never authorize replay."""
         import websocket
@@ -238,4 +309,5 @@ class Dsh:
                 self.process.stdout.close()
         self.instance = HarnessInstance("dsh", self.instance.instance_id, Trust.UNVERIFIED)
         self.sessions.clear()
+        self.diagnostic_sessions.clear()
         self.workspaces.clear()

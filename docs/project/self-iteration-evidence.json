@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "status": "small_real_development_loop_verified_overall_partial",
+  "scope": "controlled isolated DSH project modification loop",
+  "evidence_dir": ".sumika-next/p2-6efa1fdedd7542bcb5cc44f7924697ed",
+  "checks": [
+    "native DSH wrote project files",
+    "native terminal ran deterministic verification",
+    "tool lifecycle and cancellation remained under DSH permissions",
+    "failed/unknown results are not automatically replayed"
+  ],
+  "boundary": "Only an isolated deterministic fixture ran. This is not evidence of Sumika improving its own real codebase or of tested release rollback.",
+  "real_model_attempt": {
+    "status": "real_model_modified_copy_but_acceptance_failed",
+    "evidence": ".sumika-next\\self-development-live-a5ead649139e433bbf2d3498a7571535\\report.json",
+    "assets": [
+      "tools/verify_portable_staging.py: actual copied product module",
+      "sumika_next/dsh.py: native real Agent/tool adapter",
+      "tools/verify_dsh_recovery.py: reused prompt/event helpers"
+    ],
+    "model": "deepseek-flash",
+    "requests": 10,
+    "observed": [
+      "Real model read source, edited verifier and ran native pwsh tests successfully",
+      "Independent tests passed and original source/test fixture remained unchanged",
+      "A later terminal command attempted C:/Windows/Temp probes and temporary-file removal outside the instructed workspace",
+      "That probe failed at Python parsing with SyntaxError before its body could execute",
+      "10-request relay cap returned HTTP403, native turn ended error, no automatic replay"
+    ],
+    "decision": "Do not adopt patch or count this as self-development acceptance. Disable live runner until native tool execution restrictions are verified.",
+    "limits": "Prompt-only restrictions are not a sandbox. Original daily configuration untouched; real key retained in memory only, local placeholder in isolated profile. Provider tokens/cost not yet summarized."
+  },
+  "native_write_confinement": {
+    "status": "native_windows_write_confinement_verified",
+    "assets": [
+      "DSH dsh-sandbox-policy, dsh-pwsh-sandbox, dsh-fs-sandbox, dsh-user-approval: reused unmodified native providers",
+      "tools/verify_dsh_recovery.py and tests_next/p2_fixture.py: reused native session/loopback verification"
+    ],
+    "tool": "tools/verify_development_sandbox.py",
+    "evidence": ".sumika-next/development-sandbox-47e58ca77ebc4b44b06c881920945da6/report.json",
+    "checks": [
+      "Native and PowerShell writes inside owned workspace succeeded",
+      "Native outside write returned FS_SANDBOX_DENIED",
+      "PowerShell outside write returned sandbox denial marker and exit 1",
+      "Explicit danger-full-access escalation rejected under approval never",
+      "Outside sentinel unchanged, all five tools settled, completed turn, owned DSH stopped, zero cloud calls"
+    ],
+    "correction": "Previous model attempt outside its task scope did not prove native sandbox escape. The probe failed parsing; actual native file-write confinement is now positively verified.",
+    "limitations": "Windows restricted-token enforcement is partial: reads/network/process visibility not isolated, ambient Everyone permissions and hard links remain relevant. Only isolated profile changed; live model runner remains disabled pending task-specific tool/command gate."
+  },
+  "probe_guard": {
+    "status": "task_scoped_native_tool_gate_verified_partial",
+    "assets": [
+      "Native tools/pre-execute waterfall reused without upstream changes",
+      "tools/verify_development_sandbox.py extended with --probe-guard"
+    ],
+    "implementation": "tools/development_probe_guard.mjs permits only named source/test reads, source edit, bounded glob and exact reviewed test command. Execution requires source/test SHA256 matching policy outside workspace. Other tools and escalation fail closed.",
+    "evidence": ".sumika-next/development-sandbox-5766b0f6a2e547b9b1a9aab15b317864/report.json",
+    "checks": [
+      "Eight real native tool results settled",
+      "Reviewed test produced success marker",
+      "Source edit allowed; next test execution denied because source hash changed",
+      "Policy read, arbitrary terminal command and test file write denied; no forbidden marker created"
+    ],
+    "findings": "First fixture failed because a pwsh call invalidated native fs read version; re-read before edit restored expected native workflow, no upstream patch.",
+    "limitations": "Isolated verification plugin only; not installed in daily profile. Not a complete sandbox, and concurrent tool dispatch/hash-to-execution race still needs fencing before live runner is enabled. Real model runner remains disabled pending integration and review/resume flow."
+  },
+  "guarded_live_edit": {
+    "status": "guarded_real_edit_and_review_passed_partial",
+    "evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/report.json",
+    "review": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/review.json",
+    "model": "deepseek-flash",
+    "requests": 5,
+    "checks": [
+      "Real edit phase completed; only glob/read/edit called",
+      "Original product and immutable tests unchanged",
+      "Main agent reviewed diff then ran two tests successfully",
+      "Three queue tests passed: recheck after edit, cancellation no execution, failure no replay",
+      "Native guarded probe passed after serialization"
+    ],
+    "native_guard_evidence": ".sumika-next/development-sandbox-391759685963479b90618546517eb4e4/report.json",
+    "limitations": "Not full self-development acceptance: no merged product change/native post-review model test turn yet. Guard serializes cooperative tool dispatch but not external writers or OS-wide processes. Day-to-day profile unchanged."
+  },
+  "adopted_reviewed_change": {
+    "status": "reviewed_model_change_adopted_with_installer_parity",
+    "candidate_origin": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/work/verify_portable_staging.py",
+    "implementation": [
+      "Adopted reviewed real-model filename validation into tools/verify_portable_staging.py",
+      "Main-agent review added superscript COM/LPT digits and CONIN$/CONOUT$ handling",
+      "PowerShell installer rejects matching device names, invalid chars and control chars before extraction"
+    ],
+    "verification": [
+      "11 Python inventory tests passed",
+      "Real installer original 15 checks plus nine invalid Windows names passed; valid Unicode and similar filenames installed",
+      "All 26020 paths in candidate d accepted by new safe_path"
+    ],
+    "evidence": ".sumika-next/package/installer-check-84ce513ddc664a8b862d1cc1d2ba88ce/report.json",
+    "limitations": "Control-character ZIP produced a different pre-extraction rejection reason on current PowerShell; retained logs show no installation or staging created. Native reviewed-model test resume remains unimplemented. Candidate d package predates adopted changes; no release-ready claim."
+  },
+  "real_development_loop": {
+    "status": "small_real_development_loop_verified",
+    "edit_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/report.json",
+    "review_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/review.json",
+    "native_resume_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/reviewed-resume/report.json",
+    "replay_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/reviewed-resume/replay-refused.json",
+    "model": "deepseek-flash",
+    "requests": "5 edit + 2 reviewed resume",
+    "checks": [
+      "Existing persisted native session resumed after process restart",
+      "Candidate/test hashes match review; edit tool disabled during resume",
+      "Exactly one native pwsh test call; two tests passed; turn completed",
+      "Source candidate, test fixture and current product unchanged during resume",
+      "Repeated resume attempt refused before model call",
+      "Reviewed candidate adopted with main-agent Windows edge-case and installer parity additions in previous turn"
+    ],
+    "limitations": "One bounded module task with main-agent review, not unattended self-updating or broad Codex equivalence. Full release rollback, clean-machine/optional capabilities, real UI approvals and durable continuity recovery remain."
+  },
+  "multi_file_development": {
+    "status": "two_file_real_edit_adopted_native_test_blocked_by_temp_acl",
+    "evidence": ".sumika-next/self-development-live-b32c628cb82b40fea2c173283a1aedc9",
+    "model": "deepseek-flash",
+    "requests": {
+      "edit": 14,
+      "reviewed_resume": 2
+    },
+    "implementation": [
+      "Extended isolated guard with explicit editableFiles subset; tests/helper remain read-only",
+      "Added audit-cli real task to existing runner; all reviewed file hashes pinned for resume",
+      "Adopted model CLI --fail-on-findings and documentation; reviewer corrected reversed limitation sentence"
+    ],
+    "verification": [
+      "4 guard tests passed including multi-file edits, test protection and hash gating",
+      "4 host candidate tests passed",
+      "Same persisted native session resumed; exactly one approved pwsh test command executed",
+      "Native tests failed with four WinError5 cases for tempfile directories; model did not escalate or replay",
+      "Actual candidate-e scan with strict flag wrote full report and returned nonzero because findings remain"
+    ],
+    "failure_evidence": ".sumika-next/self-development-live-b32c628cb82b40fea2c173283a1aedc9/reviewed-resume/events.json",
+    "finding": "Get-Acl showed tempfile directory protected DACL with owner/system/administrators only, while workspace has restricted sandbox SID and inherited entries. Directory ACL difference explains why workspace permission does not propagate to these temporary directories. No ACL changes made.",
+    "limitations": "Not accepted as a successful native multi-file development loop. Implementation+documentation is still a bounded task, not broad Codex equivalence. Preserve failed attempt; no blind resume of existing attempt. Package e predates CLI change.",
+    "next": [
+      "Reproduce Python tempfile protected-DACL behavior in isolated native sandbox; use an appropriate in-workspace test fixture without broader permissions",
+      "Repeat only explicitly reviewed new test attempt after verified fixture correction",
+      "Continue larger coding acceptance, voice wiring and install/update recovery"
+    ]
+  },
+  "multi_file_development_recovery_checkpoint": {
+    "status": "bounded_two_file_development_loop_verified",
+    "evidence": ".sumika-next/self-development-live-b32c628cb82b40fea2c173283a1aedc9/reviewed-resume-3/report.json",
+    "model": "deepseek-flash",
+    "native_test_result": "4 tests passed; exactly one pwsh command; turn completed",
+    "checks": {
+      "tests_unchanged": true,
+      "original_source_unchanged": true,
+      "helper_unchanged": true,
+      "original_companions_unchanged": true,
+      "candidate_unchanged": true,
+      "reviewed_inputs_unchanged": true,
+      "one_exact_test_call": true,
+      "native_tests_passed": true,
+      "original_session_resumed": true
+    },
+    "adopted": [
+      "tools/audit_package_licenses.py --fail-on-findings",
+      "packaging/README.md corrected reviewed documentation"
+    ],
+    "recovery": [
+      "Original fixture and failed native test retained",
+      "Native probe confirmed Python 3.14 private temp ACL denies restricted token while ordinary inherited workspace directories work",
+      "Corrected fixture keeps identical assertions and retains test output",
+      "Second attempt reused prompt text as requestId; native history had no new turn and relay requests=0. Owned DSH was stopped after identity verification; failed attempt retained",
+      "Third explicit submission uses UUID requestId recorded before submit; same native session completed with two model calls"
+    ],
+    "related_existing_guidance": "runtime/dsh/README.md already documented mkdtemp limitation; new fixture initially failed to follow it. Reproduction command and fixture reference now added there.",
+    "limitations": "One implementation-plus-documentation task, not a large multi-module feature or full Codex parity. No daily profile modification or sandbox escalation. Candidate e predates adopted audit CLI. Voice wiring, full release rollback/clean-machine validation and license review remain.",
+    "next": [
+      "Broader real development task with multiple implementation modules",
+      "Activity-room voice integration under explicit microphone permission",
+      "Release upgrade rollback and clean-machine acceptance"
+    ]
+  },
+  "installer_paths_development_checkpoint": {
+    "status": "two_implementation_files_reviewed_adopted_and_native_tests_passed",
+    "task": "Reject file-ancestor conflicts in Python release inventories and PowerShell installer before extraction",
+    "assets": [
+      "Existing real-model DSH development runner and guard extended with installer-paths task; existing implementations modified."
+    ],
+    "evidence": ".sumika-next\\self-development-live-97a9611c68264659af039b89a8e4b1d8\\reviewed-resume\\report.json",
+    "real_model": {
+      "model": "deepseek-flash",
+      "edit_requests": 12,
+      "reviewed_resume_requests": 2
+    },
+    "review": "Model candidate moved root/manifest link checks after reading manifest; host restored original order and preserved model-original-verifier.py plus revision hashes. No tests changed.",
+    "adopted": [
+      "tools/verify_portable_staging.py",
+      "packaging/install_sumika.ps1"
+    ],
+    "verification": [
+      "4 immutable focused tests passed on host and once through original native DSH session after review.",
+      "15 existing inventory/path tests passed.",
+      "Full installer fixture including hierarchy and real extraction interruption passed in installer-check-c4279ca5df584b9f9d52fcdc995cb812."
+    ],
+    "retained_failure": {
+      "path": ".sumika-next/package/installer-check-c905b97c6ff445528f7c009256ee63b7",
+      "error": "Directory.Move access denied at publication; staged inventory verified; destination absent. New isolated run passed. Cause unproven, not marked fixed."
+    },
+    "limits": [
+      "Bounded two-implementation task with host correction, not autonomous broad-feature parity.",
+      "Candidate f predates these verifier/installer changes. No daily service changes."
+    ],
+    "next": [
+      "Investigate reproducible publication failure if it recurs; retain evidence",
+      "Complete pending voice UI/device acceptance",
+      "Clean-machine and broader coding acceptance"
+    ]
+  },
+  "restore_preflight_attempt": {
+    "status": "host_completed_preflight_real_model_attempt_incomplete",
+    "assets": [
+      "Reused tools/backup_personal_data.py integrity/restore path and docs/project/backup-recovery.md.",
+      "Added tools/restore_preflight.py because no existing read-only dependency preflight was available.",
+      "Extended existing guarded tools/verify_self_development_live.py; independent immutable 13-test suite prepared by subagent."
+    ],
+    "model_evidence": ".sumika-next/self-development-live-d4ce90ce2e3d410894ceb566061f33c3/report.json",
+    "model_result": "22 real deepseek-flash requests; terminal completed but only partial backup script changes. Preflight module and documentation unchanged; restricted operations denied. No candidate execution/adoption as autonomous success.",
+    "host_implementation": [
+      "Reviewed and implemented shared verify_snapshot extraction plus --inspect CLI.",
+      "Implemented pure role-resource preflight, network/link unknown status, internal manifest eligibility and fixed-code error reporting.",
+      "Independent review caught empty/excluded payload entries not restored by v1; fixed before acceptance."
+    ],
+    "verification": {
+      "command": "python -B -m unittest tests_next.test_restore_preflight tests_next.test_personal_snapshot",
+      "result": "38 passed; pre-existing SQLite ResourceWarning in recovery tests"
+    },
+    "limits": [
+      "Not autonomous real-model development acceptance; host supplied missing implementation and documentation.",
+      "Presence checks only for two configured role fields; no all-role/DSH/plugin/runtime certification.",
+      "No UI or daily deployment, activation, user data modification or package rebuild."
+    ]
+  },
+  "development_evidence_binding_checkpoint": {
+    "status": "native_test_evidence_binding_verified",
+    "assets": [
+      "tools/verify_self_development_live.py existing guarded runner adapted",
+      "tools/development_probe_guard.mjs reviewed without loosening scope"
+    ],
+    "finding": "Edit phase permits listed read/edit and exact glob only; new writes and terminal denied. Test phase runs one command only after external hash review. This does not represent a normal iterative medium-scale development workflow.",
+    "changes": [
+      "Bind test success to sole pwsh call, exact command, turn, step and call ID.",
+      "Require one non-error, non-truncated native result and exact unittest count/final OK; reject ambiguous failure or duplicate results."
+    ],
+    "validation": [
+      "6 focused unittest tests passed",
+      "Offline recheck of 4 historical native reviewed-resume records: 3 positive and 1 negative unchanged"
+    ],
+    "evidence": ".sumika-next/development-evidence-recheck.json",
+    "limits": [
+      "No paid calls, candidate execution, guard weakening or daily profile changes.",
+      "Native output parsing does not prove arbitrary program correctness; external source review remains required.",
+      "Medium-scale planning/edit/test/review/recovery acceptance remains incomplete."
+    ],
+    "next": "Prepare ordinary-development acceptance in an isolated workspace with native approvals; do not replay interrupted DeepSeek attempt or silently select another model."
+  },
+  "native_iteration_checkpoint": {
+    "status": "deterministic_native_iteration_and_restart_passed",
+    "assets": [
+      "tools/verify_development_sandbox.py extended with --iteration",
+      "tests_next/p2_fixture.py existing loopback model reused",
+      "tools/verify_self_development_live.py bound test evidence reused"
+    ],
+    "scope": "Isolated native multi-file write, failed test, stale edit rejection, read/edit repair, passing test and managed restart; no cloud calls or daily changes.",
+    "evidence": ".sumika-next/development-sandbox-aa276220443b4df99cd29882cb7f5edc/report.json",
+    "retained_failure": ".sumika-next/development-sandbox-221bc45d5ccc42359061a0cd79c76ab5/report.json",
+    "finding": "Native write does not establish edit read-version. FS_STALE_VERSION requires read then reconsider edit; no guard weakening.",
+    "validation": [
+      "11 native checks passed, nine tool results persisted across restart without model replay",
+      "6 evidence parser unit tests passed",
+      "Owned DSH stopped; outside sentinel and immutable tests unchanged"
+    ],
+    "limits": [
+      "Deterministic fixture, not autonomous real-model medium-scale development acceptance.",
+      "Uses isolated workspace-write/approval-never fixture; interactive approval covered separately."
+    ],
+    "next": "Real-model medium-scale acceptance remains pending; no automatic replay or provider switch. Continue independent remaining feature acceptance."
+  },
+  "ordinary_product_candidate_i_review": {
+    "status": "failed_candidate_rejected",
+    "evidence": ".sumika-next/product-development-9757b82710c44522b179f2317a94e848/continuation-a125adbdbf824a31ae38d701eef0829f/main-review.json",
+    "known_issue": "Python 3.14 mkdtemp mode 0o700 creates private ACL incompatible with restricted native token; already documented in runtime/dsh/README.md and multi_file_development_recovery_checkpoint. No new reproduction needed.",
+    "planning_failure": "New regression reused TemporaryDirectory tests without first checking existing native compatibility guidance. Avoid repeated model calls on known-incompatible fixture.",
+    "next": "Review compatible fixture strategy before another native execution; retain original assertions/evidence and never substitute deterministic recursive cleanup or weaken native permissions. Do not replay interrupted request.",
+    "adopted": false
+  }
+}

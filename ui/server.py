@@ -9,7 +9,9 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
+import threading
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
@@ -20,9 +22,12 @@ from extensions.capabilities import CapabilityStore
 from extensions.desktop.audio_devices import list_input_devices
 from extensions.models.cloud import CloudError
 from extensions.models.ollama import OllamaError
-from extensions.models.settings import default_path, load as load_settings, save as save_settings
+from extensions.models.settings import default_path, load as load_settings, save as save_settings, example
 from extensions.roles.card_context import compile_card, resolve_language_policy
 from extensions.roles.chat import RoleChat, open_session
+from extensions.roles.conversations import Conversations
+from extensions.roles.speech_input import SpeechInput
+from extensions.roles.speech_playback import SpeechPlayback
 from extensions.roles.roles import (attach_asset, import_card, list_roles, load_role,
                                     remove_role, rename_role)
 from ui.state_snapshot import snapshot, validate_state
@@ -30,6 +35,7 @@ from ui import startup as startup_registry
 from ui.readiness import probes as readiness_probes, service_capabilities
 from ui.schedule import ScheduleController
 from ui.workbench import WorkbenchController, WorkbenchError
+from ui.management import Management, Conflict
 
 UI_ROOT = Path(__file__).resolve().parent
 BUILTIN_ROLES = UI_ROOT.parent / "extensions" / "roles" / "defaults"
@@ -66,11 +72,76 @@ class Bridge:
     def __init__(self, settings_path=None, *, capability_database=None, workbench_root=None,
                  schedule_directory=None):
         self.settings_path = Path(settings_path) if settings_path else default_path()
+        if not self.settings_path.exists():
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            initial = example(BUILTIN_ROLES / 'sampleA', self.settings_path.parent / 'memory.sqlite3')
+            # First launch never enables generation or downloads a model.
+            try:
+                with self.settings_path.open('x', encoding='utf8') as output:
+                    json.dump(initial, output, ensure_ascii=False, indent=2)
+            except FileExistsError:
+                pass  # Another launcher initialized it; never overwrite.
         self.capability_database = Path(capability_database) if capability_database else None
         self.workbench = WorkbenchController(workbench_root or Path(__file__).resolve().parents[1],
                                              )
         self.schedule = ScheduleController(schedule_directory)
         self.capability_bootstrap()
+        self.management = Management(self)
+        self.conversations = Conversations(self.settings_path.parent / 'role-conversations.sqlite3')
+        self._chat_lock = threading.RLock()
+        self._shutdown_requested = threading.Event()
+        self._closing = False
+        self.speech = SpeechInput(self.settings_path.parent/'speech-input', self.speech_configuration)
+        self.playback = SpeechPlayback(self.settings_path.parent/'speech-output', self.playback_configuration)
+
+    def playback_configuration(self, role_id):
+        from extensions.desktop.audio_devices import env_python
+        settings = load_settings(self.settings_path)
+        if load_role(settings['role']['role_dir'])['id'] != role_id:
+            raise ValueError('active role changed')
+        if not settings['voice']['enabled'] or not self.capability_database:
+            raise PermissionError('enable voice in capability settings')
+        store = CapabilityStore(self.capability_database)
+        try:
+            selected = store.resolve('voice')
+            if selected['provider'] != 'windows-sapi':
+                raise PermissionError('selected voice provider is not connected')
+        finally:
+            store.close()
+        interpreter = env_python()
+        if not interpreter:
+            raise ValueError('local voice runtime unavailable')
+        return dict(python=interpreter, root=str(self.workbench.root),
+                    voice_name=settings['voice']['tts_voice'], voice_capability=selected,
+                    capabilities=str(self.capability_database.resolve()))
+
+    def speech_configuration(self, role_id):
+        from extensions.desktop.audio_devices import env_python
+        settings = load_settings(self.settings_path)
+        voice = settings['voice']
+        if load_role(settings['role']['role_dir'])['id'] != role_id:
+            raise ValueError('active role changed')
+        if not voice['enabled'] or type(voice['input_device']) is not int:
+            raise PermissionError('enable voice and choose a microphone in capability settings')
+        if not self.capability_database:
+            raise PermissionError('speech capabilities not configured')
+        store = CapabilityStore(self.capability_database)
+        try:
+            microphone, asr = store.resolve('microphone'), store.resolve('asr')
+            if (microphone['provider'] != 'sounddevice' or microphone['options'].get('user_authorized') is not True
+                    or asr['provider'] != 'vosk'):
+                raise PermissionError('microphone authorization and local recognition must be enabled')
+        finally:
+            store.close()
+        interpreter = env_python()
+        model = Path(voice['asr_model'])
+        if not model.is_absolute():
+            model = self.workbench.root/model
+        if not interpreter or not model.is_dir():
+            raise ValueError('local speech runtime or recognition model unavailable')
+        return dict(python=interpreter, root=str(self.workbench.root), device=voice['input_device'],
+                    sample_rate=voice['sample_rate'], model=str(model.resolve()),
+                    capabilities=str(self.capability_database.resolve()), microphone=microphone, asr=asr)
 
     def capability_bootstrap(self):
         """Register the capabilities this machine can serve.
@@ -89,7 +160,7 @@ class Bridge:
             return {"seeded": False}
         store = CapabilityStore(str(self.capability_database))
         try:
-            known = {item["id"] for item in store.list()}
+            known = {item["id"] for item in store.list()} | store.removed()
             added = []
             for entry in entries:
                 if entry["id"] in known:
@@ -124,7 +195,10 @@ class Bridge:
         return {"source": source, "text": text}
 
     def save_settings(self, payload):
+        before = load_settings(self.settings_path)
         saved = save_settings(payload, self.settings_path)
+        if before['voice'] != payload['voice'] or before['role']['role_dir'] != payload['role']['role_dir']:
+            self.stop_speech()
         return {"saved": str(saved), "language_policy_preview": self._policy_preview(payload),
                 "startup": self.apply_startup(payload)}
 
@@ -193,6 +267,8 @@ class Bridge:
                 raise ValueError("unknown capability")
             item = current[capability_id]
             store.configure(capability_id, item["provider"], enabled=enabled, options=item["options"])
+            if capability_id in ('voice', 'asr', 'microphone'):
+                self.stop_speech()
             return {"id": capability_id, "enabled": enabled, "provider": item["provider"]}
         finally:
             store.close()
@@ -205,12 +281,21 @@ class Bridge:
         # Built-in roles ship with the client; imported ones stay in the runtime
         # store. A user role with the same id as a built-in wins, which is what an
         # explicit import means.
-        return {item["id"]: item["path"] for item in
+        paths={item["id"]: item["path"] for item in
                 list_roles(BUILTIN_ROLES, user_role_store())}
+        for moved in self.conversations.relocated_locations(settings['role']['user_id'],settings['role']['project_id']):
+            selected=load_role(moved)
+            if selected['verified']['status']=='ok':paths[selected['id']]=moved
+        return paths
 
     def _role_kinds(self):
-        return {item["id"]: item["kind"] for item in
-                list_roles(BUILTIN_ROLES, user_role_store())}
+        kinds={item["id"]: item["kind"] for item in list_roles(BUILTIN_ROLES, user_role_store())}
+        settings=self.settings()
+        if settings.get('configured'):
+            for moved in self.conversations.relocated_locations(settings['role']['user_id'],settings['role']['project_id']):
+                selected=load_role(moved)
+                if selected['verified']['status']=='ok':kinds[selected['id']]='user'
+        return kinds
 
     def roles(self):
         result = []
@@ -309,6 +394,8 @@ class Bridge:
         if role_id not in paths:
             raise ValueError("unknown role")
         settings = load_settings(self.settings_path)
+        if settings['role']['role_dir'] != paths[role_id]:
+            self.stop_speech()
         settings["role"]["role_dir"] = paths[role_id]
         saved = save_settings(settings, self.settings_path)
         return {"selected": role_id, "role_dir": settings["role"]["role_dir"], "saved": str(saved)}
@@ -347,16 +434,46 @@ class Bridge:
             memory={"provider": settings["role"]["memory_provider"]},
             modules=self.modules()))
 
-    def chat(self, message, session_id="ui-role-chat"):
-        settings = load_settings(self.settings_path)
-        chat = self._role_chat(settings)
-        result = chat.reply(message, session_id=session_id)
-        self._record_turn(session_id, message, result)
+    def chat(self, message, session_id="ui-role-chat", role_id=None):
+        with self._chat_lock:
+            if self._closing or self._shutdown_requested.is_set():
+                raise ValueError('bridge is shutting down; message was not sent')
+            settings = load_settings(self.settings_path)
+            if role_id is not None and load_role(settings['role']['role_dir'])['id'] != role_id:
+                raise ValueError('active role changed; message was not sent')
+            scope = self._chat_scope(settings)
+            chat = self._role_chat(settings)
+            chat.histories[session_id] = self.conversations.context(scope, session_id, chat.history_limit)
+            turn_id = self.conversations.begin(scope, session_id, message)
+            result = chat.reply(message, session_id=session_id, task_intent=True, source_message_id=turn_id + ':user')
+            self.conversations.complete(turn_id, result)
+            result['source_message_id'] = turn_id + ':user'
         if "usage" not in result:
             return result
         return {key: value for key, value in result.items() if key != "usage"} | {
             "usage": result.get("usage", {}),
             "usage_status": result.get("usage_status", "unknown")}
+
+    def stop_speech(self, *, closing=False):
+        failures = []
+        for service in (self.speech, self.playback):
+            try:
+                service.close() if closing else service.cancel_active()
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                failures.append(error)
+        if failures:
+            raise WorkbenchError('speech stop outcome unknown; operation not confirmed') from failures[0]
+
+    def shutdown(self):
+        # Fence new admissions before waiting for the current writer. A failed
+        # stop remains fenced: only reads and explicit shutdown retry are safe.
+        self._shutdown_requested.set()
+        self.stop_speech(closing=True)
+        with self._chat_lock:
+            if self._closing:
+                return
+            self.workbench.stop()
+            self._closing = True
 
     def _role_chat(self, settings):
         """One live RoleChat per settings revision.
@@ -374,21 +491,14 @@ class Bridge:
             self._role_chat_revision = revision
         return self._role_chat_cache
 
-    def _record_turn(self, session_id, message, result):
-        """Keep the visible transcript for this session; never invent entries."""
-        record = getattr(self, "_transcripts", None)
-        if record is None:
-            record = self._transcripts = {}
-        turns = record.setdefault(session_id, [])
-        stamp = datetime.now(timezone.utc).isoformat()
-        turns.append({"who": "me", "text": message, "at": stamp})
-        reply = result.get("text") if isinstance(result, dict) else None
-        if isinstance(reply, str) and reply.strip():
-            turns.append({"who": "role", "text": reply, "at": stamp})
-        del turns[:-60]
+    def _chat_scope(self, settings):
+        from extensions.roles.relocation import require_settled
+        require_settled(self.settings_path)
+        role = settings['role']
+        return self.conversations.scope_for(role['user_id'], str(Path(role['role_dir']).resolve()), role['project_id'])
 
     def transcript(self, session_id):
-        return list((getattr(self, "_transcripts", None) or {}).get(session_id, []))
+        return self.conversations.messages(self._chat_scope(load_settings(self.settings_path)), session_id)
 
     # ---- long-term memory ------------------------------------------------------
     def _with_session(self, handler):
@@ -429,21 +539,23 @@ def _handler(bridge):
             pass
 
         def _cors(self):
-            """Allow reads from other loopback pages only.
-
-            DSH renders the workbench on its own port, so its panels need to call
-            this bridge. Echoing the origin only for http://127.0.0.1[:port] and
-            http://localhost[:port] keeps every non-local site blocked while the
-            bridge stays loopback-only.
-            """
+            """Only the bridge origin may read private data and request tokens."""
             origin = self.headers.get("Origin")
             if not origin:
                 return
-            if re.fullmatch(r"http://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?", origin):
+            if origin in bridge.management.allowed_origins(self):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sumika-CSRF")
+
+        def _authorize(self, write=False):
+            try:
+                bridge.management.authorize(self, write=write)
+                return True
+            except PermissionError as error:
+                self._json(403, {'error': str(error)})
+                return False
 
         def _json(self, status, payload):
             body = json.dumps(payload, ensure_ascii=False).encode("utf8")
@@ -470,6 +582,7 @@ def _handler(bridge):
                 return self._json(404, {"error": "not found"})
             body = target.read_bytes()
             self.send_response(200)
+            self._cors()
             self.send_header("Content-Type", CONTENT_TYPES.get(target.suffix, "application/octet-stream"))
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -492,7 +605,17 @@ def _handler(bridge):
 
         def do_GET(self):
             path = urlparse(self.path).path
+            if not self._authorize():
+                return
+            if path.startswith('/api/manage/'):
+                return self._manage('GET')
             try:
+                if path == "/api/instance":
+                    from sumika_next.runtime_ownership import process_identity
+                    return self._json(200, {"kind": "sumika-ui-bridge", "pid": os.getpid(),
+                        "creation": process_identity(os.getpid()),
+                        "root": str(UI_ROOT.parent.resolve()),
+                        "settings": str(bridge.settings_path.resolve())})
                 if path == "/api/state":
                     return self._json(200, bridge.state())
                 if path == "/api/settings/role-model":
@@ -517,6 +640,12 @@ def _handler(bridge):
                         Path(__file__).resolve().parents[1])})
                 if path == "/api/voice/devices":
                     return self._json(200, bridge.voice_devices())
+                if path == '/api/voice/input':
+                    identifier = (parse_qs(urlparse(self.path).query).get('id') or [''])[0]
+                    return self._json(200, bridge.speech.status(identifier))
+                if path == '/api/voice/output':
+                    identifier = (parse_qs(urlparse(self.path).query).get('id') or [''])[0]
+                    return self._json(200, bridge.playback.status(identifier))
                 if path == "/api/startup":
                     return self._json(200, bridge.startup_state())
                 if path == "/api/tree":
@@ -528,6 +657,14 @@ def _handler(bridge):
                     session = (query.get("session") or ["ui-role-chat"])[0]
                     if not isinstance(session, str) or not session.strip():
                         raise ValueError("invalid session")
+                    settings=load_settings(bridge.settings_path)
+                    role_id=(query.get('role_id') or [None])[0]
+                    if role_id and load_role(settings['role']['role_dir'])['id'] != role_id:
+                        raise ValueError('active role changed')
+                    if 'limit' in query:
+                        before=(query.get('before') or [None])[0]
+                        return self._json(200, {'session':session, 'supports_clear':True, **bridge.conversations.page(
+                            bridge._chat_scope(settings),session,int(before) if before else None,int(query['limit'][0]))})
                     return self._json(200, {"session": session,
                                             "messages": bridge.transcript(session)})
                 if path.startswith("/api/roles/"):
@@ -543,14 +680,30 @@ def _handler(bridge):
             return self._static(path)
 
         def do_PUT(self):
+            if not self._authorize(write=True):
+                return
+            if bridge._closing or bridge._shutdown_requested.is_set():
+                return self._json(503, {'error': 'bridge is shutting down; request was not applied'})
+            with bridge._chat_lock:
+                if not self._authorize(write=True):
+                    return
+                if bridge._closing or bridge._shutdown_requested.is_set():
+                    return self._json(503, {'error': 'bridge is shutting down; request was not applied'})
+                return self._put()
+
+        def _put(self):
             if urlparse(self.path).path != "/api/settings/role-model":
                 return self._json(404, {"error": "unknown endpoint"})
             try:
                 return self._json(200, bridge.save_settings(self._body()))
+            except WorkbenchError as error:
+                return self._json(502, {'status':'unknown', 'error':str(error)})
             except (ValueError, OSError, KeyError) as error:
                 return self._json(400, {"error": str(error)})
 
         def do_OPTIONS(self):
+            if not self._authorize():
+                return
             """CORS preflight for JSON POSTs from the workbench page."""
             self.send_response(204)
             self._cors()
@@ -558,7 +711,67 @@ def _handler(bridge):
             self.end_headers()
 
         def do_POST(self):
+            if not self._authorize(write=True):
+                return
+            # Shutdown must announce its fence before acquiring the writer lock.
+            # Keep this authenticated route available for an explicit stop retry.
+            if urlparse(self.path).path == '/api/lifecycle/shutdown':
+                return self._post()
+            if bridge._closing or bridge._shutdown_requested.is_set():
+                return self._json(503, {'error': 'bridge is shutting down; request was not applied'})
+            # Share admission with chat persistence and shutdown. A queued write
+            # must recheck closing after obtaining the lock, not before it.
+            with bridge._chat_lock:
+                if not self._authorize(write=True):
+                    return
+                if bridge._closing or bridge._shutdown_requested.is_set():
+                    return self._json(503, {'error': 'bridge is shutting down; request was not applied'})
+                return self._post()
+
+        def _post(self):
             route = urlparse(self.path).path
+            if route not in ('/api/manage/role-relocation/resume','/api/manage/role-relocation/rollback','/api/lifecycle/shutdown'):
+                from extensions.roles.relocation import require_settled
+                try: require_settled(bridge.settings_path)
+                except ValueError as error: return self._json(409, {'error':str(error)})
+            if route in ('/api/voice/input/start', '/api/voice/input/cancel',
+                         '/api/voice/output/start', '/api/voice/output/cancel'):
+                try:
+                    payload = self._body()
+                    service = bridge.playback if '/output/' in route else bridge.speech
+                    if route.endswith('/cancel'):
+                        result = service.cancel(payload.get('id'))
+                    else:
+                        extra = {'text': payload.get('text')} if service is bridge.playback else {}
+                        result = service.start(payload.get('role_id'), approved=payload.get('approved'), **extra)
+                    return self._json(200, result)
+                except PermissionError as error:
+                    return self._json(403, {'error': str(error)})
+                except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/role/chat/clear':
+                try:
+                    payload=self._body()
+                    settings=load_settings(bridge.settings_path)
+                    role_id=load_role(settings['role']['role_dir'])['id']
+                    if payload.get('role_id') != role_id or payload.get('session') != 'room-'+role_id:
+                        raise ValueError('current role and room session required')
+                    count=bridge.conversations.clear(bridge._chat_scope(settings),payload['session'])
+                    cached=getattr(bridge,'_role_chat_cache',None)
+                    if cached: cached.histories.pop(payload['session'],None)
+                    return self._json(200, {'cleared':True,'turns':count})
+                except (ValueError,OSError,KeyError) as error:
+                    return self._json(400, {'error':str(error)})
+            if route == '/api/lifecycle/shutdown':
+                try:
+                    bridge.shutdown()
+                except WorkbenchError as error:
+                    return self._json(502, {'status':'unknown', 'message':str(error)})
+                self._json(200, {'stopping':True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+            if route.startswith('/api/manage/'):
+                return self._manage('POST')
             if route in ("/api/workbench/start", "/api/workbench/stop"):
                 try:
                     if route.endswith("/stop"):
@@ -596,6 +809,8 @@ def _handler(bridge):
                 try:
                     payload = self._body()
                     return self._json(200, bridge.select_role(payload.get("id")))
+                except WorkbenchError as error:
+                    return self._json(502, {'status':'unknown', 'error':str(error)})
                 except (ValueError, OSError, KeyError) as error:
                     return self._json(400, {"error": str(error)})
             if route == "/api/roles/import":
@@ -627,6 +842,8 @@ def _handler(bridge):
                 try:
                     payload = self._body()
                     return self._json(200, bridge.toggle_module(payload.get("id"), payload.get("enabled")))
+                except WorkbenchError as error:
+                    return self._json(502, {'status':'unknown', 'error':str(error)})
                 except (ValueError, OSError, KeyError) as error:
                     return self._json(400, {"error": str(error)})
             if route != "/api/role/chat":
@@ -639,12 +856,28 @@ def _handler(bridge):
                 session_id = payload.get("session") or "ui-role-chat"
                 if not isinstance(session_id, str) or not session_id.strip():
                     raise ValueError("invalid session")
-                return self._json(200, bridge.chat(message, session_id=session_id))
+                return self._json(200, bridge.chat(message, session_id=session_id, role_id=payload.get('role_id')))
             except (CloudError, OllamaError) as error:
                 return self._json(502, {"status": "unknown", "kind": getattr(error, "kind", "unknown"),
                                         "message": str(error), "fallback_used": False})
             except (ValueError, OSError, KeyError) as error:
                 return self._json(400, {"error": str(error)})
+
+        def _manage(self, method):
+            try:
+                bridge.management.authorize(self, write=method != 'GET')
+                if method == 'GET' and urlparse(self.path).path == '/api/manage/session':
+                    return self._json(200, {'csrf': bridge.management.client_token(self)})
+                payload = self._body() if method != 'GET' else None
+                return self._json(200, bridge.management.dispatch(method, self.path, payload))
+            except PermissionError as error:
+                return self._json(403, {'error': str(error)})
+            except Conflict as error:
+                return self._json(409, {'error': str(error)})
+            except WorkbenchError as error:
+                return self._json(502, {'status':'unknown', 'error':str(error)})
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                return self._json(400, {'error': str(error)})
 
     return Handler
 
@@ -653,10 +886,36 @@ def serve(settings_path=None, *, host="127.0.0.1", port=8765, capability_databas
           workbench_root=None, schedule_directory=None):
     if host != "127.0.0.1":
         raise ValueError("UI bridge must bind loopback")
-    bridge = Bridge(settings_path, capability_database=capability_database,
-                    workbench_root=workbench_root, schedule_directory=schedule_directory)
-    httpd = ThreadingHTTPServer((host, port), _handler(bridge))
-    return httpd
+    from ui.data_lease import DataLease
+    lease = DataLease((Path(settings_path) if settings_path else default_path()).parent).acquire()
+
+    class OwnedServer(ThreadingHTTPServer):
+        def server_close(self):
+            # Do not release the personal-data lease while admitted writes or an
+            # owned workbench remain active. Failed stop retains ownership.
+            if hasattr(self, 'sumika_bridge'):
+                self.sumika_bridge.shutdown()
+            try:
+                super().server_close()
+            finally:
+                lease.release()
+
+    try:
+        restore_state = lease.directory/'role-restore-state.json'
+        if restore_state.exists():
+            state = json.loads(restore_state.read_text(encoding='utf8'))
+            if (not isinstance(state, dict) or state.get('schema_version') != 1
+                    or state.get('status') != 'complete'
+                    or state.get('destination') != str(lease.directory)):
+                raise ValueError('personal data recovery is incomplete; explicitly resume before startup')
+        bridge = Bridge(settings_path, capability_database=capability_database,
+                        workbench_root=workbench_root, schedule_directory=schedule_directory)
+        httpd = OwnedServer((host, port), _handler(bridge))
+        httpd.sumika_bridge = bridge
+        return httpd
+    except BaseException:
+        lease.release()
+        raise
 
 
 def main():

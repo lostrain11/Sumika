@@ -1,0 +1,38 @@
+{
+  "status": "candidate_recipe_sources_required_build_identity_unproved",
+  "boundary": "Candidate pinned MXE recipe evidence, not proof of original release container or complete runtime source obligations.",
+  "archives": [
+    {
+      "component": "rust",
+      "version": "nightly",
+      "sha256": "89e9769b66c61eca90b885c852fbe34e952081c0e3332a7921eabfc7990d2afe",
+      "recipe_path": "mxe-d973945bb92c7783d5afa41bb2b8d2e1a04eaba3/plugins/llvm-mingw/rust.mk",
+      "recipe_sha256": "c23742a786b5ccfd6cfc61f99b59ee32cd78ffce49facf0fe768b607e47c2eb5",
+      "url": "https://static.rust-lang.org/dist/2026-06-05/rustc-nightly-src.tar.xz"
+    },
+    {
+      "component": "llvm",
+      "version": "22.1.7",
+      "sha256": "5cc4a3f12bba50b6bdfb4b61bdc852117a0ff2517807c3902fc13267fb93562e",
+      "recipe_path": "mxe-d973945bb92c7783d5afa41bb2b8d2e1a04eaba3/src/llvm.mk",
+      "recipe_sha256": "44fb0abb3a4baf7027af3f91fc92cf962f602d38f2d66f5e6a7615eb856ed7e3",
+      "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/llvm-project-22.1.7.src.tar.xz"
+    },
+    {
+      "component": "mingw-w64",
+      "version": "14.0.0",
+      "sha256": "6eaf921d9eb987d3820b364ea9775bc19b965ec81490b6fdd716526c28e1995c",
+      "recipe_path": "mxe-d973945bb92c7783d5afa41bb2b8d2e1a04eaba3/src/mingw-w64.mk",
+      "recipe_sha256": "3784fec422ff880b6c97d594d208db70dc2519999bbe5bb3b5652cb2843d0a6c",
+      "url": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2"
+    },
+    {
+      "component": "llvm-mingw",
+      "version": "20260602",
+      "sha256": "ac037f1ccb45bbff9ae202baa6840ebb6e178b56e2ea72d501486288548d92e9",
+      "recipe_path": "mxe-d973945bb92c7783d5afa41bb2b8d2e1a04eaba3/plugins/llvm-mingw/llvm-mingw.mk",
+      "recipe_sha256": "8b692c1b3d118644eb4cea506ab0f8035e52649eba575ed35e404ffd7da40a5f",
+      "url": "https://github.com/mstorsjo/llvm-mingw/archive/20260602.tar.gz"
+    }
+  ]
+}

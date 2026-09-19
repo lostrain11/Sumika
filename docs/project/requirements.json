@@ -1209,6 +1209,76 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "2f0f5ceff4f3d4639eed241ea2ef21c1092eaeddc54ea91acaa1a62a5968476d"
+    },
+    {
+      "id": "R-115",
+      "sequence": 115,
+      "original": "先完善定时任务。另外问问，实时挂载Sumika，翻译游戏内UI和文本的功能你打算怎么实现？别人是如何实现的，可否参考？我想做一个玩能实时翻译不自带简中的游戏的功能，应该能支持简单游戏的游戏内文本替换，和复杂游戏的原文本下翻译显示",
+      "source": "visible-conversation: user message; locator=先完善定时任务。另外问问",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "5fa3b0eeb8bb5f6d3e84092e94e70f8e5daa49aeb1fe97f91ad2c8878cdae744"
+    },
+    {
+      "id": "R-116",
+      "sequence": 116,
+      "original": "加入长期计划，先不做",
+      "source": "visible-conversation: user reply to 游戏实时中文翻译方案",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "2cdf1ba68dce9fd2c7964dbc52f872ecd2b97d6418e99ad7c8cf407db2c76c49"
+    },
+    {
+      "id": "R-117",
+      "sequence": 117,
+      "original": "设置—语音与设备 中的内容是不是可以移到能力页中的对应能力模块中详细设置，设置—数据与存储 中的长期记忆相关也是。\n然后能力页的这俩感觉能合成一个卡片？麦克风采集应该作为这个功能卡片模块的单独授权，在详情页选择是否开启授权。\n另外，设置中一些选项，例如图三中这些，可以适量加些使用说明，我不知道他们有什么用（可以改成悬停在选项上面时浮现提示文本？）",
+      "source": "visible-conversation: user message with voice/memory/settings screenshots",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "34c6bf49aaf64156c36764ed2c21db1c9408c715539beae87ad353fde91a0a0e"
+    },
+    {
+      "id": "R-118",
+      "sequence": 118,
+      "original": "这个可以加入需求文档中，后面我可能还会让其他擅长前端的模型重构优化界面，这些需求可以给他看",
+      "source": "visible-conversation: user instruction to preserve UI requirements for future frontend reconstruction",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "0ebe0db672684d6abd78dc6f9e8ec42b8192d94a0afd04c8ee47e690365381e8"
+    },
+    {
+      "id": "R-119",
+      "sequence": 119,
+      "original": "不是必须遵守的，是设计参考，有更合适的想法也可以不遵守",
+      "source": "visible-conversation: clarification of UI design reference",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "1ac46916f8a7aba464752a3c0b96036c9b4239d54283ffacc8a98f10f0c1e2f4"
+    },
+    {
+      "id": "R-120",
+      "sequence": 120,
+      "original": "弄个本地端侧模型来负责一些简单任务吧，例如提示词优化；角色聊天是否涉及具体项目，是否需要转到工作台等。然后在设置页弄个列表，统一扫描和管理所有本地模型，模型一般比较大，所以可以不要求模型存放在Sumika路径下？你看这一块逻辑怎么弄合理？",
+      "source": "visible-conversation: local helper model and shared model library",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "9f56df9a49e6cd88e5edb59825b39a79cac46c1815d3c35f38808ea464ab6121"
+    },
+    {
+      "id": "R-121",
+      "sequence": 121,
+      "original": "是不是应该在设置—模型与连接里统一管理，工作模型/角色模型/辅助模型做三个子分栏，三者都可以选择云端模型或者本地模型。然后他们的下面再弄本地模型管理分栏，本地模型可以手动选择自动扫描的本地文件夹？指定路径扫出来的本地模型列在下面。这些扫出来的模型可以在工作/角色/辅助模型中选用。\n这是我的想法，你有更好的也可以提出，不按这个来。\n然后帮我把所有本地模型都统一移到一个路径下",
+      "source": "visible-conversation: local helper model and shared model library",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "120727fd93d36d62712813865e5b3cfd9461831736a0ce2784edca284fca5df3"
     }
   ]
 }

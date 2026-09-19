@@ -1,0 +1,23 @@
+{
+  "component": "BrowserSkill",
+  "version": "0.1.11",
+  "protocol": "1.1",
+  "verified": [
+    "status",
+    "session_start",
+    "session_list",
+    "agent_tab_list",
+    "session_stop",
+    "real DeepSeek observe"
+  ],
+  "session_id": "kfmc",
+  "tab_scope": "agent",
+  "result": "pass",
+  "limitations": [
+    "No message submitted",
+    "Kimi and GPT read/send flows not yet exercised"
+  ],
+  "timestamp": "2026-09-11",
+  "site": "chat.deepseek.com",
+  "observation_status": "pass"
+}

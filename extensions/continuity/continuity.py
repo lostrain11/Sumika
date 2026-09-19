@@ -273,6 +273,14 @@ def main():
             args.root, {'action': 'recover'} if args.action == 'recover' else json.load(sys.stdin))
         print(dumps(result))
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+        if args.action == 'request' and isinstance(error, (OSError, sqlite3.Error)):
+            # The DSH bridge must preserve an unknown write outcome without
+            # retrying or exposing paths/exception text to the model session.
+            print(dumps({'status': 'unknown', 'source': 'continuity.ingest',
+                         'provenance': 'observed_write_failure',
+                         'error_kind': type(error).__name__,
+                         'error_code': 'continuity-write-failed', 'retry': False}))
+            return 0
         print('continuity: '+str(error), file=sys.stderr)
         return 1
     return 0

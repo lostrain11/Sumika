@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "principles": ["DSH owns sessions and agent execution", "extensions expose independent status and switches", "UI never invents completion"],
+  "panels": {
+    "workbench": ["session", "workspace", "task_state", "approval", "transcript"],
+    "character": ["active_role", "role_context_enabled", "memory_provider", "voice_state"],
+    "modules": ["extension_id", "enabled", "provider", "health", "last_error"],
+    "settings": ["harness", "browser_sites", "feature_switches", "paths"]
+  },
+  "states": ["unknown", "pending", "running", "completed", "failed", "cancelled"],
+  "prohibited": ["UI-only success state", "implicit paid fallback", "sending user content without approval"]
+}

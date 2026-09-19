@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "provider": "rapidocr-json",
+  "fixture": "generated English text and digits",
+  "screen_capture": false,
+  "text": "Sumika OcR test 123"
+}

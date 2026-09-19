@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-15T00:19:58.601833+00:00",
+  "bridge": "ui/server.py (loopback 127.0.0.1 only)",
+  "page": "ui/app/",
+  "endpoints": [
+    "GET /api/state",
+    "GET /api/settings/role-model",
+    "PUT /api/settings/role-model",
+    "GET /api/modules",
+    "POST /api/role/chat"
+  ],
+  "static_checks": {
+    "app_index": 200,
+    "app_css": 200,
+    "app_js": 200,
+    "prototype_room_asset": 200
+  },
+  "state_projection": {
+    "session_status": "pending",
+    "role_model": "deepseek-flash",
+    "language_policy_source": "card",
+    "modules": 0
+  },
+  "chat_smoke": [
+    {
+      "turn": 1,
+      "provider": "openai-compatible",
+      "usage_status": "reported",
+      "usage": {
+        "prompt_tokens": 2006,
+        "completion_tokens": 311,
+        "total_tokens": 2317
+      },
+      "role_tools": 0,
+      "language_policy_source": "card",
+      "kana_before_honorific_rule": 0.0165
+    },
+    {
+      "turn": 2,
+      "provider": "openai-compatible",
+      "usage_status": "reported",
+      "usage": {
+        "prompt_tokens": 2253,
+        "completion_tokens": 450,
+        "total_tokens": 2703
+      },
+      "role_tools": 0,
+      "name_mappings_applied": [
+        "桃香さん"
+      ],
+      "kana_ratio": 0.0
+    }
+  ],
+  "fixes": [
+    "display-layer honorific strip added after the first smoke revealed 小林さん / 露帕さん residues"
+  ],
+  "limitations": [
+    "No automated browser test yet; pages verified by HTTP status and API wiring",
+    "Bridge requires the provider key in its own process environment",
+    "Workbench, 能力, 角色 pages are read-only placeholders until DSH wiring is added"
+  ],
+  "key_recorded": false,
+  "roles_and_modules_slice": {
+    "endpoints_added": [
+      "GET /api/roles",
+      "GET /api/roles/<id>/asset/<kind>",
+      "POST /api/capabilities/toggle"
+    ],
+    "role_listing": {
+      "sampleA": {
+        "verified": "ok",
+        "has_model_3d": true,
+        "has_thumbnail": true
+      },
+      "sumika-guide": {
+        "verified": "unknown",
+        "has_model_3d": false
+      },
+      "anhe-subaru": {
+        "verified": "ok",
+        "has_model_3d": false
+      },
+      "anhe-subaru-v13": {
+        "verified": "ok",
+        "has_model_3d": false
+      }
+    },
+    "asset_serving": {
+      "path": "/api/roles/sampleA/asset/model_3d",
+      "status": 200,
+      "content_type": "model/gltf-binary",
+      "bytes": 15096320
+    },
+    "viewer": {
+      "path": "ui/vendor/sumika-vrm-viewer.js",
+      "bytes": 840435,
+      "sha256_prefix": "b3fa67be87edd1cf1da594519da0b45ae35ee01f7ad07",
+      "source": "D:\\Code\\Sumika-UI-Designs\\direction-d-hiyori\\vendor\\sumika-vrm-viewer.js",
+      "api": "mountVrmViewer(container, url, {naturalPose:true})"
+    },
+    "capability_toggle": {
+      "endpoint": "POST /api/capabilities/toggle",
+      "verified": "test toggles memory to disabled and the registry reflects it",
+      "unknown_id": "HTTP 400, registry unchanged"
+    },
+    "privacy": "role listing returns asset kind flags only; absolute filesystem paths are not exposed",
+    "not_yet_verified": [
+      "multi-role coexistence on one stage",
+      "workbench page bound to a managed DSH session"
+    ],
+    "render_verification": {
+      "method": "Playwright driving the machine's Edge in headless mode against the running bridge",
+      "page_state": {
+        "caption": "Sample A · 实机 VRM",
+        "vrm_render_status": "running",
+        "stage_px": [
+          740,
+          555
+        ],
+        "console_errors": []
+      },
+      "roster": [
+        "Sample A",
+        "Sumika 示例助手",
+        "安和昴（anhe-subaru）",
+        "安和昴（anhe-subaru-v13）"
+      ],
+      "screenshots": [
+        ".sumika-next/ui-stage-check.png",
+        ".sumika-next/ui-full-check.png"
+      ],
+      "fixes_after_first_look": [
+        "stage background replaced the prototype screenshot with a CSS room (wall, window, floor, desk, shelf)",
+        "stage given a fixed 4:3 aspect ratio so the VRM frames fully instead of being cropped",
+        "duplicate character names disambiguated with the role id",
+        "policy source shown as 角色卡声明/用户设置/内置默认 instead of the raw internal value",
+        "inline empty favicon removes the only 404 console error"
+      ],
+      "user_reported": "VRM rendered successfully in the user's own browser before this pass"
+    },
+    "workbench_slice": {
+      "endpoints": [
+        "GET /api/workbench",
+        "POST /api/workbench/start",
+        "POST /api/workbench/stop"
+      ],
+      "controller": "ui/workbench.py (owns exactly one child process, reports only what it owns)",
+      "real_run": {
+        "start": {
+          "http": 200,
+          "installed": true,
+          "version": "0.1.5-rc.2",
+          "running": true,
+          "url": "http://127.0.0.1:53895",
+          "pid": 7000
+        },
+        "native_web_without_cookie": {
+          "http": 401,
+          "note": "expected: the clean URL needs the authenticated browser cookie"
+        },
+        "stop": {
+          "stopped": true,
+          "pid": 7000
+        },
+        "after_stop": {
+          "running": false,
+          "url": null,
+          "port": "connection refused",
+          "orphan_dsh_processes": 0
+        }
+      },
+      "failure_paths": [
+        "missing runtime/dsh install -> WorkbenchError, no launch attempted",
+        "no URL reported within the deadline -> child stopped, unknown reported instead of success"
+      ],
+      "remaining": "The UI start button opens the native DSH web URL in a new tab; the launch now uses a fixed port (5175) so the tab survives restarts. A task timeline inside Sumika is still a later step."
+    },
+    "memory_slice": {
+      "endpoints": [
+        "GET /api/memory?q=&limit=",
+        "POST /api/memory/forget",
+        "POST /api/memory/reset"
+      ],
+      "backend": [
+        "EmbeddedMemory.list_relations added (scoped, newest first, bounded)",
+        "RoleSession operation relations_all",
+        "extensions.roles.chat.open_session shared by chat and the bridge so scope and provider resolution cannot drift"
+      ],
+      "page": "角色与长期记忆：提供方、关系条数、检索、逐条遗忘、按角色卡重置",
+      "verified": {
+        "unit": "search hits, relations listing, forget removes recall, reset clears relations, invalid id and limit rejected",
+        "live": "GET /api/memory returns provider embedded with empty results/relations on the real user database",
+        "render": "headless Edge on the 角色 page: facts/status/results/relations rendered, zero console errors",
+        "screenshot": ".sumika-next/ui-memory-page.png"
+      },
+      "boundaries": [
+        "the page does not invent memories; writes still come from the role session or capture path",
+        "reset requires an explicit confirmation in the page",
+        "memory scope stays user + role + project"
+      ]
+    },
+    "capability_and_provenance_slice": {
+      "module_catalogue": "GET /api/modules now returns label, purpose and options per registered capability; ids without a label entry are shown as-is and never described as available",
+      "bridges": [
+        "start_ui_bridge.ps1 passes --capabilities %LOCALAPPDATA%/Sumika/capabilities.db so the page reflects a real registry once one exists"
+      ],
+      "memory_provenance": [
+        "EmbeddedMemory.source_counts groups active memories by provenance for the current scope",
+        "RoleSession operation 'sources'; GET /api/memory now includes sources",
+        "memory page shows 写入来源 alongside provider and relation count"
+      ],
+      "verified": {
+        "unit": "catalogue labels, options rendering, source counts after write, source counts after reset (role_card)",
+        "live": "GET /api/modules returns an empty list with an empty registry; GET /api/memory returns provider embedded with sources []",
+        "render": "headless Edge: capability page shows 未配置能力注册表, memory page shows 记忆提供方 embedded / 关系条数 0 / 写入来源 暂无, zero console errors"
+      },
+      "honest_empty_states": "no registry and no memories are reported as empty rather than as available features"
+    },
+    "schedule_slice": {
+      "endpoints": [
+        "GET /api/schedule",
+        "POST /api/schedule/toggle",
+        "POST /api/schedule/remove",
+        "POST /api/schedule/acknowledge"
+      ],
+      "controller": "ui/schedule.py (definition store + local reminder inbox, no bridge bound)",
+      "page": "能力页新增定时任务面板：定义列表（kind/expression/timezone/mode/下次触发）、启用开关、删除、未读提醒与标记已读",
+      "blocked_semantics": "execute-mode definitions without a bound managed DSH bridge are reported in status.blocked instead of being submitted anywhere",
+      "verified": {
+        "unit": "next_due for daily Asia/Shanghai, toggle disables then re-enables, remove deletes, unknown id and non-boolean rejected, reminders durable across reopen and acknowledge clears unread",
+        "http": "bridge returns directory/definitions/reminders/status; toggle and remove round-trip; unknown id returns 400",
+        "render": "headless Edge on 能力页: 还没有定时任务定义 / 没有未读提醒 / 定义目录 <localappdata>\\Sumika\\schedules, zero console errors",
+        "screenshot": ".sumika-next/ui-modules-page.png"
+      },
+      "not_included": "creating definitions from the UI still uses the schedule CLI; the panel intentionally does not offer an unattended high-privilege action"
+    }
+  },
+  "readiness_slice": {
+    "endpoint": "GET /api/readiness",
+    "probe_module": "ui/readiness.py（只用 importlib.find_spec 与文件存在性检查；不 import 重型库、不打开设备、不启动进程）",
+    "isolated_envs": {
+      "desktop-env": [
+        "pyautogui",
+        "pywinauto",
+        "pywinctl",
+        "cv2",
+        "sounddevice",
+        "vosk"
+      ],
+      "office-env": [
+        "docx",
+        "openpyxl",
+        "pptx"
+      ],
+      "memory-env": [
+        "fastembed"
+      ]
+    },
+    "real_machine_result": {
+      "OCR / 截屏翻译": "未就绪：未安装 Tesseract 或 RapidOCR",
+      "语音": "就绪：隔离环境 desktop-env（sounddevice, vosk）+ voice-models 模型目录",
+      "网页咨询（内含浏览器）": "就绪：runtime/browserskill/bsk.exe",
+      "桌面控制": "就绪：Windows + 隔离环境 desktop-env（pyautogui, pywinauto, pywinctl）",
+      "办公文件": "就绪：隔离环境 office-env（docx, openpyxl, pptx）",
+      "摄像头感知": "就绪：隔离环境 desktop-env（cv2）",
+      "语义长期记忆": "就绪：隔离环境 memory-env（fastembed）",
+      "定时任务": "就绪：本地定义目录，随应用运行，不安装系统开机任务"
+    },
+    "correction": "首版探测只看桥接解释器，误报办公/桌面/语音未就绪；改为同时检查扩展隔离环境后与既有验收记录一致",
+    "render": "无头 Edge：8 项全部渲染、控制台零错误；截图 .sumika-next/ui-readiness.png"
+  },
+  "workbench_timeline": {
+    "source": "managed process stdout (real output only)",
+    "structure": "timeline entries with at/level/text; level error/system/info; blank lines skipped; capped at 200; cleared on restart",
+    "page": "workbench page renders the timeline with time and level, errors highlighted, and states that session history stays in the native UI",
+    "verified": {
+      "unit": "classification, timestamps, blank filtering, cap, restart clearing",
+      "live": "POST /api/workbench/start on fixed port 5175 returned 4 system entries (DSH Web / Profile / model hint / browser hint)"
+    },
+    "not_claimed": "DSH internal session history is not read: the profile has no plaintext session file, so no session API is faked"
+  }
+}

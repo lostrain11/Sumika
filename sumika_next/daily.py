@@ -2,11 +2,14 @@
 from pathlib import Path
 import json
 import uuid
+import subprocess
 
 from .authorization import Authority
 from .contracts import ToolRequest, WorkBinding, Workspace
 from .dsh import Dsh
 from .execution import Execution
+from .runtime_ownership import ProfileLease
+from .paths import data_override
 
 
 def default_home(root: Path):
@@ -14,7 +17,8 @@ def default_home(root: Path):
     version = release['version']
     if not isinstance(version, str) or not version or version in ('.', '..') or any(c not in '0123456789abcdefghijklmnopqrstuvwxyz.-' for c in version):
         raise ValueError('invalid release version for profile directory')
-    return root / '.sumika-next/daily' / version
+    personal = data_override()
+    return personal / 'dsh-profiles' / version if personal is not None else root / '.sumika-next/daily' / version
 
 
 def create_workspace_session(adapter, workspace: Path, database: Path):
@@ -38,12 +42,20 @@ def create_workspace_session(adapter, workspace: Path, database: Path):
         execution.close()
 
 
-def run(root: Path, home: Path, workspace: Path | None, browser: bool = True):
+def run(root: Path, home: Path, workspace: Path | None, browser: bool = True,
+        extensions_config: Path | None = None, port: int = 0):
     if workspace is not None:
         Workspace(workspace.resolve())  # Reject missing workspace before launch.
-    adapter = Dsh(root, home)
+    lease = ProfileLease(home).acquire()
+    adapter = None
+    host=None
     try:
-        adapter.start()
+        adapter = Dsh(root, home)
+        adapter.start(port=port)
+        lease.bind(adapter.process)
+        if extensions_config is not None:
+            from .extension_host import ExtensionHost
+            host=ExtensionHost(adapter,extensions_config)
         if workspace is not None:
             session_id = create_workspace_session(adapter, workspace, home / 'sumika-launch.sqlite3')
             print('Workspace session:', session_id, flush=True)
@@ -54,10 +66,27 @@ def run(root: Path, home: Path, workspace: Path | None, browser: bool = True):
             adapter.open_browser()
         else:
             print('Browser disabled; the clean URL requires an existing authenticated browser cookie.', flush=True)
-        adapter.process.wait()
+        if host is None:
+            adapter.process.wait()
+        else:
+            while adapter.process.poll() is None:
+                host.tick()
+                try:adapter.process.wait(timeout=.2)
+                except subprocess.TimeoutExpired:pass
         if adapter.process.returncode:
             raise RuntimeError(f'DSH exited with code {adapter.process.returncode}')
     except KeyboardInterrupt:
         print('Stopping managed DSH; resume from native session history next time.', flush=True)
     finally:
-        adapter.close()
+        try:
+            if host:host.close()
+        finally:
+            if adapter is None:
+                lease.release()
+            else:
+                # Keep the original handle: close() may clear adapter.process.
+                process = adapter.process
+                adapter.close()
+                if process is not None and process.poll() is None:
+                    raise RuntimeError('process exit not confirmed; profile remains fenced')
+                lease.release()

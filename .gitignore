@@ -19,3 +19,11 @@
 *.egg-info/
 /build/
 /.agents/skills/sumika-office/
+# Build outputs and separately supplied third-party runtime binaries.
+/packaging/bin/
+/packaging/obj/
+/runtime/browserskill/*.exe
+/runtime/browserskill/*.exe.update-*
+*.pyc
+.env
+.env.*

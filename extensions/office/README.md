@@ -57,3 +57,21 @@ python -X utf8 -B .agents/skills/sumika-office/scripts/run.py exec extensions/of
 ```
 
 每次文件验收使用不存在的新输出目录，避免覆盖之前结果。DSH 验收采用真实 Skill、原生终端和文件库，模型端点是本地确定性替身，不是自然语言任务质量评测。失败保留证据，不开启付费 fallback。
+## 视觉验收（2026-09-15）
+
+往返读写只能证明文件本身没坏，证明不了“用户看到的页面是对的”。为此增加了 `tools/verify_office_visual.py`：
+
+1. 用既有夹具生成/编辑 docx、xlsx、pptx；
+2. LibreOffice 转 PDF（`D:\Tools\LibreOffice\26.2.6\program\soffice.exe`）；
+3. **pypdfium2**（BSD/Apache，PDFium 内核，避免 AGPL 的 PyMuPDF）逐页光栅化为 PNG；
+4. RapidOCR 识别每页文字，校验预期关键词是否真的出现在版面上，并统计每页墨迹比例以发现空白页。
+
+实测结果（`docs/project/office-visual-evidence.json`）：docx 1 页、xlsx 1 页、pptx 2 页，全部命中预期文字，无空白页；`office-render-evidence.json` 的 `visual_layout_review` 由 `not_run` 改为 `ran_via_ocr`。
+
+一个实测发现：**工作表名不会打印在页面上**，所以 xlsx 的视觉校验只断言页面可见文字（项目、完成量、合并单元格内容），不断言 sheet 名。
+
+新增依赖 `pypdfium2==5.13.0` 已写入 `requirements.lock`（含 wheel 哈希）。运行方式（需用隔离环境解释器）：
+
+```powershell
+& .sumika-next\office-env\Scripts\python.exe -B tools/verify_office_visual.py --soffice <soffice.exe 路径>
+```

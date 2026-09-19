@@ -46,3 +46,23 @@
 ## 更新与回退
 
 每次更新在独立候选安装/profile 中锁定版本和依赖，检查协议及插件组合，执行冻结安装和完整门槛；失败保留当前已验收组合。协议方法名集中于 DSH 适配层。回退同时恢复发行 Git 提交和对应 profile 备份，不将新格式数据原地交给旧版；步骤见 `runtime/dsh/README.md`。
+
+## Actual Sumika shell approval integration
+
+`python -B tools/verify_native_approval_ui.py --sumika-shell` starts isolated Bridge plus managed DSH and the delivered skin. The actual embedded approval buttons passed reject, allow-once and cancellation with correlated native events and local sentinel execution only. Room/board switching preserved frame identity in every case; cancelled approval did not return after reload. Evidence: `.sumika-next/native-approval-ui-f1431b1ed8f740148f9de40de7adb1d8/report.json`. Zero external messages; owned processes stopped.
+
+Prior fixture failures retained: first-run declaration overlaid the visible session tree; blocking event consumption during browser work was replaced by a reader thread, which must finish before closing its generator. This acceptance does not cover attachment/trace/usage interactions or external providers. Daily profile/package unchanged.
+
+## Workbench draft, attachment and native details integration
+
+Reused the isolated shell approval verifier and installed native components; no product UI or upstream edits. Evidence: `.sumika-next/native-approval-ui-9ee55f3a36024bfe8562ad557fea08f0/report.json`. Drafts survive room/board and native session switching without cross-session leakage. A TXT attachment reaches uploaded state and survives the same switches. Both turn and session usage open; native tool summary expands and trajectory parameters/results show the expected local sentinel, then close. Approval reject/cancel/allow-once remain passing and owned processes stop.
+
+This proves attachment staging only, not submission to a model. Project switching, draft reload/restart, multimodal provider behavior, broader coding quality and clean-machine acceptance remain separate. The daily service was unchanged. Two failed fixture iterations confused turn versus session usage and matched the time button containing tok/s; selectors now distinguish them, and failed artifacts are retained.
+
+## Attachment submission, project isolation and restart
+
+Evidence: `.sumika-next/native-approval-ui-e64edff768704a41be2d53f743a4327d/report.json`, command `python -B tools/verify_native_approval_ui.py --sumika-shell`. Browser project switching preserves isolated text drafts. Same-origin reload restores text; **unsent attachments do not survive refresh** (native runtime-only draft/receipt state), so this is a known limitation, not a passed persistence requirement. Sent attachments survive browser refresh and a managed DSH restart.
+
+A single browser submission produced a readonly file handle, one native read, and a model continuation containing exact UTF-8 Chinese fixture content. Both stored copies match all 57 bytes and SHA256; the session reference matches. Restart restored the durable reference without model replay. All prior approval and interaction checks passed, and owned processes stopped. No external provider, daily data or upstream modifications.
+
+Fixture maintenance: non-current blank sessions are intentionally absent from native navigation; populate a local fixture turn before testing project switches. Never reset ModelFixture response index inside an existing session: doing so reused call-0 for different tools and produced a blank history after reload. Keeping unique tool IDs passed the same reload. Failed artifacts retained. This is deterministic protocol/tool acceptance, not real-model reasoning quality or image-provider acceptance.

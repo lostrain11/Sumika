@@ -132,7 +132,9 @@ def import_package(package, store):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with z.open(archive_name) as src, target.open('wb') as out: shutil.copyfileobj(src, out)
             (temp/'checksums.json').write_text(json.dumps({str(p): hashlib.sha256((temp/p).read_bytes()).hexdigest() for p, _ in members}, indent=2), encoding='utf-8')
-            temp.replace(destination)
+            # New role publication must not request Windows REPLACE_EXISTING.
+            # Target conflicts remain errors; never retry or merge directories.
+            temp.rename(destination)
         except Exception:
             shutil.rmtree(temp, ignore_errors=True); raise
     return destination
@@ -233,7 +235,10 @@ def import_card(card, store, role_id):
     if any(not isinstance(v,str) for v in fields):raise ValueError('invalid persona text')
     manifest=dict(schema_version=SCHEMA,id=role_id,name=name,persona='\n\n'.join(v for v in fields if v),worldbook=worldbook,assets={'card':'card/original-card.json'},source_format=value['spec'])
     validate_config({'schema_version':1,'work_model':'work','role_model':'role','roles':[manifest]})
-    with tempfile.TemporaryDirectory(prefix='sumika-card-') as d:
+    # Keep model/card staging beside the selected user store, not C: TEMP.
+    staging_parent=Path(store).resolve().parent
+    staging_parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='sumika-card-',dir=staging_parent) as d:
         package=Path(d)/'card.zip'
         with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED) as z:
             z.writestr('role.json',json.dumps(manifest,ensure_ascii=False,indent=2))

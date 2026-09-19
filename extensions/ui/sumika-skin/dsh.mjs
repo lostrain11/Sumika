@@ -217,45 +217,28 @@ html[data-sumika-skin='1'] [class*='_composerStack'] [class*='_tools'] {
   padding-top: 9px;
 }
 
-/* Rail toggle: upstream swaps the brand mark for its own panel glyph on hover
-   (.collapsed .toggle:hover .panelIcon{display:inline} plus a railMark hide), so
-   the Sumika mark would disappear exactly while the pointer is on it. Keep the
-   mark and suppress the swap; the button stays a plain icon button either way. */
-html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle']:hover [class*='_panelIcon'] {
-  display: none;
+/* The outer application frame is not a scrolling surface. Unlike hidden,
+   clip prevents scrollIntoView on a wide tool row from shifting the sidebar.
+   Conversation, code and terminal retain their own scroll containers. */
+html[data-sumika-skin='1'] [class$='_frame']:has([class$='_sidebarCol']) {
+  overflow: clip;
 }
-html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle']:hover [class*='_railMark'] {
-  display: inline-flex;
+/* Keep the native reject action readable in both native palette modes. */
+html[data-sumika-skin='1'] [data-approval-key] button[class*='_reject'] {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
 }
 
-/* The design's sidebar has no brand of its own - the wordmark lives in the
-   shell's top bar - so the identity button is hidden while the collapse toggle
-   beside it stays. In the collapsed rail the mark is shown again (railMark),
-   because there the toggle *is* the only affordance. */
-html[data-sumika-skin='1'] [class$='_brand'],
-html[data-sumika-skin='1'] [class*='_brand '] {
-  display: none;
-}
-/* With the identity gone that row would hold nothing but the collapse control,
-   and an empty 40–60px band above 新建任务 reads as a mistake. The row collapses
-   to zero and the control moves to the sidebar's foot, just above 设置, where a
-   rail toggle belongs. */
-html[data-sumika-skin='1'] [class*='_logoRow'] {
-  height: 0;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  overflow: visible;
-}
-/* While the column is open the control is hidden outright: the design's column
-   starts with 新建任务 and an empty band above it reads as a mistake. The rail
-   keeps the control, because there it is the only way back out. Collapsing from
-   the open state is offered by our own footer block instead. */
-html[data-sumika-skin='1'] [class*='_logoRow'] [class*='_toggle'] {
-  display: none;
-}
-html[data-sumika-skin='1'] [class*='_collapsed'] [class*='_toggle'] {
-  display: inline-flex;
+html[data-sumika-palette='dark'] {
+  --sumika-paper: var(--dsw-alias-bg-base);
+  --sumika-panel: var(--dsw-specific-sidebar-fill);
+  --sumika-ink: var(--dsw-alias-label-primary);
+  --sumika-muted: var(--dsw-alias-label-secondary);
+  --sumika-line: var(--dsw-alias-border-l1);
+  --sumika-hover: var(--dsw-alias-bg-layer-2);
+  --sumika-rose-soft: var(--dsw-alias-bg-layer-2);
+  --sumika-mizu-soft: var(--dsw-alias-bg-layer-1);
 }
 
 /* The New Session hero repeats the brand that the shell's top bar already shows,
@@ -276,6 +259,45 @@ const SKIN_SCRIPT = `(() => {
   const html = document.documentElement;
   if (html.dataset.sumikaSkin === '1') return;
   html.dataset.sumikaSkin = '1';
+  // Presentation-only vocabulary. Do not touch transcripts, drafts or data IDs.
+  const labels = new Map([
+    ['工作区','项目'], ['按工作区','按项目'], ['添加工作区','添加项目'],
+    ['添加工作区…','添加项目…'], ['正在加载工作区…','正在加载项目…'],
+    ['重命名工作区','重命名项目'], ['工作区名称','项目名称'],
+    ['删除工作区','删除项目'], ['正在删除工作区…','正在删除项目…']
+  ]);
+  function relabel() {
+    for (const button of document.querySelectorAll('button[aria-label="选择工作区"]')) {
+      button.setAttribute('aria-label','选择项目');
+    }
+    const roots = document.querySelectorAll('[class*="_sidebarCol"], [role="dialog"], [role="menu"], [role="listbox"]');
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement.closest('textarea,input,[contenteditable],pre,code')) continue;
+        if (node.textContent === '工作区' && !node.parentElement.closest('[class*="_sectionLabel"]')) continue;
+        const value = labels.get(node.textContent);
+        if (value) node.textContent = value;
+      }
+      for (const el of root.querySelectorAll('[aria-label],[title]')) {
+        for (const attr of ['aria-label','title']) {
+          const value = el.getAttribute(attr);
+          if (!value) continue;
+          const next = labels.get(value) || (value.startsWith('工作区“') && value.endsWith('”的操作')
+            ? '项目' + value.slice(3) : value);
+          if (next !== value) el.setAttribute(attr,next);
+        }
+      }
+    }
+  }
+  let queued=false;
+  const observer=new MutationObserver(()=>{
+    if(queued)return;
+    queued=true;queueMicrotask(()=>{queued=false;relabel();});
+  });
+  observer.observe(html,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-label','title']});
+  relabel();
 })();`;
 
 export function apply(ctx, config = {}) {

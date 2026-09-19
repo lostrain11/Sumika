@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-15T08:20:25.149614+00:00",
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv",
+  "renderer": "LibreOffice -> PDF -> pypdfium2 -> PNG -> RapidOCR",
+  "documents": [
+    {
+      "kind": "docx",
+      "pdf": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\docx\\edited.pdf",
+      "pages": [
+        {
+          "page": 1,
+          "png": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\docx\\page-1.png",
+          "ink_ratio": 0.00459,
+          "ocr_lines": 6,
+          "hits": [
+            "项目周报",
+            "任务",
+            "状态"
+          ],
+          "text_sample": "项目周报已完成：读取与写入任务状态写入完成"
+        }
+      ],
+      "expected": [
+        "项目周报",
+        "任务",
+        "状态"
+      ],
+      "missing": [],
+      "blank_pages": [],
+      "passed": true
+    },
+    {
+      "kind": "xlsx",
+      "pdf": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\xlsx\\edited.pdf",
+      "pages": [
+        {
+          "page": 1,
+          "png": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\xlsx\\page-1.png",
+          "ink_ratio": 0.00165,
+          "ocr_lines": 8,
+          "hits": [
+            "项目",
+            "完成量",
+            "保留合并单元格"
+          ],
+          "text_sample": "项目完成量保留合并单元格读取2写入57"
+        }
+      ],
+      "expected": [
+        "项目",
+        "完成量",
+        "保留合并单元格"
+      ],
+      "missing": [],
+      "blank_pages": [],
+      "passed": true
+    },
+    {
+      "kind": "pptx",
+      "pdf": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\pptx\\edited.pdf",
+      "pages": [
+        {
+          "page": 1,
+          "png": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\pptx\\page-1.png",
+          "ink_ratio": 0.00914,
+          "ocr_lines": 2,
+          "hits": [
+            "阶段进度",
+            "读取"
+          ],
+          "text_sample": "阶段进度读取与写入完成"
+        },
+        {
+          "page": 2,
+          "png": "D:\\Code\\Sumika\\.sumika-next\\office-visual-atfd2zjv\\pptx\\page-2.png",
+          "ink_ratio": 0.00694,
+          "ocr_lines": 1,
+          "hits": [
+            "保留页面"
+          ],
+          "text_sample": "保留页面"
+        }
+      ],
+      "expected": [
+        "阶段进度",
+        "读取",
+        "保留页面"
+      ],
+      "missing": [],
+      "blank_pages": [],
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "visual_layout_review": "ran_via_ocr"
+}

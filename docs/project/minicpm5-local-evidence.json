@@ -1,0 +1,16 @@
+{
+  "model": "openbmb/MiniCPM5-2B-GGUF",
+  "artifact": "MiniCPM5-2B-Q4_K_M.gguf",
+  "source": "https://www.modelscope.cn/models/OpenBMB/MiniCPM5-2B-GGUF",
+  "license": "Apache-2.0",
+  "size": 1561318368,
+  "sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd",
+  "runtime": "Ollama 0.34.0",
+  "local_model": "sumika-minicpm5-2b:latest",
+  "endpoint": "http://127.0.0.1:11434",
+  "benchmark": "D:/Models/Sumika/role-models/minicpm5-evaluation.json",
+  "status": "requests_verified_quality_partial",
+  "limitations": [
+    "See local-model-comparison-evidence.json for multi-turn tests and limitations; no default model selected."
+  ]
+}

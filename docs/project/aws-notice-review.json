@@ -1,0 +1,231 @@
+{
+  "status": "pinned_version_license_and_notice_scope_verified",
+  "packages": [
+    {
+      "file": "aws-sdk-js-v3-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/LICENSE",
+      "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "@aws-sdk/credential-provider-http",
+        "version": "3.972.73",
+        "manifest_sha256": "053a07f9837ab56732facd808e115f12410ee118f60732ccb591be0258e6cb46"
+      },
+      "license_scope": "pinned_source_license_with_copyright",
+      "unresolved": [],
+      "registry_integrity": "sha512-uyYYnJOnlis8uQzaYGPd7N1JoioCoNpXgnkXYixsWJXHXgXyYi8WXJSDfofxJeWfQIGWLe2Nwyq60Uc7MZdVOg==",
+      "archive_sha256": "1f7397f9ef11f49defd8b086fa6b705b5253387cd2afa9d37a4495b68b2a004f",
+      "verification": "Exact-version source manifests match archive manifests after workspace protocol expansion; READMEs match bytes; complete pinned tree has no applicable NOTICE or nearer license. Full root Apache text includes Amazon copyright. No reproducible JS build claim.",
+      "source_association": {
+        "name": "@aws-sdk/credential-provider-http",
+        "directory": "packages-internal/credential-provider-http",
+        "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+        "version": "3.972.73",
+        "manifest_sha256": "053a07f9837ab56732facd808e115f12410ee118f60732ccb591be0258e6cb46",
+        "package.json": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-http/package.json",
+          "source_sha256": "e63c1940b28da1f336c8917be977d347527d6289d695a80d715cd26f6162227a",
+          "archive_sha256": "053a07f9837ab56732facd808e115f12410ee118f60732ccb591be0258e6cb46",
+          "bytes_match": false
+        },
+        "manifest_semantics_match": false,
+        "different_fields": [
+          "dependencies"
+        ],
+        "README.md": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-http/README.md",
+          "source_sha256": "27ef1d7518b40bb68d188dc925e6499fa5fc403e89b3c44eb8b61554980163e3",
+          "archive_sha256": "27ef1d7518b40bb68d188dc925e6499fa5fc403e89b3c44eb8b61554980163e3",
+          "bytes_match": true
+        },
+        "manifest_matches_after_workspace_protocol_expansion": true,
+        "applicable_notice_paths": [
+          "LICENSE"
+        ],
+        "limits": "Version, normalized manifest and README association; not a byte-for-byte reproduction of transpiled JavaScript."
+      }
+    },
+    {
+      "file": "aws-sdk-js-v3-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/LICENSE",
+      "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "@aws-sdk/credential-provider-login",
+        "version": "3.972.78",
+        "manifest_sha256": "d1a6cbfc0477ab590ba4656917d1d9da02ffe28b635db579ad5c407dac54b156"
+      },
+      "license_scope": "pinned_source_license_with_copyright",
+      "unresolved": [],
+      "registry_integrity": "sha512-eUtswnXu0+Ii9ieRK+0L7aPFV3Z/dnW2VntJzjBP9xs8s+8p5nBNuymIXtXwZ+5r5+XJP3e32nMkuZ/r0HozEA==",
+      "archive_sha256": "b76f5d04a85e6999cdb19fd1cd391ae245726c3a15d737728992a5b03c4f68f8",
+      "verification": "Exact-version source manifests match archive manifests after workspace protocol expansion; READMEs match bytes; complete pinned tree has no applicable NOTICE or nearer license. Full root Apache text includes Amazon copyright. No reproducible JS build claim.",
+      "source_association": {
+        "name": "@aws-sdk/credential-provider-login",
+        "directory": "packages-internal/credential-provider-login",
+        "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+        "version": "3.972.78",
+        "manifest_sha256": "d1a6cbfc0477ab590ba4656917d1d9da02ffe28b635db579ad5c407dac54b156",
+        "package.json": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-login/package.json",
+          "source_sha256": "6becb325ab639a46e701efcf2dec17d0709c6294026a03f9194b5c8ff758b886",
+          "archive_sha256": "d1a6cbfc0477ab590ba4656917d1d9da02ffe28b635db579ad5c407dac54b156",
+          "bytes_match": false
+        },
+        "manifest_semantics_match": false,
+        "different_fields": [
+          "dependencies"
+        ],
+        "README.md": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-login/README.md",
+          "source_sha256": "a33261115ded62f80ada337b9ed2193392837a6dd49d3ce89ec81fc48fbe33fd",
+          "archive_sha256": "a33261115ded62f80ada337b9ed2193392837a6dd49d3ce89ec81fc48fbe33fd",
+          "bytes_match": true
+        },
+        "manifest_matches_after_workspace_protocol_expansion": true,
+        "applicable_notice_paths": [
+          "LICENSE"
+        ],
+        "limits": "Version, normalized manifest and README association; not a byte-for-byte reproduction of transpiled JavaScript."
+      }
+    },
+    {
+      "file": "aws-sdk-js-v3-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/LICENSE",
+      "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "@aws-sdk/nested-clients",
+        "version": "3.997.45",
+        "manifest_sha256": "032d9e44c92d97643efc9ec1df81a76b535fe804d956ac70632edf27f5a95d2c"
+      },
+      "license_scope": "pinned_source_license_with_copyright",
+      "unresolved": [],
+      "registry_integrity": "sha512-mooq9Q+jLa18VoM7HouczmslZU60iiB0aKc/Ztnq/luIL1ud0z4DnYprLR/ZO1gp331S9tJctM1HZr7u6YKBXQ==",
+      "archive_sha256": "051527c74948bfe8b249b8353d929d5188e7ab0d733e98084f89598b4b140a81",
+      "verification": "Exact-version source manifests match archive manifests after workspace protocol expansion; READMEs match bytes; complete pinned tree has no applicable NOTICE or nearer license. Full root Apache text includes Amazon copyright. No reproducible JS build claim.",
+      "source_association": {
+        "name": "@aws-sdk/nested-clients",
+        "directory": "packages-internal/nested-clients",
+        "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+        "version": "3.997.45",
+        "manifest_sha256": "032d9e44c92d97643efc9ec1df81a76b535fe804d956ac70632edf27f5a95d2c",
+        "package.json": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/nested-clients/package.json",
+          "source_sha256": "61f2b84b6b1e32f451bae8eaa14d614b1a167bb9a1ddd21f5075f2759e5b20d8",
+          "archive_sha256": "032d9e44c92d97643efc9ec1df81a76b535fe804d956ac70632edf27f5a95d2c",
+          "bytes_match": false
+        },
+        "manifest_semantics_match": false,
+        "different_fields": [
+          "dependencies"
+        ],
+        "README.md": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/nested-clients/README.md",
+          "source_sha256": "92cdad5ce2f6c085d7b65ee8c701340a75799ae6045f1b526b49a28caad27c30",
+          "archive_sha256": "92cdad5ce2f6c085d7b65ee8c701340a75799ae6045f1b526b49a28caad27c30",
+          "bytes_match": true
+        },
+        "manifest_matches_after_workspace_protocol_expansion": true,
+        "applicable_notice_paths": [
+          "LICENSE"
+        ],
+        "limits": "Version, normalized manifest and README association; not a byte-for-byte reproduction of transpiled JavaScript."
+      }
+    }
+  ],
+  "source_followup": {
+    "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+    "tree_truncated": false,
+    "tree_entries": 55466,
+    "license_sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d",
+    "association": [
+      {
+        "name": "@aws-sdk/credential-provider-http",
+        "directory": "packages-internal/credential-provider-http",
+        "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+        "version": "3.972.73",
+        "manifest_sha256": "053a07f9837ab56732facd808e115f12410ee118f60732ccb591be0258e6cb46",
+        "package.json": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-http/package.json",
+          "source_sha256": "e63c1940b28da1f336c8917be977d347527d6289d695a80d715cd26f6162227a",
+          "archive_sha256": "053a07f9837ab56732facd808e115f12410ee118f60732ccb591be0258e6cb46",
+          "bytes_match": false
+        },
+        "manifest_semantics_match": false,
+        "different_fields": [
+          "dependencies"
+        ],
+        "README.md": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-http/README.md",
+          "source_sha256": "27ef1d7518b40bb68d188dc925e6499fa5fc403e89b3c44eb8b61554980163e3",
+          "archive_sha256": "27ef1d7518b40bb68d188dc925e6499fa5fc403e89b3c44eb8b61554980163e3",
+          "bytes_match": true
+        },
+        "manifest_matches_after_workspace_protocol_expansion": true,
+        "applicable_notice_paths": [
+          "LICENSE"
+        ],
+        "limits": "Version, normalized manifest and README association; not a byte-for-byte reproduction of transpiled JavaScript."
+      },
+      {
+        "name": "@aws-sdk/credential-provider-login",
+        "directory": "packages-internal/credential-provider-login",
+        "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+        "version": "3.972.78",
+        "manifest_sha256": "d1a6cbfc0477ab590ba4656917d1d9da02ffe28b635db579ad5c407dac54b156",
+        "package.json": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-login/package.json",
+          "source_sha256": "6becb325ab639a46e701efcf2dec17d0709c6294026a03f9194b5c8ff758b886",
+          "archive_sha256": "d1a6cbfc0477ab590ba4656917d1d9da02ffe28b635db579ad5c407dac54b156",
+          "bytes_match": false
+        },
+        "manifest_semantics_match": false,
+        "different_fields": [
+          "dependencies"
+        ],
+        "README.md": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/credential-provider-login/README.md",
+          "source_sha256": "a33261115ded62f80ada337b9ed2193392837a6dd49d3ce89ec81fc48fbe33fd",
+          "archive_sha256": "a33261115ded62f80ada337b9ed2193392837a6dd49d3ce89ec81fc48fbe33fd",
+          "bytes_match": true
+        },
+        "manifest_matches_after_workspace_protocol_expansion": true,
+        "applicable_notice_paths": [
+          "LICENSE"
+        ],
+        "limits": "Version, normalized manifest and README association; not a byte-for-byte reproduction of transpiled JavaScript."
+      },
+      {
+        "name": "@aws-sdk/nested-clients",
+        "directory": "packages-internal/nested-clients",
+        "commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+        "version": "3.997.45",
+        "manifest_sha256": "032d9e44c92d97643efc9ec1df81a76b535fe804d956ac70632edf27f5a95d2c",
+        "package.json": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/nested-clients/package.json",
+          "source_sha256": "61f2b84b6b1e32f451bae8eaa14d614b1a167bb9a1ddd21f5075f2759e5b20d8",
+          "archive_sha256": "032d9e44c92d97643efc9ec1df81a76b535fe804d956ac70632edf27f5a95d2c",
+          "bytes_match": false
+        },
+        "manifest_semantics_match": false,
+        "different_fields": [
+          "dependencies"
+        ],
+        "README.md": {
+          "url": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/cece9809ea2ed8fdb5f3e73972e2f71154b01129/packages-internal/nested-clients/README.md",
+          "source_sha256": "92cdad5ce2f6c085d7b65ee8c701340a75799ae6045f1b526b49a28caad27c30",
+          "archive_sha256": "92cdad5ce2f6c085d7b65ee8c701340a75799ae6045f1b526b49a28caad27c30",
+          "bytes_match": true
+        },
+        "manifest_matches_after_workspace_protocol_expansion": true,
+        "applicable_notice_paths": [
+          "LICENSE"
+        ],
+        "limits": "Version, normalized manifest and README association; not a byte-for-byte reproduction of transpiled JavaScript."
+      }
+    ],
+    "evidence": ".sumika-next\\aws-notice-followup",
+    "boundary": "AWS notice association only; no native/copyleft clearance or public release authorization."
+  }
+}

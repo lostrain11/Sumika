@@ -1,0 +1,141 @@
+{
+  "model": "sumika-minicpm5-2b:latest",
+  "scope": "simple Chinese wording preview only",
+  "cases": [
+    {
+      "input": "帮我整理 Sumika 的模型设置说明。只修改文档，不改代码，不安装依赖，不调用云端模型，保留现有配置。",
+      "elapsed_ms": 4199,
+      "status": "rejected",
+      "original": "帮我整理 Sumika 的模型设置说明。只修改文档，不改代码，不安装依赖，不调用云端模型，保留现有配置。",
+      "enhanced": "帮我整理 Sumika 的模型设置说明。只修改文档，不改代码，不安装依赖，不调用云端模型，保留现有配置。",
+      "changed": false,
+      "reason": "改写未通过格式或原文保护检查，已保留原文。",
+      "usage": {
+        "prompt_eval_count": 138,
+        "eval_count": 210,
+        "total_duration": 4160530800
+      }
+    },
+    {
+      "input": "优化这段需求的表述，不执行：检查 `D:\\Demo\\config.json` 中 `{\"enabled\":false}` 的说明。预算不超过10元，未经确认不要删除文件。",
+      "elapsed_ms": 2547,
+      "status": "rejected",
+      "original": "优化这段需求的表述，不执行：检查 `D:\\Demo\\config.json` 中 `{\"enabled\":false}` 的说明。预算不超过10元，未经确认不要删除文件。",
+      "enhanced": "优化这段需求的表述，不执行：检查 `D:\\Demo\\config.json` 中 `{\"enabled\":false}` 的说明。预算不超过10元，未经确认不要删除文件。",
+      "changed": false,
+      "reason": "改写未通过格式或原文保护检查，已保留原文。",
+      "usage": {
+        "prompt_eval_count": 150,
+        "eval_count": 348,
+        "total_duration": 2534549600
+      }
+    },
+    {
+      "input": "把设置页点击没反应这个问题帮我看看，先找原因。",
+      "elapsed_ms": 1918,
+      "status": "reported",
+      "finish_reason": "stop",
+      "provider": "ollama",
+      "model": "sumika-minicpm5-2b:latest",
+      "usage": {
+        "prompt_eval_count": 124,
+        "eval_count": 265,
+        "total_duration": 1907275100
+      },
+      "original": "把设置页点击没反应这个问题帮我看看，先找原因。",
+      "enhanced": "请协助排查设置页点击无响应问题，并优先分析可能原因。",
+      "changed": true,
+      "requires_confirmation": true,
+      "diff": "--- 原文\n+++ 改写\n@@ -1 +1 @@\n-把设置页点击没反应这个问题帮我看看，先找原因。\n+请协助排查设置页点击无响应问题，并优先分析可能原因。"
+    },
+    {
+      "input": "我想让导入角色卡时能看到名字，再让我决定是不是导入。",
+      "elapsed_ms": 1694,
+      "status": "rejected",
+      "original": "我想让导入角色卡时能看到名字，再让我决定是不是导入。",
+      "enhanced": "我想让导入角色卡时能看到名字，再让我决定是不是导入。",
+      "changed": false,
+      "reason": "改写未通过格式或原文保护检查，已保留原文。",
+      "usage": {
+        "prompt_eval_count": 125,
+        "eval_count": 234,
+        "total_duration": 1692463900
+      }
+    },
+    {
+      "input": "帮我写一段新手也看得懂的模型选择说明，别用太多专业词。",
+      "elapsed_ms": 1694,
+      "status": "reported",
+      "finish_reason": "stop",
+      "provider": "ollama",
+      "model": "sumika-minicpm5-2b:latest",
+      "usage": {
+        "prompt_eval_count": 128,
+        "eval_count": 233,
+        "total_duration": 1692923600
+      },
+      "original": "帮我写一段新手也看得懂的模型选择说明，别用太多专业词。",
+      "enhanced": "帮我写一段通俗易懂的模型选择说明，尽量避免使用过多专业术语。",
+      "changed": true,
+      "requires_confirmation": true,
+      "diff": "--- 原文\n+++ 改写\n@@ -1 +1 @@\n-帮我写一段新手也看得懂的模型选择说明，别用太多专业词。\n+帮我写一段通俗易懂的模型选择说明，尽量避免使用过多专业术语。"
+    },
+    {
+      "input": "把当前聊天记录按时间顺序显示，只展示最近三条。",
+      "elapsed_ms": 1478,
+      "status": "rejected",
+      "original": "把当前聊天记录按时间顺序显示，只展示最近三条。",
+      "enhanced": "把当前聊天记录按时间顺序显示，只展示最近三条。",
+      "changed": false,
+      "reason": "改写未通过格式或原文保护检查，已保留原文。",
+      "usage": {
+        "prompt_eval_count": 124,
+        "eval_count": 202,
+        "total_duration": 1467269200
+      }
+    },
+    {
+      "input": "给我建议怎么简化这个界面，不要直接修改。",
+      "elapsed_ms": 1473,
+      "status": "reported",
+      "finish_reason": "stop",
+      "provider": "ollama",
+      "model": "sumika-minicpm5-2b:latest",
+      "usage": {
+        "prompt_eval_count": 121,
+        "eval_count": 203,
+        "total_duration": 1471601000
+      },
+      "original": "给我建议怎么简化这个界面，不要直接修改。",
+      "enhanced": "提供建议如何简化该界面，不要直接修改。",
+      "changed": true,
+      "requires_confirmation": true,
+      "diff": "--- 原文\n+++ 改写\n@@ -1 +1 @@\n-给我建议怎么简化这个界面，不要直接修改。\n+提供建议如何简化该界面，不要直接修改。"
+    },
+    {
+      "input": "帮我把错误提示说得更清楚，让人知道下一步怎么做。",
+      "elapsed_ms": 1590,
+      "status": "reported",
+      "finish_reason": "stop",
+      "provider": "ollama",
+      "model": "sumika-minicpm5-2b:latest",
+      "usage": {
+        "prompt_eval_count": 123,
+        "eval_count": 218,
+        "total_duration": 1578652400
+      },
+      "original": "帮我把错误提示说得更清楚，让人知道下一步怎么做。",
+      "enhanced": "优化错误提示表述以增强清晰度，并指导用户明确后续操作步骤。",
+      "changed": true,
+      "requires_confirmation": true,
+      "diff": "--- 原文\n+++ 改写\n@@ -1 +1 @@\n-帮我把错误提示说得更清楚，让人知道下一步怎么做。\n+优化错误提示表述以增强清晰度，并指导用户明确后续操作步骤。"
+    }
+  ],
+  "manual_review": "Four accepted rewrites preserve intent in these synthetic cases. Four rejected outputs retain originals. This is not a broad model ranking or semantic safety guarantee.",
+  "limits": [
+    "8 examples, single run",
+    "Lexical checks cannot prove semantic equivalence; explicit user review required",
+    "No automated classification, dispatch or approval",
+    "Complex code blocks/diffs skipped before generation"
+  ]
+}

@@ -50,19 +50,13 @@ iframe 里跑的是 DSH 完整应用（含它自己的侧栏、顶栏与内测�
 - DSH 已有的会话时间线、审批流程 → 保留 DSH 自己的组件，只做皮肤级调整，避免重造并保证行为一致。
 - 只有出现「扩展面确实无法表达，且必须结构性改动」的具体需求时，才重新评估 fork，并且要单独说明维护代价。
 
-## 皮肤能力实测上限（2026-09-15）
+## UI v2 核验修正
 
-把皮肤做扎实之后，实测到的事实决定了后续路线：
+此前仅检查静态 CSS 就断言「没有通用调色板令牌」，依据不足。rc.2 的正式 ThemeRuntime 提供 `overrideTokens(source, pairs)` 及 disposer；现已通过 `sumika-skin/client.js` 调整背景、侧栏、描边与标签色，并在 dark 模式释放覆盖。真实页面验证 base 为 `#fffdf8`、sidebar 为 `#faf8f0`。
 
-- 前端包是 `@deepseek-ai/dsh-web-frontend@0.1.5-rc.2`，样式为 `dist/assets/index-*.css`。
-- 它对外**只定义 37 个 CSS 变量**，且用途很窄：文件类型色、滚动条、`--dsh-state-ongoing`、代码块/diff/终端/搜索的圆角与字体、`--dsw-elevation-stroke-color`、hovercard 背景等。**没有通用调色板令牌**（没有 `--bg`/`--text`/`--accent` 之类）。
-- DOM 类名是 CSS Modules 哈希（例如 `pI_x6G_frame`、`_dialog_w1urq_22`、`jLrgrW_dialog`），不是稳定 API。
+结构沿用 DSH 原生工作区树、会话、审批与输入组件；不另造项目树。新行为仅挂正式 slot：提示词预览、用户消息手动转草稿。CSS Modules 的局部选择器仍需在上游升级后回归。
 
-已接入皮肤并实测生效的令牌：`--dsh-boot-bg`、`--dsh-boot-brand`、`--dsh-state-ongoing`、`--dsh-scrollbar-*`、`--dsl-web-radius`(9px)、`--dsl-diff/read/search/terminal-radius`、`--dsw-elevation-stroke-color`、`--dsw-hovercard-bg`、`--dsl-code-block-*`。验证值：`--sumika-paper=#f7f4ec`、`--dsl-web-radius=9px`、`--dsw-elevation-stroke-color=#e2dccd`、`--dsh-state-ongoing=#a94067`、`body` 背景 `rgb(247,244,236)`。
-
-由此得到明确结论：**靠 CSS 皮肤无法还原整套设计**。它能做全局底色、圆角、描边、滚动条、状态色这类表面调整；要还原设计里的结构（项目树、时间线版式、审批卡、输入区），必须在 DSH 内渲染我们自己的组件，即走**客户端 UI 插件**（自带稳定类名），而不是继续加大 CSS 覆盖。
-
-下一步的调查目标：读一个客户端 UI 插件包的 `./client` 入口与类型，确认它能做到哪一步——是只能追加面板，还是可以参与主布局；据此决定设计稿里哪些结构可以落地、哪些必须保留 DSH 原生组件。
+工作台当前仍在外壳内通过 iframe 挂载。本轮统一主题和布局，未宣称改成单一前端运行时。原生工具详情、审批、diff 等复杂状态仍需单独验收，浅色空会话截图不能覆盖它们。
 
 ## 客户端插件契约（2026-09-15 已核实）
 

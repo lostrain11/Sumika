@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "status": "partial",
+  "adapter": "extensions/diagnostics/dsh.py",
+  "dsh_version": "0.1.5-rc.2",
+  "runs": [
+    {
+      "tool": "tools/verify_dsh_p2.py",
+      "result": "passed",
+      "evidence_dir": ".sumika-next/p2-6efa1fdedd7542bcb5cc44f7924697ed",
+      "checks": [
+        "native session/follow and session/page records",
+        "terminal exit and timeout records",
+        "cancel lifecycle",
+        "no paid model"
+      ]
+    },
+    {
+      "tool": "tools/verify_dsh_recovery.py",
+      "result": "passed",
+      "checks": [
+        "plan review",
+        "session history/reconnect/restart"
+      ]
+    },
+    {
+      "tool": "tools/verify_web_review_dsh.py",
+      "result": "passed",
+      "evidence_dir": ".sumika-next/web-review-native-06a66ed747fb4334b9581292a097cd98",
+      "checks": [
+        "native approval/asked",
+        "approval cancellation",
+        "ABORTED_BEFORE_DISPATCH tool/result",
+        "no external message or production change",
+        "diagnostic projection recovered error_code"
+      ]
+    },
+    {
+      "tool": "tests_next.test_continuity_extension",
+      "result": "passed",
+      "checks": [
+        "corrupt continuity database raises DatabaseError",
+        "no empty success on write/recover failure",
+        "concurrent writer safety"
+      ]
+    },
+    {
+      "tool": "live Dsh.list_sessions/adopt_existing_session/diagnostic_page probe",
+      "result": "passed",
+      "checks": [
+        "explicit session/list identity check",
+        "native session/page snapshot cursor",
+        "metadata-only projection",
+        "isolated profile closed cleanly"
+      ]
+    },
+    {
+      "tool": "tools/verify_continuity_failure_dsh.py",
+      "result": "passed",
+      "evidence_dir": ".sumika-next/continuity-failure-90ea5dc060b145c59c9f16ff7f773697",
+      "checks": [
+        "real DSH plugin automatic capture",
+        "corrupted continuity database",
+        "session turn stopped before model request",
+        "no automatic replay"
+      ]
+    },
+    {
+      "tool": "subprocess native-diagnostics acceptance",
+      "result": "passed",
+      "evidence_dir": ".sumika-next/native-cli-live-abaedc3cc83a4f94a72e83c4ff3ab2b2",
+      "checks": [
+        "persisted non-empty session",
+        "new CLI process started same profile",
+        "session/list identity verification",
+        "session/page metadata export",
+        "17 events returned"
+      ]
+    },
+    {
+      "tool": "tools/verify_continuity_failure_dsh.py",
+      "result": "passed",
+      "evidence_dir": ".sumika-next/continuity-failure-6019217d9dbd47a5bcde2f739ea3ff08",
+      "checks": [
+        "Healthy plugin and loopback model baseline completed",
+        "Corrupted database only after confirmed process stop; healthy database copy retained",
+        "After restart both submitted turns end with observed continuity error and zero new model requests",
+        "Corrupt database bytes remain unchanged"
+      ],
+      "limitations": "Does not establish durable unknown-operation fencing after database repair or process death between dispatch and acknowledgement. No cloud model or daily service tested."
+    },
+    {
+      "tool": "tools/verify_web_review_dsh.py --decision reject",
+      "result": "passed",
+      "status": "native_service_rejection_passed",
+      "evidence": ".sumika-next/web-review-native-ed30a789fe344935bf49c8278ed5e807/report.json",
+      "checks": [
+        "Native approval asked/decided pair records rejected",
+        "Rejected tool reports isError=true without an invented error code",
+        "Local worker dispatch sentinel absent",
+        "Diagnostic projection retains approval ID, call ID and rejected outcome"
+      ],
+      "boundary": "Synthetic native answerer, not a real user clicking the browser refusal button; isolated loopback model and inert worker only."
+    }
+  ],
+  "projection": "Native records were read from the isolated run and projected without message/tool text. Terminal non-zero exit is represented by DSH text with isError=false, so the adapter correctly reports reported_success/unknown rather than guessing failure.",
+  "remaining": [
+    "CLI single-writer profile protection audit",
+    "continuity failure propagation to all query/report callers",
+    "explicit approval denial distinct from cancellation",
+    "diagnostic enable/disable boundary"
+  ],
+  "adapter_cli": {
+    "command": "python -B -m sumika_next.cli native-diagnostics --root PROJECT --home PROFILE --session SESSION",
+    "identity": "session/list from the explicitly supplied managed Profile",
+    "fallback": "none; unknown session/profile/start failure closes"
+  },
+  "continuity_failure_boundary": {
+    "implementation": "extensions/diagnostics/continuity.py",
+    "status": "unknown",
+    "error_code": "continuity-write-failed",
+    "retry": false,
+    "test": "tests_next.test_diagnostics_dsh.NativeDiagnosticProjection.test_continuity_write_failure_is_unknown_without_retry_or_payload",
+    "automatic_capture": "extensions/continuity/dsh.mjs fences session after unknown write outcome; no replay until new session start",
+    "bridge_process_test": "tests_next.test_diagnostics_dsh.NativeDiagnosticProjection.test_continuity_bridge_process_returns_unknown_without_replay"
+  },
+  "packaging": {
+    "launcher": ".sumika-next/package/sumika-launcher/Sumika.exe",
+    "staging": ".sumika-next/package/sumika-portable",
+    "verification": "tools/verify_portable_staging.py",
+    "status": "passed",
+    "scope": "launcher and required runtime tree; external Python/Node prerequisites remain explicit"
+  }
+}

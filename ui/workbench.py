@@ -6,27 +6,33 @@ it reports the child process it actually owns, and stops only that process tree.
 """
 import json
 import socket
+import subprocess
 import sys
 import threading
 import uuid
 from datetime import datetime, timezone
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sumika_next.daily import default_home
 from sumika_next.dsh import Dsh, DshError
+from sumika_next.contracts import Trust
+from sumika_next.runtime_ownership import ProfileLease
 
 SKIN_MODULE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-skin" / "dsh.mjs"
 BRAND_PACKAGE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-brand"
 WORKBENCH_PACKAGE = Path(__file__).resolve().parents[1] / "extensions" / "ui" / "sumika-workbench"
 
 
-def ensure_skin(home, *, enabled=True):
+def ensure_skin(home, *, enabled=True, root=None):
     """Register the Sumika skin in a managed profile's patch layer.
 
     The patch file is the documented extension point of a DSH profile; nothing
     under runtime/dsh is touched. Idempotent, and never touches other rows.
     """
+    product = Path(root).resolve() if root is not None else Path(__file__).resolve().parents[1]
+    plugin_root = product / "extensions" / "ui"
     patch = Path(home) / "cordis.patch.yml"
     try:
         rows = json.loads(patch.read_text(encoding="utf8")) if patch.is_file() else []
@@ -34,7 +40,7 @@ def ensure_skin(home, *, enabled=True):
             return {"registered": False, "reason": "unexpected patch layer shape"}
     except (OSError, ValueError):
         return {"registered": False, "reason": "patch layer is not valid JSON"}
-    entry = {"id": "sumika-skin", "name": str(SKIN_MODULE), "config": {"enabled": bool(enabled)}}
+    entry = {"id": "sumika-skin", "name": str(plugin_root / "sumika-skin" / "dsh.mjs"), "config": {"enabled": bool(enabled)}}
     found = False
     for row in rows:
         if not isinstance(row, dict):
@@ -53,14 +59,12 @@ def ensure_skin(home, *, enabled=True):
     # The loader imports this path as a module, so it must be a file; the host
     # still reads the enclosing package.json to find dsh.client and ./client.
     release = None
-    release_path = Path(home).parents[2] / "runtime" / "dsh" / "release.json"
-    if not release_path.is_file():
-        release_path = Path(__file__).resolve().parents[1] / "runtime" / "dsh" / "release.json"
+    release_path = product / "runtime" / "dsh" / "release.json"
     try:
         release = json.loads(release_path.read_text(encoding="utf8")).get("version")
     except (OSError, ValueError):
         release = None
-    brand_entry = {"id": "sumika-brand", "name": str(BRAND_PACKAGE / "lib" / "index.js"),
+    brand_entry = {"id": "sumika-brand", "name": str(plugin_root / "sumika-brand" / "lib" / "index.js"),
                    "config": {"harness": "dsh", "release": release}}
     brand_found = False
     for row in rows:
@@ -75,7 +79,7 @@ def ensure_skin(home, *, enabled=True):
     # The workbench additions ship a browser half too, so their loader entry has
     # the same shape: a file path plus the enclosing package's dsh.client.
     workbench_entry = {"id": "sumika-workbench",
-                       "name": str(WORKBENCH_PACKAGE / "lib" / "index.js"), "config": {}}
+                       "name": str(plugin_root / "sumika-workbench" / "lib" / "index.js"), "config": {}}
     workbench_found = False
     for row in rows:
         if not isinstance(row, dict):
@@ -102,6 +106,7 @@ class WorkbenchController:
         self.browser = browser
         self.start_timeout = start_timeout
         self.adapter = None
+        self._lease = None
         self.url = None
         self._embed_url = None
         self.log = deque(maxlen=200)
@@ -147,6 +152,21 @@ class WorkbenchController:
             raise WorkbenchError("managed DSH is not running")
         return {"url": self._embed_url}
 
+    def browser_binding(self):
+        """Exact live native origin and identity, never inferred from a port."""
+        with self._lock:
+            if not self.running() or self._lease is None:
+                return None
+            instance = self.adapter.instance
+            if instance.trust != Trust.MANAGED:
+                return None
+            target = urlsplit(self.url or '')
+            if target.scheme != 'http' or target.hostname != '127.0.0.1' or not target.port:
+                return None
+            if target.username or target.password:
+                return None
+            return (f'http://127.0.0.1:{target.port}', instance.instance_id)
+
     def create_session(self, workspace=None):
         """Create one native session in a workspace so the UI leaves its welcome state."""
         if not self.running():
@@ -187,32 +207,44 @@ class WorkbenchController:
         with self._lock:
             if self.running():
                 return self.status()
+            if self.adapter is not None:
+                self.stop()  # Release only after the previous child is confirmed gone.
             release = self.release()
             if not release["installed"]:
                 raise WorkbenchError("managed DSH is not installed under runtime/dsh")
             if port and self._port_in_use(port):
-                # The fixed port may still be held by an instance this bridge does not
-                # own. If it is our own orphan (same managed profile) we stop it;
-                # anything else must be reported instead of killed.
-                if not self._stop_orphan(port):
-                    raise WorkbenchError(
-                        f"port {port} is already in use by another program; free it or "
-                        f"pick a different port before starting again")
+                # Port and command line are not proof of instance ownership.
+                raise WorkbenchError(f"port {port} is occupied by an unowned instance; no process was stopped")
             self.log.clear()
             self.timeline.clear()
             self.url = None
             self._embed_url = None
             home = default_home(self.root)
             home.mkdir(parents=True, exist_ok=True)
-            skin = ensure_skin(home)
-            if skin.get("registered"):
-                self._record("Sumika 皮肤已登记到受管 profile")
-            adapter = Dsh(self.root, home)
+            try:
+                self._lease = ProfileLease(home).acquire()
+            except (OSError, ValueError) as error:
+                raise WorkbenchError('profile ownership unknown or already in use') from error
+            try:
+                skin = ensure_skin(home, root=self.root)
+                if skin.get("registered"):
+                    self._record("Sumika 皮肤已登记到受管 profile")
+                adapter = Dsh(self.root, home)
+            except Exception:
+                self._lease.release()
+                self._lease = None
+                raise
+            self.adapter = adapter
             try:
                 # Owning the adapter (instead of spawning the CLI) keeps the PID, the
                 # tokenized launch URL and the RPC surface inside this process.
                 adapter.start(port=port)
+                self._lease.bind(adapter.process)
             except Exception as error:  # boundary layer: any adapter failure becomes one error type
+                try:
+                    self.stop()
+                except WorkbenchError:
+                    pass  # Keep ownership and unknown state, never claim cleanup.
                 detail = ""
                 messages = list(getattr(adapter, "startup_messages", []) or [])
                 if messages:
@@ -221,8 +253,8 @@ class WorkbenchController:
                     f"managed DSH failed to start: {type(error).__name__}: {error}{detail}") from error
             if not getattr(adapter, "url", None):
                 try:
-                    adapter.close()
-                except (DshError, OSError):
+                    self.stop()
+                except WorkbenchError:
                     pass
                 raise WorkbenchError("managed DSH did not report a URL")
             self.adapter = adapter
@@ -242,8 +274,13 @@ class WorkbenchController:
             alive = self.running()
             try:
                 self.adapter.close()
-            except (DshError, OSError):
-                pass
+            except (DshError, OSError, subprocess.TimeoutExpired) as error:
+                raise WorkbenchError('stop outcome unknown; instance retained for inspection') from error
+            if process is not None and process.poll() is None:
+                raise WorkbenchError('process exit not confirmed; instance retained for inspection')
+            if self._lease is not None:
+                self._lease.release()
+                self._lease = None
             self.adapter = None
             self.url = None
             self._embed_url = None
@@ -255,39 +292,3 @@ class WorkbenchController:
             probe.settimeout(0.5)
             return probe.connect_ex(("127.0.0.1", int(port))) == 0
 
-    def _stop_orphan(self, port):
-        """Stop a leftover DSH launched from our own managed profile, if that is
-        what holds the port. Returns True only when we identified and stopped it."""
-        import subprocess
-        try:
-            listing = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "(Get-NetTCPConnection -State Listen -LocalPort "
-                 f"{int(port)} -ErrorAction SilentlyContinue).OwningProcess"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30)
-            pid = listing.stdout.strip().splitlines()[0].strip() if listing.stdout.strip() else ""
-            if not pid.isdigit():
-                return False
-            detail = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30)
-            command = detail.stdout or ""
-        except (OSError, subprocess.SubprocessError, IndexError):
-            return False
-        # The child runs as `<root>/runtime/dsh/.../bin.js --profile web --port N`,
-        # so the runtime path plus the port identifies our own instance.
-        marker = str(Path(self.root) / "runtime" / "dsh")
-        if marker not in command or f"--port {int(port)}" not in command:
-            return False
-        try:
-            subprocess.run(["taskkill", "/PID", pid, "/T", "/F"],
-                           capture_output=True, text=True, timeout=30)
-        except (OSError, subprocess.SubprocessError):
-            return False
-        for _ in range(20):
-            if not self._port_in_use(port):
-                self._record(f"已清理遗留的受管 DSH 进程（pid {pid}）")
-                return True
-            threading.Event().wait(0.5)
-        return False

@@ -7,14 +7,24 @@ name = "sumika-next"
 version = "0.1.0"
 description = "Portable project continuity and a thin managed Harness boundary"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["tzdata>=2025.2; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 dsh = ["websocket-client==1.9.2"]
 browser-test = ["playwright==1.62.0"]
+memory = ["fastembed==0.8.0"]
+desktop = ["pywinauto==0.6.9; sys_platform == 'win32'", "PyWinCtl==0.4.1", "PyAutoGUI==0.9.54", "Pillow==12.1.1"]
+voice = ["vosk==0.3.45", "sounddevice==0.5.3"]
+camera = ["opencv-python-headless==4.13.0.92"]
 
 [project.scripts]
 sumika = "sumika_next.cli:main"
+sumika-role = "extensions.roles.service:main"
+sumika-desktop = "extensions.desktop.service:main"
+sumika-schedule = "extensions.desktop.schedule_cli:main"
 
 [tool.setuptools.packages.find]
-include = ["sumika_next*"]
+include = ["sumika_next*", "extensions*"]
+
+[tool.setuptools.package-data]
+"extensions.roles" = ["defaults/*/*.json", "defaults/*/*.vrm", "defaults/*/*.png", "dsh.mjs", "model.mjs"]

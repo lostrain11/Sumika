@@ -1,6 +1,11 @@
+import {bridgeFetch as fetch} from './bridge-client.js';
 // Data binding for the D design shell: keeps the design markup and replaces the
 // mock content with the real backend. Never presents mock data as real: the mock
 // timeline and approval card are hidden once the real DSH instance is embedded.
+
+import {hasExplicitTaskIntent} from './task-intent.js';
+import {bindSpeechInput, cancelSpeechInput} from './speech-input.js';
+import {bindSpeechPlayback, cancelSpeechPlayback} from './speech-playback.js';
 
 const COLORS = [
   ['#c24e6e', '#f9e8ed'],
@@ -36,9 +41,16 @@ body.on-board #deskpet { display: none; }
 document.head.appendChild(style);
 
 async function api(path, options) {
-  const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
+  const headers = {'Content-Type':'application/json', ...options?.headers};
+  if (options?.method && !['GET','HEAD'].includes(options.method.toUpperCase())) {
+    const session = await fetch('/api/manage/session');
+    if (!session.ok) throw new Error('无法验证本地连接，请刷新页面');
+    headers['X-Sumika-CSRF'] = (await session.json()).csrf;
+  }
+  // Never retry a write on token failure: its outcome may be unknown.
+  const response = await fetch(path, { ...options, headers });
   const payload = await response.json().catch(() => ({ error: 'invalid response' }));
-  if (!response.ok) throw Object.assign(new Error(payload.error || payload.message || 'failed'), { payload });
+  if (!response.ok) throw Object.assign(new Error(payload.error || payload.message || 'failed'), { payload, status:response.status });
   return payload;
 }
 
@@ -47,10 +59,38 @@ function setText(selector, text) {
   if (node) node.textContent = text;
 }
 
+const escapeHTML = value => String(value).replace(/[&<>"']/g,
+  char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
+
 function bindHeader(state) {
   setText('.model-chip', `${state.role?.model || '未配置模型'} ▾`);
   const proto = document.querySelector('.proto');
-  if (proto) proto.textContent = state.session?.status === 'unknown' ? '后端未连接' : '真实后端 · 已连接';
+  if (proto) {
+    proto.textContent = '本地服务已连接';
+    proto.title = '已收到 Sumika 本地服务响应。角色模型与工作台的可用状态分别判断。';
+  }
+}
+
+let headerRevision = 0;
+async function refreshHeader() {
+  const revision = ++headerRevision;
+  const unavailable = (text) => {
+    const proto = document.querySelector('.proto');
+    if (proto) {
+      proto.textContent = text;
+      proto.title = '当前无法确认本地服务连接；已有会话和草稿不会重新发送。';
+    }
+  };
+  if (!navigator.onLine) {
+    unavailable('浏览器离线');
+    return;
+  }
+  try {
+    const state = await api('/api/state');
+    if (revision === headerRevision && navigator.onLine) bindHeader(state);
+  } catch {
+    if (revision === headerRevision) unavailable('本地服务连接异常');
+  }
 }
 
 function bindRoster(payload) {
@@ -63,6 +103,7 @@ function bindRoster(payload) {
   const activeId = payload.active?.id;
   roster.querySelectorAll('.member').forEach(node => node.remove());
   const anchor = roster.querySelector('h3');
+  let previous = anchor;
   roles.forEach((role, index) => {
     const [color, soft] = COLORS[index % COLORS.length];
     const button = document.createElement('button');
@@ -73,20 +114,24 @@ function bindRoster(payload) {
     button.dataset.soft = soft;
     button.dataset.speech = `${role.name}：准备好了。`;
     button.dataset.roleId = role.id;
+    button.style.setProperty('--mc', color);
     // Same element shape as the design's roster: avatar, name + status lines, and
     // the VRM badge — so the stylesheet applies unchanged.
     const initial = role.name.trim().slice(0, 1) || '角';
     const sub = `${role.kind === 'user' ? '用户导入' : 'Sumika 内置'} · `
       + (role.has_model_3d ? '已绑定 VRM' : '角色卡 · 立绘占位');
     button.dataset.sub = sub;
-    button.innerHTML = `<span class="ava" style="background:linear-gradient(135deg,${soft},${color})">${initial}</span>`
-      + `<span><span class="nm">${role.name}</span><span class="st">${sub}</span></span>`
+    button.innerHTML = `<span class="ava" style="background:linear-gradient(135deg,${soft},${color})">${escapeHTML(initial)}</span>`
+      + `<span><span class="nm">${escapeHTML(role.name)}</span><span class="st">${escapeHTML(sub)}</span></span>`
       + (role.has_model_3d ? '<span class="bind">VRM</span>' : '');
     button.addEventListener('click', async () => {
-      document.querySelectorAll('.roster .member').forEach(node => node.classList.remove('active'));
-      button.classList.add('active');
+      if (roster.dataset.selecting === '1') return;
+      roster.dataset.selecting = '1';
       try {
         await api('/api/roles/select', { method: 'POST', body: JSON.stringify({ id: role.id }) });
+        document.querySelectorAll('.roster .member').forEach(node => node.classList.remove('active'));
+        button.classList.add('active');
+        window.sumikaSyncRolePresentation?.({name: role.name, sub, color, soft});
         setText('#roomOwner', `${role.name}的房间`);
         setText('#chatChara', role.name);
         setText('#atChip', `@${role.name}`);
@@ -99,26 +144,23 @@ function bindRoster(payload) {
         await loadRoomChat(role.id);
       } catch (error) {
         setText('#roomOwner', `切换失败：${error.message}`);
+      } finally {
+        delete roster.dataset.selecting;
       }
     });
-    if (anchor && anchor.nextSibling) roster.insertBefore(button, anchor.nextSibling);
+    if (previous) previous.after(button);
     else roster.appendChild(button);
+    previous = button;
   });
   const count = document.getElementById('memberCount');
   if (count) count.textContent = String(roles.length);
-  // The layer legend names the roles that actually have a VRM; the design's
-  // hard-coded "昴：实机渲染" is replaced by the real list.
-  const vrmRoles = roles.filter(role => role.has_model_3d).map(role => role.name);
-  const layerTag = document.getElementById('layerVrmTag');
-  if (layerTag) {
-    layerTag.textContent = vrmRoles.length
-      ? `图层③ 角色 VRM · 已绑定：${vrmRoles.join('、')} / 其余：立绘占位`
-      : '图层③ 角色 VRM · 当前没有角色绑定 VRM，全部显示立绘占位';
-  }
   // The design's placeholder assistant is called 澄花; every surface that shows
   // the speaking role must follow the active one instead.
   const active = roles.find(role => role.id === activeId);
   if (active) {
+    const [color, soft] = COLORS[roles.indexOf(active) % COLORS.length];
+    window.sumikaSyncRolePresentation?.({name: active.name,
+      sub: active.kind === 'user' ? '用户导入' : 'Sumika 内置', color, soft});
     setText('#chatChara', active.name);
     setText('#stageChara', active.name);
     setText('#roomOwner', `${active.name}的房间`);
@@ -210,12 +252,27 @@ function bindRoster(payload) {
 // session, and a failure is shown as a failure instead of a plausible reply.
 
 let roomChatRoleId = null;
+let roomChatEpoch = 0;
+let roomMessages = [];
+let roomBefore = null;
+let roomHasMore = false;
+let roomHistoryBusy = false;
+let roomSending = false;
+let roomSupportsClear=false;
+let roomLegacyEarlier=[];
+
+function syncRoomHistoryControls() {
+  const more=document.querySelector('[data-room-older]');
+  if(more){more.hidden=!roomHasMore;more.disabled=roomHistoryBusy;}
+  const clear=document.querySelector('[data-room-clear]');
+  if(clear){clear.disabled=!roomSupportsClear || roomHistoryBusy || roomSending || !roomMessages.length;clear.title=roomSupportsClear?'仅清空当前聊天，保留长期记忆':'当前运行服务尚不支持清空，需更新后端';}
+}
 
 function roomSessionId(roleId) {
   return `room-${roleId || 'default'}`;
 }
 
-function roomMessageNode({ who, text, at, isError }) {
+function roomMessageNode({ who, text, at, isError, task_intent, id, state }) {
   const mine = who === 'me';
   const name = document.getElementById('chatChara')?.textContent || '她';
   const node = document.createElement('div');
@@ -232,6 +289,37 @@ function roomMessageNode({ who, text, at, isError }) {
     bubble.style.borderColor = '#e0b3b3';
   }
   node.append(label, bubble);
+  if (!mine && !isError && typeof text === 'string' && text.trim()) {
+    const playback = document.createElement('button');
+    playback.type = 'button'; playback.className = 'mini-btn room-playback';
+    playback.textContent = '朗读';
+    node.append(playback);
+    if (text.length > 4000) {
+      playback.disabled = true; playback.title = '单次朗读最多支持 4000 字符';
+    } else {
+      bindSpeechPlayback(playback, {key:JSON.stringify([roomChatRoleId,id || at,text]),
+        text, roleId:roomChatRoleId, api});
+    }
+  }
+  if (mine && state === 'unknown') {
+    const status = document.createElement('small');
+    status.textContent = '回复结果未确认，不会自动重发';
+    node.append(status);
+  }
+  if (mine && !isError && task_intent?.kind === 'task' && task_intent.confidence === 'high'
+      && typeof task_intent.evidence === 'string' && task_intent.evidence.trim()
+      && text.includes(task_intent.evidence) && hasExplicitTaskIntent(text)) {
+    const sourceMessageId = id;
+    if (!sourceMessageId) return node;
+    const handoff = document.createElement('button');
+    handoff.type = 'button';
+    handoff.className = 'mini-btn';
+    handoff.textContent = '转到工作台…';
+    handoff.addEventListener('click', () => window.dispatchEvent(new CustomEvent('sumika:prepare-task', {
+      detail: {text, sourceMessageId},
+    })));
+    node.append(handoff);
+  }
   return node;
 }
 
@@ -266,37 +354,57 @@ function renderRoomMessages(messages) {
 }
 
 async function loadRoomChat(roleId) {
+  if (roleId !== roomChatRoleId) { await cancelSpeechInput(); await cancelSpeechPlayback(); }
+  const epoch = ++roomChatEpoch;
   roomChatRoleId = roleId || null;
   const session = encodeURIComponent(roomSessionId(roleId));
-  const payload = await api(`/api/role/chat/history?session=${session}`);
-  renderRoomMessages(payload.messages || []);
+  const payload = await api(`/api/role/chat/history?session=${session}&role_id=${encodeURIComponent(roleId || '')}&limit=3`);
+  if (epoch !== roomChatEpoch) return;
+  // Older bridges return an unpaged list; display only the requested tail.
+  roomMessages=(payload.messages || []).slice(-3);
+  roomBefore=payload.before ?? null;
+  roomSupportsClear=payload.supports_clear===true;
+  roomLegacyEarlier=payload.has_more===undefined?(payload.messages||[]).slice(0,-3):[];
+  roomHasMore=payload.has_more === true || roomLegacyEarlier.length>0;
+  renderRoomMessages(roomMessages);
+  syncRoomHistoryControls();
   window.sumikaDeskpet?.reload?.();
 }
 
 async function sendRoomMessage(text) {
+  roomSending=true;syncRoomHistoryControls();
+  const epoch = roomChatEpoch;
+  const roleId = roomChatRoleId;
   const list = document.querySelector('#screen-room .chat-msgs');
   if (!list) return;
   // The empty-state bubble is not a message: drop it before the first real one.
   list.querySelector('[data-room-empty]')?.remove();
   const stamp = new Date().toISOString();
-  list.appendChild(roomMessageNode({ who: 'me', text, at: stamp }));
+  const userNode = roomMessageNode({ who: 'me', text, at: stamp });
+  list.appendChild(userNode);
   list.scrollTop = list.scrollHeight;
   try {
     const result = await api('/api/role/chat', {
       method: 'POST',
-      body: JSON.stringify({ message: text, session: roomSessionId(roomChatRoleId) }),
+      body: JSON.stringify({ message: text, session: roomSessionId(roleId), role_id: roleId }),
     });
+    if (epoch !== roomChatEpoch) {roomSending=false;syncRoomHistoryControls();return;}
     const reply = typeof result.text === 'string' ? result.text.trim() : '';
+    userNode.replaceWith(roomMessageNode({who:'me',text,at:stamp,task_intent:result.task_intent,id:result.source_message_id}));
     list.appendChild(roomMessageNode({
       who: 'role', at: new Date().toISOString(),
+      id: result.source_message_id?.replace(/:user$/, ':assistant'),
       text: reply || '（模型没有返回文本）', isError: !reply,
     }));
+    if(reply)await loadRoomChat(roleId).catch(()=>{});
   } catch (error) {
+    if (epoch !== roomChatEpoch) {roomSending=false;syncRoomHistoryControls();return;}
     const detail = (error.payload || {}).message || error.message;
     list.appendChild(roomMessageNode({
       who: 'role', at: new Date().toISOString(), text: `发送失败：${detail}`, isError: true,
     }));
   }
+  roomSending=false;syncRoomHistoryControls();
   list.scrollTop = list.scrollHeight;
   window.sumikaDeskpet?.reload?.();
 }
@@ -304,6 +412,43 @@ async function sendRoomMessage(text) {
 async function bindRoomChat(activeRoleId) {
   const composer = document.querySelector('#screen-room .chat-composer');
   if (!composer) return;
+  const head=document.querySelector('#screen-room .chat-head');
+  if(head && !head.querySelector('[data-room-clear]')) {
+    const controls=document.createElement('div');controls.className='room-history-controls';
+    const more=document.createElement('button');more.type='button';more.className='mini-btn';
+    more.dataset.roomOlder='';more.textContent='加载更早';more.hidden=true;
+    const clear=document.createElement('button');clear.type='button';clear.className='mini-btn';
+    clear.dataset.roomClear='';clear.textContent='清空聊天';
+    const notice=document.createElement('small');notice.dataset.roomHistoryNotice='';notice.setAttribute('role','status');
+    more.addEventListener('click',async()=>{
+      if(roomHistoryBusy || !roomHasMore)return;
+      const epoch=roomChatEpoch,role=roomChatRoleId;
+      roomHistoryBusy=true;syncRoomHistoryControls();notice.textContent='';
+      try {
+        const payload=roomLegacyEarlier.length?{messages:roomLegacyEarlier.splice(-3),before:null,has_more:roomLegacyEarlier.length>0}:await api(`/api/role/chat/history?session=${encodeURIComponent(roomSessionId(role))}&role_id=${encodeURIComponent(role)}&limit=3&before=${roomBefore}`);
+        if(epoch!==roomChatEpoch)return;
+        const list=document.querySelector('#screen-room .chat-msgs'),height=list.scrollHeight,top=list.scrollTop;
+        roomMessages=[...(payload.messages||[]),...roomMessages];roomBefore=payload.before;
+        roomHasMore=payload.has_more===true;renderRoomMessages(roomMessages);
+        list.scrollTop=top+list.scrollHeight-height;
+      }catch(error){if(epoch===roomChatEpoch)notice.textContent=`加载失败：${error.message}`;}
+      finally{roomHistoryBusy=false;syncRoomHistoryControls();}
+    });
+    clear.addEventListener('click',async()=>{
+      if(roomHistoryBusy || roomSending || !confirm('清空当前角色的聊天？长期记忆和角色资源会保留。'))return;
+      const epoch=roomChatEpoch,role=roomChatRoleId;
+      roomHistoryBusy=true;syncRoomHistoryControls();notice.textContent='';
+      try {
+        await cancelSpeechPlayback();
+        await api('/api/role/chat/clear',{method:'POST',body:JSON.stringify({role_id:role,session:roomSessionId(role)})});
+        if(epoch!==roomChatEpoch)return;
+        await loadRoomChat(role);
+        window.dispatchEvent(new Event('sumika:chat-cleared'));
+      }catch(error){if(epoch===roomChatEpoch)notice.textContent=`未清空：${error.message}`;}
+      finally{roomHistoryBusy=false;syncRoomHistoryControls();}
+    });
+    controls.append(more,clear,notice);head.append(controls);
+  }
   // Shared with the floating deskpet so both surfaces speak to one session.
   window.sumikaRoomSession = () => roomSessionId(roomChatRoleId);
   window.sumikaRoomReload = () => loadRoomChat(roomChatRoleId);
@@ -329,6 +474,8 @@ async function bindRoomChat(activeRoleId) {
     if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); }
   });
   composer.querySelector('#sendBtn')?.addEventListener('click', submit);
+  bindSpeechInput(composer.querySelector('.voice'), input,
+    document.querySelector('[data-room-history-notice]'), api, () => roomChatRoleId);
   await loadRoomChat(activeRoleId);
 }
 
@@ -483,68 +630,59 @@ async function ensureWorkbenchUrl() {
   }
 }
 
+let workbenchLoad = null;
 async function bindWorkbench() {
-  const main = document.querySelector('.wb-main');
-  if (!main) return;
-  // The design ships a mock room/chat widget on the workbench screen. It stays
-  // visible for layout fidelity but must be labelled, never mistaken for real data.
-  // The floating deskpet widget is global (not part of the board markup) and
-  // still carries the design's sample character and log lines.
-  const roomWidget = document.querySelector('#deskpet, .deskpet, .wb-wrap .room-widget, .wb-wrap aside.room');
-  if (roomWidget && !roomWidget.querySelector('.sumika-mock-tag')) {
-    const tag = document.createElement('span');
-    tag.className = 'sumika-mock-tag';
-    tag.textContent = '设计示例数据';
-    tag.style.cssText = 'position:absolute;top:6px;right:8px;font-size:10px;padding:1px 6px;'
-      + 'border:1px solid var(--line,#e2dccd);border-radius:999px;color:var(--muted,#7d8a86);'
-      + 'background:rgba(255,253,247,.9);z-index:5';
-    roomWidget.style.position = 'relative';
-    roomWidget.appendChild(tag);
-  }
-  let status;
-  try {
-    status = await api('/api/workbench');
-    if (!status.running) status = await api('/api/workbench/start', {
-      method: 'POST', body: JSON.stringify({ port: 5175 }),
-    });
-  } catch (error) {
-    setText('.wb-crumb', `工作台启动失败：${(error.payload || {}).message || error.message}`);
-    return;
-  }
-  let url = null;
-  if (status.embed_ready) url = (await api('/api/workbench/embed')).url;
-
-  // The workbench screen *is* the DSH front end: the managed instance renders
-  // into this screen, under the shell's own top bar, skinned by DSH's own
-  // index-injection hook. The design's mock board markup is replaced rather than
-  // layered, so nothing mock sits on top of the real workbench.
-  const screen = document.querySelector('#screen-board');
-  const wrap = screen?.querySelector('.wb-wrap');
-  if (!screen || !wrap) return;
-  wrap.querySelectorAll('.wb-timeline, .confirm-d').forEach(node => node.remove());
-
-  if (url) {
-    const frame = document.createElement('iframe');
-    frame.id = 'sumika-workbench-frame';
-    frame.title = 'Sumika 工作台（受管 DSH）';
-    frame.src = url;
-    frame.style.cssText = 'width:100%;height:100%;border:0;display:block;background:var(--paper,#fffdf8)';
-    wrap.replaceWith(frame);
-    if (document.querySelector('#gnav button[data-go="board"]')) {
-      document.querySelector('#gnav button[data-go="board"]').dataset.sumikaBound = '1';
+  const screen = document.getElementById('screen-board');
+  if (!screen || screen.querySelector('iframe')) return;
+  if (workbenchLoad) return workbenchLoad;
+  workbenchLoad = (async () => {
+    try {
+      const layout = await fetch('/api/manage/workbench-layout').then(r => r.ok ? r.json() : null);
+      if (layout) screen.dataset.workbenchMode = layout.mode || 'iframe-fallback';
+    } catch (_) { screen.dataset.workbenchMode = 'iframe-fallback'; }
+    screen.replaceChildren();
+    const state = document.createElement('div');
+    state.className = 'sumika-loading';
+    state.textContent = '正在连接工作台…';
+    screen.append(state);
+    const {url, error} = await ensureWorkbenchUrl();
+    if (url) {
+      const frame = document.createElement('iframe');
+      frame.id = 'sumika-workbench-frame';
+      frame.title = 'Sumika 工作台';
+      frame.src = url;
+      // Keep the native DSH surface aware of the Sumika shell route without
+      // creating a second navigator or duplicating session state.
+      const syncRoute = () => {
+        if (!frame.contentWindow) return;
+        frame.contentWindow.postMessage({type:'sumika:host-route',route:(location.hash||'#room').slice(1)}, new URL(frame.src).origin);
+      };
+      window.addEventListener('hashchange', syncRoute);
+      frame.addEventListener('load', syncRoute, {once:false});
+      frame.style.cssText = 'width:100%;height:100%;border:0;display:block';
+      const wrapper = document.createElement('div');
+      wrapper.className = 'sumika-workbench-host';
+      wrapper.style.cssText='position:relative;width:100%;height:100%;min-height:0';
+      const notice=document.createElement('div');
+      notice.className='sumika-workbench-status';
+      notice.textContent='正在加载 DSH 工作台…';
+      notice.style.cssText='position:absolute;z-index:2;top:12px;left:50%;transform:translateX(-50%);padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--muted);font-size:11px;pointer-events:none';
+      frame.addEventListener('load',()=>{notice.remove();});
+      frame.addEventListener('error',()=>{
+        notice.style.pointerEvents='auto';notice.style.cursor='pointer';notice.textContent='工作台加载失败，点击重试';
+        notice.onclick=()=>{notice.onclick=null;notice.textContent='正在重新连接…';frame.src=url;};
+      });
+      wrapper.append(frame,notice);screen.replaceChildren(wrapper);
+    } else {
+      state.className = 'sumika-region-error';
+      state.textContent = `工作台未连接：${error || '实例未就绪'} `;
+      const retry = document.createElement('button');
+      retry.className = 'mini-btn'; retry.textContent = '重试';
+      retry.addEventListener('click', bindWorkbench);
+      state.append(retry);
     }
-  } else {
-    const card = document.createElement('div');
-    card.style.cssText = 'margin:14px 0;padding:16px;border:1px solid var(--line,#e2dccd);'
-      + 'border-radius:9px;background:var(--panel,#fffdf7)';
-    card.innerHTML = '<p style="margin:0 0 10px">DSH 实例未就绪，工作台暂时无法显示。</p>'
-      + '<button class="sumika-open-dsh" style="padding:6px 14px">重试</button>';
-    card.querySelector('.sumika-open-dsh')
-      .addEventListener('click', async () => { await ensureWorkbenchUrl(); location.reload(); });
-    const head = main.querySelector('.wb-head');
-    (head || main).after(card);
-    setText('.wb-crumb', '受管 DSH · 未就绪');
-  }
+  })();
+  try { await workbenchLoad; } finally { workbenchLoad = null; }
 }
 
 // ---- capability switches (R-107/R-108) -------------------------------------
@@ -593,6 +731,7 @@ function capabilityCard({ icon, title, status, statusClass, text, source, enable
                           capabilityId }) {
   const card = document.createElement('div');
   card.className = 'cap-card';
+  card.tabIndex = 0;
   if (capabilityId) card.dataset.capabilityId = capabilityId;
   const top = document.createElement('div');
   top.className = 'top';
@@ -618,8 +757,15 @@ function capabilityCard({ icon, title, status, statusClass, text, source, enable
 }
 
 async function capabilityState() {
-  const [modules, readiness] = await Promise.all([api('/api/modules'), api('/api/readiness')]);
-  return { modules: modules.modules || [], readiness: readiness.capabilities || [] };
+  const [registry, readiness, settings] = await Promise.all([api('/api/modules'), api('/api/readiness'),api('/api/manage/settings')]);
+  const raw=registry.modules||[];
+  const modules=raw.filter(m=>!['voice','asr','microphone','memory','memory-semantic'].includes(m.id));
+  const speech=raw.filter(m=>['voice','asr'].includes(m.id));
+  modules.push({id:'speech',label:'语音交互',purpose:'语音识别、朗读与输入设备；麦克风需单独授权。',
+    enabled:speech.some(m=>m.enabled),provider:'本地语音模块',detailOnly:true});
+  modules.push({id:'memory',label:'长期记忆',purpose:'管理记忆检索、自动提取与待确认提议。',
+    enabled:settings.data.memory.enabled!==false,provider:settings.data.role.memory_provider,detailOnly:true});
+  return { modules, readiness:(readiness.capabilities||[]).filter(m=>!['voice','asr','microphone','memory','memory-semantic'].includes(m.id)) };
 }
 
 async function toggleCapability(id, enabled) {
@@ -648,6 +794,7 @@ function setRow(panel, label, value, ok) {
 
 /** The capability detail panel mirrors the selected card; never invents values. */
 function renderCapabilityDetail(card, entry, readinessRow, version) {
+  window.dispatchEvent(new CustomEvent('sumika-capability-selected', {detail:{id:entry?.id || readinessRow?.id}}));
   const side = document.querySelector('.cap-side');
   if (!side) return;
   const hero = side.querySelector('.hero-d');
@@ -662,35 +809,34 @@ function renderCapabilityDetail(card, entry, readinessRow, version) {
     }
     if (glyph) glyph.textContent = card?.querySelector('.cap-ic')?.textContent || '◈';
   }
-  const panels = side.querySelectorAll('.panel');
+  const panels = side.querySelectorAll('.panel:not([data-extra-action])');
   if (panels[0]) {
     if (entry) {
       setRow(panels[0], '状态', entry.enabled ? '已启用' : '已停用', entry.enabled);
-      setRow(panels[0], '来源', `注册表 · ${entry.provider}`);
+      setRow(panels[0], '来源', entry.detailOnly ? `能力配置 · ${entry.provider}` : `注册表 · ${entry.provider}`);
       setRow(panels[0], '版本', '—');
       setRow(panels[0], '权限', '执行前经授权与审批');
-      setRow(panels[0], '数据', '仅本机 · 不上传');
+      setRow(panels[0], '数据', '按所选工具与模型的数据策略处理');
     } else if (readinessRow) {
       setRow(panels[0], '状态', readinessRow.ready ? '依赖就绪 · 未登记' : '依赖缺失', false);
       setRow(panels[0], '来源', '就绪检查');
       setRow(panels[0], '版本', '—');
       setRow(panels[0], '权限', '—');
-      setRow(panels[0], '数据', '仅本机 · 不上传');
+      setRow(panels[0], '数据', '按所选工具与模型的数据策略处理');
     } else {
       setRow(panels[0], '状态', 'Harness 自带', true);
       setRow(panels[0], '来源', 'DSH 原生');
       setRow(panels[0], '版本', version || '—');
       setRow(panels[0], '权限', '由 DSH 权限策略管理');
-      setRow(panels[0], '数据', '仅本机 · 不上传');
+      setRow(panels[0], '数据', '按所选工具与模型的数据策略处理');
     }
   }
 }
 
+let selectedCapability = null;
 async function bindCapabilityScreens() {
   const shelf = document.querySelector('#screen-shelf .cap-main');
-  const settingsGroup = Array.from(document.querySelectorAll('#screen-settings .set-group'))
-    .find(group => /能力模块/.test(group.querySelector('h2')?.textContent || ''));
-  if (!shelf && !settingsGroup) return;
+  if (!shelf) return;
 
   const render = async () => {
     const { modules, readiness } = await capabilityState();
@@ -738,10 +884,10 @@ async function bindCapabilityScreens() {
           status: item.enabled ? '已启用' : '已停用',
           statusClass: item.enabled ? 'on' : 'rsv',
           text: `${item.purpose || ''}${item.purpose ? ' ' : ''}实现：${item.provider}`,
-          source: `扩展 ${item.id}`,
+          source: item.detailOnly ? '点击查看详细设置' : `扩展 ${item.id}`,
           capabilityId: item.id,
           enabled: item.enabled,
-          onToggle: next => runToggle(item.id, next),
+          onToggle: item.detailOnly ? undefined : next => runToggle(item.id, next),
         }));
       });
       registryGroup.appendChild(registryGrid);
@@ -794,6 +940,8 @@ async function bindCapabilityScreens() {
         card.setAttribute('tabindex', '0');
         const select = () => {
           const target = detail.find(entry => entry.card === card);
+          selectedCapability = target?.entry?.id || target?.readinessRow?.id || card.querySelector('h4')?.textContent;
+          cards.forEach(item => item.classList.toggle('selected', item === card));
           renderCapabilityDetail(card, target?.entry, target?.readinessRow, release);
         };
         card.addEventListener('click', event => {
@@ -804,11 +952,29 @@ async function bindCapabilityScreens() {
           if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); }
         });
       });
-      const first = cards[0];
-      if (first && detail[0]) renderCapabilityDetail(first, detail[0].entry, null, release);
+      const selected = detail.find(item => (item.entry?.id || item.readinessRow?.id || item.card?.querySelector('h4')?.textContent) === selectedCapability) || detail[0];
+      if (selected?.card) selected.card.click();
+
+      // Present capabilities by user task; implementation origin stays in detail.
+      const businessGroups = new Map();
+      for (const [id, title] of [['development','开发'],['office','办公'],['companion','陪伴']]) {
+        const section = document.createElement('section');section.className = 'cap-group';
+        const heading = document.createElement('h2');const label = document.createElement('b');
+        label.textContent = title;heading.append(label);section.append(heading);
+        const grid = document.createElement('div');grid.className = 'cap-grid';section.append(grid);
+        businessGroups.set(id,{section,grid});
+      }
+      for (const item of detail) {
+        const id = item.entry?.id || item.readinessRow?.id;
+        const group = !id || ['desktop','browser','schedule'].includes(id) ? 'development'
+          : ['ocr','office','office-render'].includes(id) ? 'office' : 'companion';
+        if(item.card)businessGroups.get(group).grid.append(item.card);
+      }
+      shelf.querySelectorAll('.cap-group').forEach(el=>el.remove());
+      for(const {section,grid} of businessGroups.values())if(grid.children.length)shelf.append(section);
 
       const side = document.querySelector('.cap-side');
-      const panels = side ? side.querySelectorAll('.panel') : [];
+      const panels = side ? side.querySelectorAll('.panel:not([data-extra-action])') : [];
       if (panels[1]) {
         const enabledCount = modules.filter(item => item.enabled).length;
         const unavailable = readiness.filter(item => !item.ready).length;
@@ -817,9 +983,11 @@ async function bindCapabilityScreens() {
         cells.forEach((cell, index) => {
           const number = cell.querySelector('b');
           if (number && values[index] !== undefined) number.textContent = String(values[index]);
+          const label = cell.querySelector('span');
+          if (label) label.textContent = ['已启用','已停用','依赖缺失'][index];
         });
         const heading = panels[1].querySelector('h3 b');
-        if (heading) heading.textContent = `${modules.length} 个已登记`;
+        if (heading) heading.textContent = `${modules.length} 项能力`;
       }
       if (panels[2]) {
         const notes = panels[2].querySelector('.note-p');
@@ -831,42 +999,7 @@ async function bindCapabilityScreens() {
       }
     }
 
-    if (settingsGroup) {
-      const card = settingsGroup.querySelector('.set-card');
-      if (card) {
-        card.textContent = '';
-        const summary = document.createElement('div');
-        summary.className = 'set-row';
-        const enabledCount = modules.filter(item => item.enabled).length;
-        const unavailable = readiness.filter(item => !item.ready).length;
-        summary.innerHTML = '<div>模块总览<small>关闭仅停用，数据与配置保留（enabled 契约）</small></div>'
-          + `<div class="val"><b>${enabledCount} 已启用 · ${modules.length - enabledCount} 已停用 · `
-          + `${unavailable} 不可用</b><button class="mini-btn">打开能力页 →</button></div>`;
-        // The design shell's own inline script owns screen switching by hash.
-        summary.querySelector('button').addEventListener('click', () => { location.hash = 'shelf'; });
-        card.appendChild(summary);
 
-        modules.forEach(item => {
-          const row = document.createElement('div');
-          row.className = 'set-row';
-          row.dataset.capabilityId = item.id;
-          const label = document.createElement('div');
-          label.innerHTML = `${item.label || item.id}<small>${item.purpose || ''} · ${item.provider}</small>`;
-          row.appendChild(label);
-          const holder = document.createElement('span');
-          holder.style.marginLeft = 'auto';
-          holder.appendChild(switchElement(item.enabled, next => runToggle(item.id, next)));
-          row.appendChild(holder);
-          card.appendChild(row);
-        });
-
-        const dshRow = document.createElement('div');
-        dshRow.className = 'set-row';
-        dshRow.innerHTML = '<div>连续记录 · 自动捕获<small>属于 DSH 侧插件，开关在 DSH 自己的插件清单里，'
-          + '因此这里不重复提供一个不生效的开关</small></div>';
-        card.appendChild(dshRow);
-      }
-    }
   };
 
   try {
@@ -898,12 +1031,7 @@ async function bindSettingsFacts(tree) {
       setRow(panel, '项目', tree?.project?.path || tree?.project?.name || '未找到项目记录');
       setRow(panel, '数据', '本机 · 未上传', true);
     }
-    const notes = side.querySelectorAll('.panel')[1]?.querySelector('.note-p');
-    if (notes) {
-      notes.innerHTML = '① 关闭开关只停用能力，数据与授权记录保留；<br>'
-        + '② 工作模型与 API 凭据由 DSH 工作台管理，本页不重复提供入口；<br>'
-        + '③ 角色模型来自本机角色服务，按角色独立绑定。';
-    }
+
   }
 
   const modelsGroup = Array.from(document.querySelectorAll('#screen-settings .set-group'))
@@ -952,7 +1080,7 @@ function markGroupUnwired(group) {
   if (heading && !heading.querySelector('.rsv-tag')) {
     const tag = document.createElement('span');
     tag.className = 'rsv-tag';
-    tag.textContent = '原型 · 未接入';
+    tag.textContent = '未接入';
     tag.title = UNWIRED_REASON;
     tag.style.marginLeft = '8px';
     heading.appendChild(tag);
@@ -1001,29 +1129,57 @@ async function bindUnwiredSettings() {
   }
 }
 
-(async () => {
-  try {
-    // The design's inline script owns screen switching; the workbench screen
-    // needs one extra body class so its mock overlays stay hidden.
-    const syncBoardClass = () => {
-      document.body.classList.toggle('on-board', location.hash === '#board');
-    };
-    window.addEventListener('hashchange', syncBoardClass);
-    syncBoardClass();
-    const [state, roles, tree] = await Promise.all([
-      api('/api/state'), api('/api/roles'), api('/api/tree'),
-    ]);
-    bindHeader(state);
-    bindRoster(roles);
-    await bindRoleImport(roles);
-    await bindRoomChat(roles.active?.id || null);
-    bindTree(tree);
-    await bindCapabilityScreens();
-    await bindSettingsFacts(tree);
-    await bindUnwiredSettings();
-    await bindWorkbench();
-  } catch (error) {
-    const proto = document.querySelector('.proto');
-    if (proto) proto.textContent = `绑定失败：${error.message}`;
-  }
-})();
+// Each region has its own load/error state. One unavailable provider must not
+// strand the rest of the client in its prototype state.
+const syncBoard = () => {
+  const active = location.hash === '#board';
+  document.body.classList.toggle('on-board', active);
+  if (active) void bindWorkbench();
+};
+window.addEventListener('hashchange', syncBoard);
+syncBoard();
+// A browser network outage must not destroy the iframe or its unsent draft.
+// Native DSH owns transport reconnection; the shell never replays requests.
+const networkNotice = document.createElement('div');
+networkNotice.className = 'sumika-network-notice';
+networkNotice.setAttribute('role', 'status');
+networkNotice.hidden = true;
+document.body.append(networkNotice);
+function syncNetworkNotice() {
+  networkNotice.hidden = navigator.onLine;
+  networkNotice.textContent = navigator.onLine ? ''
+    : '浏览器处于离线状态。当前页面与未发送草稿已保留，请恢复连接后检查任务状态。';
+}
+window.addEventListener('offline', () => { syncNetworkNotice(); void refreshHeader(); });
+window.addEventListener('online', () => {
+  syncNetworkNotice();
+  void refreshHeader();
+  // Network availability can lag behind the browser's online event.
+  // Only repeat this read; never repeat an outstanding task or write.
+  setTimeout(() => void refreshHeader(), 500);
+});
+syncNetworkNotice();
+const showRegionError = (selector, error) => {
+  const region = document.querySelector(selector);
+  if (!region) return;
+  const note = document.createElement('p');
+  note.className = 'sumika-region-error';
+  note.textContent = `暂时无法加载：${error.message}`;
+  region.prepend(note);
+};
+void refreshHeader();
+void api('/api/roles').then(async roles => {
+  bindRoster(roles);
+  await bindRoleImport(roles);
+  await bindRoomChat(roles.active?.id || null);
+}).catch(error => showRegionError('.roster', error));
+window.sumikaSettingsReady = Promise.allSettled([
+  bindCapabilityScreens().catch(error => showRegionError('.cap-main', error)),
+  api('/api/tree').catch(() => ({})).then(bindSettingsFacts)
+    .catch(error => showRegionError('.set-main', error)),
+  bindUnwiredSettings(),
+]);
+window.addEventListener('sumika-modules-changed', () => void bindCapabilityScreens());
+window.addEventListener('sumika-role-resources-changed', () => {
+  void api('/api/roles').then(bindRoster).catch(error=>showRegionError('.roster',error));
+});

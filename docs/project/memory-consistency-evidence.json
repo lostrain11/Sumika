@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "suite": "sumika-memory-multiturn-v1",
+  "boundary": "scripted local regression; not an AML benchmark; no answer model involved",
+  "turn_design": [
+    "write a fact",
+    "ask with different phrasing",
+    "update the same fact_key",
+    "ask again: the stale value must not appear in the injected context",
+    "ask an unrelated topic: no cross-topic mixing",
+    "cross-role scope isolation",
+    "relations recorded with provenance",
+    "forget stops recall",
+    "restart keeps the update and the unrelated fact separate"
+  ],
+  "providers": {
+    "embedded": {
+      "passed": 9,
+      "total": 13,
+      "elapsed_seconds": 0.07,
+      "failing_cases": [
+        "first_turn_recall",
+        "update_is_recalled",
+        "second_fact_coexists",
+        "restart_keeps_other_fact"
+      ]
+    },
+    "semantic": {
+      "passed": 13,
+      "total": 13,
+      "elapsed_seconds": 1.29,
+      "failing_cases": []
+    }
+  },
+  "cases": {
+    "embedded": [
+      {
+        "case": "first_turn_recall",
+        "passed": false,
+        "detail": ""
+      },
+      {
+        "case": "literal_match_recall",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 1, \"text\": \"用户喜欢喝乌龙茶。\", \"source\": \"user\"}}"
+      },
+      {
+        "case": "update_is_recalled",
+        "passed": false,
+        "detail": ""
+      },
+      {
+        "case": "stale_value_not_injected",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "case": "no_mis_recall_on_unrelated_topic",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "case": "second_fact_coexists",
+        "passed": false,
+        "detail": ""
+      },
+      {
+        "case": "cross_role_scope_is_clean",
+        "passed": true,
+        "detail": "[]"
+      },
+      {
+        "case": "relation_recorded",
+        "passed": true,
+        "detail": "[{\"subject\": \"用户\", \"predicate\": \"饮用\", \"object\": \"白水\", \"source\": \"user\"}]"
+      },
+      {
+        "case": "relation_source_present",
+        "passed": true,
+        "detail": "[{\"subject\": \"用户\", \"predicate\": \"饮用\", \"object\": \"白水\", \"source\": \"user\"}]"
+      },
+      {
+        "case": "forget_stops_recall",
+        "passed": true,
+        "detail": "forgotten row must not be searchable"
+      },
+      {
+        "case": "restart_keeps_update",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "case": "restart_keeps_other_fact",
+        "passed": false,
+        "detail": ""
+      },
+      {
+        "case": "restart_does_not_mix_facts",
+        "passed": true,
+        "detail": "drink= anime="
+      }
+    ],
+    "semantic": [
+      {
+        "case": "first_turn_recall",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 1, \"text\": \"用户喜欢喝乌龙茶。\", \"source\": \"user\", \"score\": 0.612859, \"retrieval\":"
+      },
+      {
+        "case": "literal_match_recall",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 1, \"text\": \"用户喜欢喝乌龙茶。\", \"source\": \"user\", \"score\": 1.0, \"retrieval\": \"hyb"
+      },
+      {
+        "case": "update_is_recalled",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 2, \"text\": \"用户改喝白水了。\", \"source\": \"user\", \"score\": 0.48507, \"retrieval\": \""
+      },
+      {
+        "case": "stale_value_not_injected",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 2, \"text\": \"用户改喝白水了。\", \"source\": \"user\", \"score\": 0.48507, \"retrieval\": \""
+      },
+      {
+        "case": "no_mis_recall_on_unrelated_topic",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "case": "second_fact_coexists",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 3, \"text\": \"用户喜欢晚上九点看动画。\", \"source\": \"user\", \"score\": 0.589039, \"retrieva"
+      },
+      {
+        "case": "cross_role_scope_is_clean",
+        "passed": true,
+        "detail": "[]"
+      },
+      {
+        "case": "relation_recorded",
+        "passed": true,
+        "detail": "[{\"subject\": \"用户\", \"predicate\": \"饮用\", \"object\": \"白水\", \"source\": \"user\"}]"
+      },
+      {
+        "case": "relation_source_present",
+        "passed": true,
+        "detail": "[{\"subject\": \"用户\", \"predicate\": \"饮用\", \"object\": \"白水\", \"source\": \"user\"}]"
+      },
+      {
+        "case": "forget_stops_recall",
+        "passed": true,
+        "detail": "forgotten row must not be searchable"
+      },
+      {
+        "case": "restart_keeps_update",
+        "passed": true,
+        "detail": ""
+      },
+      {
+        "case": "restart_keeps_other_fact",
+        "passed": true,
+        "detail": "{\"source\": \"memory_context\", \"content\": {\"id\": 3, \"text\": \"用户喜欢晚上九点看动画。\", \"source\": \"user\", \"score\": 0.589039, \"retrieva"
+      },
+      {
+        "case": "restart_does_not_mix_facts",
+        "passed": true,
+        "detail": "drink= anime={\"source\": \"memory_context\", \"content\": {\"id\": 3, \"text\": \"用"
+      }
+    ]
+  },
+  "conclusion": "Keyword FTS fails on paraphrased questions, which is exactly the multi-turn case. The semantic provider passes every case including update supersede, stale rejection, no cross-topic mixing and restart persistence. Semantic is the recommended default for role memory; embedded stays as the dependency-free fallback."
+}

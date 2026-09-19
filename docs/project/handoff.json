@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-15T20:16:01.147736+00:00",
-  "current_goal": "D 方向 UI 收敛：工作台=DSH、能力与项目作为 DSH 主面板、活动室接真实角色服务，扩展开关与角色完整性均有验收",
+  "updated_at": "2026-09-11T00:00:00+00:00",
+  "current_goal": "实施已批准架构调整：保留 Harness 可更换边界，优先 DSH 生态复用与可靠功能接线；视觉精修暂缓",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "若需要“从展开态收成轨道”的入口，需另选位置（当前没有）；其余按覆盖表推进（审批卡/终端 diff 需真实场景）。",
+  "next_action": "Internal-use handoff with actual package path and documented limitations; public redistribution deferred by user.",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -138,7 +138,8 @@
       "审批/diff/终端场景实测：真实工具调用 2 次（跑测试、写并删除临时文件）——工具卡样式已生效；diffStat 节点存在；diff 正文与终端容器均未渲染（仍标未验证）；审批卡未出现，原因是权限为「工作区内修改」，工作区内写文件不弹审批，需要用户切权限预设或执行工作区外操作才能验证。",
       "修复外壳布局 bug：1160x800 视口下 body 被算成 900px 且 overflow:hidden，导致输入区控件行（含权限模式）与侧栏页脚永远看不到、也滚不到；改为 html/body 定高 + body flex 纵向 + .screen flex:1 min-height:0。实测两种尺寸 frame 底边都等于视口高度、scrollable=false。同时撤回“被框架加载时跳过品牌”——那会让侧栏露出 DSH 官方 deepseek HARNESS 字样，反而更差。",
       "侧栏去品牌（贴合设计稿）：隐藏 `_brand`（晴日部室/官方 HARNESS 字样都不再出现），保留折叠按钮，logoRow 行高 60→40；验收脚本把“侧栏必须有品牌”改为反向断言“侧栏不得出现品牌字样”。另注意到 DSH 沙箱内跑 tests_next 报 113 errors（工作区外为 293 OK），是沙箱环境差异，非代码回归，留待核查。",
-      "去掉两处多余品牌与整块侧栏页脚：hero 标题（标记 + 探索未至之境 + 预览版）与侧栏页脚状态块（含“回 Sumika/收起侧栏”）全部隐藏/删除，同时清掉为页脚注入的宿主代码与 shell_url 管线；修掉“回 Sumika”把 iframe 自身导航到外壳导致双顶栏的 bug。现状：展开态无折叠按钮（设计稿没有），轨道态保留按钮用于展开回来。"
+      "去掉两处多余品牌与整块侧栏页脚：hero 标题（标记 + 探索未至之境 + 预览版）与侧栏页脚状态块（含“回 Sumika/收起侧栏”）全部隐藏/删除，同时清掉为页脚注入的宿主代码与 shell_url 管线；修掉“回 Sumika”把 iframe 自身导航到外壳导致双顶栏的 bug。现状：展开态无折叠按钮（设计稿没有），轨道态保留按钮用于展开回来。",
+      "模型设置三用途分栏与独立辅助provider契约；共享本地模型库可填入角色/辅助模型，默认关闭且失败关闭"
     ],
     "pending": [
       "角色与记忆调用入口/世界书接线",
@@ -210,5 +211,2601 @@
     "language_guard": "interjections -> Chinese words (kana and romaji forms), then leftover kana -> romaji; no extra model call by default; language.retry_on_kana opts into one retry",
     "interjection_policy": "card declares allow_romanized; those tokens are never rewritten (安和昴 keeps hah？), other romaji interjections become Chinese words"
   },
-  "design_coverage": "docs/project/ui-design-coverage.md"
+  "design_coverage": "docs/project/ui-design-coverage.md",
+  "ui_v2": {
+    "status": "in_progress",
+    "record": "docs/project/ui-v2-execution.md",
+    "verified": [
+      "21 backend tests",
+      "18 browser interactions",
+      "4 pages x 3 viewports",
+      "native draft handoff with original and workspace/session target"
+    ],
+    "unverified": [
+      "resource package restore UI",
+      "enhancement attachment and stale draft checks",
+      "complex native DSH tools and approvals",
+      "125 percent zoom",
+      "offline recovery",
+      "cross-page appearance and device settings"
+    ],
+    "user_data": "personal resources and credentials are not bundled",
+    "worktree": "existing uncommitted changes preserved; no push",
+    "resource_management": "rename/bind/export/archive/package restore implemented; personal resource operations tested with fixtures",
+    "enhancement_switch": "persisted and browser verified; host unknown fails closed",
+    "latest_validation": "24 management browser checks passed, including attachments; 8 historical workbench checks passed; screenshot exposed horizontal clipping at narrow viewport",
+    "next": "Actual browser zoom and server disconnect; real pending approval integration remains unverified",
+    "windows_publication": "replace:2/40 failed;rename:0/40 failed;new-only publication now rename, no retries;internal OS cause unproven",
+    "horizontal_clipping": "fixed in outer frame skin using overflow:clip; 9 native UI checks passed and screenshot reviewed",
+    "preview_url": "http://127.0.0.1:8765/#board",
+    "delivery": "Every completion response must include a clickable local preview link",
+    "offline_validation": "3 browser offline checks passed: HTTP blocked, iframe/draft preserved across navigation, HTTP recovered; server crash and interrupted task recovery not verified",
+    "background": "Browser-local PNG/JPEG/WebP background and reset implemented;4 browser checks passed;not bundled or uploaded",
+    "theme": "Fixed reentrant theme/change override ordering in skin via queued microtask; 3 theme checks passed; no upstream edits",
+    "copy_cleanup": "User-authorized prototype explanatory copy removed; operational hints/status retained;24 interaction checks passed",
+    "latest_visual": "Dark room controls contrast fixed; prototype object labels and dummy role removed;3 theme and24 management checks passed before final static placeholder removal",
+    "approval_fixture": "6 isolated checks passed: scrolling/actions/failure plus light-dark-light computed palette and reject contrast >=4.5; screenshots reviewed; no real authority or transport exercised",
+    "task_entry": "Same-generation advisory metadata plus verbatim current-message evidence and conservative local filter;26 backend tests and browser fixtures passed;zero model requests;backend restart pending to preserve volatile active chat;real model compliance unverified",
+    "settings_capabilities": "用户授权移除设置能力模块分区及重复列表，保留能力页唯一管理入口；23项浏览器回归通过，0页面错误。",
+    "sidebar_repair": "借鉴shadcn ghost面板按钮，移至顶部；移除top45%及渐变替代图标，修复浅色tooltip；1280/810各3轮折叠展开通过，提示对比度11.12，证据.sumika-next/sidebar-verification",
+    "prompt_optimization": "用户要求仅UI预留；星光按钮已接原生conversation.input.right，aria-disabled无操作；模板改写撤下，模型接入F-003 deferred。20项浏览器管理检查通过。",
+    "narrow_header": "360/480/810宽度顶栏检查通过，480截图核对；导航不竖排，状态另行排列。",
+    "room_history": "新版日用后端已上线：3条消息分页/当前角色清空可用，长期记忆不清；20界面检查、HTTP隔离和浏览器夹具通过，用户聊天未删除。",
+    "room_history_role_binding": "分页/非分页历史均绑定当前角色；清空保持严格会话匹配；新增2项隔离测试，整体41项后端回归和20项浏览器检查通过"
+  },
+  "desktop_integration": {
+    "status": "in_progress",
+    "record": "docs/project/desktop-integration-execution.md",
+    "implemented": [
+      "统一新旧 Bridge Host/Origin/CSRF 写入口",
+      "无角色模型配置首启，生成默认关闭",
+      "受管工作台 Profile 单写者锁及 PID 创建身份",
+      "角色会话和交接草稿 SQLite 持久化",
+      "退出与 HTTP 写操作串行化；失败保留未知状态",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "verified": "30 targeted tests passed; isolated bridge restart and stale token rejection passed; native layout isolated probe passed (not product migration)",
+    "daily_rollout": "已切换新版Bridge及受管DSH；已知角色聊天备份/恢复2条，分页/清空API已上线，20界面检查通过；自定义旧session枚举限制仍保留",
+    "remaining": [
+      "原生布局产品迁入和准确来源通信",
+      "可信项目选择、接收状态及完成证据回传",
+      "定时任务执行桥和三站 BrowserSkill 实际接线",
+      "安全模式、备份恢复、安装和诊断",
+      "异常启动记录的显式恢复流程，日用旧进程历史导出与安全版本切换"
+    ],
+    "next_action": "完成 BrowserSkill 三站绑定与端到端验收；保留当前 iframe 方案",
+    "shared_ownership": "UI和CLI共享sumika_next.runtime_ownership；19项测试通过；真实两轮UI/CLI竞争写者被拒绝，零模型调用",
+    "ownership_evidence": ".sumika-next/ownership-probe-54ec971bdb794c7788f9b8f00f68feec/report.json",
+    "legacy_chat": "已知UI会话个人快照SHA256校验；安和昴2条消息导入1轮；旧接口不能枚举自定义会话，旧服务继续运行。4项会话测试通过。",
+    "native_transport": "当前受管DSH准确origin与实例绑定令牌；隔离真实浏览器CORS/写保护/切页草稿保留通过，无模型调用，未部署日用",
+    "native_transport_evidence": ".sumika-next/layout-probe-dcfc0fc5c00a42689b7f501a9ea1d69e",
+    "role_card_refresh": "最新用户交付原样导入；source/target SHA256 b2d7578633c5181072aaf162f048f0a8e101e8f8f0a104dc86b91699f797bf4e；个人备份校验，模型绑定及2条聊天保留",
+    "shared_page_transport": "bind/management/handoff复用模块来源绑定的Bridge请求层；旧页面20项检查及原生动态导入/写保护实测通过",
+    "cleanup_blocker": "失败备份backend-switch-fe98f622d7a14d14885ecda06d14812f递归清理被自动审核拒绝，未绕过，正式备份backend-data-830dc5652a5844dca33a758a0046d27b已校验",
+    "native_regression": "近期切换后原生布局隔离探针通过：f8a3d5e4ad634e2bbad0d764bd019a45；历史夹具通过；仍未产品迁移",
+    "workbench_load_feedback": "受管DSH iframe加载/错误状态与同URL重试已接线；20项浏览器回归通过，不重启/重放"
+  },
+  "browser_consultation_execution": {
+    "status": "complete",
+    "updated_at": "2026-09-17T06:48:47.944970+00:00",
+    "scope": "BrowserSkill 三站会话绑定、授权与失效恢复",
+    "implemented": [
+      "授权注册表内持久化网站/浏览器实例/Agent窗口/session/tab绑定，不改变read/send授权",
+      "绑定查询及按绑定创建咨询桥；操作前检查身份，跨站/移窗/撤权/失效时拒绝，不自动重绑",
+      "管理接口 browsers/bind 与 browsers/status；session inventory错误标unknown",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "verified": [
+      "25 targeted Python tests passed",
+      "通过 bound_bridge.observe 对 DeepSeek/Kimi/GPT 实际只读调用均 observed，未提交消息；个人证据 browser-binding-verification.json"
+    ],
+    "remaining": [
+      "前端绑定/显式重新绑定与失效提示接线",
+      "原生网页提交/响应采集与持久化未知状态链路",
+      "需要明确发送测试许可后做三站端到端验收"
+    ],
+    "layout_decision": "按用户最新决定保留当前 iframe + 独立适配层；原生四页迁入暂缓，不是完成事实",
+    "submission_journal": {
+      "status": "implemented_fixture_tested",
+      "tests": "23 targeted tests passed; wider 32-test run had 1 unrelated role import WinError 5",
+      "boundary": "Explicit host approval plus read/send and current binding checks; UNKNOWN committed before fill/click; same request ID never dispatches twice; submitted is not completed",
+      "remaining": [
+        "Real site selectors and draft-preservation preflight",
+        "Browser-side origin race mitigation",
+        "Response correlation and completion evidence",
+        "Real send approval and three-site acceptance"
+      ],
+      "external_messages_sent": 0
+    },
+    "submission_guard": {
+      "status": "implemented_local_browser_verified",
+      "tests": "20 targeted Python tests pass; real headless Edge guard fixture passes with zero external requests",
+      "scope": "page-local origin + exact draft guard before fill/click; textarea and contenteditable supported",
+      "remaining": "Real site selector verification and response correlation/completion; explicit test-send approval; production integration not accepted"
+    },
+    "next_action": "第2项验收完成；后续按批准计划进入下一项。新咨询继续逐次原生审批，已使用测试不重放。",
+    "send_approval_pending": {
+      "artifact": ".sumika-next/web-review-acceptance/pending.json",
+      "sites": 3,
+      "messages_per_site": 1,
+      "status": "approved_and_consumed"
+    },
+    "send_acceptance": {
+      "three_sites": "SUMIKA_OK observed in actual answer regions",
+      "kimi": "first adapter attempt UNKNOWN; screenshot-guided one-shot existing draft submission succeeded",
+      "cause": "first failure unproven; earlier journal lacked stage information",
+      "automatic_replays": 0
+    },
+    "readiness_guard": {
+      "implemented": "read-only readiness polling, one fill/one click, durable stage metadata",
+      "verified": "21 targeted tests and real Edge local fixture passed",
+      "live_fixed_kimi": "not_verified"
+    },
+    "purpose": "主Agent完成计划或复杂成果后的交叉审查；网页模型仅提建议，由主Agent核验，不主导规划或授权。",
+    "binding_ui": {
+      "status": "implemented_fixture_verified",
+      "test": "tools/verify_browser_authorization_ui.mjs",
+      "live_binding_state": "three_sites_ready_revalidated",
+      "daily_backend_restarted": false
+    },
+    "response_correlation": {
+      "status": "three_site_native_readback_verified",
+      "python_tests": 37,
+      "collectors": "live_three_site_completed",
+      "no_new_submission": false,
+      "legacy_baseline_backfill": false,
+      "daily_backend_restarted": true
+    },
+    "native_review_tools": {
+      "status": "daily_registered_and_isolated_live_native_execution_verified",
+      "python_tests": 43,
+      "node_tests": 5,
+      "native_result": "ABORTED_BEFORE_DISPATCH",
+      "daily_installed": true,
+      "new_messages_sent": 5,
+      "evidence": ".sumika-next/web-review-native-ee58179d2a794dcfadbd3e74b0beab8c",
+      "daily_tool_discovery": "native_registry_verified"
+    },
+    "complex_draft_guard": {
+      "status": "implemented_edge_fixture_verified",
+      "uploaded_preview_cards": "not_fully_verified"
+    },
+    "live_review_acceptance": {
+      "evidence": ".sumika-next/web-review-acceptance/live/report.json",
+      "sites": {
+        "chat.deepseek.com": {
+          "state": "completed",
+          "native_readback": true
+        },
+        "www.kimi.com": {
+          "state": "completed",
+          "native_readback": true
+        },
+        "chatgpt.com": {
+          "state": "completed",
+          "native_readback": true
+        }
+      },
+      "restart_no_replay": true,
+      "paid_api_calls": 0,
+      "kimi": "快速模式；清旧稿后同一获准消息经一次受控续提交；未验收修复后全新请求全自动流程",
+      "chatgpt": "用户授权后选择左侧回复1；思考模式在原测试发送后开启，未重发",
+      "remaining": [
+        "日用工具发现验证",
+        "受管浏览器恢复产品入口",
+        "站点已上传附件预览卡保护完整验收"
+      ]
+    },
+    "daily_install": {
+      "evidence": ".sumika-next/web-review-acceptance/install.json",
+      "profile_backup_verified": true,
+      "running": true,
+      "embed_ready": true,
+      "settings_rpc_verified": true,
+      "reloaded_with_recovery_and_step_identity": true
+    },
+    "request_identity": {
+      "status": "implemented_tested",
+      "identity": "project/session/native turn/native step/callId",
+      "node_tests": 5,
+      "legacy_query_ownership_preserved": true
+    },
+    "recovery_entry": {
+      "status": "daily_live_restore_verified",
+      "assets": "existing connection permissions dialog, BrowserSkill session_start/session_list/bind_session",
+      "tests": "13 Python tests plus real headless Edge UI fixture passed",
+      "remaining": "重新打开页面只保证传输绑定可用；各站生成模式仍须检查",
+      "evidence": ".sumika-next/web-review-acceptance/daily-recovery.json"
+    },
+    "final_send_proposal": ".sumika-next/web-review-acceptance/final-send-proposal.json",
+    "final_acceptance": {
+      "status": "passed",
+      "original_three_site_evidence": ".sumika-next/web-review-acceptance/live/report.json",
+      "kimi_fast_gpt_thinking_evidence": ".sumika-next/web-review-acceptance/final-live/report.json",
+      "daily_registry_evidence": ".sumika-next/web-review-acceptance/daily-registration.json",
+      "recovery_evidence": ".sumika-next/web-review-acceptance/daily-recovery.json",
+      "paid_api_calls": 0,
+      "native_approval_cancel": "ABORTED_BEFORE_DISPATCH",
+      "automatic_replays": 0,
+      "python_tests": 43,
+      "node_tests": 5,
+      "scope": "第2项网页交叉审查授权、绑定、提交、完成回读、未知/取消、重启恢复及日用接线；非整个P5完成"
+    },
+    "limitations": [
+      "仅三站固定文本入口；已上传附件预览并非全形态覆盖，不将带附件草稿列为支持范围",
+      "GPT本次思考回答曾空白，重载同一线程后读回；未重新发送，不承诺站点始终自动恢复",
+      "网站DOM或模式变化失败关闭；重新绑定不自动重发历史请求",
+      "取消仅本地跟踪，不保证停止网站生成；未知通道不自动释放",
+      "日用原生注册与恢复实测，发送执行使用真实隔离DSH+确定性本地模型，不冒称日用付费模型已调用"
+    ],
+    "master_switch": {
+      "status": "implemented_tested_daily_loaded",
+      "default": false,
+      "legacy_without_flag": false,
+      "current_personal_state": false,
+      "source": "personal browser-authorizations.json enabled field",
+      "ui": "设置→连接与权限→网页咨询授权→启用网页咨询",
+      "tests": "26 targeted Python tests; real Edge dialog fixture; daily GET confirms disabled and POST start rejected",
+      "boundary": "关闭保留授权、绑定、历史；禁止新网页操作。已到达网站的请求不承诺远端终止；本地状态查询/取消保留。"
+    }
+  },
+  "memory_integration_execution": {
+    "status": "complete",
+    "goal": "完成第3项长期记忆及角色能力实际接线验收",
+    "current_verified_settings": {
+      "memory_provider": "embedded",
+      "auto_extract": false,
+      "enabled": true,
+      "model_proposals": false
+    },
+    "assets": "existing RoleSession/EmbeddedMemory/SemanticMemory/ExtractionGate and persisted conversations; reuse, no parallel memory engine",
+    "implemented": "chat extraction uses persisted user message identity; standalone calls get unique identity instead of process-randomized hash",
+    "tests": "57 relevant Python tests passed; shipped UI exercised in real Edge with synthetic data; real local Qwen3 8B final 3-case acceptance passed; semantic multi-turn 13/13; retrieval comparison embedded 8/14 and semantic 13/14",
+    "next_action": "Item3 functional integration complete. Keep personal settings unchanged; broader P6-3 provider research/long-range benchmarking remains in long-term-memory-plan.md.",
+    "verified_this_pass": [
+      "memory reaches real RoleChat provider boundary with compiled card enabled and disabled",
+      "user and project scopes isolated; forgotten fact absent from injection",
+      "new Python process restores existing SQLite facts",
+      "12 targeted tests passed"
+    ],
+    "discovered_gaps": [],
+    "semantic_runtime": {
+      "status": "implemented_real_offline_verified_bridge_reloaded_provider_unchanged",
+      "implementation": "existing memory-env and bge-small-zh-v1.5 offline worker; one subprocess per nonempty retrieval; no download/fallback",
+      "evidence": ".sumika-next/memory-chat-runtime-6e9afca723d54b7285848aea60236893/report.json",
+      "checks": [
+        "paraphrase recalled into model reference",
+        "updated fact supersedes previous value after reopen",
+        "other user isolated"
+      ],
+      "elapsed_seconds": 2.86,
+      "tests": "15 targeted tests + settings preflight failure preservation"
+    },
+    "switch_verification": {
+      "status": "passed",
+      "ui": "settings / data / 使用长期记忆",
+      "enabled": true,
+      "auto_extract": false,
+      "provider": "embedded",
+      "tests": "42 targeted unittest tests passed; real headless Edge checkbox visible and checked; auto_extract unchecked",
+      "semantics": "disabled chat skips recall/injection/extraction and semantic runtime; explicit local management remains available"
+    },
+    "extraction_hardening": "whole-message conservative matching; skip quoted/hypothetical/ambiguous update statements; independent stable preference keys; reject bool/nonfinite/out-of-range confidence",
+    "model_proposer": {
+      "status": "implemented_tested_live_verified_daily_reloaded",
+      "implementation": "single response JSON envelope carries intent and memories; no second generation; obvious hypothetical/quoted source rejected; explicit user confirmation before recall",
+      "tests": "55 relevant Python tests passed; real Edge shipped UI with synthetic API responses passed; one unrelated Windows role package rename PermissionError in broad suite",
+      "runtime": "daily Bridge reloaded; workbench running; embedded/enabled=true/auto_extract=false/model_proposals=false unchanged",
+      "failed_live_evidence": ".sumika-next/memory-model-live-3bd6b89970b94f5a88e419e368b3d784/report.json",
+      "last_failure": ".sumika-next/memory-model-live-78cf6ebe1d774f8985dc757109c88ba9/report.json",
+      "live_evidence": ".sumika-next/memory-model-live-d88a6ca86a544290adf283573a004f41/report.json"
+    },
+    "semantic_consistency": {
+      "evidence": ".sumika-next/memory-final-consistency.json",
+      "passed": 13,
+      "total": 13,
+      "elapsed_seconds": 2.0
+    },
+    "limitations": [
+      "Small synthetic local-model acceptance is not a general model-quality guarantee; malformed or missing metadata is discarded without retry",
+      "Model suggestions require user confirmation; no automatic contradiction resolution or model-selected fact-key overwrite",
+      "Semantic regression misses one paraphrase out of 14; this task does not claim AML or best-provider certification",
+      "Separate existing Windows role-package rename flakiness not fixed in this memory package"
+    ]
+  },
+  "capability_settings_ui": {
+    "status": "complete",
+    "scope": "Capability configuration migration and UI design-reference documentation R-117/R-118/R-119",
+    "assets": "ui/prototype-d/index.html capability cards/detail and settings forms adapted; existing Management settings/modules APIs retained",
+    "implemented": [
+      "speech groups ASR/TTS; microphone separate consent in details",
+      "memory controls migrated from settings to capability details",
+      "usage stays in general data settings; help supports hover/focus/click",
+      "microphone module enabled does not imply permission; backend denies without explicit consent and still requires per-call approval",
+      "requirements captured as design reference, alternative designs allowed",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "verification": [
+      "10 targeted Python tests passed",
+      "verify_capability_settings_ui.mjs real Edge with synthetic writes passed",
+      "verify_memory_proposals_ui.mjs passed after migration",
+      "1440 and 1024 pixel screenshots reviewed; panel indexing fixed"
+    ],
+    "personal_data": "No personal settings, module grants or memories changed; daily Bridge reloaded and workbench restored",
+    "next_action": "Future frontend work can redesign grouping/layout; preserve functioning controls, data and authorization semantics."
+  },
+  "model_library_migration": {
+    "status": "complete",
+    "root": "E:/Models",
+    "scope": "9 identified standalone LLM/embedding/speech asset roots; runtime package bundled OCR excluded",
+    "strategy": "copy, SHA256 compare target and source, exact source removal, compatibility junction; no overwrite, no model download",
+    "next_action": "Implement settings work/role/helper usage sections and shared selectable-folder model inventory; evaluate Qwen3 1.7B/4B helper, then wire prompt optimization and project/intent suggestions. These product features remain pending.",
+    "manifest": "E:/Models/migration-records/20260917-181427/manifest.json",
+    "verification": "8 Ollama models discovered from 3 relocated libraries; semantic RoleChat offline integration passed; all 9 junctions, file counts and sizes checked after migration",
+    "summary": {
+      "roots": 9,
+      "files": 160,
+      "GiB": 48.921,
+      "freed_C_GiB": 2.908,
+      "freed_D_GiB": 3.238
+    }
+  },
+  "model_library_ui": {
+    "status": "partial",
+    "implemented": "settings model section reuses existing form; configurable absolute roots and opt-in startup scan; read-only bounded GGUF/safetensors/ONNX/Ollama manifest discovery; registered Ollama name can populate role fields without auto enable",
+    "verified": "4 targeted tests; E:/Models 18 assets no issues; actual Edge scan displays 18 models; no inference/download",
+    "remaining": "three usage subpanels, independent helper configuration and actual helper inference; endpoint compatibility verification before selection; work model native adapter",
+    "personal_change": "only initialized empty model_library.roots to E:/Models; auto_scan false; existing model choices unchanged"
+  },
+  "model_settings_navigation_fix": {
+    "status": "verified",
+    "cause": "New frontend accessed missing auxiliary.enabled from old running Bridge and aborted settings navigation initialization.",
+    "fix": "Backward-compatible optional-section defaults; daily Bridge gracefully reloaded.",
+    "verification": "tools/verify_model_settings_ui.mjs: live and simulated legacy settings; all usage tabs and appearance navigation pass, no writes."
+  },
+  "minicpm_prompt_preview": {
+    "status": "integration_paused_by_user",
+    "evidence": "docs/project/minicpm-prompt-preview-evidence.json",
+    "tests": "20 Python tests; browser fixture preview checks passed",
+    "personal_enabled": false,
+    "remaining": "No further integration without user instruction; toolbar restored to disabled placeholder, helper config disabled.",
+    "boundary": "No classification or dispatch; explicit preview confirmation only"
+  },
+  "minicpm_task_survey": {
+    "status": "research_complete_limited_samples",
+    "requests": 64,
+    "evidence": "docs/project/minicpm-task-survey.md",
+    "product_integrated": false
+  },
+  "role_location_migration": {
+    "status": "implemented_isolated_verified_daily_deployed",
+    "scope": "Active imported role copy-and-cutover via single Bridge admission lock; original retained",
+    "implementation": [
+      "SHA256 resource inventory and valid role checks",
+      "Exact settings backup and SQLite online backup plus integrity check",
+      "Durable prepared/rolling_back/completed/cancelled journal",
+      "Explicit resume or rollback; no model/task replay; independent changes refuse recovery",
+      "Persistent roster path projection for repeated migrations and role switching",
+      "Protected HTTP operations and tools/relocate_user_role.py; default read-only"
+    ],
+    "verification": [
+      "43 targeted regression tests passed",
+      "6 relocation tests passed including real isolated HTTP authorization, pending write fence and explicit resume"
+    ],
+    "limitations": [
+      "No settings GUI migration dialog added",
+      "Single managed Bridge assumption; direct file/database writes by other programs unsupported",
+      "General application backup/installer/update recovery remain pending"
+    ],
+    "cleanup": "Four explicitly named failed-test directories removed after approval and verified absent.",
+    "deployment_evidence": "docs/project/role-relocation-deployment-evidence.json"
+  },
+  "diagnostics": {
+    "status": "partial_query_hardened",
+    "assets": [
+      "extensions/diagnostics/query.py",
+      "sumika_next/cli.py",
+      "existing continuity records"
+    ],
+    "implemented": [
+      "read-only SQLite access; task/session predicates before result limit; seq cursor",
+      "structured status/error fields only; no keyword inference from user text",
+      "opaque redaction of non-token identifiers; raw payload and project docs excluded from exports",
+      "document hashes preserve source identity; export refuses overwriting existing files",
+      "CLI local json import shadowing fixed after actual subprocess export failure",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "tests": "6 unit tests passed plus actual subprocess CLI query and ZIP export in synthetic workspace",
+    "evidence": ".sumika-next/diagnostic-cli-7b0f452d0ec64ad8926d1bb76944ab45",
+    "remaining": [
+      "DSH-native event adapter and real native failure/approval denial/continuity-write-failure acceptance",
+      "query switch and broader diagnostics product integration",
+      "general personal-data backup/restore remains next package"
+    ],
+    "personal_data_changed": false
+  },
+  "diagnostic_lifecycle_checkpoint": {
+    "status": "implemented_and_targeted_tests_passed",
+    "tests": 34,
+    "scope": "Profile lease, diagnostic adoption isolation, evidence CLI export",
+    "evidence": "docs/project/agent-diagnostics-plan.md"
+  },
+  "continuity_failure_checkpoint": {
+    "status": "targeted_tests_passed",
+    "implemented": "Native continuity adapter propagates and latches capture/recover/query/report failures across queued flush, tools and pre-step; generic CONTINUITY_UNAVAILABLE errors exclude subprocess details.",
+    "verification": [
+      "node --test extensions/continuity/dsh.test.mjs: 9 passed",
+      "python -B -m unittest tests_next.test_continuity_extension tests_next.test_diagnostics_cli_lifecycle tests_next.test_diagnostics_dsh: 25 passed"
+    ],
+    "limitations": "Fence is per in-memory session object. Durable restart recovery and strengthened real DSH failure acceptance remain unverified."
+  },
+  "continuity_real_failure_checkpoint": {
+    "status": "isolated_real_dsh_passed",
+    "evidence": ".sumika-next/continuity-failure-6019217d9dbd47a5bcde2f739ea3ff08/report.json",
+    "checks": [
+      "Healthy plugin and loopback model baseline completed",
+      "Corrupted database only after confirmed process stop; healthy database copy retained",
+      "After restart both submitted turns end with observed continuity error and zero new model requests",
+      "Corrupt database bytes remain unchanged"
+    ],
+    "limitations": "Does not establish durable unknown-operation fencing after database repair or process death between dispatch and acknowledgement. No cloud model or daily service tested."
+  },
+  "native_rejection_checkpoint": {
+    "status": "native_service_rejection_passed",
+    "evidence": ".sumika-next/web-review-native-ed30a789fe344935bf49c8278ed5e807/report.json",
+    "checks": [
+      "Native approval asked/decided pair records rejected",
+      "Rejected tool reports isError=true without an invented error code",
+      "Local worker dispatch sentinel absent",
+      "Diagnostic projection retains approval ID, call ID and rejected outcome"
+    ],
+    "boundary": "Synthetic native answerer, not a real user clicking the browser refusal button; isolated loopback model and inert worker only."
+  },
+  "portable_inventory_checkpoint": {
+    "status": "inventory_gate_implemented",
+    "assets": [
+      "tools/verify_portable_staging.py",
+      "packaging/README.md",
+      "packaging/Sumika.Launcher.csproj",
+      "tools/start_sumika.ps1",
+      "tools/start_ui_bridge.ps1"
+    ],
+    "decision": "Reuse existing launcher and verifier; strengthen the verifier instead of introducing another packaging system.",
+    "verification": [
+      "python -B -m unittest tests_next.test_portable_inventory: 7 passed",
+      "Existing .sumika-next/package/sumika-portable rejected: version 2 inventory missing"
+    ],
+    "remaining": [
+      "Explicit clean release selection and physical dependency staging",
+      "Installer enforcement of inventory",
+      "Runtime dependencies and isolated data/startup",
+      "Instance identity instead of arbitrary HTTP 200",
+      "Backup/restore and real self-development acceptance"
+    ],
+    "limitations": "No new release archive built; old archives preserved. Inventory hashes do not prove absence of secrets in arbitrary source, runtime completeness or licenses."
+  },
+  "installer_inventory_checkpoint": {
+    "status": "implemented_and_synthetic_installation_passed",
+    "assets": [
+      "packaging/install_sumika.ps1",
+      "tools/verify_portable_installer.py"
+    ],
+    "implementation": "Verify schema-v2 inventory and every ZIP file hash before extraction without running package code or depending on Python. Reject nested runtime data and credentials.",
+    "verification": "14 PowerShell installer scenarios passed; same-size content tampering included",
+    "evidence": ".sumika-next/package/installer-check-8d0600de0e75468393164437d78ff48a/report.json",
+    "limitations": "Synthetic archives only; no new complete runnable release built. Existing destination concurrency, dependency portability and clean startup remain to review."
+  },
+  "portable_dsh_runtime_checkpoint": {
+    "status": "runtime_relocation_verified",
+    "assets": [
+      "runtime/dsh/package.json",
+      "runtime/dsh/pnpm-lock.yaml",
+      "runtime/dsh/release.json",
+      "D:/Caches/pnpm-store/v11",
+      "tests_next/p2_fixture.py",
+      "sumika_next/dsh.py"
+    ],
+    "build_command": "pnpm.cmd install --offline --frozen-lockfile --ignore-scripts --node-linker=hoisted",
+    "build_directory": ".sumika-next/package/runtime-build-4495d8c18ec9409db56879350af232c7",
+    "build_result": {
+      "pnpm_version": "11.19.0",
+      "packages": 500,
+      "downloaded": 0,
+      "files": 24450,
+      "bytes": 222021483,
+      "filesystem_links": 0,
+      "release_hashes_verified": 4
+    },
+    "verification": "tools/verify_portable_dsh.py: copied physical runtime; real DSH authenticated start, native write/edit/read/pwsh, output assertions and owned process exit all passed",
+    "evidence": ".sumika-next/package/runtime-relocation-503179a4ee8446f7abad328d939b760e/report.json",
+    "limitations": "Host Python and Node still used; no bundled dependency or full product acceptance. Five deterministic loopback model requests, no cloud. Original daily runtime unchanged; no files deleted."
+  },
+  "host_runtime_checkpoint": {
+    "status": "baseline_staged_and_isolation_verified",
+    "assets": [
+      "D:/Tools/python/Python314",
+      "D:/Tools/nodejs",
+      "pyproject.toml"
+    ],
+    "tool": "tools/build_host_runtimes.py",
+    "evidence": ".sumika-next\\package\\host-runtimes-20260911-c/isolation-evidence.json",
+    "decision": "Reuse installed interpreter binaries with licenses, standard library, and two pinned baseline dependencies; omit developer site-packages, models and optional capability packages.",
+    "limitations": "Locally installed binary provenance only; vendor archive/signature review and complete product execution still required. Earlier a/b fixtures retained, c is the verified candidate."
+  },
+  "portable_startup_wiring_checkpoint": {
+    "status": "implemented_targeted_tests_passed",
+    "assets": [
+      "tools/start_sumika.ps1",
+      "tools/start_ui_bridge.ps1",
+      "sumika_next/daily.py",
+      "sumika_next/dsh.py",
+      "extensions/models/settings.py",
+      "ui/schedule.py",
+      "extensions/desktop/browser_skill.py"
+    ],
+    "implementation": [
+      "SUMIKA_DATA_DIR absolute override shared across settings, roles, schedule, browser grants and DSH profiles",
+      "Launcher DataDirectory parameter; packaged runtime defaults personal data outside installation",
+      "Bundled Python/Node preferred; incomplete bundled runtime fails without host fallback",
+      "Bridge logs in personal data; early process exit reported; quoted path arguments"
+    ],
+    "verification": [
+      "47 existing/new related tests passed",
+      "4 portable path tests passed after adding Node selection/failure coverage",
+      "PowerShell syntax parse passed for both launchers"
+    ],
+    "limitations": [
+      "No assembled product startup performed yet",
+      "Launcher HTTP200 identity still insufficient",
+      "Runtime dependencies incomplete for optional capabilities",
+      "No automatic migration of existing profile/data"
+    ]
+  },
+  "assembled_product_checkpoint": {
+    "status": "assembled_service_and_workbench_startup_passed",
+    "builder": "tools/build_portable_staging.py",
+    "candidate": ".sumika-next/package/product-candidate-20260911-a",
+    "inventory_files": 26013,
+    "evidence": [
+      ".sumika-next/package/startup-3a2d9c3ad58c49dc903728b2583391c6/report.json",
+      ".sumika-next/package/workbench-startup-8535ee7608c4420ba660b12bee48e8d4/result.json"
+    ],
+    "checks": [
+      "Inventory exact file sizes and hashes verified",
+      "Bundled Python imports product and serves HTML/state",
+      "Personal settings and conversations created outside installation",
+      "Workbench with Sumika extensions starts using bundled Node",
+      "Versioned DSH profile placed under explicit personal directory",
+      "Owned bridge and workbench stopped"
+    ],
+    "limitations": [
+      "Direct bundled Python startup; EXE and PowerShell launch path not yet accepted",
+      "Launcher existing-instance identity still HTTP200-based",
+      "No clean-machine acceptance, optional dependency completeness or license audit",
+      "No real model self-development task executed"
+    ]
+  },
+  "bridge_identity_checkpoint": {
+    "status": "identity_probe_verified",
+    "implemented": "Launcher verifies root/settings, live PID creation identity and OS listener ownership via ui.bridge_probe; unknown occupied ports fail closed.",
+    "verification": [
+      "21 probe/UI tests passed",
+      "Real isolated server matched; wrong settings path rejected"
+    ],
+    "evidence": ".sumika-next/package/bridge-identity-dbfff271196941968c11dbd45fc67d32/report.json",
+    "limitations": "Candidate a predates this fix. Rebuild candidate and test actual EXE launch/reuse. Bridge single-writer lock and concurrent launch race still require coverage."
+  },
+  "bridge_writer_checkpoint": {
+    "status": "implemented_tests_passed",
+    "assets": [
+      "ui/server.py",
+      "sumika_next/runtime_ownership.py"
+    ],
+    "decision": "Bridge data needs a process-lifetime lock distinct from child DSH ProfileLease; added ui/data_lease.py without a second ownership record or deletion.",
+    "verification": "24 bridge lease/UI/probe tests passed; same-data rejection before Bridge construction, constructor failure release and process termination release tested.",
+    "remaining": "Candidate b built and inventory verified (26016 files); actual EXE first launch failed because Windows refusal takes ~2s while probe timeout was 1s. Source probe timeout fixed to 5s; candidate b remains unchanged and needs rebuild."
+  },
+  "exe_startup_checkpoint": {
+    "status": "actual_exe_startup_reuse_conflict_passed",
+    "candidate": ".sumika-next/package/product-candidate-20260911-c",
+    "inventory_files": 26016,
+    "tool": "tools/verify_portable_exe.py",
+    "evidence": ".sumika-next/package/exe-startup-083b1425c8464988b741e42f11bd7f03/report.json",
+    "checks": [
+      "Actual Sumika.exe -> PowerShell -> bundled Python startup with new data directory succeeded",
+      "Second executable invocation reused identical bridge process identity",
+      "Foreign HTTP200 listener refused and left alive",
+      "Verified test bridge stopped"
+    ],
+    "limitations": [
+      "Current Windows host only; not a clean machine",
+      "No model task executed during this test",
+      "Optional dependencies and licensing not complete",
+      "No graceful active-work shutdown or full self-development acceptance"
+    ]
+  },
+  "personal_snapshot_checkpoint": {
+    "status": "offline_snapshot_implemented_not_restore_complete",
+    "assets": [
+      "docs/project/backup-recovery.md",
+      "extensions/roles/relocation.py",
+      "ui/data_lease.py",
+      "ui/management.py"
+    ],
+    "decision": "Existing role/memory exports are not whole personal-data snapshots; reuse bridge writer lock and add verified copy tool without activation or overwrite.",
+    "tool": "tools/backup_personal_data.py",
+    "tests": "5 passed: SQLite/settings preservation, live writer refusal, unresolved DSH ownership refusal, overwrite/nested destination refusal, copy failure preserves original and no success manifest",
+    "evidence": ".sumika-next\\package\\exe-startup-083b1425c8464988b741e42f11bd7f03\\verified-snapshot\\snapshot.json",
+    "limitations": "Offline snapshot only. External paths, legacy profiles outside source, active independent writers, full restore and rebinding need further work. No personal daily data copied."
+  },
+  "personal_restore_checkpoint": {
+    "status": "byte_restore_and_role_rebind_verified_partial",
+    "tool": "tools/backup_personal_data.py --restore --rebind-role-paths",
+    "verification": [
+      "9 snapshot tests passed; preserve message IDs/original text/unknown state and stable role scope",
+      "Restored prior isolated EXE data to new directory; rebound internal role memory path; bundled Python bridge /api/state returned 200"
+    ],
+    "evidence": ".sumika-next/package/restore-startup-307073076b5a497180d2723e71ff76a4/report.json",
+    "limitations": "Not complete profile relocation. DSH paths, external resources and other capability-specific paths still require review; independent writer fencing, partial-rebind recovery and full task restart acceptance remain. Daily data untouched."
+  },
+  "restore_interruption_checkpoint": {
+    "status": "role_rebind_recovery_and_existing_profile_fencing_verified",
+    "implementation": [
+      "Durable pending role rebind journal precedes binding writes; same plan resumes idempotently after config save failure",
+      "Bridge rejects pending/invalid restore journals before business initialization",
+      "Changed settings cause explicit recovery conflict rather than overwrite",
+      "Offline snapshot holds existing DSH byte-range locks without rewriting ownership records"
+    ],
+    "verification": [
+      "31 combined snapshot/bridge/UI tests passed after fixing empty test role fixture",
+      "15 focused snapshot/lease tests passed after independent DSH lock coverage"
+    ],
+    "limitations": [
+      "Not full DSH/capability path migration",
+      "Snapshot cannot guarantee quiescence of uncooperative external writers or newly created independent profiles",
+      "Restore journal is personal data and contains settings; never publish",
+      "Existing packaged candidate c does not contain these newest recovery changes"
+    ]
+  },
+  "dsh_profile_restore_checkpoint": {
+    "status": "real_dsh_profile_restore_passed",
+    "tool": "tools/verify_personal_restore_dsh.py",
+    "evidence": ".sumika-next/package/profile-restore-114d0fb31d16441e9cb42d22e268c0fe/report.json",
+    "verification": [
+      "Real original DSH file-write task completed then owned workbench stopped",
+      "13-file snapshot restored into new data root",
+      "DSH session original text and tool-result records preserved",
+      "Restored startup made zero new model calls and did not modify task artifact",
+      "Original profile unchanged; recovered workbench stopped",
+      "13 snapshot unit tests passed"
+    ],
+    "implementation": "Exclude only generated dsh-profiles/*/profiles/node_modules; DSH recreates dependency mount on restart. Other linked user data remains rejected.",
+    "limitations": "Same application/runtime and workspace paths retained; cross-install plugin paths and optional capability resources not accepted. Source verifier inventory optimized after run; no new broad acceptance claim."
+  },
+  "release_notice_checkpoint": {
+    "status": "release_selection_hardened_notices_partial",
+    "implementation": [
+      "BrowserSkill allowlist includes only bsk.exe and named LICENSE/NOTICE files",
+      "Builder and installer reject .update- residual files without deleting originals",
+      "packaging/notices added from official URLs and wired into licenses output",
+      "VRM and thumbnail reversed hash labels corrected from actual SHA256"
+    ],
+    "verification": [
+      "9 portable inventory tests passed",
+      "15 actual PowerShell installer scenarios passed"
+    ],
+    "evidence": ".sumika-next/package/installer-check-90c75382679d4bf88607dd36ef8d5b79/report.json",
+    "notices": "packaging/notices/sources.json",
+    "limitations": "Remote BrowserSkill asset digest remains unverified; transitive license/dependency audit incomplete. Candidate c predates latest selection/recovery changes; not release-ready.",
+    "provenance_followup": "BrowserSkill cli-v0.1.11 MIT pinned at 70b851a3e8408f4994a757e47137ef515bd82901; binary equals cached archive. Three.js embedded r185 marker matched to r185 notice. Reviewed asset and notice digests checked before staging."
+  },
+  "repeat_restore_checkpoint": {
+    "status": "repeat_role_recovery_verified_partial",
+    "assets": [
+      "tools/backup_personal_data.py: adapted existing journal/rebind flow",
+      "extensions/roles/conversations.py: reused stable scopes",
+      "tests_next/test_personal_snapshot.py: extended existing recovery tests"
+    ],
+    "implementation": [
+      "Completed inherited journals archived by content hash before a new recovery plan",
+      "Repeated relocation retains stable role scope, message original and unknown state",
+      "Pending inherited journals remain rejected; original and prior restored data untouched"
+    ],
+    "verification": "python -B -m unittest tests_next.test_personal_snapshot tests_next.test_portable_inventory: 25 passed; sqlite ResourceWarning observed",
+    "limitations": "Role paths only. Cross-install DSH/capability paths, full distribution and real model self-development remain incomplete."
+  },
+  "cross_install_restore_checkpoint": {
+    "status": "cross_install_workbench_profile_restore_verified_partial",
+    "assets": [
+      "ui/workbench.py ensure_skin: adapted existing registration to selected product root",
+      "tools/verify_personal_restore_dsh.py: extended existing live DSH recovery verifier"
+    ],
+    "implementation": "Workbench plugin paths and brand release metadata now derive from controller product root, not imported Python module or guessed profile ancestors. User plugin rows preserved.",
+    "verification": [
+      "11 workbench tests passed, including idempotent re-registration and external plugin preservation",
+      "Real DSH original tool task -> offline snapshot -> restored data under separate product candidate -> existing session/tool records intact",
+      "Three owned plugin registrations point to selected product; original profile unchanged; zero replay/new model calls; owned instances stopped"
+    ],
+    "evidence": ".sumika-next/package/profile-restore-57478c018ebd4153bd5f56008171069f/report.json",
+    "limitations": "Current host Python orchestrated the restored candidate DSH. Original install remains present. External role/workspace paths retained. Not clean-machine acceptance, all extension migration, full EXE recovery, or real model self-development. Candidate c remains stale."
+  },
+  "packaged_install_checkpoint": {
+    "status": "current_host_archive_install_exe_passed",
+    "candidate": ".sumika-next/package/product-candidate-20260911-d",
+    "files": 26020,
+    "assets": [
+      "tools/build_portable_staging.py: reused explicit file selection",
+      "packaging/install_sumika.ps1: reused production installer",
+      "tools/verify_portable_exe.py: reused owned EXE lifecycle probe"
+    ],
+    "verification": [
+      "Candidate exact inventory passed",
+      "10 portable inventory tests passed",
+      "Archive entries hash/size verified",
+      "Real PowerShell installer succeeded; 26020 installed files verified",
+      "Installed EXE first launch, same-instance reuse, foreign port rejection and owned test shutdown passed"
+    ],
+    "tool": "tools/verify_packaged_install.py",
+    "next": "Real model self-development, full dependency/license audit, clean-machine acceptance and active-task graceful shutdown remain. Internal artifact only; no publication or daily installation change.",
+    "evidence": ".sumika-next/package/packaged-install-33addfbf832e42d29c011a9f6ab39ce8/report.json",
+    "archive_sha256": "fdf028736860a15009c46ae5099dd9721a75cb288725266b5cbd51ff029a4b82",
+    "archive_bytes": 221867262
+  },
+  "live_self_development_checkpoint": {
+    "status": "real_model_modified_copy_but_acceptance_failed",
+    "evidence": ".sumika-next\\self-development-live-a5ead649139e433bbf2d3498a7571535\\report.json",
+    "assets": [
+      "tools/verify_portable_staging.py: actual copied product module",
+      "sumika_next/dsh.py: native real Agent/tool adapter",
+      "tools/verify_dsh_recovery.py: reused prompt/event helpers"
+    ],
+    "model": "deepseek-flash",
+    "requests": 10,
+    "observed": [
+      "Real model read source, edited verifier and ran native pwsh tests successfully",
+      "Independent tests passed and original source/test fixture remained unchanged",
+      "A later terminal command attempted C:/Windows/Temp probes and temporary-file removal outside the instructed workspace",
+      "That probe failed at Python parsing with SyntaxError before its body could execute",
+      "10-request relay cap returned HTTP403, native turn ended error, no automatic replay"
+    ],
+    "decision": "Do not adopt patch or count this as self-development acceptance. Disable live runner until native tool execution restrictions are verified.",
+    "limits": "Prompt-only restrictions are not a sandbox. Original daily configuration untouched; real key retained in memory only, local placeholder in isolated profile. Provider tokens/cost not yet summarized."
+  },
+  "development_sandbox_checkpoint": {
+    "status": "native_windows_write_confinement_verified",
+    "assets": [
+      "DSH dsh-sandbox-policy, dsh-pwsh-sandbox, dsh-fs-sandbox, dsh-user-approval: reused unmodified native providers",
+      "tools/verify_dsh_recovery.py and tests_next/p2_fixture.py: reused native session/loopback verification"
+    ],
+    "tool": "tools/verify_development_sandbox.py",
+    "evidence": ".sumika-next/development-sandbox-47e58ca77ebc4b44b06c881920945da6/report.json",
+    "checks": [
+      "Native and PowerShell writes inside owned workspace succeeded",
+      "Native outside write returned FS_SANDBOX_DENIED",
+      "PowerShell outside write returned sandbox denial marker and exit 1",
+      "Explicit danger-full-access escalation rejected under approval never",
+      "Outside sentinel unchanged, all five tools settled, completed turn, owned DSH stopped, zero cloud calls"
+    ],
+    "correction": "Previous model attempt outside its task scope did not prove native sandbox escape. The probe failed parsing; actual native file-write confinement is now positively verified.",
+    "limitations": "Windows restricted-token enforcement is partial: reads/network/process visibility not isolated, ambient Everyone permissions and hard links remain relevant. Only isolated profile changed; live model runner remains disabled pending task-specific tool/command gate."
+  },
+  "development_probe_guard_checkpoint": {
+    "status": "task_scoped_native_tool_gate_verified_partial",
+    "assets": [
+      "Native tools/pre-execute waterfall reused without upstream changes",
+      "tools/verify_development_sandbox.py extended with --probe-guard"
+    ],
+    "implementation": "tools/development_probe_guard.mjs permits only named source/test reads, source edit, bounded glob and exact reviewed test command. Execution requires source/test SHA256 matching policy outside workspace. Other tools and escalation fail closed.",
+    "evidence": ".sumika-next/development-sandbox-5766b0f6a2e547b9b1a9aab15b317864/report.json",
+    "checks": [
+      "Eight real native tool results settled",
+      "Reviewed test produced success marker",
+      "Source edit allowed; next test execution denied because source hash changed",
+      "Policy read, arbitrary terminal command and test file write denied; no forbidden marker created"
+    ],
+    "findings": "First fixture failed because a pwsh call invalidated native fs read version; re-read before edit restored expected native workflow, no upstream patch.",
+    "limitations": "Isolated verification plugin only; not installed in daily profile. Not a complete sandbox, and concurrent tool dispatch/hash-to-execution race still needs fencing before live runner is enabled. Real model runner remains disabled pending integration and review/resume flow."
+  },
+  "guarded_live_edit_checkpoint": {
+    "status": "guarded_real_edit_and_review_passed_partial",
+    "evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/report.json",
+    "review": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/review.json",
+    "model": "deepseek-flash",
+    "requests": 5,
+    "checks": [
+      "Real edit phase completed; only glob/read/edit called",
+      "Original product and immutable tests unchanged",
+      "Main agent reviewed diff then ran two tests successfully",
+      "Three queue tests passed: recheck after edit, cancellation no execution, failure no replay",
+      "Native guarded probe passed after serialization"
+    ],
+    "native_guard_evidence": ".sumika-next/development-sandbox-391759685963479b90618546517eb4e4/report.json",
+    "limitations": "Not full self-development acceptance: no merged product change/native post-review model test turn yet. Guard serializes cooperative tool dispatch but not external writers or OS-wide processes. Day-to-day profile unchanged."
+  },
+  "model_change_adoption_checkpoint": {
+    "status": "reviewed_model_change_adopted_with_installer_parity",
+    "candidate_origin": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/work/verify_portable_staging.py",
+    "implementation": [
+      "Adopted reviewed real-model filename validation into tools/verify_portable_staging.py",
+      "Main-agent review added superscript COM/LPT digits and CONIN$/CONOUT$ handling",
+      "PowerShell installer rejects matching device names, invalid chars and control chars before extraction"
+    ],
+    "verification": [
+      "11 Python inventory tests passed",
+      "Real installer original 15 checks plus nine invalid Windows names passed; valid Unicode and similar filenames installed",
+      "All 26020 paths in candidate d accepted by new safe_path"
+    ],
+    "evidence": ".sumika-next/package/installer-check-84ce513ddc664a8b862d1cc1d2ba88ce/report.json",
+    "limitations": "Control-character ZIP produced a different pre-extraction rejection reason on current PowerShell; retained logs show no installation or staging created. Native reviewed-model test resume remains unimplemented. Candidate d package predates adopted changes; no release-ready claim."
+  },
+  "real_development_loop_checkpoint": {
+    "status": "small_real_development_loop_verified",
+    "edit_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/report.json",
+    "review_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/review.json",
+    "native_resume_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/reviewed-resume/report.json",
+    "replay_evidence": ".sumika-next/self-development-live-e2a8d08c97bb4bdaafe3bd7e9c8a2d45/reviewed-resume/replay-refused.json",
+    "model": "deepseek-flash",
+    "requests": "5 edit + 2 reviewed resume",
+    "checks": [
+      "Existing persisted native session resumed after process restart",
+      "Candidate/test hashes match review; edit tool disabled during resume",
+      "Exactly one native pwsh test call; two tests passed; turn completed",
+      "Source candidate, test fixture and current product unchanged during resume",
+      "Repeated resume attempt refused before model call",
+      "Reviewed candidate adopted with main-agent Windows edge-case and installer parity additions in previous turn"
+    ],
+    "limitations": "One bounded module task with main-agent review, not unattended self-updating or broad Codex equivalence. Full release rollback, clean-machine/optional capabilities, real UI approvals and durable continuity recovery remain."
+  },
+  "durable_continuity_checkpoint": {
+    "status": "durable_unknown_fence_verified_partial",
+    "assets": [
+      "extensions/continuity/dsh.mjs: reused serialized checkedCall boundary",
+      "tools/verify_continuity_failure_dsh.py: extended existing real failure/restart fixture"
+    ],
+    "implementation": "Before every storage child call write/fsync/rename pending sidecar keyed by hashed session ID; mark settled only after recognized success. Pending/invalid state rejects post-restart sync/recover/query/report. Sidecar has schema/status/action only, no request contents.",
+    "verification": [
+      "11 Node continuity tests passed: unknown restart remains fenced and settled restart reads remain available",
+      "Real DSH healthy baseline -> corrupt database -> two rejected turns -> stop/restore healthy DB/restart -> still rejected, zero additional model calls, restored bytes unchanged"
+    ],
+    "evidence": ".sumika-next/continuity-failure-58229606e9d141e4b71147accdbfcb9d/report.json",
+    "limitations": "Explicit reconciliation/unfence flow still required; do not manually delete marker to pretend unknown outcome resolved. Independent concurrent hosts and disk-level durability beyond OS fsync remain outside current evidence. Existing package and daily service not updated."
+  },
+  "continuity_reconciliation_checkpoint": {
+    "status": "explicit_continuity_storage_reconciliation_verified",
+    "assets": [
+      "Existing continuity pending marker and core SQLite schema reused",
+      "ui.data_lease.DataLease shares existing profile byte lock without changing process ownership"
+    ],
+    "tool": "tools/reconcile_continuity.py",
+    "implementation": [
+      "Read-only integrity inspection returns state/database SHA256 and session record count",
+      "Explicit storage-retry disposition requires matching inspected hashes, stopped/reconciled bound profile and intact database",
+      "Preserve original pending metadata in receipt, retain original_outcome unknown, atomically publish reconciled marker",
+      "No prompt, task execution, automatic database repair or marker deletion",
+      "Node sidecar boundary rejects junction/symlink and linked state files before writes"
+    ],
+    "verification": [
+      "3 reconciliation tests passed: retained evidence/bytes, stale review/live profile refused, corrupt DB unchanged",
+      "12 Node adapter tests passed including linked directory rejection",
+      "Real DSH database failure -> durable fence -> repaired DB still fenced -> explicit reconciliation -> restart without model replay -> one explicit new turn completes"
+    ],
+    "evidence": ".sumika-next/continuity-failure-f0362d18edc343dd8962a180238b2cf9/report.json",
+    "limitations": "CLI recovery, not a new UI. Operator must inspect unknown operation; integrity alone does not establish its original outcome. Single managed profile tested, not arbitrary independent writers. No daily service restart or package rebuild."
+  },
+  "active_stop_checkpoint": {
+    "status": "active_tool_and_queued_restart_verified_partial",
+    "assets": [
+      "ui/workbench.py WorkbenchController.stop: exercised existing product code without replacing it",
+      "tests_next/p2_fixture.py and native DSH session/control/session/page: reused"
+    ],
+    "tool": "tools/verify_active_workbench_stop.py --queued",
+    "evidence": ".sumika-next/active-stop-af305f60246f44f8ae6b8149abe6371f/report.json",
+    "single_task_evidence": ".sumika-next/active-stop-e749e9c7346c4264a1d79d97d405ec18/report.json",
+    "checks": [
+      "Observed real native pwsh child PID and creation identity before stop",
+      "Workbench stop reclaimed active child; delayed write absent",
+      "Restart made no model call and restored running=false",
+      "Native recovery persisted turn interrupted and tool outcome unknown",
+      "One queued prompt was observed before stop and remained pending after restart; original text preserved"
+    ],
+    "findings": "Native session/cancel documentation says queued messages resume FIFO. Do not replace process stop with naive cancel-and-wait; doing so can execute queued work during exit.",
+    "limitations": "Current stop is forced process termination with native interrupted recovery, not graceful flush. Concurrent submissions, app-wide role/voice cancellation and clean-machine release remain unverified. Daily service unchanged."
+  },
+  "native_browser_approval_checkpoint": {
+    "status": "native_browser_reject_allow_cancel_verified",
+    "assets": [
+      "tools/verify_web_review_dsh.py reused native fixture and product adapter setup",
+      "tests_next/p2_fixture.py reused loopback model",
+      "tools/verify_workbench_ui.mjs reused browser approach; installed Playwright discovered dynamically"
+    ],
+    "tools": [
+      "tools/verify_native_approval_ui.py",
+      "tools/verify_native_approval_ui.mjs"
+    ],
+    "evidence": ".sumika-next/native-approval-ui-cc430e6aea2c429aa1a1e4e28a214ba2/report.json",
+    "checks": [
+      "Actual rendered native Reject and Allow once clicked through Playwright",
+      "Approval request and decision IDs matched; tool call IDs and success/error results checked",
+      "Rejected tool did not execute; allowed worker ran exactly once with matching request_id",
+      "Cancel after visible approval yielded ABORTED_BEFORE_DISPATCH; approval absent after browser reload",
+      "Owned isolated DSH stopped; no cloud model or website submissions"
+    ],
+    "lessons": [
+      "Fresh native browser profile shows an initial disclaimer; dismiss using Continue before selecting session",
+      "Browser evidence is UTF-8; explicit encoding required on Windows"
+    ],
+    "limitations": "Native DSH UI and product web-review gate verified with local worker only. Not Sumika skin/iframe integration, external website acceptance, malicious stale RPC replay, or all tool types. No daily profile change or package rebuild.",
+    "next": [
+      "App-wide role/voice shutdown and concurrent admissions",
+      "Broader multi-file real coding acceptance",
+      "Current-source package rebuild, full dependency/license audit, clean-machine and update rollback acceptance"
+    ]
+  },
+  "bridge_shutdown_checkpoint": {
+    "status": "bridge_shutdown_admission_and_lease_fixed",
+    "assets": [
+      "ui/server.py existing writer RLock and lifecycle endpoint adapted",
+      "tests_next/test_ui_server.py existing HTTP and persistence fixture extended",
+      "tools/sumika_tray.ps1 inspected: shutdown errors retain tray; no forced port kill"
+    ],
+    "implementation": [
+      "Signal shutdown intent before waiting for admitted chat/write",
+      "Reject newly arriving and queued ordinary POST/PUT after shutdown intent",
+      "Retain read access and explicit shutdown retry when stop fails",
+      "OwnedServer.server_close waits for admitted writes and successful workbench stop before releasing personal-data lease",
+      "KeyboardInterrupt/final cleanup uses same owned close path"
+    ],
+    "verification": {
+      "command": "D:/Tools/python/Python314/python.exe -B -m unittest tests_next.test_ui_server tests_next.test_bridge_data_lease tests_next.test_ui_workbench tests_next.test_role_conversations tests_next.test_startup",
+      "result": "44 tests passed"
+    },
+    "checks": [
+      "Real loopback HTTP shutdown waits while controlled role reply is active; new POST/PUT refused; response persisted before stop acknowledgement",
+      "Failed stop returns unknown, permits reads, blocks workbench restart, supports explicit successful shutdown retry",
+      "Failed server close keeps personal-data lease locked"
+    ],
+    "limitations": "Concurrency test controls RoleChat reply with a test double. Real model transport interruption, separate voice process ownership, abrupt OS termination, and packaged host shutdown remain to verify. Existing tray shutdown call blocks while draining. No daily service restart or package rebuild.",
+    "next": [
+      "Run real provider-transport active role shutdown acceptance",
+      "Audit separate voice/extension ownership and termination",
+      "Broader multi-file real coding task, current-source package rebuild and release recovery acceptance"
+    ]
+  },
+  "role_transport_shutdown_checkpoint": {
+    "status": "role_transport_drain_disconnect_and_process_restart_verified",
+    "assets": [
+      "ui/server.py existing Bridge and HTTP server used unchanged",
+      "extensions/roles/chat.py and extensions/models/ollama.py real request path reused",
+      "extensions/roles/conversations.py persistent unknown-before-send journal reused"
+    ],
+    "tool": "tools/verify_role_shutdown.py",
+    "evidence": ".sumika-next/role-shutdown-301bac784fda4175bbb39ae32d0c9546/report.json",
+    "verification": [
+      "Real HTTP role request persisted unknown before provider response",
+      "Shutdown rejected new writes and waited for accepted reply",
+      "Completed reply restored with stable message IDs",
+      "Disconnected provider returned HTTP 502 unknown without fallback or replay",
+      "Owned fixture Bridge killed during outstanding provider HTTP request; new process restored identical unknown history; provider request count remained one",
+      "Restarted child exited normally through authenticated lifecycle endpoint"
+    ],
+    "voice_audit": {
+      "sources": [
+        "extensions/roles/realtime_voice.py",
+        "extensions/roles/voice.py",
+        "extensions/desktop/service.py",
+        "ui/server.py",
+        "sumika_next/extension_host.py"
+      ],
+      "finding": "VoiceSession is an independent coordinator without a production caller. SAPI/Vosk/microphone operations are on-demand desktop CLI dispatch; Bridge does not own a persistent voice session. ExtensionHost owns schedules only.",
+      "remaining": "Activity-room voice capture/transcribe/chat/playback/cancel integration and actual audio device acceptance remain; do not label this merely an existing process cleanup test."
+    },
+    "limitations": "Deterministic loopback Ollama response tests transport/lifecycle, not model quality. No actual microphone/speaker use, DSH active child, packaged EXE, OS-wide crash recovery, or daily restart in this run.",
+    "next": [
+      "Broader real multi-file coding acceptance using DSH native functions",
+      "Complete voice integration under existing microphone permission boundary",
+      "Rebuild current-source package; verify release rollback and clean-machine install"
+    ]
+  },
+  "candidate_e_checkpoint": {
+    "status": "candidate_e_current_host_archive_install_exe_verified",
+    "candidate": ".sumika-next/package/product-candidate-20260911-e",
+    "files": 26029,
+    "evidence_directory": ".sumika-next/package/packaged-install-3df42efd2d8144f29d4c09593ab86662",
+    "assets": [
+      "tools/build_portable_staging.py reused explicit source selection and physical pinned runtimes",
+      "tools/verify_packaged_install.py reused installer/archive/EXE chain",
+      "tools/verify_portable_exe.py extended authenticated shutdown and confirmed process exit"
+    ],
+    "scope": "Internal current-host candidate, no daily installation or shortcut changes. Old packages retained. Clean-machine, update rollback, optional runtimes and full dependency licensing outstanding.",
+    "evidence": ".sumika-next/package/packaged-install-3df42efd2d8144f29d4c09593ab86662/report.json",
+    "sha256": "12f9e9f798f80a807a254c7ade183f1d175ff5737bb710226a55595acb6d1d2e",
+    "checks": {
+      "archived_bytes_match_inventory": true,
+      "real_installer_and_installed_inventory": true,
+      "installed_exe_launch_reuse_conflict_and_stop": true
+    },
+    "exe_checks": {
+      "first": true,
+      "reuse": true,
+      "foreign_http200_rejected_and_preserved": true,
+      "authenticated_shutdown_and_process_exit": true
+    },
+    "limitations": "Current-host internal package only; no clean-machine, full dependency/license, optional voice/OCR/office, automatic update rollback or broad Codex-equivalence acceptance. Verification script enhanced after candidate build; shipped product fixes are included."
+  },
+  "dependency_license_checkpoint": {
+    "status": "shipped_dependency_inventory_complete_license_review_partial",
+    "asset": "Existing verified candidate e physical package and bundled metadata/notices reused; no upstream changes",
+    "tool": "tools/audit_package_licenses.py",
+    "evidence": ".sumika-next/package/license-audit-candidate-e-reviewed.json",
+    "counts": {
+      "npm": 500,
+      "python": 2
+    },
+    "finding_counts": {
+      "no_package_license_file_found": 8,
+      "native_component_licenses_require_review": 1,
+      "terms_require_specific_review": 1,
+      "embedded_license_text_requires_review": 5
+    },
+    "findings": [
+      {
+        "name": "@aws-sdk/credential-provider-http",
+        "version": "3.972.73",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "@aws-sdk/credential-provider-login",
+        "version": "3.972.78",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "@aws-sdk/nested-clients",
+        "version": "3.997.45",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "0.85.1",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "@earendil-works/pi-telemetry",
+        "version": "0.85.1",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "@img/sharp-win32-x64",
+        "version": "0.35.4",
+        "findings": [
+          "native_component_licenses_require_review",
+          "terms_require_specific_review"
+        ]
+      },
+      {
+        "name": "@koromix/koffi-win32-x64",
+        "version": "3.2.1",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "@xterm/headless",
+        "version": "6.0.0",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      },
+      {
+        "name": "data-uri-to-buffer",
+        "version": "4.0.1",
+        "findings": [
+          "embedded_license_text_requires_review"
+        ]
+      },
+      {
+        "name": "debug",
+        "version": "2.6.9",
+        "findings": [
+          "embedded_license_text_requires_review"
+        ]
+      },
+      {
+        "name": "debug",
+        "version": "4.4.3",
+        "findings": [
+          "embedded_license_text_requires_review"
+        ]
+      },
+      {
+        "name": "jwa",
+        "version": "2.0.1",
+        "findings": [
+          "embedded_license_text_requires_review"
+        ]
+      },
+      {
+        "name": "jws",
+        "version": "4.0.1",
+        "findings": [
+          "embedded_license_text_requires_review"
+        ]
+      },
+      {
+        "name": "standardwebhooks",
+        "version": "1.1.1",
+        "findings": [
+          "no_package_license_file_found"
+        ]
+      }
+    ],
+    "manual_observations": [
+      "data-uri-to-buffer 4.0.1 includes MIT terms in README, not a standalone LICENSE",
+      "@img/sharp-win32-x64 0.35.4 declares Apache-2.0 AND LGPL-3.0-or-later; root LICENSE inspected contains Apache text; versions.json lists native dependencies including vips 8.18.6"
+    ],
+    "boundary": "Metadata/notice inventory is not redistribution approval. Exact pinned source/notice recovery for eight packages and native component terms remain. Personal local development acceptance can continue. No dependency removal or daily configuration change.",
+    "next": [
+      "Resolve pinned missing notice sources and native binary terms before distribution",
+      "Continue broader real development acceptance and release recovery work"
+    ]
+  },
+  "multi_file_development_checkpoint": {
+    "status": "two_file_real_edit_adopted_native_test_blocked_by_temp_acl",
+    "evidence": ".sumika-next/self-development-live-b32c628cb82b40fea2c173283a1aedc9",
+    "model": "deepseek-flash",
+    "requests": {
+      "edit": 14,
+      "reviewed_resume": 2
+    },
+    "implementation": [
+      "Extended isolated guard with explicit editableFiles subset; tests/helper remain read-only",
+      "Added audit-cli real task to existing runner; all reviewed file hashes pinned for resume",
+      "Adopted model CLI --fail-on-findings and documentation; reviewer corrected reversed limitation sentence"
+    ],
+    "verification": [
+      "4 guard tests passed including multi-file edits, test protection and hash gating",
+      "4 host candidate tests passed",
+      "Same persisted native session resumed; exactly one approved pwsh test command executed",
+      "Native tests failed with four WinError5 cases for tempfile directories; model did not escalate or replay",
+      "Actual candidate-e scan with strict flag wrote full report and returned nonzero because findings remain"
+    ],
+    "failure_evidence": ".sumika-next/self-development-live-b32c628cb82b40fea2c173283a1aedc9/reviewed-resume/events.json",
+    "finding": "Get-Acl showed tempfile directory protected DACL with owner/system/administrators only, while workspace has restricted sandbox SID and inherited entries. Directory ACL difference explains why workspace permission does not propagate to these temporary directories. No ACL changes made.",
+    "limitations": "Not accepted as a successful native multi-file development loop. Implementation+documentation is still a bounded task, not broad Codex equivalence. Preserve failed attempt; no blind resume of existing attempt. Package e predates CLI change.",
+    "next": [
+      "Reproduce Python tempfile protected-DACL behavior in isolated native sandbox; use an appropriate in-workspace test fixture without broader permissions",
+      "Repeat only explicitly reviewed new test attempt after verified fixture correction",
+      "Continue larger coding acceptance, voice wiring and install/update recovery"
+    ]
+  },
+  "multi_file_development_recovery_checkpoint": {
+    "status": "bounded_two_file_development_loop_verified",
+    "evidence": ".sumika-next/self-development-live-b32c628cb82b40fea2c173283a1aedc9/reviewed-resume-3/report.json",
+    "model": "deepseek-flash",
+    "native_test_result": "4 tests passed; exactly one pwsh command; turn completed",
+    "checks": {
+      "tests_unchanged": true,
+      "original_source_unchanged": true,
+      "helper_unchanged": true,
+      "original_companions_unchanged": true,
+      "candidate_unchanged": true,
+      "reviewed_inputs_unchanged": true,
+      "one_exact_test_call": true,
+      "native_tests_passed": true,
+      "original_session_resumed": true
+    },
+    "adopted": [
+      "tools/audit_package_licenses.py --fail-on-findings",
+      "packaging/README.md corrected reviewed documentation"
+    ],
+    "recovery": [
+      "Original fixture and failed native test retained",
+      "Native probe confirmed Python 3.14 private temp ACL denies restricted token while ordinary inherited workspace directories work",
+      "Corrected fixture keeps identical assertions and retains test output",
+      "Second attempt reused prompt text as requestId; native history had no new turn and relay requests=0. Owned DSH was stopped after identity verification; failed attempt retained",
+      "Third explicit submission uses UUID requestId recorded before submit; same native session completed with two model calls"
+    ],
+    "related_existing_guidance": "runtime/dsh/README.md already documented mkdtemp limitation; new fixture initially failed to follow it. Reproduction command and fixture reference now added there.",
+    "limitations": "One implementation-plus-documentation task, not a large multi-module feature or full Codex parity. No daily profile modification or sandbox escalation. Candidate e predates adopted audit CLI. Voice wiring, full release rollback/clean-machine validation and license review remain.",
+    "next": [
+      "Broader real development task with multiple implementation modules",
+      "Activity-room voice integration under explicit microphone permission",
+      "Release upgrade rollback and clean-machine acceptance"
+    ]
+  },
+  "room_speech_input_checkpoint": {
+    "status": "one_shot_room_speech_input_wired_device_acceptance_pending",
+    "assets": [
+      "Design direction-d-hiyori/index.html composer voice icon around line 722 reused",
+      "extensions/desktop/perception.py capture_audio and extensions/roles/voice.py transcribe reused",
+      "CapabilityStore and existing voice config are authoritative; bridge auth reused"
+    ],
+    "implementation": [
+      "Owned asynchronous SpeechInput worker with explicit one-shot approval, capability checks, fixed device, timeout and cancellation",
+      "Authenticated start/cancel and read status endpoints",
+      "Existing room voice icon fills unchanged role draft only; no model submission",
+      "Normal Bridge shutdown reclaims speech child before reporting success"
+    ],
+    "verification": [
+      "28 backend tests passed including actual owned subprocess cancellation and no-spawn unauthorized API",
+      "Browser fixture passed confirmation dismissal, draft append, stale-role/draft discard and cancel once",
+      "Node syntax checks passed"
+    ],
+    "evidence": ".sumika-next/speech-ui-dcd89cdc-3d9f-4cc3-a897-4a6cb4bb79f4/report.json",
+    "limitations": "No live microphone or actual recognition called in this turn; no daily restart. Real device acceptance, TTS playback, continuous voice, abrupt parent-exit child cleanup and recording retention policy remain. One-shot input is not complete real-time voice.",
+    "next": [
+      "Verify child lifetime on abrupt Bridge exit before enabling daily voice",
+      "Use actual authorized microphone from existing user confirmation flow for capture/ASR acceptance",
+      "Wire response playback and interruption using existing providers"
+    ]
+  },
+  "speech_parent_exit_checkpoint": {
+    "status": "speech_owned_worker_abrupt_parent_exit_verified",
+    "assets": [
+      "SpeechInput subprocess path reused; no existing job-object wrapper found in workspace",
+      "sumika_next/child_job.py adds Windows KILL_ON_JOB_CLOSE ownership, not a sandbox"
+    ],
+    "implementation": [
+      "Non-inheritable job handle assigned via retained child process handle before capture JSON is sent",
+      "Assignment failure kills only owned child and refuses capture",
+      "Worker completion closes job; parent termination closes handle through OS"
+    ],
+    "verification": [
+      "28 speech/Bridge/lease tests passed before added failure test",
+      "5 focused speech tests passed including job assignment failure no payload sent",
+      "Actual SpeechInput started a local text worker; verified live child identity; killed owned parent; child exited and delayed output absent"
+    ],
+    "evidence": ".sumika-next/speech-parent-exit-2a61c944ee184b6a8a94ad43ccf174f3/report.json",
+    "limitations": "No microphone opened; real audio driver release, ASR hardware acceptance, TTS and continuous conversation remain. Windows only; unavailable job ownership fails closed. No daily restart or package rebuild."
+  },
+  "speech_failure_checkpoint": {
+    "status": "speech_failure_ownership_and_explicit_runtime_fixed",
+    "assets": [
+      "Modified existing extensions/roles/speech_input.py and extensions/desktop/audio_devices.py; reused existing unit tests and tools/verify_speech_parent_exit.py. No UI change or parallel implementation."
+    ],
+    "implementation": [
+      "Cancellation reports cancelled only after confirmed exit and job close; failure remains unknown and retains ownership, blocking new capture.",
+      "Worker failure and assignment failure retain cleanup ownership; explicit retry can reclaim it.",
+      "Transcript is published only after cleanup succeeds.",
+      "Explicit missing SUMIKA_VOICE_PYTHON fails closed; default discovery only when unset."
+    ],
+    "verification": [
+      "38 speech/audio/Bridge/lease tests passed; after final publication and pipe-close adjustment, 14 focused tests passed.",
+      "Actual owned parent-exit probe passed; worker observed live then reclaimed, late output absent."
+    ],
+    "evidence": ".sumika-next/speech-parent-exit-16994aa8539b4630934145ced30de780/report.json",
+    "limitations": "No real microphone capture, TTS, daily restart or package rebuild. Full Codex replacement and release acceptance remain incomplete.",
+    "next": [
+      "Actual authorized device capture/ASR and playback acceptance",
+      "Broader multi-module coding acceptance",
+      "Current-source package rebuild and upgrade recovery acceptance"
+    ]
+  },
+  "speech_cancel_ui_checkpoint": {
+    "status": "speech_cancel_ui_recovery_verified",
+    "assets": [
+      "ui/prototype-d/index.html:722 existing voice icon reused; no new entry",
+      "ui/app/speech-input.js and tools/verify_speech_input_ui.mjs modified in place"
+    ],
+    "implementation": [
+      "Failed cancellation retains request ID and offers explicit stop retry; no second capture or automatic retry.",
+      "Cancel before start response waits for its ID and cancels once. Late results cannot fill the draft after cancellation."
+    ],
+    "evidence": ".sumika-next/speech-ui-2d8178c4-e8b7-4126-a4ef-254ca1999bfd/report.json",
+    "verification": "Actual Edge isolated product module/markup fixture passed six checks; no microphone opened.",
+    "limitations": "Daily service not restarted. TTS currently creates files only; playback integration, real device acceptance and continuous voice remain pending."
+  },
+  "speech_playback_backend_checkpoint": {
+    "status": "local_playback_backend_connected_ui_and_hardware_pending",
+    "assets": [
+      "Reuse extensions/roles/voice.py synthesize and SpeechInput owned worker lifecycle; no parallel process manager.",
+      "Existing CapabilityStore voice and voice.tts_voice settings remain authoritative. No UI entry added."
+    ],
+    "implementation": [
+      "SpeechPlayback runs selected Windows SAPI synthesis and synchronous winsound playback in owned child; explicit approval, status, cancel and shutdown through authenticated Bridge output endpoints.",
+      "Playback requires voice capability only, not microphone/ASR. Unknown provider and unavailable interpreter fail closed.",
+      "Rechecks voice capability after synthesis; cancellation reuses retained ownership and unknown-state semantics."
+    ],
+    "verification": [
+      "39 playback/input/Bridge/lease tests passed. Hardware calls mocked; actual text subprocess cancellation verified.",
+      "Actual owned-parent exit probe passed after worker-hook changes.",
+      "Six Edge speech-input regression checks passed."
+    ],
+    "evidence": [
+      ".sumika-next/speech-parent-exit-ed06f26670464c6f9b7f9a12b5a0c477/report.json",
+      ".sumika-next/speech-ui-7747ed38-a580-47e5-8372-9ff060ebf061/report.json"
+    ],
+    "limitations": [
+      "No audible playback or microphone capture performed.",
+      "No product playback button, role-switch cancellation integration, continuous voice or echo suppression yet.",
+      "Playback has inherited 60-second worker deadline and explicit 4000-character input bound; long output can end unknown after timeout.",
+      "No daily restart or package rebuild. Full Codex replacement remains unproven."
+    ],
+    "next": [
+      "Complete playback product interaction using approved existing UI direction and preserve explicit user control.",
+      "Real device capture/ASR/playback acceptance.",
+      "Broader coding task and current-source packaging/recovery acceptance."
+    ]
+  },
+  "candidate_f_checkpoint": {
+    "status": "current_source_candidate_f_archive_install_exe_verified",
+    "assets": [
+      "Existing build_portable_staging.py, verified physical DSH runtime, bundled host runtimes, launcher and install/EXE verifiers reused; no runtime downloads."
+    ],
+    "candidate": ".sumika-next/package/product-candidate-20260911-f",
+    "files": 26037,
+    "evidence": ".sumika-next\\package\\packaged-install-66e5a13e681a4de8a4e40171ac3a53a9\\report.json",
+    "sha256": "c9c9c93225fd72861b93bdf52449b026f87b0a6854dc8630b885f7b093446d23",
+    "verification": {
+      "archived_bytes_match_inventory": true,
+      "real_installer_and_installed_inventory": true,
+      "installed_exe_launch_reuse_conflict_and_stop": true
+    },
+    "license_audit": ".sumika-next/package/license-audit-candidate-f-strict.json",
+    "limitations": [
+      "Current Windows host only; no clean-machine or upgrade rollback acceptance.",
+      "Optional audio runtimes and model weights are not bundled; backend inclusion does not imply complete speech UI or device acceptance.",
+      "Strict license audit retains findings: no public-release clearance.",
+      "No daily installation/profile/shortcut changed; prior packages preserved."
+    ],
+    "next": [
+      "Isolated upgrade/failure recovery validation",
+      "Broader multi-module coding acceptance",
+      "Complete speech interaction and real device acceptance"
+    ]
+  },
+  "retained_version_rollback_checkpoint": {
+    "status": "retained_version_snapshot_rollback_verified",
+    "assets": [
+      "Extended tools/verify_personal_restore_dsh.py --rollback-product; reused backup/restore and actual installed candidates f and e."
+    ],
+    "evidence": ".sumika-next\\package\\profile-restore-7afc512933e34ff1bfada20340f08af5\\report.json",
+    "checks": {
+      "original_native_task_completed_and_stopped": true,
+      "plugins_bound_to_selected_installation": true,
+      "history_and_tool_records_restored": true,
+      "no_task_replay": true,
+      "original_profile_unchanged": true,
+      "restored_workbench_stopped": true,
+      "prior_product_restored_original_history": true,
+      "rollback_plugins_bound_to_prior_product": true,
+      "rollback_did_not_replay": true,
+      "candidate_data_preserved": true
+    },
+    "limitations": [
+      "Uses a deterministic local model fixture, actual DSH and actual installed runtime assets; no external model calls.",
+      "Explicit recovery to a new personal directory from pre-change snapshot; not schema downgrade or automatic update.",
+      "No injected installer interruption or failed upgrade, clean-machine test, daily profile changes or deletions."
+    ],
+    "next": [
+      "Interrupted/failed installation recovery evidence",
+      "Broader real-model multi-module coding task",
+      "Speech playback UI and authorized device acceptance"
+    ]
+  },
+  "installer_interruption_checkpoint": {
+    "status": "actual_installer_extraction_interrupt_and_retry_verified",
+    "assets": [
+      "Extended existing tools/verify_portable_installer.py; exercised unmodified packaging/install_sumika.ps1."
+    ],
+    "evidence": ".sumika-next\\package\\installer-check-94726bd1bf66439c9c577f9c60896199\\report.json",
+    "verification": {
+      "status": "passed",
+      "scope": "synthetic installer boundary fixtures and actual extraction interruption; no executable product startup",
+      "interruption": {
+        "observed_after_first_file": true,
+        "partial_destination_absent": true,
+        "retry_complete": true,
+        "failed_staging_preserved": true,
+        "old_install_and_personal_data_unchanged": true
+      },
+      "windows_name_rejections": 9,
+      "valid_unicode_and_similar_names": true,
+      "checks": [
+        "exact extraction",
+        "what-if has no writes",
+        "no overwrite",
+        "hash mismatch",
+        "path traversal",
+        "absolute path",
+        "runtime-data root",
+        "legacy manifest",
+        "tampered entry",
+        "unlisted entry",
+        "missing entry",
+        "duplicate inventory",
+        "nested runtime data",
+        "credential file",
+        "updater residue"
+      ]
+    },
+    "limits": [
+      "Synthetic package bytes; actual PowerShell installer was terminated by its retained Popen handle after first extracted file.",
+      "Tests new destination installation, not power failure, interruption during shortcut creation or final publication, or automatic update switching.",
+      "No user data, daily installation or previous evidence deleted."
+    ],
+    "next": [
+      "Broader real-model development task",
+      "Clean-machine acceptance and remaining release review",
+      "Speech UI/device acceptance"
+    ]
+  },
+  "installer_paths_development_checkpoint": {
+    "status": "two_implementation_files_reviewed_adopted_and_native_tests_passed",
+    "task": "Reject file-ancestor conflicts in Python release inventories and PowerShell installer before extraction",
+    "assets": [
+      "Existing real-model DSH development runner and guard extended with installer-paths task; existing implementations modified."
+    ],
+    "evidence": ".sumika-next\\self-development-live-97a9611c68264659af039b89a8e4b1d8\\reviewed-resume\\report.json",
+    "real_model": {
+      "model": "deepseek-flash",
+      "edit_requests": 12,
+      "reviewed_resume_requests": 2
+    },
+    "review": "Model candidate moved root/manifest link checks after reading manifest; host restored original order and preserved model-original-verifier.py plus revision hashes. No tests changed.",
+    "adopted": [
+      "tools/verify_portable_staging.py",
+      "packaging/install_sumika.ps1"
+    ],
+    "verification": [
+      "4 immutable focused tests passed on host and once through original native DSH session after review.",
+      "15 existing inventory/path tests passed.",
+      "Full installer fixture including hierarchy and real extraction interruption passed in installer-check-c4279ca5df584b9f9d52fcdc995cb812."
+    ],
+    "retained_failure": {
+      "path": ".sumika-next/package/installer-check-c905b97c6ff445528f7c009256ee63b7",
+      "error": "Directory.Move access denied at publication; staged inventory verified; destination absent. New isolated run passed. Cause unproven, not marked fixed."
+    },
+    "limits": [
+      "Bounded two-implementation task with host correction, not autonomous broad-feature parity.",
+      "Candidate f predates these verifier/installer changes. No daily service changes."
+    ],
+    "next": [
+      "Investigate reproducible publication failure if it recurs; retain evidence",
+      "Complete pending voice UI/device acceptance",
+      "Clean-machine and broader coding acceptance"
+    ]
+  },
+  "dependency_notice_source_checkpoint": {
+    "status": "four_exact_dependency_notices_added_for_next_build",
+    "assets": [
+      "Existing packaging/notices/sources.json and audit_package_licenses.py extended; upstream/node_modules unchanged."
+    ],
+    "sources": ".sumika-next/package/notice-source-fffb63d27d794440ba2c65e46bda5575",
+    "verified": [
+      "Eight exact npm tarballs matched registry integrity; all eight omit standalone notices.",
+      "Fixed gitHead source MIT notices added for pi-ai 0.85.1, pi-telemetry 0.85.1, xterm/headless 6.0.0 and standardwebhooks 1.1.1.",
+      "standardwebhooks repository root Apache applies to different scope; SDK libraries/LICENSE is MIT and libraries/javascript/package.json matches 1.1.1."
+    ],
+    "implementation": "Supplemental notice association requires ecosystem, name, version and installed manifest SHA256 match plus notice hash; mismatch does not clear missing notice finding.",
+    "tests": "13 dependency notice/inventory tests passed; all reviewed asset hashes verified.",
+    "limits": [
+      "Candidate f unchanged and still has eight absent notices; next build will carry four supplements.",
+      "AWS three packages and koffi native package notices unresolved; native components and other release gates remain.",
+      "Source notice association is not full legal or binary provenance clearance."
+    ]
+  },
+  "koffi_native_notice_checkpoint": {
+    "status": "fifth_dependency_notice_added_native_review_scoped",
+    "evidence": ".sumika-next/package/notice-source-fffb63d27d794440ba2c65e46bda5575/koffi-parent-verification.json",
+    "implementation": [
+      "Same-version koffi parent MIT notice added with native optional dependency pin and manifest/hash binding.",
+      "Sharp native versions and package README terms joined in docs/project/native-component-review.json; review remains pending."
+    ],
+    "verification": "Two supplemental notice tests passed; all reviewed asset hashes verified.",
+    "limits": [
+      "AWS three exact npm releases omit notices and gitHead; attempted matching version tags returned 404. Remain unresolved.",
+      "Sharp native corresponding sources/build/license obligations not cleared.",
+      "Candidate f unchanged; five sidecar notices apply to future rebuild."
+    ],
+    "next": [
+      "Return to remaining product interaction/device acceptance while public-release terms stay explicitly pending."
+    ]
+  },
+  "speech_stop_integration_checkpoint": {
+    "status": "audio_stop_lifecycle_wired_playback_entry_awaits_design_confirmation",
+    "assets": [
+      "ui/prototype-d/index.html activity room bubbles around 697-715 and composer voice icon at 722 inspected; no message playback entry exists.",
+      "Existing SpeechInput cancellation, Bridge settings and capability writes reused."
+    ],
+    "implementation": [
+      "Role switching stops both speech tasks before changing selection.",
+      "Voice settings and related capability changes stop active audio; disabled config stays disabled on unknown stop.",
+      "Shutdown attempts both input and playback cleanup even if one fails."
+    ],
+    "verification": "50 management/Bridge/speech tests passed. Isolated proposal rendered in Edge, two controls and label toggle checked; no audio or API used.",
+    "proposal": ".sumika-next/voice-playback-proposal.html",
+    "proposal_image": ".sumika-next/voice-playback-proposal.png",
+    "limits": [
+      "Proposal is not product UI. New message entry awaits user confirmation under project AGENTS.md.",
+      "Current voice.enabled schema still requires an input-device selection even for output-only use; decouple in next implementation with input execution checks retained.",
+      "No daily restart, real microphone/playback, or package rebuild."
+    ]
+  },
+  "output_only_voice_checkpoint": {
+    "status": "output_only_voice_configuration_verified",
+    "assets": [
+      "Existing extensions/models/settings.py schema and Bridge speech/playback configuration reused. Existing speech capability form already serializes empty input device as null."
+    ],
+    "implementation": [
+      "Voice may be enabled with input_device=None for output-only playback.",
+      "Recording still requires explicit device, enabled/authorized microphone and per-request approval before spawn.",
+      "Updated microphone authorization test fixture to supply new lifecycle callback."
+    ],
+    "verification": [
+      "43 Bridge/microphone/playback/management tests passed.",
+      "17 role-chat/settings tests passed after updating obsolete global input-device requirement.",
+      "Read speech capability form save handler: empty device serializes null and has no client-side rejection."
+    ],
+    "limits": [
+      "No product playback button added; prior proposed placement still awaits user confirmation.",
+      "No actual audio hardware test, daily restart or package rebuild."
+    ]
+  },
+  "audio_write_api_checkpoint": {
+    "status": "ui_regression_and_legacy_audio_write_recovery_verified",
+    "assets": [
+      "Existing ui/server.py legacy and management write routes; existing UI test suites reused."
+    ],
+    "implementation": [
+      "Legacy capability writes now stop active audio as management writes already do.",
+      "Settings PUT, role selection, legacy capability writes and management dispatch return JSON HTTP 502 unknown for unconfirmed audio stop instead of dropping connection.",
+      "Both audio tasks still receive stop attempts and saved module disable remains effective."
+    ],
+    "verification": [
+      "61 existing UI tests passed before targeted fix.",
+      "25 UI server tests passed after fix including HTTP checks for both module routes, persisted disable and playback stop attempt after input stop failure."
+    ],
+    "remaining": [
+      "UI currently restores previous switch appearance on failed writes; unknown-stop responses need fresh server state projection, not assumed rollback.",
+      "Playback button placement awaits confirmation.",
+      "No daily restart/package rebuild or hardware audio acceptance."
+    ]
+  },
+  "capability_failure_ui_checkpoint": {
+    "status": "capability_write_failure_state_reconciled",
+    "assets": [
+      "Existing capabilitySettings form in ui/app/management.js; approved capability detail placement from ui/prototype-d reused, no new navigation."
+    ],
+    "implementation": [
+      "After failed module/permission writes, read authoritative registry and refresh values/revision; never assume rollback or resend.",
+      "If refresh fails or module disappears, mark controls indeterminate and disable them until details reopened.",
+      "After failed settings save, refresh saved baseline/revision while retaining inputs; a second click does not resubmit already-saved values."
+    ],
+    "verification": "Actual Edge product form functions with only shell bootstrap omitted; four local API failure scenarios passed. No daily writes or hardware use.",
+    "evidence": ".sumika-next/capability-recovery-729b85fa-8e92-4add-af43-e9384a8329cf/report.json",
+    "limits": [
+      "Full shell/daily reload not tested this turn.",
+      "Playback-entry confirmation and real-device acceptance remain pending."
+    ]
+  },
+  "shell_approval_checkpoint": {
+    "status": "actual_sumika_shell_native_approval_verified",
+    "assets": [
+      "Extended tools/verify_native_approval_ui.py/.mjs with --sumika-shell; reused real serve/WorkbenchController/skin and product approval adapter. No product UI change."
+    ],
+    "evidence": ".sumika-next/native-approval-ui-f1431b1ed8f740148f9de40de7adb1d8/report.json",
+    "verified": [
+      "Native reject prevents execution; allow-once executes one correlated local worker request.",
+      "Native cancellation before dispatch is reflected in backend events; reload has no cancelled approval.",
+      "Room/board navigation preserves native frame identity in all three scenarios.",
+      "Owned isolated processes stopped; zero external website messages."
+    ],
+    "fixture_repairs": [
+      "First-run overlay could appear after session visibility; clicks now wait through overlay.",
+      "Continuously drain event stream while browser runs; join reader before generator close. Failed attempts retained."
+    ],
+    "limits": [
+      "Deterministic local model and sentinel worker; not actual website consultation or broad real-model development.",
+      "Attachments, trace/detail and usage interaction not covered by this approval run.",
+      "Daily service, package and user data unchanged."
+    ]
+  },
+  "workbench_interaction_checkpoint": {
+    "status": "isolated_native_workbench_interactions_passed",
+    "assets": [
+      "Extended existing tools/verify_native_approval_ui.mjs and reused --sumika-shell host; no product or upstream changes.",
+      "Read installed native conversation, attachment, chat and trajectory components for selectors."
+    ],
+    "evidence": ".sumika-next/native-approval-ui-9ee55f3a36024bfe8562ad557fea08f0/report.json",
+    "verified": [
+      "Original draft preserved across room/board and native session changes; other session does not inherit draft.",
+      "TXT attachment reaches uploaded state and survives page/session switching without cross-session leakage.",
+      "Turn and session usage dialogs open; tool summary expands; trajectory parameters/results match local sentinel.",
+      "Reject, cancel, allow-once rerun passed; owned processes stopped; no external sends."
+    ],
+    "limits": [
+      "Attachment was staged but not sent to a model; no multimodal provider acceptance.",
+      "Browser reload/restart draft retention and project switching not covered.",
+      "Deterministic model; no broader coding-quality or clean-machine claim.",
+      "Daily service and installed candidate unchanged."
+    ],
+    "fixture_notes": [
+      "Separated turn usage from session usage; token selector excludes time control containing tok/s. Failed isolated attempts retained."
+    ]
+  },
+  "attachment_acceptance_checkpoint": {
+    "status": "attachment_submission_and_managed_restart_verified",
+    "assets": [
+      "Extended tools/verify_native_approval_ui.py/.mjs using existing ModelFixture, native read tool, WorkbenchController and actual Sumika shell.",
+      "Read native conversation/workspace/attachment/llm sources; no upstream or product modifications."
+    ],
+    "evidence": ".sumika-next/native-approval-ui-e64edff768704a41be2d53f743a4327d/report.json",
+    "verified": [
+      "Draft isolation across two projects; same-origin browser refresh restores original text.",
+      "Browser submits one file turn; provider receives readonly handle, native read returns exact Chinese content, then one continuation (two model requests total).",
+      "Stored original and named file bytes, SHA256, size and durable session reference agree.",
+      "Sent attachment survives browser refresh and managed DSH restart; restart does not make another model request.",
+      "Existing approval, cancellation, usage, trace and page/session draft checks remain passing; owned processes stopped."
+    ],
+    "limits": [
+      "Native unsent attachment draft is runtime-only and is lost on refresh; text persistence depends on browser storage and origin.",
+      "Deterministic loopback provider only; image/multimodal and broader real-model development not covered.",
+      "No daily service restart, package rebuild or user-data modification."
+    ],
+    "fixture_repairs": [
+      "Native sidebar excludes non-current blank sessions; second project now contains one local fixture turn.",
+      "Model response index must not reset within one session: duplicate call-0 histories caused reload body to remain absent. Unique call index restored successful refresh. Failed isolated runs preserved."
+    ]
+  },
+  "restore_preflight_checkpoint": {
+    "status": "host_completed_preflight_real_model_attempt_incomplete",
+    "assets": [
+      "Reused tools/backup_personal_data.py integrity/restore path and docs/project/backup-recovery.md.",
+      "Added tools/restore_preflight.py because no existing read-only dependency preflight was available.",
+      "Extended existing guarded tools/verify_self_development_live.py; independent immutable 13-test suite prepared by subagent."
+    ],
+    "model_evidence": ".sumika-next/self-development-live-d4ce90ce2e3d410894ceb566061f33c3/report.json",
+    "model_result": "22 real deepseek-flash requests; terminal completed but only partial backup script changes. Preflight module and documentation unchanged; restricted operations denied. No candidate execution/adoption as autonomous success.",
+    "host_implementation": [
+      "Reviewed and implemented shared verify_snapshot extraction plus --inspect CLI.",
+      "Implemented pure role-resource preflight, network/link unknown status, internal manifest eligibility and fixed-code error reporting.",
+      "Independent review caught empty/excluded payload entries not restored by v1; fixed before acceptance."
+    ],
+    "verification": {
+      "command": "python -B -m unittest tests_next.test_restore_preflight tests_next.test_personal_snapshot",
+      "result": "38 passed; pre-existing SQLite ResourceWarning in recovery tests"
+    },
+    "limits": [
+      "Not autonomous real-model development acceptance; host supplied missing implementation and documentation.",
+      "Presence checks only for two configured role fields; no all-role/DSH/plugin/runtime certification.",
+      "No UI or daily deployment, activation, user data modification or package rebuild."
+    ]
+  },
+  "current_remaining_audit": {
+    "status": "incomplete_current_integration_and_release",
+    "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
+    "active_packages": [
+      {
+        "id": "A",
+        "name": "Current integrated daily-development regression",
+        "status": "completed_with_main_agent_corrections",
+        "remaining": "Autonomous acceptance not claimed; one isolated Pro task finished with main-Agent fixes; no further paid model run started.",
+        "existing": "pro_development_checkpoint: 18 requests; code/tests/docs completed, report-writing race corrected by main Agent."
+      },
+      {
+        "id": "B",
+        "name": "Daily main-Agent web cross-review E2E",
+        "status": "completed",
+        "remaining": "None for this approved actual-work cross-review",
+        "existing": "One approved draft recovery, website response, native readback/restart, main-Agent adjudication and two verified fixes; see current-work-cross-review.json"
+      },
+      {
+        "id": "C",
+        "name": "Final installation and recovery acceptance",
+        "status": "internal_current_source_delivery_verified",
+        "remaining": "K has host acceptance plus byte-identical business/runtime to guest-tested J; no claim K was separately guest tested. Public release remains separate.",
+        "existing": "K archive/install/EXE passed with 26229 files; installer provided beside archive. J clean guest installation/lifecycle passed."
+      },
+      {
+        "id": "D",
+        "name": "Redistribution obligations",
+        "status": "deferred_public_distribution",
+        "remaining": "Preserve native audit findings for later public-release scope; no full rebuild or WSL in this internal-use delivery.",
+        "existing": "Exact supplemental notice bindings and component mismatch audit implemented; no public clearance. AWS exact-version source/notice association now verified and full copyright license retained."
+      }
+    ],
+    "deferred": [
+      {
+        "name": "Microphone/audibility/continuous voice hardware acceptance",
+        "reason": "User explicitly deferred audio verification; no further playback/capture now."
+      }
+    ],
+    "corrections": [
+      "Historical P3 is complete per phase-03-acceptance.md and phase-03-evidence.json; 9/9 artifact hashes matched in current inspection. Logs contain 157 tool calls/results, 6 completed turn events and compaction start/summary/end.",
+      "Recent narrow restore-preflight model attempt remains incomplete; it does not invalidate prior P3 acceptance.",
+      "Playback button approved and implemented; no pending placement decision.",
+      "Current release candidate predates latest UI/notices/installer updates; no claim current source is deployed.",
+      "Unsent native attachment drafts are runtime-only; retain limitation in final product regression.",
+      "Always-on screen, visual polish, auxiliary model adoption and automatic update UI remain outside immediate work per user choices."
+    ],
+    "verification": "Current receipts/continuity/execution/daily regression: 51 run, 50 passed, 1 symbolic-link privilege skip.",
+    "evidence": ".sumika-next/p3-evidence-recheck.json",
+    "next_action": "Internal J1 delivery is available. Public/native redistribution obligations remain open; do not install WSL or claim public clearance."
+  },
+  "header_connection_checkpoint": {
+    "status": "header_connection_projection_fixed_and_verified",
+    "assets": [
+      "ui/prototype-d/index.html:514 existing .proto status badge reused; no navigation or feature added.",
+      "ui/app/bind.js uses successful state response for Bridge connectivity independently of role session status."
+    ],
+    "changes": [
+      "Unconfigured role no longer labels healthy local Bridge disconnected.",
+      "Offline/reconnect refreshes read-only state; one delayed read handles online-event lag.",
+      "Revision fence rejects stale read responses; no task or write replay."
+    ],
+    "evidence": [
+      ".sumika-next/header-connection-3c833667-19d0-406e-abd9-0a994f8ab38e/report.json",
+      ".sumika-next/native-approval-ui-da92856e9046463381ddaed7223e2f43/report.json"
+    ],
+    "validation": "Four isolated Edge state checks (zero writes); actual isolated shell approval/draft/attachment/read/restart suite passed with header assertion.",
+    "limits": [
+      "Label confirms last successful Sumika state read, not model or DSH health.",
+      "No daily restart or package rebuild; browser refresh loads current assets if served from workspace."
+    ]
+  },
+  "deepseek_delegation_checkpoint": {
+    "status": "deepseek_delegation_paused_by_user",
+    "model": "deepseek-flash (DeepSeek V4.1 Flash)",
+    "decision": "User asked to continue host implementation; in-progress isolated continuation was interrupted before any output was adopted.",
+    "attempted_task": "resume incomplete restore-preflight edit in isolated self-development-live-d4ce90ce2e3d410894ceb566061f33c3",
+    "evidence": "self-development-live-d4ce90ce2e3d410894ceb566061f33c3/report.json",
+    "boundary": "DeepSeek remains suitable for frozen-interface routine implementation, but this thread uses host Agent for remaining work and final authority. No daily profile or product files were changed by the attempt.",
+    "verification": "python -B -m unittest tests_next.test_restore_preflight tests_next.test_personal_snapshot tests_next.test_ui_server tests_next.test_ui_workbench tests_next.test_role_chat: 91 passed",
+    "limits": [
+      "Existing ResourceWarning and Python 3.15 PurePath.is_reserved deprecation remain unrelated.",
+      "Real medium-scale development acceptance remains unproven."
+    ]
+  },
+  "candidate_g_checkpoint": {
+    "status": "current_host_archive_install_exe_passed_release_gate_open",
+    "candidate": ".sumika-next/package/product-candidate-20260919-g",
+    "files": 26048,
+    "assets": "Reused existing frozen DSH runtime, host runtimes c, launcher and reviewed notices; copied current product sources.",
+    "boundary": "Internal candidate only; not deployed or publicly cleared. Existing packages/data retained.",
+    "interrupted_development": {
+      "observation": ".sumika-next/self-development-live-d4ce90ce2e3d410894ceb566061f33c3/edit-continuation/observation.json",
+      "managed_process_alive": false,
+      "outcome": "unknown",
+      "automatic_replay": false
+    },
+    "install_evidence": ".sumika-next/package/packaged-install-ae1e6e81487040fdad061f7f9b602448/report.json",
+    "archive_sha256": "e939ace03e4251376f7fb5db3b6a84f5b061bbc0aff30b89cddc2787e3bb477a",
+    "license_evidence": ".sumika-next/package/license-audit-candidate-g.json",
+    "license_findings": "3 AWS package notices missing, sharp native terms, 5 embedded texts require review",
+    "limits": [
+      "Current host only; not clean-machine acceptance.",
+      "No daily shortcut/profile replacement, no public release.",
+      "Full original goal remains incomplete."
+    ]
+  },
+  "installer_publication_checkpoint": {
+    "status": "complete_directory_publication_verified",
+    "assets": [
+      "packaging/install_sumika.ps1: adapted existing installer",
+      "tools/verify_portable_installer.py: extended existing real PowerShell fixtures"
+    ],
+    "changes": [
+      "Reject existing destination including empty folders before staging.",
+      "Publish only by same-parent directory rename; never merge release files.",
+      "On concurrent destination conflict, retain complete staging and leave conflicting folder unchanged."
+    ],
+    "evidence": ".sumika-next/package/installer-check-9bc888f2b3a54807a32b6b35666b08a3/report.json",
+    "validation": "Real PowerShell installer suite passed: new publication conflict and existing interruption/retry/inventory/path/hash scenarios.",
+    "limits": [
+      "No daily replacement or deletion.",
+      "Candidate g is unchanged; its earlier install evidence predates this installer fix.",
+      "Power loss, shortcut activation, automatic update and clean-machine acceptance remain unverified."
+    ],
+    "next": "Resume medium-scale development workflow policy assessment without paid replay; hardware voice and external cross-review require their specific interaction/authorization."
+  },
+  "development_evidence_binding_checkpoint": {
+    "status": "native_test_evidence_binding_verified",
+    "assets": [
+      "tools/verify_self_development_live.py existing guarded runner adapted",
+      "tools/development_probe_guard.mjs reviewed without loosening scope"
+    ],
+    "finding": "Edit phase permits listed read/edit and exact glob only; new writes and terminal denied. Test phase runs one command only after external hash review. This does not represent a normal iterative medium-scale development workflow.",
+    "changes": [
+      "Bind test success to sole pwsh call, exact command, turn, step and call ID.",
+      "Require one non-error, non-truncated native result and exact unittest count/final OK; reject ambiguous failure or duplicate results."
+    ],
+    "validation": [
+      "6 focused unittest tests passed",
+      "Offline recheck of 4 historical native reviewed-resume records: 3 positive and 1 negative unchanged"
+    ],
+    "evidence": ".sumika-next/development-evidence-recheck.json",
+    "limits": [
+      "No paid calls, candidate execution, guard weakening or daily profile changes.",
+      "Native output parsing does not prove arbitrary program correctness; external source review remains required.",
+      "Medium-scale planning/edit/test/review/recovery acceptance remains incomplete."
+    ],
+    "next": "Prepare ordinary-development acceptance in an isolated workspace with native approvals; do not replay interrupted DeepSeek attempt or silently select another model."
+  },
+  "native_iteration_checkpoint": {
+    "status": "deterministic_native_iteration_and_restart_passed",
+    "assets": [
+      "tools/verify_development_sandbox.py extended with --iteration",
+      "tests_next/p2_fixture.py existing loopback model reused",
+      "tools/verify_self_development_live.py bound test evidence reused"
+    ],
+    "scope": "Isolated native multi-file write, failed test, stale edit rejection, read/edit repair, passing test and managed restart; no cloud calls or daily changes.",
+    "evidence": ".sumika-next/development-sandbox-aa276220443b4df99cd29882cb7f5edc/report.json",
+    "retained_failure": ".sumika-next/development-sandbox-221bc45d5ccc42359061a0cd79c76ab5/report.json",
+    "finding": "Native write does not establish edit read-version. FS_STALE_VERSION requires read then reconsider edit; no guard weakening.",
+    "validation": [
+      "11 native checks passed, nine tool results persisted across restart without model replay",
+      "6 evidence parser unit tests passed",
+      "Owned DSH stopped; outside sentinel and immutable tests unchanged"
+    ],
+    "limits": [
+      "Deterministic fixture, not autonomous real-model medium-scale development acceptance.",
+      "Uses isolated workspace-write/approval-never fixture; interactive approval covered separately."
+    ],
+    "next": "Real-model medium-scale acceptance remains pending; no automatic replay or provider switch. Continue independent remaining feature acceptance."
+  },
+  "speech_result_shape_checkpoint": {
+    "status": "malformed_audio_worker_result_fail_closed_verified",
+    "assets": [
+      "extensions/roles/speech_input.py shared existing lifecycle adapted",
+      "extensions/roles/speech_playback.py inherits same lifecycle",
+      "tests_next/test_speech_input.py extended existing suite"
+    ],
+    "finding": "Valid JSON of non-object shape raised AttributeError and could leave recording/processing status after worker exit.",
+    "changes": [
+      "Validate object shape before text access; malformed results become unknown and retain existing cleanup semantics."
+    ],
+    "validation": "41 tests passed: tests_next.test_speech_input, tests_next.test_speech_playback, tests_next.test_ui_server; includes real text subprocess null output and both input/output malformed shapes.",
+    "limits": [
+      "Existing HTTPError ResourceWarning and is_reserved deprecation warnings remain.",
+      "No microphone, audible output, daily restart, package rebuild or UI entry change."
+    ],
+    "pending_choice": "Per-message explicit playback/stop entry asked via async input; not yet approved.",
+    "next": "After playback-entry choice implement only if approved; otherwise continue independent release/acceptance work. Hardware and real-model medium-scale acceptance remain outstanding."
+  },
+  "playback_ui_checkpoint": {
+    "status": "explicit_playback_ui_implemented_and_browser_verified",
+    "authorization": "User explicitly approved adding per-message playback/stop button.",
+    "assets": [
+      "ui/prototype-d/index.html:325 chat design reused",
+      "ui/app/bind.js existing reply renderer adapted",
+      "SpeechPlayback existing backend reused"
+    ],
+    "validation": [
+      "8 Edge checks and screenshot inspection",
+      "30 playback/server tests passed"
+    ],
+    "evidence": ".sumika-next/playback-ui-b0a67753-500b-40f2-90b5-9b2b5817f2c1/report.json",
+    "limits": [
+      "No audible hardware test or daily restart",
+      "Start response unknown without ID blocks subsequent playback; no automatic resend",
+      "4000 character backend limit retained"
+    ],
+    "next": "Real microphone/audible playback hardware acceptance and real-model medium-scale development remain pending."
+  },
+  "playback_live_checkpoint": {
+    "status": "real_local_sapi_playback_and_cancel_verified_audibility_pending",
+    "assets": [
+      "extensions/roles/speech_playback.py existing SAPI/winsound worker used unchanged",
+      "extensions/roles/speech_input.py existing owned process lifecycle reused",
+      "tools/verify_voice_local.py and playback tests used as reference; new opt-in live runner covers actual playback rather than file-only recognition"
+    ],
+    "tool": "tools/verify_speech_playback_live.py --play",
+    "evidence": ".sumika-next/playback-live-ec8a6319a287479eb705cd8993b95244/report.json",
+    "validation": [
+      "Real Chinese SAPI synthesis and synchronous Windows playback returned completed",
+      "Second long WAV synthesized; explicit cancellation reclaimed child and job in approximately 4 ms",
+      "No late completion; final close released ownership"
+    ],
+    "output_device": "System default reported VoiceMeeter Input (VB-Audio virtual output); no device rerouting performed",
+    "audible_confirmation": "deferred_by_user",
+    "limits": [
+      "Windows playback success is not proof sound reached physical speakers/headphones.",
+      "Second cancellation proves actual worker reclamation, not physical output buffer timing.",
+      "No microphone, cloud calls, daily setting changes, service restart or package rebuild."
+    ],
+    "next": "Record user audibility feedback; microphone/continuous voice hardware and real-model medium-scale acceptance remain outstanding."
+  },
+  "embedded_notice_checkpoint": {
+    "status": "voice_hardware_deferred_by_user_embedded_notices_preserved",
+    "decision": "User explicitly deferred audible/hardware verification; no further audio testing now.",
+    "assets": [
+      "Existing packaged README and LICENSE texts manually compared",
+      "packaging/notices/sources.json exact-version binding reused"
+    ],
+    "changes": [
+      "Preserved five verbatim MIT README copyright/permission/disclaimer excerpts for data-uri-to-buffer, debug (two versions), jwa and jws.",
+      "Kept longer README copyright ranges for debug 2.6.9 and jws 4.0.1 alongside existing standalone notices."
+    ],
+    "validation": "13 notice/inventory tests passed; exact name/version/manifest matching and tamper refusal retained.",
+    "evidence": "docs/project/embedded-notice-review.json",
+    "limits": [
+      "No upstream/package modification or rebuild.",
+      "Conservative embedded-text audit finding not waived.",
+      "AWS three missing notices and native terms/source obligations remain."
+    ],
+    "next": "Continue independent unfinished work; audible and microphone verification deferred by user."
+  },
+  "aws_declared_terms_checkpoint": {
+    "status": "aws_declared_terms_preserved_notice_obligations_explicit",
+    "assets": [
+      "Reused cached integrity-verified AWS npm tarballs and candidate-g manifests",
+      "Reused packaging/notices sources bindings and existing license auditor"
+    ],
+    "changes": [
+      "Official Apache 2.0 text added for three exact AWS versions.",
+      "Archive SHA512 integrity and manifest SHA256 matched cached registry and shipped manifests.",
+      "Audit preserves unresolved copyright/NOTICE findings after generic license supplementation."
+    ],
+    "evidence": "docs/project/aws-notice-review.json",
+    "validation": "14 notice/inventory tests passed, including unresolved notice keeps release finding and exact-version/tamper checks.",
+    "limits": [
+      "No matching gitHead/version source available; version-specific copyright/NOTICE remains unverified.",
+      "No runtime changes, candidate rebuild or public release clearance.",
+      "Voice hardware acceptance remains deferred by user."
+    ],
+    "next": "Continue native-component notice/source review or other independent remaining acceptance; do not repeat audio testing."
+  },
+  "native_metadata_checkpoint": {
+    "status": "native_metadata_bidirectional_audit_verified",
+    "assets": [
+      "Existing sharp README, versions.json and LICENSE inspected",
+      "tools/audit_package_licenses.py extended rather than a parallel scanner"
+    ],
+    "finding": "libnsgif is declared in README but absent from versions.json; previous version-first review omitted it. Shipped standalone LICENSE is Apache-only despite declared LGPL components.",
+    "changes": [
+      "Audit joins declarations and versions in both directions with explicit aliases.",
+      "Missing versions, missing declarations and missing table retain native_component_metadata_incomplete finding.",
+      "Duplicate aliases rejected; unknown component versions remain unknown."
+    ],
+    "validation": "17 tests passed; real 500 npm / 2 Python candidate inventory audited, strict finding gate failed as expected.",
+    "evidence": ".sumika-next/package/license-audit-candidate-g-components.json",
+    "limits": [
+      "Metadata comparison is not binary component/source matching or legal clearance.",
+      "Candidate g is unchanged and lacks newly added source-side notices; findings do not represent rebuilt package.",
+      "No daily restart, settings mutation or audio testing."
+    ],
+    "next": "Native complete license texts and corresponding source/build/relinking evidence remain; clean-machine and real-model medium-scale acceptance still outstanding."
+  },
+  "current_review_checkpoint": {
+    "status": "review_closed_two_confirmed_defects_fixed_and_regressed",
+    "assets": [
+      "Existing consultation guard/snapshot and live runner adapted; no parallel browser automation",
+      "Existing installer, speech-playback controller and their regression runners retained",
+      "Existing packaging notice bindings and native review extended"
+    ],
+    "candidate_h": {
+      "files": 26057,
+      "report": ".sumika-next/package/packaged-install-48f8c28b5c9d4dbbaa4a40d847f955ea/report.json",
+      "status": "current_host_install_and_exe_passed",
+      "limits": "Predates latest browser fixes and supplemental notice; not final or clean-machine evidence"
+    },
+    "web_review": {
+      "report": ".sumika-next/web-review-acceptance/current-work-review-20260919/report.json",
+      "authorization": "One original-draft recovery approved and consumed; never resend",
+      "result": "Same-thread reload recovered full response; native readback and managed restart without replay passed",
+      "judgment": "Archive hash/open race confirmed; unbounded playback start/stop wait confirmed; stale polling already guarded; path validation exists but hostile destination reparse races not proven; real current integration still pending"
+    },
+    "implemented": [
+      "Rich editor semantic paragraphs preserve exact approved draft",
+      "ChatGPT user-content selector excludes Expand button",
+      "Native fixture per-turn call IDs avoid reuse",
+      "Pinned Windows libvips DLL equality and source chain recorded; vendored libnsgif full MIT notice preserved"
+    ],
+    "remaining": [
+      "Current real product development integration",
+      "Final rebuild and clean Windows acceptance",
+      "Remaining source/build/relinking and AWS notices"
+    ],
+    "limits": [
+      "Voice hardware acceptance deferred by user",
+      "No daily replacement, deletion or public release clearance"
+    ],
+    "adjudication": "docs/project/current-work-cross-review.json",
+    "validation": [
+      "31 consultation/journal/bridge/playback Python tests passed",
+      "11 browser playback checks passed, hardware_used=false",
+      "Actual PowerShell installer fixtures passed, including archive write/rename denial after hash",
+      "Native web result hash and restart without replay passed"
+    ]
+  },
+  "clean_windows_checkpoint": {
+    "status": "clean_guest_prepared_host_rehearsal_passed_system_feature_approval_pending",
+    "assets": [
+      "Reused PowerShell installer, installed-inventory verifier and existing EXE lifecycle verifier",
+      "EXE verifier now imports installed product helpers, avoiding source-checkout dependencies",
+      "Reused package h exact archive; no duplicate build or model download"
+    ],
+    "implementation": [
+      "tools/prepare_clean_windows.py creates explicit read-only input/writable result mappings and disabled network/clipboard/microphone",
+      "packaging/verify_clean_windows.ps1 uses installed Python; exports reports only",
+      "Dedicated results directory remains empty; host rehearsal stored separately to prevent stale host evidence being mistaken for guest results"
+    ],
+    "evidence": "D:\\Code\\Sumika\\.sumika-next\\package\\clean-windows-candidate-h\\host-results\\report.json",
+    "prepared_configuration": "D:\\Code\\Sumika\\.sumika-next\\package\\clean-windows-candidate-h\\acceptance.wsb",
+    "validation": "19 notice/inventory/bundle tests passed; actual installer and bundled-Python EXE first/reuse/foreign-port rejection/authenticated exit passed on current host",
+    "limits": [
+      "No Sandbox installed or started; no clean-guest evidence",
+      "Candidate h predates newest code and notices; final candidate rebuild remains pending",
+      "No model or voice calls; no daily data changed or deleted"
+    ],
+    "approval_needed": "Enable Windows optional feature Containers-DisposableClientVM with dependencies as administrator; NoRestart. Prepared enable-sandbox.ps1. Host C free approximately 13.5 GB. User confirmation required for OS feature change."
+  },
+  "aws_source_checkpoint": {
+    "status": "three_exact_package_source_license_associations_verified",
+    "evidence": "docs/project/aws-notice-review.json",
+    "root_commit": "cece9809ea2ed8fdb5f3e73972e2f71154b01129",
+    "remaining": "Native complete terms/corresponding-source/build/relinking; updated notices not rebuilt into final candidate"
+  },
+  "native_source_material_checkpoint": {
+    "status": "native_source_materials_advanced_not_release_clearance",
+    "assets": [
+      "Reused pinned MXE build source, shipped versions, native review and supplemental notice registry",
+      "Fetched exact libvips source and eight dependency archives; each matched effective recipe checksum"
+    ],
+    "evidence": "docs/project/native-component-review.json",
+    "verification": [
+      "28 shipped versions matched after resolving overrides and mozjpeg plugin",
+      "9 source archives matched recipe SHA256",
+      "11 original source notice texts retained",
+      "17 notice/inventory tests passed"
+    ],
+    "limits": [
+      "Source archives stored on D:, no models or Windows features changed",
+      "No deletions or daily service changes",
+      "Base image identity, remaining dependency/transitive sources, applied patches and relinking not yet verified",
+      "Clean Windows feature approval still pending"
+    ],
+    "next": "Complete remaining native source/notice material and validate build/relink path; continue real integrated development and final candidate acceptance."
+  },
+  "native_source_completion_checkpoint": {
+    "status": "28_declared_source_archives_verified_transitive_build_relinking_pending",
+    "assets": [
+      "Existing Windows recipe index and checksum-verified source archives reused",
+      "Existing notice registry extended; no dependency replacement or upstream changes"
+    ],
+    "changes": [
+      "All 28 versioned native component original source archives now match effective Windows build recipe SHA256",
+      "37 additional original notices retained, including AOM patent grant, FreeType FTL, IJG README and Adobe notice",
+      "FreeType and IJG acknowledgments added",
+      "Native source identity index records pinned URLs/hashes and remaining obligations"
+    ],
+    "evidence": [
+      "packaging/notices/native-source-materials.json",
+      "docs/project/native-component-review.json",
+      ".sumika-next/native-source-review-20260919/component-sources/remaining-report.json"
+    ],
+    "validation": [
+      "28 archives and two build-script archives rehashed",
+      "17 notice/inventory tests passed",
+      "Builder reviewed-assets gate passed with all supplemental notice hashes"
+    ],
+    "limits": [
+      "Not complete corresponding source: transitive crates, effective patches, build/relink validation remain",
+      "No installed WSL distribution or Docker available for cross-build; no software installed",
+      "Clean Windows feature approval pending; no daily restart, deletion or publication"
+    ],
+    "next": "Trace full source dependencies and effective patches, prepare verifiable source bundle; final candidate and real current-product acceptance remain."
+  },
+  "rust_source_checkpoint": {
+    "status": "patched_librsvg_registry_sources_verified",
+    "assets": [
+      "Exact librsvg source and upstream MXE patch reused",
+      "Existing DSH development records checked: narrow guarded runner is not ordinary current-product acceptance"
+    ],
+    "changes": [
+      "Added reusable tools/collect_locked_crate_sources.py; does not install or execute downloaded code",
+      "350 original-lock registry archives verified against lock SHA256",
+      "Upstream Windows librsvg patch dry-run/applied with fuzz=0 to affected isolated source files",
+      "346 effective-lock registry archives reverified; source identity index retained in packaging notices"
+    ],
+    "validation": [
+      "21 source-collector/notice/inventory tests passed",
+      "All notice hashes pass builder reviewed-assets gate",
+      "Original source, lock and patch evidence preserved"
+    ],
+    "evidence": [
+      "docs/project/native-component-review.json",
+      ".sumika-next/native-source-review-20260919/librsvg-patch-verification.json",
+      ".sumika-next/native-source-review-20260919/rsvg-crates/effective-report.json"
+    ],
+    "limits": [
+      "Full native compilation/relinking not run",
+      "Registry source set includes build/test/optional dependencies; not a runtime SBOM",
+      "Some crate archives lack standalone notice files; target scope and exact notices remain to review",
+      "Current ordinary-product real development acceptance still pending; no new model calls",
+      "Windows Sandbox feature approval pending"
+    ],
+    "next": "Resolve remaining source/notice and target-build evidence; current real-development regression and final clean-Windows candidate acceptance remain."
+  },
+  "rust_target_notice_checkpoint": {
+    "status": "offline_windows_capi_graph_and_notice_materials_verified",
+    "assets": [
+      "Reused installed Cargo 1.98.0 stable; no new toolchain installation",
+      "Reused checksum-verified Rust sources and Windows librsvg patch"
+    ],
+    "changes": [
+      "Prepared D:/Caches/sumika-native isolated patched source and vendored crates; no global Cargo config change",
+      "Cargo metadata/tree --offline --locked completed for x86_64-pc-windows-gnullvm; lock unchanged",
+      "Candidate librsvg-c capi normal/build graph has 162 entries; not runtime binary proof",
+      "279 exact/supplemental notice bindings preserved; missing mutants/selector texts resolved for candidate graph"
+    ],
+    "verification": [
+      "21 collector/notice/inventory tests passed",
+      "Builder reviewed notice hash gate passed",
+      "No Rust build scripts or downloaded source code executed"
+    ],
+    "evidence": [
+      "docs/project/native-component-review.json",
+      ".sumika-next/native-source-review-20260919/rsvg-c-windows-tree-review.json",
+      ".sumika-next/native-source-review-20260919/offline-rust-workspace.json"
+    ],
+    "limits": [
+      "Actual upstream target features/container/toolchain/build-std provenance and native build/relink remain pending",
+      "Current Windows host toolchain is MSVC; historical library target is gnullvm cross-build",
+      "No Sandbox enablement, model calls, daily restart, deletion or release"
+    ],
+    "next": "Complete remaining effective patches/toolchain source boundary and native relink acceptance; real current product and final clean Windows acceptance remain."
+  },
+  "candidate_i_checkpoint": {
+    "status": "candidate_i_current_host_install_exe_passed_clean_guest_pending",
+    "candidate": ".sumika-next/package/product-candidate-20260919-i",
+    "files": 26211,
+    "report": ".sumika-next\\package\\packaged-install-40a3339d1e1b44ae99b6d025525803eb\\report.json",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\packaged-install-40a3339d1e1b44ae99b6d025525803eb\\Sumika-internal.zip",
+    "sha256": "d63324a24b94ab63ec4155438b5b8611bee4951b9c83739b80dfed672d60b96b",
+    "checks": {
+      "archived_bytes_match_inventory": true,
+      "real_installer_and_installed_inventory": true,
+      "installed_exe_launch_reuse_conflict_and_stop": true
+    },
+    "changes_included": [
+      "Bounded speech start/stop waits with no unknown-state replay",
+      "Multiline consultation guard and expand-button-free response correlation",
+      "Native source/notice material indexes and exact AWS source license bindings"
+    ],
+    "clean_guest_configuration": ".sumika-next\\package\\clean-windows-candidate-i\\acceptance.wsb",
+    "license_audit": ".sumika-next\\package\\license-audit-candidate-i.json",
+    "audit_status": "Strict findings remain for native terms/source and five embedded README reviews; no AWS missing notices remain",
+    "current_workbench_model": "deepseek-official / deepseek-flash, read-only settings inspection",
+    "limits": [
+      "Current host acceptance is not clean Windows acceptance",
+      "Internal package only; no public release or daily replacement",
+      "No model calls or audio hardware tests",
+      "Sandbox enablement still awaits original system-change approval"
+    ],
+    "next": "Current-product ordinary real development regression using configured model; finish native distribution and clean-guest acceptance."
+  },
+  "product_development_checkpoint": {
+    "status": "interrupted_candidate_rejected_not_adopted",
+    "asset_reuse": {
+      "tools/verify_product_development_live.py": "adapt existing opt-in runner",
+      "tools/audit_package_licenses.py": "candidate modification via installed product; independent review required",
+      "packaging/notices/sources.json": "reuse exact manually reviewed bindings"
+    },
+    "base": ".sumika-next/product-development-9757b82710c44522b179f2317a94e848",
+    "initial_result": "Native task terminal after local 40-request cap; draft has identity-binding and empty-excerpt defects. Not adopted.",
+    "preflight_failure": "continuation-cfd35a06042b4ca3ae0be060697d0b35: prepared, zero requests, no request.json/events/session; no matching live Python/Node processes. Evidence retained.",
+    "recovery": "mkdir exist_ok fix; explicit inspected preflight identifier required; new feedback submitted to existing native session.",
+    "next": "Use existing documented Python private-ACL diagnosis; review fixture compatibility before new native acceptance, preserve assertions/no deletion/no ACL changes. No replay.",
+    "review": ".sumika-next\\product-development-9757b82710c44522b179f2317a94e848\\continuation-a125adbdbf824a31ae38d701eef0829f\\main-review.json",
+    "result": "Candidate rewrote temporary-directory tests following sandbox PermissionError and executed recursive cleanup of deterministic scratch paths despite no-deletion instruction. No automatic adoption."
+  },
+  "embedded_review_implementation_checkpoint": {
+    "status": "reviewed_mit_evidence_recognition_implemented_native_suite_passed",
+    "assets": {
+      "tools/audit_package_licenses.py": "adapted existing auditor",
+      "packaging/notices/sources.json": "explicit review kind on exactly five existing reviewed entries",
+      "tests_next/test_dependency_notices.py": "retained original assertions; unique retained workspace fixtures replace private temp ACL/cleanup",
+      "tools/verify_development_sandbox.py": "new --notice-tests mode reuses native fixture transport"
+    },
+    "validation": [
+      "14 host unit tests passed",
+      "14 identical tests passed through native workspace-write sandbox with unchanged source/test hashes",
+      "All five reviewed records match actual inventory-validated candidate-i README and notice bytes"
+    ],
+    "native_report": ".sumika-next/development-sandbox-dec3ead2fcee4f5eaf1ee04c82cf5a8d/report.json",
+    "package_source_check": ".sumika-next/package/embedded-review-candidate-i-source-check.json",
+    "limits": [
+      "Updated auditor/metadata not yet packaged; candidate-i historical strict audit retained",
+      "No legal/native source/relink clearance",
+      "Native deterministic tests do not complete ordinary real-model development acceptance",
+      "Interrupted rejected model candidate not adopted or replayed"
+    ],
+    "next": "Finish remaining effective native patches/source and clean Windows acceptance; select next real development task from current source, after compatibility preflight."
+  },
+  "native_patch_checkpoint": {
+    "status": "candidate_effective_patches_applied_zero_fuzz",
+    "components": 28,
+    "patches": 16,
+    "evidence": ".sumika-next\\native-source-review-20260919\\patch-check-c8e1008083b64541ac83cc8123edc557\\report.json",
+    "index": "packaging\\notices\\native-patch-materials.json",
+    "assets_reused": [
+      "Existing exact component source archives",
+      "Pinned build-win64-mxe/MXE recipe archives",
+      "Existing Windows GNU patch at D:/Tools/Git/usr/bin/patch.exe"
+    ],
+    "implementation": "tools/verify_native_source_patches.py; copies affected source files to fresh retained directories; executes patch only, not upstream build scripts",
+    "verification": "All 16 selected patches dry-run and apply exit 0 with --fuzz=0; no offset diagnostics. Existing librsvg Cargo.lock patch independently agrees with previous evidence.",
+    "retained_failure": "First run stopped before mozjpeg patching because obsolete codeload archive failed hash; corrected lookup to existing mozjpeg.recipe-source, without download/replacement.",
+    "limits": [
+      "Affected-file subsets verified only; no full native compilation or relink",
+      "Original release container identity and optional feature choices not proved",
+      "Full original recipe archives retained; index is not a corresponding-source delivery offer"
+    ],
+    "next": "Real native compilation/replacement and final source-delivery package still needed; clean Windows approval and ordinary model-development acceptance remain."
+  },
+  "clean_windows_system_checkpoint": {
+    "status": "guest_started_installer_terminal_failure",
+    "authorized": "User explicitly allowed enabling Windows Sandbox without automatic restart",
+    "attempt_pid": 12480,
+    "dism_time": "2026-09-19 20:00:13",
+    "hresult": "0x80073712",
+    "cbs_reason": "ERROR_SXS_COMPONENT_STORE_CORRUPT; failed to decompress optional component content",
+    "sandbox_executable_present": false,
+    "restarted": true,
+    "next": "Await confirmed sandbox focus to run prepared retry; original guest report and failed staging retained.",
+    "repair_authorized": true,
+    "repair_status": "completed_exit_0",
+    "repair_process_started": "2026-09-19 20:04:14",
+    "repair_script": ".sumika-next/package/clean-windows-candidate-i/repair-component-store.ps1",
+    "repair_result": ".sumika-next/package/clean-windows-candidate-i/restore-health-result.json",
+    "restart_authorized": true,
+    "repair_exit_code": 0,
+    "feature_state": "Enabled",
+    "restart_needed": true,
+    "feature_evidence": ".sumika-next/package/clean-windows-candidate-j/feature-state.json",
+    "boot_time": "2026-09-19T20:54:09.5000000+08:00",
+    "sandbox_pid": 17968,
+    "launch_evidence": ".sumika-next/package/clean-windows-candidate-j/launch.json",
+    "observation": ".sumika-next/package/clean-windows-candidate-j/startup-observation.json",
+    "sandbox_client_pid": 12324
+  },
+  "ordinary_patch_development_checkpoint": {
+    "status": "real_model_task_incomplete_main_agent_completed_tool_fix",
+    "adopted_model_candidate": false,
+    "model": "deepseek-flash",
+    "provider_requests": 77,
+    "terminal_evidence": [
+      "report.json",
+      "continuation-1b0bf1c38fdf499799afc520a77c8aa3/report.json",
+      "continuation-d00779d0c60d4ad8be409f493f064b5f/report.json"
+    ],
+    "results": [
+      "First and second turn reached max-tokens; third reached local 60-call cap",
+      "Native read/write/edit/terminal and same-session restart worked",
+      "Model did not complete negative tests/docs, so ordinary autonomous development acceptance remains failed",
+      "No further automatic model retry; model candidate retained, not adopted"
+    ],
+    "main_fix": {
+      "tool": "tools/verify_native_source_patches.py",
+      "tests": "tests_next/test_native_source_patches.py",
+      "result": "7 tests passed; real 28 components / 16 patches passed with explicit recipe archive hashes",
+      "evidence": ".sumika-next/native-source-review-20260919/patch-check-d0ad9e2944904931af79b674c0ef0cff/report.json"
+    }
+  },
+  "candidate_j_checkpoint": {
+    "status": "candidate_j_host_and_clean_guest_lifecycle_passed_with_corrected_external_tools",
+    "files": 26214,
+    "candidate": ".sumika-next/package/product-candidate-20260919-j",
+    "report": ".sumika-next/package/packaged-install-0366ff2f44dc4790acb86dfe74e326b0/report.json",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\packaged-install-0366ff2f44dc4790acb86dfe74e326b0\\Sumika-internal.zip",
+    "sha256": "ceaeebd373071660d3fa64ea393f4f190ec3bef6892955a58543ffa0965bcae1",
+    "clean_guest_configuration": ".sumika-next/package/clean-windows-candidate-j/acceptance.wsb",
+    "audit": ".sumika-next/package/license-audit-candidate-j.json",
+    "remaining_findings": [
+      "native_component_licenses_require_review",
+      "native_component_metadata_incomplete",
+      "terms_require_specific_review"
+    ],
+    "limits": [
+      "Clean guest installation and EXE lifecycle passed with corrected external installer/verifier; original archive unchanged",
+      "No public release or daily replacement",
+      "Business end-to-end and native redistribution review not cleared by this test"
+    ],
+    "next": "Package validated installer/verifier fixes for internal delivery; retain provenance and earlier failure evidence."
+  },
+  "native_source_bundle_checkpoint": {
+    "status": "internal_material_bundle_verified_not_release_clearance",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\native-source-materials-20260919.zip",
+    "sha256": "6bad42a3ec84714bb97044cabda6ee49a1fbf5bd709e0234e3c31a8698598d69",
+    "bytes": 185909111,
+    "counts": {
+      "native_archives": 28,
+      "rust_archives": 346,
+      "recipe_archives": 2
+    },
+    "verified_entries": 545,
+    "remaining": [
+      "Historical container/toolchain/build-std provenance and source scope",
+      "Actual compilation, binary replacement/relinking validation",
+      "Final applicable source/license scope and delivery review"
+    ],
+    "reviewed_build": {
+      "report": ".sumika-next/package/native-source-materials-20260919-reviewed.report.json",
+      "tests_passed": 18,
+      "verified_entries": 545,
+      "status": "internal_material_bundle_verified_not_release_clearance"
+    }
+  },
+  "pro_development_checkpoint": {
+    "status": "completed_with_main_agent_corrections",
+    "autonomous_acceptance_passed": false,
+    "provider_requests_total": 18,
+    "authorization_limit": 40,
+    "daily_model_changed": false,
+    "model_tests_passed": 15,
+    "reviewed_tests_passed": 18,
+    "adopted_files": [
+      "tools/build_native_source_materials.py",
+      "tests_next/test_native_source_materials.py",
+      "packaging/README.md"
+    ],
+    "findings": [
+      "Model candidate could overwrite a sidecar created by a competing writer after preflight; fixed with exclusive creation and retained owned handle.",
+      "Windows control and reserved names rejected; tests added.",
+      "Report IO failure is attached to original exception rather than silently discarded."
+    ],
+    "validation": "18 tests passed; actual cached source bundle 545 entries verified",
+    "real_bundle_report": ".sumika-next/package/native-source-materials-20260919-reviewed.report.json",
+    "boundary": "Native isolated model completed code/tests/docs after one max-token continuation; main-agent corrections required. Not a clean autonomous pass or full release clearance.",
+    "base": ".sumika-next\\product-development-663e856871974993ba9b2e96259db211",
+    "model": "deepseek-v4-pro",
+    "terminal_report": ".sumika-next\\product-development-663e856871974993ba9b2e96259db211\\continuation-ede344e8df484806b460cb166bb7a496\\report.json",
+    "next": "No further provider requests started. Preserve model candidate and distinguish reviewed adoption from autonomous acceptance."
+  },
+  "restart_handoff": {
+    "at": "2026-09-19T20:41:38.793049+08:00",
+    "authorization": "User explicitly requested help restarting computer",
+    "download_session": 32530,
+    "download_state": "Interrupted for restart; inspect retained toolchain-download directories and hashes before any retry; partial files are not verified sources.",
+    "next": [
+      "Verify Sandbox enabled and run existing clean-windows-candidate-j/acceptance.wsb",
+      "Resume native source review from docs/project/native-component-review.json; inspect toolchain downloads first",
+      "Pro acceptance ended at 18 calls; reviewed adoption required main-agent fixes; no active Pro call"
+    ]
+  },
+  "clean_windows_installer_checkpoint": {
+    "status": "clean_guest_install_inventory_and_exe_lifecycle_passed",
+    "failure_report": ".sumika-next/package/clean-windows-candidate-j/results/report.json",
+    "guest": "Windows 10.0.26100 / WDAGUtilityAccount",
+    "cause": "Windows PowerShell 5.1 legacy .NET MAX_PATH on deep package paths under default user directory",
+    "fix": "Verifier uses extended paths without changing machine policy, raises directory enumeration errors; PS runner redirects native stderr via Start-Process.",
+    "assets_reused": [
+      "tools/verify_portable_staging.py",
+      "packaging/verify_clean_windows.ps1",
+      "tools/verify_portable_exe.py",
+      "existing candidate J guest installation"
+    ],
+    "host_evidence": ".sumika-next/package/installer-check-fcd39af3f29347af8f1b0f047b58d3e5/report.json",
+    "guest_retest": ".sumika-next/package/clean-windows-candidate-j/retry-longpath.json",
+    "current_guest_client_pid": 12324,
+    "next": "No further guest action required for this milestone. Assemble current internal delivery with corrected installer/verifier; retain candidate J and original failures. Full business acceptance and public-distribution review remain separate.",
+    "inspection": ".sumika-next\\package\\clean-windows-candidate-j\\results\\retry-inspection.json",
+    "inspection_result": "No jobs and only initial failed work directory; prior retry did not start.",
+    "guest_report": ".sumika-next\\package\\clean-windows-candidate-j\\results\\retry-observed\\lifecycle-report.json",
+    "result": "Fixed installer succeeded in Windows Sandbox; all 26214 files hash-verified; EXE first start, reuse, foreign-port rejection/preservation, authenticated shutdown and process exit passed.",
+    "inventory_error": "Resolved: ordinary Windows paths omitted 63 existing files; extended paths verify all 26214 hashes.",
+    "hypothesis": "Confirmed: ordinary Windows path enumeration omitted 63 deep files; extended paths enumerate and hash-verify all files.",
+    "path_evidence": ".sumika-next\\package\\clean-windows-candidate-j\\results\\retry-observed\\path-diagnostic.json",
+    "validation": "15 portable inventory and clean-Windows bundle tests passed, including deep-file integrity and tamper rejection.",
+    "completed_at": "2026-09-20T03:08:33.982202+08:00",
+    "prior_inventory_failure_report": ".sumika-next\\package\\clean-windows-candidate-j\\results\\retry-observed\\report.json",
+    "checks": {
+      "first": true,
+      "reuse": true,
+      "foreign_http200_rejected_and_preserved": true,
+      "authenticated_shutdown_and_process_exit": true
+    },
+    "test_bridge_stopped": true,
+    "boundary": "Candidate J archive tested with corrected external installer/verifier. Archive itself unchanged; no model requests, no daily-profile migration, no WSL installation. DSH task execution and all business features are not covered by this lifecycle test."
+  },
+  "native_toolchain_download_checkpoint": {
+    "status": "complete_all_four_expected_hashes_verified",
+    "exec_session": 75951,
+    "verified_sources": [
+      "mingw-w64 14.0.0",
+      "llvm-mingw 20260602",
+      "Rust nightly 2026-06-05",
+      "LLVM 22.1.7"
+    ],
+    "pending": [],
+    "next": "No download running. Full native build needs Linux/OCI environment; no such installation authorized yet.",
+    "notices_preserved": 2,
+    "notice_tests_passed": 14,
+    "rust_download_observed_bytes": 160432128,
+    "observation_time": "2026-09-19T21:56:30+08:00",
+    "remaining": "Rust/LLVM downloads and original build identity, compilation/relinking remain open; no release gate cleared."
+  },
+  "toolchain_bundle_checkpoint": {
+    "status": "all_four_sources_verified_and_bundled",
+    "report": ".sumika-next\\package\\native-source-materials-20260919-toolchain.report.json",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\native-source-materials-20260919-toolchain.zip",
+    "sha256": "b749c176fc3c2e5c2f9703914c2a0ea5993cd1c6f2fff7933807122633395b80",
+    "bytes": 607941251,
+    "verified_entries": 563,
+    "counts": {
+      "native_archives": 28,
+      "rust_archives": 346,
+      "recipe_archives": 2,
+      "toolchain_archives": 4
+    },
+    "notice_tests_passed": 14,
+    "download_terminal": true,
+    "remaining": [
+      "Historical container/toolchain/build-std provenance and source scope",
+      "Actual compilation, binary replacement/relinking validation",
+      "Final applicable source/license scope and delivery review"
+    ],
+    "boundary": "Internal source materials only. C++ wrapper rebuild/replacement passed separately; core C DLL and complete transitive rebuild pending."
+  },
+  "guest_observation_checkpoint": {
+    "status": "progress_observation_and_diagnostics_used_in_guest",
+    "assets_reused": [
+      "packaging/verify_clean_windows.ps1",
+      "tests_next/test_clean_windows_bundle.py"
+    ],
+    "tests_passed": 3,
+    "behavior": [
+      "Exclusive progress.json claim before work",
+      "PID and stage observable while running",
+      "Terminal failures recorded",
+      "Same output directory refuses replay and preserves evidence"
+    ],
+    "boundary": "Observed guest install/inventory stages and terminal inventory failure; separate Python continuation records successful EXE lifecycle. Start-Process stderr change not yet run as full guest pipeline."
+  },
+  "cpp_rebuild_checkpoint": {
+    "status": "cpp_wrapper_rebuilt_and_replacement_loaded",
+    "passed": true,
+    "compiler": "MSVC 14.44.35207 x64 via existing Visual Studio 2022",
+    "recipe_reference": ".sumika-next/native-source-review-20260919/sharp-binding.gyp",
+    "source_inputs": "Checksum-verified libvips 8.18.6 release and official Windows development ZIP",
+    "build_command": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\build-utf8.cmd",
+    "build_log": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\build-utf8.log",
+    "baseline": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\baseline-verified.json",
+    "replacement": ".sumika-next\\native-source-review-20260919\\cpp-rebuild-a25f5dc52f9c46e7b350c23d9c593648\\replacement-verified.json",
+    "built_cpp_sha256": "0bb98fa86e933703f0cd6a88cd33ce527bcb357ea92bbe9d2b5758743f8061f0",
+    "original_cpp_sha256": "4f458afdb7b8a4290dbda3f287d7db037b239b8a9d21f0b87333f92192cdee76",
+    "unchanged_binding_copy": true,
+    "unchanged_c_library_copy": true,
+    "checks": [
+      "PNG exact pixel roundtrip",
+      "JPEG resize encode and decode dimensions",
+      "SVG red pixel rasterization",
+      "Native process DLL path proves rebuilt wrapper was loaded"
+    ],
+    "limits": [
+      "C dependency DLL reused, not rebuilt",
+      "Not byte-identical upstream compiler reproduction",
+      "Test-only Module._load routing; no node_modules or daily binary modification",
+      "Full corresponding source and Linux/MXE build remain pending"
+    ],
+    "retained_failures": [
+      "Initial build missing included vips-operators.cpp; extracted exact source and added UTF-8 compiler option",
+      "First probe rejected Windows extended path spelling; normalized both sides using path.toNamespacedPath"
+    ]
+  },
+  "rust_source_completion_checkpoint": {
+    "status": "archive_verified_staged_root_notices_preserved",
+    "bytes": 243562908,
+    "sha256": "89e9769b66c61eca90b885c852fbe34e952081c0e3332a7921eabfc7990d2afe",
+    "source": ".sumika-next\\native-source-review-20260919\\toolchain\\rust-nightly.source",
+    "notices": ".sumika-next\\native-source-review-20260919\\rust-toolchain-notices.json",
+    "remaining": "Third-party standard-library/build-std scope must be reviewed; root MIT/Apache alone does not cover every bundled source. LLVM download exec 75951 still live."
+  },
+  "linux_build_environment_checkpoint": {
+    "status": "deferred_public_release_only",
+    "script": ".sumika-next/package/linux-build-preflight/install-wsl-runtime.ps1",
+    "requested_scope": "WSL runtime install only via --install --no-distribution; no distro, no automatic restart",
+    "existing_assets": [
+      "Pinned MXE recipe and original source material bundle",
+      "Existing MSVC build already used successfully for C++ wrapper",
+      "Official Microsoft WSL command documentation captured under linux-build-preflight"
+    ],
+    "evidence": "wsl --help exposes installation stub only; no Linux runtime or Docker/Podman detected",
+    "disk": {
+      "D_free_approx_GB": 5.2,
+      "E_free_approx_GB": 1018,
+      "E_type": "fixed NTFS"
+    },
+    "future_distro_location": "Proposed E:/SumikaBuild after separate concrete distro preparation; not created or installed",
+    "next": "Not needed for internal use; no WSL installation authorized or planned in current scope."
+  },
+  "execution_block_checkpoint": {
+    "status": "clean_guest_block_resolved",
+    "consecutive_goal_turns": 0,
+    "conditions": [],
+    "resume": [
+      "Prepare internal delivery using validated fixes; no WSL required for this milestone"
+    ],
+    "objective_complete": false,
+    "downloads_running": false,
+    "preserved": "Clean guest install/inventory/EXE lifecycle passed. Full third-party rebuild remains separate, unapproved and unexecuted."
+  },
+  "internal_delivery_checkpoint": {
+    "status": "assembled_verified_not_installed_to_daily",
+    "path": ".sumika-next\\package\\internal-delivery-20260920-j1",
+    "archive_sha256": "ceaeebd373071660d3fa64ea393f4f190ec3bef6892955a58543ffa0965bcae1",
+    "base": "candidate J unchanged; external installer and inventory verifier fixed",
+    "evidence": "evidence/clean-windows-lifecycle.json",
+    "boundary": "Internal delivery only; no full current-source rebuild, public release or daily replacement.",
+    "successor": ".sumika-next\\package\\packaged-install-93f1d18bdb564c58b44810cd20bfd718"
+  },
+  "candidate_k_checkpoint": {
+    "status": "current_source_host_install_and_exe_passed",
+    "candidate": ".sumika-next\\package\\product-candidate-20260920-k",
+    "files": 26229,
+    "report": ".sumika-next\\package\\packaged-install-93f1d18bdb564c58b44810cd20bfd718\\report.json",
+    "archive": "D:\\Code\\Sumika\\.sumika-next\\package\\packaged-install-93f1d18bdb564c58b44810cd20bfd718\\Sumika-internal.zip",
+    "sha256": "570d185ce03007a1e22cf1938fc09d1f23abf159a65b0f1a7566196cbd926ad5",
+    "installer_sha256": "78b60bbdb8f2337bb562c351f1cd7db8e55f4521b02a08511019e5c4a865bc9f",
+    "delta": ".sumika-next\\package\\candidate-k-delta.json",
+    "business_and_runtime_identical_to_guest_tested_J": true,
+    "audit": ".sumika-next\\package\\license-audit-candidate-k.json",
+    "limits": [
+      "K itself not separately run in clean guest",
+      "Three native/public-redistribution audit findings remain",
+      "No daily installation or personal data changes"
+    ],
+    "next": "Current-source internal package ready. Public-release native source/terms review remains separate; no WSL installation authorized."
+  },
+  "delivery_scope_checkpoint": {
+    "status": "user_selected_internal_use",
+    "question": "Continue internal-use functionality or include public redistribution readiness in this delivery?",
+    "verified_internal_delivery": ".sumika-next/package/packaged-install-93f1d18bdb564c58b44810cd20bfd718/report.json",
+    "inspection": {
+      "audit": ".sumika-next/package/license-audit-candidate-k.json",
+      "all_three_findings_concentrated_in": "@img/sharp-win32-x64 0.35.4",
+      "metadata_gap": "libnsgif vendored revision identified in source_chain; shipped versions.json omits a standalone version. Do not invent a version.",
+      "remaining_source_review": "Core DLL exact upstream match recorded; C++ replacement passed; full linked-dependency source/build delivery still unproven."
+    },
+    "scope_boundary": "Native full rebuild and WSL are not prerequisites for internal Sumika operation. No WSL installation or new paid call started. Do not infer public redistribution approval from continuing product development.",
+    "plan_quality": "Historical P4-UI/P5/P6 rows contain older partial statuses; later feature evidence exists. Neither redo automatically nor mark all product requirements complete without reconciliation.",
+    "next": "Finish internal-use handoff; retain public review as future work, do not install WSL.",
+    "decision": "User: 先完成内部自用"
+  },
+  "candidate_k_first_run_checkpoint": {
+    "status": "installed_first_run_http_checks_passed",
+    "report": ".sumika-next/package/packaged-install-93f1d18bdb564c58b44810cd20bfd718/startup-f2de289a0faa413d8df65a31ab971d6e/report.json",
+    "checks": {
+      "settings_readable": true,
+      "role_generation_disabled": true,
+      "auxiliary_disabled": true,
+      "no_personal_roles_imported": true,
+      "modules_readiness_workbench_schedule_readable": true
+    },
+    "assets_reused": [
+      "tools/verify_portable_startup.py",
+      "installed candidate K",
+      "extensions/roles/defaults/sampleA",
+      "extensions/roles/defaults/sumika-guide"
+    ],
+    "test_script": ".sumika-next/package/first-run-check-2a94239fca424b68a6e6ea54c9ecb3d1/verify_first_run_v3.py",
+    "retained_failures": "First two assertions incorrectly assumed no built-ins, then only sampleA; source confirmed sumika-guide is also an intentional built-in. No product change needed.",
+    "boundary": "Fresh isolated personal data, bundled Python, HTML and HTTP endpoints only; not browser-rendered interaction, clean guest rerun or optional hardware execution. No model calls; child bridge stopped."
+  },
+  "internal_use_acceptance": "docs/project/internal-use-acceptance.json",
+  "source_upload_checkpoint": {
+    "status": "prepared_for_commit_and_push",
+    "authorization": "User asked to upload current code before continuing development inside Sumika",
+    "remote": "https://github.com/lostrain11/Sumika.git",
+    "branch": "codex/sumika-next-dsh",
+    "assets_reused": [
+      "existing Git remote and branch",
+      "candidate K archive and installer",
+      "existing build and backup tooling"
+    ],
+    "guide": "docs/project/internal-use-development.md",
+    "validation": "35 focused inventory/clean-Windows/source-material tests passed; continuity check passed",
+    "boundary": "Source only; runtime data, credentials, generated binaries and model weights excluded. No daily installation or personal-data migration."
+  }
 }

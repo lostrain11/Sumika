@@ -1,0 +1,42 @@
+{
+  "scope": "Internal personal use; public redistribution and voice hardware excluded by user direction",
+  "evidence": {
+    "current_package": {
+      "path": ".sumika-next\\package\\packaged-install-93f1d18bdb564c58b44810cd20bfd718\\report.json",
+      "sha256": "31ad14904bf2d906f9dc17a357085d39eaf1d274e218f179406cb4f9c3c4e29c"
+    },
+    "clean_guest": {
+      "path": ".sumika-next\\package\\clean-windows-candidate-j\\results\\retry-observed\\lifecycle-report.json",
+      "sha256": "87707e0529bc18e9202efaf4ddd2755ce2aeef46e1d64183e54a6d973cc280f9"
+    },
+    "first_run": {
+      "path": ".sumika-next\\package\\packaged-install-93f1d18bdb564c58b44810cd20bfd718\\startup-f2de289a0faa413d8df65a31ab971d6e\\report.json",
+      "sha256": "7db62fa5eaabd334d4c5b32bc383b170bbd5101e8b2c0d29c857a7fed88e30a1"
+    },
+    "native_ui": {
+      "path": ".sumika-next\\native-approval-ui-e64edff768704a41be2d53f743a4327d\\report.json",
+      "sha256": "216e2d7f678859236051949b2248162f929d7e3e32f4c54f8a03862de45a101e"
+    },
+    "restore": {
+      "path": ".sumika-next\\package\\profile-restore-57478c018ebd4153bd5f56008171069f\\report.json",
+      "sha256": "54f2d631027e90b9bb4a8884a28c9c0a38d0ba83d948e467767a80fc3347bac4"
+    },
+    "rollback": {
+      "path": ".sumika-next\\package\\profile-restore-7afc512933e34ff1bfada20340f08af5\\report.json",
+      "sha256": "df0128389dbe7b1791b8a90cf95d8b8d6b37527ad9da9a735ce6b93715e5c9d4"
+    },
+    "installer_interruption": {
+      "path": ".sumika-next\\package\\installer-check-94726bd1bf66439c9c577f9c60896199\\report.json",
+      "sha256": "465c25060eca39b5b3e9442ed4f2f6d4eb92dba0b8203e2304a28188a803af40"
+    },
+    "model_review": {
+      "path": ".sumika-next\\product-development-663e856871974993ba9b2e96259db211\\main-review.json",
+      "sha256": "235b10af37647a0ebba50c3707d9cd4d9a1feed781f052ad99dcb532d911f293"
+    },
+    "web_review": {
+      "path": "docs\\project\\current-work-cross-review.json",
+      "sha256": "d8daa42c17c9a8fe2f8e7d64ec44fe0c472d16f98388fdc6cdc87c9fce6cee2c"
+    }
+  },
+  "boundary": "Historical feature evidence is not a fresh all-feature run on K. K host installation tested; J clean guest tested; business/runtime byte equality established by candidate-k-delta.json. Real model development required main-agent corrections."
+}

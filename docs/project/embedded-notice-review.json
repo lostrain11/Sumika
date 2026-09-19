@@ -1,0 +1,104 @@
+{
+  "status": "five_readme_notice_texts_reviewed_and_preserved",
+  "candidate": "product-candidate-20260919-g",
+  "reviewed": [
+    {
+      "file": "data-uri-to-buffer-4.0.1-README-LICENSE.txt",
+      "sha256": "7a8f3fccba68c989de5d992c20583f7f2a8ac87843c60c06ff6f4ebd533b80d6",
+      "version": "4.0.1",
+      "source_artifact": "runtime/dsh/node_modules/data-uri-to-buffer/README.md",
+      "source_sha256": "a7cc4332acfa1f9b6530e01aac77fefe74f2efa32579215fddaa473013f9a25c",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "data-uri-to-buffer",
+        "version": "4.0.1",
+        "manifest_sha256": "ad4f90a737ab5d8af4dad265e9218456e3779ca5beb70df38dd5feecf80121dd"
+      },
+      "verification": "Verbatim copyright-through-MIT-disclaimer excerpt from hash-verified shipped README; reviewed permission/retention/disclaimer text. Existing LICENSE also retained; no blanket redistribution clearance."
+    },
+    {
+      "file": "debug-2.6.9-README-LICENSE.txt",
+      "sha256": "95f4a8bd405badd7a1cbaf1f9785976937039c47b1035ff858a4a59761a432be",
+      "version": "2.6.9",
+      "source_artifact": "runtime/dsh/node_modules/compression/node_modules/debug/README.md",
+      "source_sha256": "cda3dbd285a2b65894758565a565e7bc2e7c3696225af7b5bd01454240df0aea",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "debug",
+        "version": "2.6.9",
+        "manifest_sha256": "6c3d2c892db282317913ce7c340dd2edccd326bcafd18b644b8738144967d6ee"
+      },
+      "verification": "Verbatim copyright-through-MIT-disclaimer excerpt from hash-verified shipped README; reviewed permission/retention/disclaimer text. Existing LICENSE also retained; no blanket redistribution clearance."
+    },
+    {
+      "file": "debug-4.4.3-README-LICENSE.txt",
+      "sha256": "d63f8eb6f41ce67166eef69dab8f5e5cb5b791eec5c30406c168c944da190416",
+      "version": "4.4.3",
+      "source_artifact": "runtime/dsh/node_modules/debug/README.md",
+      "source_sha256": "486cb669048bd5014adf9ea117e27a45c4e61b0e668f464c724273beb8170797",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "debug",
+        "version": "4.4.3",
+        "manifest_sha256": "ea8e33d63fe5f3a4c36609b6c3df8e2ef1f8b8ba2fc3a2e1e53cb27291f384af"
+      },
+      "verification": "Verbatim copyright-through-MIT-disclaimer excerpt from hash-verified shipped README; reviewed permission/retention/disclaimer text. Existing LICENSE also retained; no blanket redistribution clearance."
+    },
+    {
+      "file": "jwa-2.0.1-README-LICENSE.txt",
+      "sha256": "66b558b8706eb9ed0c1599ac87b28d576baee95a843669f1697ab67b94a42f63",
+      "version": "2.0.1",
+      "source_artifact": "runtime/dsh/node_modules/jwa/README.md",
+      "source_sha256": "2273f282b7e98c67c5de625f91c6707efdd3e9f277f6f8e1e7fb5036516253bd",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "jwa",
+        "version": "2.0.1",
+        "manifest_sha256": "53610fa0143c2cdef9d280e0c029ededf688930648358d4f3e35a081d75219d8"
+      },
+      "verification": "Verbatim copyright-through-MIT-disclaimer excerpt from hash-verified shipped README; reviewed permission/retention/disclaimer text. Existing LICENSE also retained; no blanket redistribution clearance."
+    },
+    {
+      "file": "jws-4.0.1-README-LICENSE.txt",
+      "sha256": "afd62fc0c4594ed212f3eae15f7d03e791bd8ee80a4a37e0d7905adfc2843507",
+      "version": "4.0.1",
+      "source_artifact": "runtime/dsh/node_modules/jws/readme.md",
+      "source_sha256": "19ede149863e882b0fcd22697c264690daecda51bd141928dd33af11d40043b7",
+      "dependency": {
+        "ecosystem": "npm",
+        "name": "jws",
+        "version": "4.0.1",
+        "manifest_sha256": "a934389f53e2ac8909d5399410c1ede3e35397be9e9f521bde25b61e1fee0b2f"
+      },
+      "verification": "Verbatim copyright-through-MIT-disclaimer excerpt from hash-verified shipped README; reviewed permission/retention/disclaimer text. Existing LICENSE also retained; no blanket redistribution clearance."
+    }
+  ],
+  "limits": [
+    "Candidate not rebuilt; standalone notices and readmes remain unchanged.",
+    "Auditor embedded-text finding remains conservative; no release-gate waiver.",
+    "Three AWS notices and native terms/source obligations remain outstanding."
+  ],
+  "implementation_verification": {
+    "status": "reviewed_mit_evidence_recognition_implemented_native_suite_passed",
+    "assets": {
+      "tools/audit_package_licenses.py": "adapted existing auditor",
+      "packaging/notices/sources.json": "explicit review kind on exactly five existing reviewed entries",
+      "tests_next/test_dependency_notices.py": "retained original assertions; unique retained workspace fixtures replace private temp ACL/cleanup",
+      "tools/verify_development_sandbox.py": "new --notice-tests mode reuses native fixture transport"
+    },
+    "validation": [
+      "14 host unit tests passed",
+      "14 identical tests passed through native workspace-write sandbox with unchanged source/test hashes",
+      "All five reviewed records match actual inventory-validated candidate-i README and notice bytes"
+    ],
+    "native_report": ".sumika-next/development-sandbox-dec3ead2fcee4f5eaf1ee04c82cf5a8d/report.json",
+    "package_source_check": ".sumika-next/package/embedded-review-candidate-i-source-check.json",
+    "limits": [
+      "Updated auditor/metadata not yet packaged; candidate-i historical strict audit retained",
+      "No legal/native source/relink clearance",
+      "Native deterministic tests do not complete ordinary real-model development acceptance",
+      "Interrupted rejected model candidate not adopted or replayed"
+    ],
+    "next": "Finish remaining effective native patches/source and clean Windows acceptance; select next real development task from current source, after compatibility preflight."
+  }
+}

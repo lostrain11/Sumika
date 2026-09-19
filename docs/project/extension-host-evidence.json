@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "managed_dispatch": true,
+  "host_stop": true,
+  "process_restart_no_replay": true,
+  "external_model_calls": 0,
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\extension-host-b4757d9380da492b8db5a9a12d6ef266"
+}

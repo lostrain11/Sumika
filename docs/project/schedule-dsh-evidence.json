@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "scheduled_prompt": true,
+  "reminder_local": true,
+  "restart_no_replay": true,
+  "cancel_request_accepted": true,
+  "cancel_test": "active model request and idle completed session",
+  "cancel_reason": "native step ended without tool or assistant output",
+  "external_model_calls": 0,
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\schedule-e20692c1403f48c28f5383bc459d1424"
+}

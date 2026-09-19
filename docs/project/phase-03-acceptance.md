@@ -37,3 +37,8 @@
 下一阶段入口：P4 连续性记录正式接入，将显式记录能力接入任务开始、计划变化、结束和模型切换流程。
 
 证据索引与本地产物摘要见 [phase-03-evidence.json](phase-03-evidence.json)。[真实成果记录](receipts/p3-real-development.json) 保留当时的操作方声明和未完成项；本文件记录最终整合结果。测试实例已停止，临时凭据副本已删除。
+
+
+## 后续状态复核
+
+已对 phase-03-evidence.json 引用的 9 项产物重新核验 SHA-256，全部一致；原始会话保留 157 次工具调用及结果、6 次 turn/end，以及完整 compaction 事件。后续受限 restore-preflight 尝试不完整，不否定此前 P3 已验收事实。当前新增界面/宿主/发行组合仍需整合回归，但不得记成从未完成真实开发闭环。证据 `.sumika-next/p3-evidence-recheck.json`。当前 receipt/continuity/execution/daily 共 51 项测试，50 通过、1 项符号链接权限跳过；未重新调用付费模型。

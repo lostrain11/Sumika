@@ -106,17 +106,8 @@ if (sidebarPath) {
 let rail = null;
 const toggle = page.locator("[class*='_toggle']").first();
 if (await toggle.count().catch(() => 0)) {
-  // While the column is open the control is hidden on purpose; the footer block
-  // offers the collapse action instead, and the rail keeps the control to come back.
-  // The control is hidden while the column is open, so invoke DSH's own toggle
-  // through the DOM instead of pointing at a hidden target.
-  await page.evaluate(() => {
-    const node = document.querySelector("[class*='_logoRow'] [class*='_toggle']")
-      || document.querySelector("[class*='_toggle']");
-    node?.click();
-  }).catch(() => {});
-  await page.waitForTimeout(700);
-  await toggle.hover().catch(() => {});
+  await toggle.click();
+  await toggle.hover();
   await page.waitForTimeout(300);
   rail = await page.evaluate(() => {
     const mark = document.querySelector("[class*='_railMark']");
@@ -136,7 +127,7 @@ if (await toggle.count().catch(() => 0)) {
     };
   });
   if (railPath) await page.screenshot({ path: railPath, fullPage: false }).catch(() => {});
-  await toggle.click().catch(() => {});
+  await toggle.click();
   await page.waitForTimeout(700);
 }
 
@@ -194,9 +185,9 @@ if (probe.surfaces.sidebar?.background !== 'rgb(250, 248, 240)') {
 }
 if (probe.tokens.rose !== '#b4496a') failures.push(`rose token is ${probe.tokens.rose}`);
 if (rail) {
-  if (rail.markDisplay === 'none') failures.push('rail toggle hides the Sumika mark on hover');
-  if (rail.panelIconDisplay !== 'none') failures.push('rail toggle swaps in the upstream panel glyph on hover');
-  if (!rail.markGradient) failures.push('rail mark does not paint the Sumika gradient');
+  if (rail.markDisplay !== 'none') failures.push('rail toggle must not use a decorative brand mark');
+  if (rail.panelIconDisplay === 'none') failures.push('rail toggle must keep the panel icon visible');
+
 }
 if (sessionStatusFailure) failures.push(sessionStatusFailure);
 
