@@ -2881,7 +2881,7 @@
   },
   "internal_use_acceptance": "docs/project/internal-use-acceptance.json",
   "source_upload_checkpoint": {
-    "status": "prepared_for_commit_and_push",
+    "status": "source_uploaded",
     "authorization": "User asked to upload current code before continuing development inside Sumika",
     "remote": "https://github.com/lostrain11/Sumika.git",
     "branch": "codex/sumika-next-dsh",
@@ -2892,6 +2892,9 @@
     ],
     "guide": "docs/project/internal-use-development.md",
     "validation": "35 focused inventory/clean-Windows/source-material tests passed; continuity check passed",
-    "boundary": "Source only; runtime data, credentials, generated binaries and model weights excluded. No daily installation or personal-data migration."
+    "boundary": "Source only; runtime data, credentials, generated binaries and model weights excluded. No daily installation or personal-data migration.",
+    "source_commit": "9eaff41",
+    "remote_verified": "git push succeeded b2640b5..9eaff41",
+    "security_check": "549 staged files and unpublished-history blobs checked for obvious key/private-key patterns; no hits. Generated and private paths excluded."
   }
 }
