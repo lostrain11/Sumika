@@ -2825,5 +2825,27 @@
     "tests": "5 legacy profile tests passed; actual installer full payload hashes/personal data preservation/repeat/nested rejection and EXE lifecycle passed",
     "personal_data_changed": false,
     "next": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped."
+  },
+  "github_release_checkpoint": {
+    "status": "draft_upload_verified",
+    "release_id": 392193291,
+    "url": "https://github.com/lostrain11/Sumika/releases/tag/untagged-85372b4ba3a7553c6b2c",
+    "tag": "v0.1.0-internal.20260920",
+    "source_commit": "7a50dc65048cb9605351064534fe572157d17356",
+    "upload_session": 47520,
+    "boundary": "Public repository, draft prerelease only; native redistribution findings still open; no public release publication.",
+    "assets": [
+      {
+        "name": "SHA256SUMS.txt",
+        "size": 97,
+        "digest": "sha256:0918d185ad2add699ea5fe947069ff26baf8d6b05389fd3286dd621d7fdeab5e"
+      },
+      {
+        "name": "Sumika-Setup-2026.09.20-k.exe",
+        "size": 142297486,
+        "digest": "sha256:e1ed7dd0b4c695daf0a0e2f7c3e95a050035be0b9a800ecdf6aaad802226db79"
+      }
+    ],
+    "next": "Owner can download from draft Release. Public publication remains gated by unresolved redistribution review."
   }
 }
