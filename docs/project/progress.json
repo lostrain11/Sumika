@@ -182,7 +182,7 @@
     "role_plugin_evidence": "docs/project/role-plugin-evidence.json",
     "role_model_evidence": "docs/project/role-model-evidence.json"
   },
-  "next_action": "Internal-use handoff with actual package path and documented limitations; public redistribution deferred by user.",
+  "next_action": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped.",
   "local_model_evaluation": {
     "status": "in_progress",
     "evidence": "docs/project/local-model-comparison-evidence.json",
@@ -2774,5 +2774,20 @@
     "source_commit": "9eaff41",
     "remote_verified": "git push succeeded b2640b5..9eaff41",
     "security_check": "549 staged files and unpublished-history blobs checked for obvious key/private-key patterns; no hits. Generated and private paths excluded."
+  },
+  "wizard_installer_checkpoint": {
+    "status": "built_and_host_install_lifecycle_verified",
+    "report": ".sumika-next\\package\\wizard-k\\installer-report.json",
+    "guide": "docs/project/setup-and-personal-data.md",
+    "assets_reused": [
+      "candidate K physical package",
+      "existing Sumika.exe and DataDirectory option",
+      "official Inno Setup standard wizard",
+      "DataLease and process_identity for legacy profile copy"
+    ],
+    "legacy_profile_tool": "tools/import_legacy_profile.py",
+    "tests": "5 legacy profile tests passed; actual installer full payload hashes/personal data preservation/repeat/nested rejection and EXE lifecycle passed",
+    "personal_data_changed": false,
+    "next": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped."
   }
 }

@@ -709,7 +709,7 @@
     "verified": "第2项三站真实审查、原生审批/回读、未知不重发、取消、重启恢复、日用注册和显式绑定恢复",
     "limitations": "见执行记录最终验收边界；不代表P5其余项完成"
   },
-  "next_action": "Internal-use handoff with actual package path and documented limitations; public redistribution deferred by user.",
+  "next_action": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped.",
   "diagnostic_lifecycle_checkpoint": {
     "status": "implemented_and_targeted_tests_passed",
     "tests": 34,
@@ -2896,5 +2896,20 @@
     "source_commit": "9eaff41",
     "remote_verified": "git push succeeded b2640b5..9eaff41",
     "security_check": "549 staged files and unpublished-history blobs checked for obvious key/private-key patterns; no hits. Generated and private paths excluded."
+  },
+  "wizard_installer_checkpoint": {
+    "status": "built_and_host_install_lifecycle_verified",
+    "report": ".sumika-next\\package\\wizard-k\\installer-report.json",
+    "guide": "docs/project/setup-and-personal-data.md",
+    "assets_reused": [
+      "candidate K physical package",
+      "existing Sumika.exe and DataDirectory option",
+      "official Inno Setup standard wizard",
+      "DataLease and process_identity for legacy profile copy"
+    ],
+    "legacy_profile_tool": "tools/import_legacy_profile.py",
+    "tests": "5 legacy profile tests passed; actual installer full payload hashes/personal data preservation/repeat/nested rejection and EXE lifecycle passed",
+    "personal_data_changed": false,
+    "next": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped."
   }
 }

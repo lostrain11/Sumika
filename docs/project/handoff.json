@@ -68,7 +68,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "Internal-use handoff with actual package path and documented limitations; public redistribution deferred by user.",
+  "next_action": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped.",
   "last_existing_checkpoint": "8f642090da0f264ab99a1ff6afabd7c4fa2a8cf7",
   "checkpoint_lookup": "git log -1 --format=%H -- docs/project/phase-04-acceptance.md",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
@@ -2810,5 +2810,20 @@
     "source_commit": "9eaff41",
     "remote_verified": "git push succeeded b2640b5..9eaff41",
     "security_check": "549 staged files and unpublished-history blobs checked for obvious key/private-key patterns; no hits. Generated and private paths excluded."
+  },
+  "wizard_installer_checkpoint": {
+    "status": "built_and_host_install_lifecycle_verified",
+    "report": ".sumika-next\\package\\wizard-k\\installer-report.json",
+    "guide": "docs/project/setup-and-personal-data.md",
+    "assets_reused": [
+      "candidate K physical package",
+      "existing Sumika.exe and DataDirectory option",
+      "official Inno Setup standard wizard",
+      "DataLease and process_identity for legacy profile copy"
+    ],
+    "legacy_profile_tool": "tools/import_legacy_profile.py",
+    "tests": "5 legacy profile tests passed; actual installer full payload hashes/personal data preservation/repeat/nested rejection and EXE lifecycle passed",
+    "personal_data_changed": false,
+    "next": "User installs EXE, retains default personal directory, optionally runs legacy workbench import while both clients are stopped."
   }
 }
