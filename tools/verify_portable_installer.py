@@ -1,5 +1,6 @@
 """Exercise the installer with bounded fixtures; retain evidence on D:."""
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    base = ROOT / '.sumika-next/package' / ('installer-check-' + uuid.uuid4().hex)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output-root', type=Path, default=ROOT / '.sumika-next/package')
+    args = parser.parse_args()
+    base = args.output_root.resolve() / ('installer-check-' + uuid.uuid4().hex)
     base.mkdir(parents=True)
     script = ROOT / 'packaging/install_sumika.ps1'
     archive = base / 'fixture.zip'
@@ -20,6 +24,9 @@ def main():
         'Sumika.exe', 'tools/start_sumika.ps1', 'tools/start_ui_bridge.ps1',
         'ui/server.py', 'sumika_next/cli.py', 'runtime/dsh/release.json')}
     files['tools/nested/file.txt'] = b'exact contents'
+    files['runtime/python/Lib/site-packages/certifi/cacert.pem'] = b'public-ca-fixture-not-a-private-key'
+    files['runtime/desktop/Lib/site-packages/certifi/cacert.pem'] = b'public-ca-fixture'
+    files['runtime/voice/Lib/site-packages/certifi/cacert.pem'] = b'public-ca-fixture'
     # Exceeds MAX_PATH even under a short checkout. Do not shorten destinations
     # or rely on host registry LongPathsEnabled for this regression.
     long_member = 'runtime/dsh/' + '/'.join(['long-component-' + str(i) + '-' + 'x' * 35 for i in range(5)]) + '/file.txt'

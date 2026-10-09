@@ -5,9 +5,10 @@ import { realpathSync, lstatSync, mkdirSync, readFileSync, openSync, writeFileSy
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { sessionEvents } from '../dsh_history.mjs';
 
 export const name = 'sumika-continuity';
-export const inject = ['tools'];
+export const inject = ['tools', 'sessionQuery'];
 
 export function observation(event) {
   const data = event.data;
@@ -149,7 +150,7 @@ export async function apply(ctx, config) {
         catch { throw unavailable(session); }
       }
       const start = cursors.get(session) ?? 0;
-      const events = session.snapshotEvents(start);
+      const events = await sessionEvents(ctx, session, start);
       const selected = events.flatMap(observation).filter(Boolean);
       // Ordinary model/tool traffic stays in DSH. Avoid an empty subprocess/write cycle.
       const state = selected.length ? await checkedCall(session, root, { action: 'ingest', harness: 'dsh',
@@ -167,7 +168,10 @@ export async function apply(ctx, config) {
     });
   }
   // Restored logs are backfilled; stable source sequence makes retries idempotent.
-  ctx.on('agent/session-start', ({ agent }) => background(agent.session));
+  const runtimeVersion = require(config.runtimeEntry).version;
+  ctx.on(runtimeVersion.startsWith('0.2.') ? 'agent/created' : 'agent/session-start', async ({ agent }) => {
+    if (project(agent.session)) await sync(agent.session);
+  });
   ctx.on('session/event', (session, event) => {
     if (event.type === 'compaction/end') injectedTurn.delete(session);
     if (['agent/inbox/spliced', 'turn/end', 'compaction/start', 'compaction/end', 'request/header'].includes(event.type)) {
@@ -189,7 +193,7 @@ export async function apply(ctx, config) {
       boundary: state.boundary, project: state.project,
       tasks: state.tasks.map(t => t.task),
       next: 'Use continuity_query to page through records; full context exceeds injection budget.' });
-    const ours = createUserMessage({ source: { kind: 'plugin', plugin: name }, content: [{ type: 'text',
+    const ours = createUserMessage({ source: runtimeVersion.startsWith('0.2.') ? { kind: name } : { kind: 'plugin', plugin: name }, content: [{ type: 'text',
       text: 'SUMIKA_CONTINUITY\n'+context+'\nLoad sumika-continuity Skill for report schemas. '
         +'Incoming messages below/above remain unchanged. Do not copy this notice into code or deliverables.' }] });
     injectedTurn.set(agent.session, turn);
@@ -225,7 +229,7 @@ export async function apply(ctx, config) {
     async execute(args, exec) {
       const root = rootFor(exec);
       await sync(exec.agent.session);
-      const step = exec.agent.session.snapshotEvents().findLast(e => e.type === 'step/start');
+      const step = (await sessionEvents(ctx, exec.agent.session)).findLast(e => e.type === 'step/start');
       if (!step) throw Error('continuity report requires a live native execution step');
       return JSON.stringify(await enqueue(() => checkedCall(exec.agent.session, root, { action: 'report',
         session: exec.agent.session.header.id,

@@ -31,9 +31,11 @@ def worker(config):
         if store.resolve('voice') != selected:
             raise PermissionError('voice capability changed before playback')
         import winsound
-        # Synchronous playback keeps completion and cancellation owned by this worker.
+        # PlaySound is synchronous by default: the worker keeps completion and
+        # cancellation ownership only as long as SND_ASYNC is NOT passed (the
+        # winsound module has no SND_SYNC flag).
         # NODEFAULT prevents an invalid file from playing a system fallback sound.
-        winsound.PlaySound(result['path'], winsound.SND_FILENAME | winsound.SND_SYNC | winsound.SND_NODEFAULT)
+        winsound.PlaySound(result['path'], winsound.SND_FILENAME | winsound.SND_NODEFAULT)
         return {'text': config['text']}
     finally:
         store.close()

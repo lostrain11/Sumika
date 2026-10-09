@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { writeFile } from 'node:fs/promises';
 
 const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/',
+  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
 );
 const { chromium } = require('playwright');
 
@@ -76,7 +76,21 @@ if (emptyLeft > 0) failures.push('the empty-state bubble stayed after the first 
 if (!after || after.lastRole !== 'role' || !after.lastText) {
   failures.push('the chat never rendered a reply bubble');
 } else if (after.error) {
-  failures.push(`the role service refused: ${after.lastText}`);
+  // 角色模型被关闭时，后端按设计返回 disabled 而非文本（extensions/roles/chat.py:101）。
+  // 这是配置状态，不是界面缺陷：只有当角色模型处于启用状态却仍拿不到回复时才算失败。
+  // 状态取自后端权威来源 /api/state，不猜。
+  const roleEnabled = await fetch(`${bridge}/api/state`)
+    .then(response => response.json())
+    .then(state => state?.role?.enabled !== false)
+    .catch(() => null);
+  if (roleEnabled === false) {
+    console.log('[skip] 角色模型当前为「未启用」，后端按设计未产出文本；'
+      + '这不是界面回归。启用后重跑本脚本即可验证真实回复。');
+  } else if (roleEnabled === null) {
+    failures.push(`the role service refused and /api/state is unreachable: ${after.lastText}`);
+  } else {
+    failures.push(`the role service refused while the role model is enabled: ${after.lastText}`);
+  }
 }
 
 if (shotPath) await page.screenshot({ path: shotPath, fullPage: false });

@@ -3,7 +3,7 @@
 The installer ships a pinned BrowserSkill build. The adapter still permits an
 explicit executable for upgrades and tests, while never silently downloading.
 """
-import json,shutil,subprocess,os,tempfile
+import json,shutil,subprocess,os,tempfile,time
 from pathlib import Path
 from sumika_next.paths import user_data_directory
 
@@ -33,19 +33,17 @@ class BrowserSkillClient:
         fd,temp=tempfile.mkstemp(prefix='.browser-auth-',suffix='.tmp',dir=self.registry.parent)
         try:
             with os.fdopen(fd,'w',encoding='utf8') as f:json.dump(data,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
-            try:
-                os.replace(temp,self.registry)
-            except OSError as exc:
-                # Some Windows filesystem filters reject ReplaceFile when the
-                # destination has not been created yet; same-volume rename
-                # preserves the no-partial-file property for first creation.
-                if getattr(exc,'winerror',None)!=17:
-                    raise
-                # Windows security filters can reject ReplaceFile even on a
-                # same-volume path. The fully written/fsynced temp is copied
-                # only after replacement failed; never expose the temp name.
-                shutil.copyfile(temp,self.registry)
-                os.unlink(temp)
+            # Retry only the same atomic replacement for bounded Windows
+            # sharing/access failures. Never truncate/copy over authorization
+            # data as a fallback; permanent failure must preserve the old file.
+            for attempt in range(5):
+                try:
+                    os.replace(temp,self.registry)
+                    break
+                except OSError as exc:
+                    if getattr(exc,'winerror',None) not in (5,32,33) or attempt == 4:
+                        raise
+                    time.sleep(.02 * (attempt + 1))
         finally:
             if os.path.exists(temp):os.unlink(temp)
     def status(self):
@@ -93,15 +91,66 @@ class BrowserSkillClient:
         if not isinstance(value,list):raise RuntimeError('invalid BrowserSkill session list')
         return value
 
-    def session_tabs(self, session_id):
+    def session_tabs(self, session_id, *, scope='agent'):
+        if scope not in ('agent', 'user', 'all'):
+            raise ValueError('invalid tab scope')
         if not self.enabled or not self.executable or not Path(self.executable).is_file():
             return []
-        out=subprocess.run([self.executable,'tab','list','--json','--session',session_id,'--scope','agent'],capture_output=True,text=True,encoding='utf8',timeout=10)
+        out=subprocess.run([self.executable,'tab','list','--json','--session',session_id,'--scope',scope],capture_output=True,text=True,encoding='utf8',timeout=10)
         if out.returncode: raise RuntimeError('BrowserSkill tab list failed')
         value=json.loads(out.stdout)
         tabs=value.get('tabs') if isinstance(value,dict) else None
         if not isinstance(tabs,list): raise RuntimeError('invalid BrowserSkill tab list')
         return tabs
+
+    def borrow_user_tab(self, session_id, tab_id):
+        """Explicitly borrow one user tab into the selected Agent Window.
+
+        BrowserSkill keeps ordinary user tabs inventory-only.  Borrowing is a
+        separate, user-visible transition; never infer it from a read grant or
+        perform it while merely collecting a snapshot.
+        """
+        if type(tab_id) is not int or tab_id < 0:
+            raise ValueError('invalid user tab identity')
+        if not self.enabled or not self.executable or not Path(self.executable).is_file():
+            raise PermissionError('browser skill unavailable')
+        rows = self.session_tabs(session_id, scope='user')
+        matches = [row for row in rows if isinstance(row, dict)
+                   and row.get('tab_id') == tab_id and row.get('scope') == 'user']
+        if len(matches) != 1:
+            raise PermissionError('selected user tab is unavailable')
+        out = subprocess.run([self.executable, 'tab', 'borrow', '--json', '--session',
+                              session_id, str(tab_id)], capture_output=True, text=True,
+                             encoding='utf8', timeout=20)
+        if out.returncode:
+            raise RuntimeError('BrowserSkill tab borrow failed')
+        try:
+            value = json.loads(out.stdout) if out.stdout.strip() else {'borrowed': True}
+        except json.JSONDecodeError:
+            raise RuntimeError('invalid BrowserSkill tab borrow response') from None
+        if not isinstance(value, (dict, list)):
+            raise RuntimeError('invalid BrowserSkill tab borrow response')
+        return value
+
+    def user_tab_capabilities(self, session_id, tab_id):
+        """Report ordinary-tab capabilities without changing browser state.
+
+        BrowserSkill 0.1.x can inventory a user tab but cannot evaluate it in
+        place.  Keeping this distinction explicit prevents callers from
+        treating inventory as a usable video observation transport.
+        """
+        if type(tab_id) is not int or tab_id < 0:
+            raise ValueError('invalid user tab identity')
+        rows = self.session_tabs(session_id, scope='user')
+        matches = [row for row in rows if isinstance(row, dict)
+                   and row.get('tab_id') == tab_id and row.get('scope') == 'user']
+        if len(matches) != 1:
+            raise PermissionError('selected user tab is unavailable')
+        row = matches[0]
+        return {'tab_id': tab_id, 'scope': 'user',
+                'inventory': True, 'evaluate': False,
+                'requires_explicit_borrow': True,
+                'url': row.get('url') if isinstance(row.get('url'), str) else None}
 
     def open_site(self, site, session_id, browser_instance_id, agent_window_id):
         """Open a fixed consultation origin in an explicitly selected live window."""

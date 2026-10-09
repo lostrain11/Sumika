@@ -29,14 +29,8 @@ print(json.dumps({"devices": devices,
 
 
 def env_python():
-    explicit = os.environ.get("SUMIKA_VOICE_PYTHON")
-    if explicit is not None:
-        return str(explicit) if explicit and Path(explicit).is_file() else None
-    for candidate in (ROOT / ".sumika-next" / "voice-env" / "Scripts" / "python.exe",
-                      ROOT / ".sumika-next" / "desktop-env" / "Scripts" / "python.exe"):
-        if candidate.is_file():
-            return str(candidate)
-    return None
+    from extensions.desktop.runtime import capability_python
+    return capability_python('voice', root=ROOT)
 
 
 def list_input_devices(*, python=None, timeout=60):

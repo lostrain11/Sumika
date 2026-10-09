@@ -24,6 +24,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--destination', type=Path, required=True)
     parser.add_argument('--node-directory', type=Path, required=True)
+    parser.add_argument('--dependency-site', type=Path,
+                        help='Explicit additional installed site-packages for model dependencies')
     args = parser.parse_args()
     destination = args.destination.absolute()
     if destination.exists():
@@ -40,10 +42,22 @@ def main():
     for name in ('node.exe', 'LICENSE'):
         if not (node/name).is_file():
             raise ValueError('missing Node runtime asset: ' + name)
-    distributions = [('tzdata', '2025.2', 'tzdata'), ('websocket-client', '1.9.2', 'websocket')]
+    distributions = [('tzdata', '2025.2', 'tzdata'), ('websocket-client', '1.9.2', 'websocket'),
+        ('httpx', '0.28.1', 'httpx'), ('httpx-sse', '0.4.0', 'httpx_sse'),
+        ('httpcore', '1.0.9', 'httpcore'), ('h11', '0.16.0', 'h11'),
+        ('anyio', '4.12.0', 'anyio'), ('certifi', '2026.7.22', 'certifi'),
+        ('idna', '3.19', 'idna'), ('typing_extensions', '4.16.0', 'typing_extensions.py')]
+    additional = {}
+    if args.dependency_site:
+        site = args.dependency_site.resolve(strict=True)
+        additional = {dist.metadata['Name'].lower().replace('_', '-'): dist
+                      for dist in metadata.distributions(path=[str(site)])}
+    selected_distributions = {}
     for name, version, _ in distributions:
-        if metadata.version(name) != version:
+        dist = additional.get(name.lower().replace('_', '-')) or metadata.distribution(name)
+        if dist.version != version:
             raise ValueError('dependency version mismatch: ' + name)
+        selected_distributions[name] = dist
     destination.mkdir(parents=True)
     python = destination/'runtime/python'
     for name in required:
@@ -60,7 +74,7 @@ def main():
             if path.is_file() and path.suffix not in ('.pyc', '.pyo'):
                 copy(path, python/directory/relative)
     for name, version, package in distributions:
-        dist = metadata.distribution(name)
+        dist = selected_distributions[name]
         for entry in dist.files or ():
             parts = Path(entry).parts
             # Keep the module and its distribution metadata/licenses; no scripts.
@@ -75,7 +89,7 @@ def main():
     for name in ('node.exe', 'LICENSE'):
         copy(node/name, destination/'runtime/node'/name)
     probe = subprocess.run([str(python/'python.exe'), '-B', '-c',
-        'import sys,sqlite3,ssl,ctypes,zoneinfo,websocket; '
+        'import sys,sqlite3,ssl,ctypes,zoneinfo,websocket,httpx,httpx_sse,httpcore,h11,anyio; '
         'assert sys.flags.isolated and sys.flags.no_site and sys.flags.ignore_environment; '
         'from pathlib import Path; assert Path(sys.executable).parents[2] in [Path(p) for p in sys.path]; '
         'assert str(zoneinfo.ZoneInfo("Asia/Shanghai")) == "Asia/Shanghai"; '

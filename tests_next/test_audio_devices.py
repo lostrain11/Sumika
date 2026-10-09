@@ -18,7 +18,7 @@ class AudioDeviceListingTests(unittest.TestCase):
     def test_unset_runtime_still_discovers_installed_environment(self):
         with patch.dict(audio_devices.os.environ, {}, clear=True), \
                 patch.object(audio_devices.Path, 'is_file', return_value=True):
-            self.assertIn('voice-env', audio_devices.env_python())
+            self.assertIn('runtime', audio_devices.env_python())
 
     def _run(self, stdout="", returncode=0, stderr=""):
         class Result:

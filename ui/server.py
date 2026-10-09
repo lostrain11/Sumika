@@ -13,6 +13,8 @@ import subprocess
 import sys
 import threading
 import tempfile
+from collections import deque
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from extensions.capabilities import CapabilityStore
 from extensions.desktop.audio_devices import list_input_devices
+from extensions.desktop.window_targets import list_window_targets
 from extensions.models.cloud import CloudError
 from extensions.models.ollama import OllamaError
 from extensions.models.settings import default_path, load as load_settings, save as save_settings, example
@@ -36,6 +39,13 @@ from ui.readiness import probes as readiness_probes, service_capabilities
 from ui.schedule import ScheduleController
 from ui.workbench import WorkbenchController, WorkbenchError
 from ui.management import Management, Conflict
+from ui.pet_host import PetHost
+from extensions.companion import ObservationBundle, CompanionQuestionService, video, cues
+from extensions.companion.perception_process import PerceptionProcess
+from extensions.companion.application_audio_process import ApplicationAudioProcess
+from extensions.companion.microphone_process import MicrophoneProcess
+from extensions.companion.context_fusion import ContextFusion
+from extensions.companion.passive_browser import PassiveBrowserConnection
 
 UI_ROOT = Path(__file__).resolve().parent
 BUILTIN_ROLES = UI_ROOT.parent / "extensions" / "roles" / "defaults"
@@ -89,7 +99,24 @@ class Bridge:
         self.management = Management(self)
         self.conversations = Conversations(self.settings_path.parent / 'role-conversations.sqlite3')
         self._chat_lock = threading.RLock()
+        self._companion = CompanionQuestionService(self._companion_chat)
+        self._context_lock = threading.RLock()
+        self._fusion = ContextFusion()
+        self._voice_events_lock = threading.Lock()
+        self._voice_events = deque(maxlen=64)
+        self._voice_event_sequence = 0
+        self._application_audio = ApplicationAudioProcess(root=UI_ROOT.parent,
+            on_observation=self._companion_audio_observe, on_clear=self._companion_audio_clear)
+        self._microphone = MicrophoneProcess(root=UI_ROOT.parent,
+            on_event=self._companion_microphone_event)
+        self._perception = PerceptionProcess(root=UI_ROOT.parent,
+            on_observation=lambda payload: self.companion_observe(payload, continuous=True),
+            on_clear=self._companion_clear)
+        self._passive_browser = PassiveBrowserConnection(
+            self._companion_passive_publish,
+            self._companion_clear)
         self._shutdown_requested = threading.Event()
+        self._pet_host = PetHost(UI_ROOT.parent)
         self._closing = False
         self.speech = SpeechInput(self.settings_path.parent/'speech-input', self.speech_configuration)
         self.playback = SpeechPlayback(self.settings_path.parent/'speech-output', self.playback_configuration)
@@ -129,8 +156,10 @@ class Bridge:
         try:
             microphone, asr = store.resolve('microphone'), store.resolve('asr')
             if (microphone['provider'] != 'sounddevice' or microphone['options'].get('user_authorized') is not True
-                    or asr['provider'] != 'vosk'):
+                    or asr['provider'] not in ('vosk', 'sherpa-onnx-sensevoice')):
                 raise PermissionError('microphone authorization and local recognition must be enabled')
+            if asr['provider'] == 'sherpa-onnx-sensevoice' and voice['sample_rate'] != 16000:
+                raise ValueError('SenseVoice speech input requires 16kHz')
         finally:
             store.close()
         interpreter = env_python()
@@ -155,7 +184,8 @@ class Bridge:
         if not self.capability_database:
             return {"seeded": False}
         try:
-            entries = service_capabilities(self.workbench.root)
+            entries = service_capabilities(self.workbench.root,
+                asr_model=load_settings(self.settings_path)['voice']['asr_model'])
         except (OSError, ValueError):
             return {"seeded": False}
         store = CapabilityStore(str(self.capability_database))
@@ -434,7 +464,7 @@ class Bridge:
             memory={"provider": settings["role"]["memory_provider"]},
             modules=self.modules()))
 
-    def chat(self, message, session_id="ui-role-chat", role_id=None):
+    def chat(self, message, session_id="ui-role-chat", role_id=None, images=None):
         with self._chat_lock:
             if self._closing or self._shutdown_requested.is_set():
                 raise ValueError('bridge is shutting down; message was not sent')
@@ -445,7 +475,8 @@ class Bridge:
             chat = self._role_chat(settings)
             chat.histories[session_id] = self.conversations.context(scope, session_id, chat.history_limit)
             turn_id = self.conversations.begin(scope, session_id, message)
-            result = chat.reply(message, session_id=session_id, task_intent=True, source_message_id=turn_id + ':user')
+            result = chat.reply(message, session_id=session_id, images=images,
+                                task_intent=True, source_message_id=turn_id + ':user')
             self.conversations.complete(turn_id, result)
             result['source_message_id'] = turn_id + ':user'
         if "usage" not in result:
@@ -454,8 +485,497 @@ class Bridge:
             "usage": result.get("usage", {}),
             "usage_status": result.get("usage_status", "unknown")}
 
+    def _companion_chat(self, message, *, session_id, images=None, on_delta=None):
+        # Screen context is short-lived reference data, not a personal-memory source.
+        with self._chat_lock:
+            if self._closing or self._shutdown_requested.is_set():
+                raise ValueError('bridge is shutting down; message was not sent')
+            chat = RoleChat(load_settings(self.settings_path))
+            stream = {'on_delta': on_delta} if on_delta is not None else {}
+            return chat.reply(message, session_id=session_id, images=images,
+                              task_intent=False, memory_writes=False, **stream)
+
+    def companion_observe(self, payload, *, collection_token=None, continuous=False):
+        if not isinstance(payload, dict):
+            raise ValueError('observation object required')
+        observed_at = payload.get('observed_at')
+        if observed_at is None:
+            observed_at = datetime.now(timezone.utc)
+        elif isinstance(observed_at, str):
+            observed_at = datetime.fromisoformat(observed_at.replace('Z', '+00:00'))
+        if not isinstance(observed_at, datetime) or observed_at.tzinfo is None:
+            raise ValueError('observed_at must include timezone')
+        bundle = ObservationBundle(observed_at=observed_at,
+            source=payload.get('source'), target=payload.get('target'),
+            valid=payload.get('valid'), text=payload.get('text',''),
+            image=payload.get('image'), media_time_seconds=payload.get('media_time_seconds'),
+            metadata=payload.get('metadata') or {})
+        passive = self._passive_browser.status()
+        if passive.get('target') is not None and passive['target'] != bundle.target:
+            self._passive_browser.stop()
+        media_state = bundle.metadata.get('media_state')
+        if media_state is None:
+            if bundle.metadata.get('seeking') is True:
+                media_state = 'seeking'
+            elif bundle.metadata.get('ended') is True:
+                media_state = 'ended'
+            elif bundle.metadata.get('paused') is True:
+                media_state = 'paused'
+        if media_state in ('paused', 'seeking', 'ended'):
+            audio_owner = self._application_audio.status().get('target')
+            if audio_owner is None or audio_owner == bundle.target:
+                self.companion_media_state({'target': bundle.target, 'state': media_state})
+        audio_status = self._application_audio.status()
+        audio_target = audio_status['target']
+        if audio_target is not None and (audio_target != bundle.target or not bundle.valid
+                or audio_status.get('media_identity') != bundle.metadata.get('media_identity')):
+            self._application_audio.stop()
+        previous = self._companion.latest
+        if not bundle.valid or (previous is not None and previous.target != bundle.target):
+            # Fence pending settings/model preflight too, before a process exists.
+            self._microphone.stop()
+        if not continuous and self._perception.status()['alive']:
+            self._perception.stop()
+            collection_token = self._companion.collection_token()
+        with self._context_lock:
+            if collection_token is not None and collection_token != self._companion.collection_token():
+                return {'status': 'rejected', 'reason': 'collection was revoked or superseded'}
+            result = self._companion_publish(self._fusion.visual(bundle), collection_token=collection_token)
+            # Keep the isolated voice worker bound to the latest visual context;
+            # it rejects target changes and invalid observations fail closed.
+            if self._microphone.status()['alive']:
+                self._microphone.observe(self._observation_payload(self._fusion.current()))
+            return result
+
+    def _companion_microphone_event(self, packet):
+        with self._voice_events_lock:
+            self._voice_event_sequence += 1
+            self._voice_events.append({'sequence':self._voice_event_sequence, **packet})
+
+    @staticmethod
+    def _observation_payload(observation):
+        return {'observed_at':observation.observed_at.isoformat(),
+            'source':observation.source, 'target':observation.target,
+            'valid':observation.valid, 'text':observation.text, 'image':observation.image,
+            'media_time_seconds':observation.media_time_seconds,
+            'metadata':dict(observation.metadata)}
+
+    def _companion_publish(self, bundle, *, collection_token=None):
+        latest = self._companion.latest
+        if latest is not None and bundle.observed_at < latest.observed_at:
+            bundle = replace(bundle, observed_at=latest.observed_at,
+                metadata={**dict(bundle.metadata),
+                          'visual_observed_at': bundle.metadata.get('visual_observed_at', bundle.observed_at.isoformat())})
+        return self._companion.update(bundle, collection_token=collection_token)
+
+    def _companion_clear(self, *, collection_token=None):
+        # Stop outside the context lock: joining pipe readers must not wait on
+        # a callback that is itself waiting for that lock.
+        if collection_token is None or collection_token == self._companion.collection_token():
+            self._microphone.stop()
+        with self._context_lock:
+            if collection_token is not None and collection_token != self._companion.collection_token():
+                return self._companion.revoke(collection_token=collection_token)
+            self._fusion.clear()
+            return self._companion.revoke(collection_token=collection_token)
+
+    def _companion_audio_clear(self):
+        with self._context_lock:
+            visual = self._fusion.clear_audio()
+            self._companion.revoke()
+            if visual is not None:
+                self._companion.update(visual)
+                if self._microphone.status()['alive']:
+                    self._microphone.observe(self._observation_payload(visual))
+
+    def _companion_audio_observe(self, payload):
+        bundle = ObservationBundle(observed_at=datetime.fromisoformat(payload['observed_at']),
+            source=payload['source'], target=payload['target'], valid=payload['valid'],
+            text=payload['text'], metadata=payload.get('metadata') or {})
+        with self._context_lock:
+            combined = self._fusion.audio(bundle)
+            if combined is not None:
+                self._companion_publish(combined)
+                if self._microphone.status()['alive']:
+                    self._microphone.observe(self._observation_payload(combined))
+
+    def companion_audio(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError('application audio action required')
+        action = payload.get('action')
+        if action == 'status':
+            return self._application_audio.status()
+        if action == 'pause':
+            return self._application_audio.pause()
+        if action == 'stop':
+            return self._application_audio.stop()
+        if action != 'start':
+            raise ValueError('invalid application audio action')
+        if payload.get('consent') is not True:
+            raise PermissionError('explicit application audio consent required')
+        admission_token = self._application_audio.admission_token()
+        observation = self._companion.latest
+        if observation is None or not observation.valid:
+            raise ValueError('select valid visible content before starting application audio')
+        pid = payload.get('process_id')
+        expected = f":pid:{pid}"
+        if observation.source != 'window-visual' or not observation.target.endswith(expected):
+            raise ValueError('application audio must match the selected window process')
+        if not self.capability_database:
+            raise PermissionError('ASR capability not configured')
+        store = CapabilityStore(self.capability_database)
+        try:
+            selected_asr = store.resolve('asr')
+            if selected_asr['provider'] not in ('vosk', 'sherpa-onnx-sensevoice'):
+                raise PermissionError('selected application ASR provider is not connected')
+        finally:
+            store.close()
+        voice = load_settings(self.settings_path)['voice']
+        if not voice['enabled'] or not voice.get('asr_model'):
+            raise PermissionError('enable recognition and configure its model')
+        model = Path(voice['asr_model'])
+        if not model.is_absolute():
+            model = self.workbench.root/model
+        return self._application_audio.start(process_id=pid,
+            media_identity=observation.metadata.get('media_identity'),
+            media_time_seconds=observation.media_time_seconds,
+            playback_rate=observation.metadata.get('playback_rate', 1.0),
+            creation=payload.get('process_creation'), target=observation.target,
+            model=model, approved=True, capabilities=self.capability_database, asr=selected_asr,
+            admission_token=admission_token)
+
+    def companion_media_state(self, payload):
+        """Fence application audio when an owning player pauses or seeks."""
+        if not isinstance(payload, dict):
+            raise ValueError('media state object required')
+        target, state = payload.get('target'), payload.get('state')
+        if not isinstance(target, str) or not target.strip() or len(target) > 512:
+            raise ValueError('bounded media target required')
+        if state not in ('playing', 'paused', 'seeking', 'ended'):
+            raise ValueError('invalid media state')
+        audio = self._application_audio.status()
+        if audio.get('alive') and audio.get('target') != target:
+            raise ValueError('media target does not own application audio')
+        action = 'none'
+        if state in ('paused', 'seeking', 'ended') and audio.get('alive'):
+            self._application_audio.pause()
+            self._companion_audio_clear()
+            action = 'paused_audio'
+        return {'state': state, 'target': target, 'action': action,
+                'application_audio': self._application_audio.status()}
+
+    def companion_microphone(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError('microphone action required')
+        action = payload.get('action')
+        if action == 'status':
+            after = payload.get('after', 0)
+            if type(after) is not int or after < 0:
+                raise ValueError('nonnegative voice event cursor required')
+            status = self._microphone.status()
+            capture = self._perception.status()
+            application_audio = self._application_audio.status()
+            with self._voice_events_lock:
+                return {**status, 'capture':capture, 'application_audio':application_audio,
+                        'cursor':self._voice_event_sequence,
+                        'events':[dict(event) for event in self._voice_events if event['sequence'] > after]}
+        if action in ('stop', 'pause'):
+            result = self._microphone.stop()
+            with self._voice_events_lock:
+                self._voice_events.clear()
+            return result
+        if action != 'start':
+            raise ValueError('invalid microphone action')
+        if payload.get('microphone_consent') is not True or payload.get('playback_consent') is not True:
+            raise PermissionError('explicit microphone and playback consent required')
+        admission_token = self._microphone.admission_token()
+        observation = self._companion.latest
+        if observation is None or not observation.valid:
+            raise ValueError('select valid visible content before starting microphone study')
+        if not self.capability_database:
+            raise PermissionError('voice capabilities not configured')
+        store = CapabilityStore(self.capability_database)
+        try:
+            selected = {kind: store.resolve(kind) for kind in ('microphone', 'asr', 'voice')}
+        finally:
+            store.close()
+        settings = load_settings(self.settings_path)
+        role = load_role(settings['role']['role_dir'])
+        voice = settings['voice']
+        if not voice['enabled'] or type(voice.get('input_device')) is not int:
+            raise PermissionError('enable voice and choose an input device')
+        model = Path(voice['asr_model'])
+        if not model.is_absolute():
+            model = self.workbench.root / model
+        config = {'settings_path':str(self.settings_path), 'settings':settings,
+            'capabilities':str(self.capability_database), 'selected':selected,
+            'role_id':role['id'], 'microphone_consent':True, 'playback_consent':True,
+            'root':str(UI_ROOT.parent), 'model':str(model),
+            'runtime_directory':str(self.settings_path.parent/'voice-runtime'),
+            'proactive':payload.get('proactive', {'enabled':True,'interval_seconds':120}),
+            'observation':self._observation_payload(observation)}
+        # Avoid admitting a continuous session alongside the one-shot recorder
+        # or player. These owners do not manage the companion microphone job.
+        self.speech.cancel_active()
+        self.playback.cancel_active()
+        with self._voice_events_lock:
+            self._voice_events.clear()
+        return self._microphone.start(config, admission_token=admission_token)
+
+    def companion_pet(self, payload):
+        if not isinstance(payload, dict) or set(payload) != {'action'}:
+            raise ValueError('pet action required; custom launch arguments are not supported')
+        action = payload['action']
+        if action == 'status':
+            return self._pet_host.status()
+        if action == 'stop':
+            return self._pet_host.stop()
+        if action == 'start':
+            if self._shutdown_requested.is_set():
+                raise RuntimeError('bridge is shutting down')
+            return self._pet_host.start(self.listen_port)
+        raise ValueError('invalid pet action')
+
+    def companion_ask(self, question, *, session_id='companion', on_delta=None, expected_target=None):
+        passive = self._passive_browser.status()
+        if expected_target is not None:
+            state=self._perception.status()
+            target=state.get('target')
+            window_matches = (state['alive'] and target and
+                expected_target == f"window:{target['handle']}:pid:{target['process_id']}")
+            passive_matches = passive.get('status') == 'running' and passive.get('target') == expected_target
+            if not window_matches and not passive_matches:
+                raise ValueError('learning target was stopped or changed')
+        with self._microphone.text_question() as token:
+            return self._companion_ask_bound(question, session_id=session_id,
+                on_delta=on_delta, expected_target=expected_target, cancellation_token=token)
+
+    def _companion_ask_bound(self, question, *, session_id, on_delta, expected_target, cancellation_token):
+        with self._context_lock:
+            current = self._fusion.current()
+            if current is not None:
+                self._companion_publish(current)
+            binding=self._companion.bind_question()
+            if expected_target is not None and binding.observation.target != expected_target:
+                raise ValueError('learning observation target changed')
+        return self._companion.ask(question, session_id=session_id, on_delta=on_delta,
+            binding=binding, cancellation_token=cancellation_token,
+            include_images=load_settings(self.settings_path)['multimodal']['enabled'])
+
+    def companion_revoke(self):
+        self._passive_browser.stop()
+        self._application_audio.stop()
+        self._microphone.stop()
+        with self._voice_events_lock:
+            self._voice_events.clear()
+        self._perception.stop()
+        return self._companion_clear()
+
+    def companion_perception(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError('perception action object required')
+        action = payload.get('action')
+        if action == 'start':
+            from sumika_next.runtime_ownership import process_identity
+            from extensions.desktop.windows_capture import _identity
+            pid, handle = payload.get('process_id'), payload.get('handle')
+            if type(pid) is not int or pid <= 0 or type(handle) is not int or handle <= 0:
+                raise ValueError('positive window handle and process id required')
+            if payload.get('consent') is not True:
+                raise PermissionError('explicit window capture consent required')
+            creation = payload.get('process_creation')
+            if creation is not None and process_identity(pid) != creation:
+                raise ValueError('selected process identity changed')
+            from extensions.companion.windows_learning import WindowsLearningCollector
+            expected_document = WindowsLearningCollector.validate_expected_document(payload.get('expected_document'))
+            _identity(handle, pid)
+            self._passive_browser.stop()
+            self._application_audio.stop()
+            self._microphone.stop()
+            return self._perception.start(handle=payload.get('handle'),
+                process_id=payload.get('process_id'), approved=payload.get('consent'),
+                expected_document=expected_document)
+        if action in ('pause', 'resume', 'stop', 'status'):
+            if action in ('pause', 'stop'):
+                self._application_audio.stop()
+                self._microphone.stop()
+            return getattr(self._perception, action)()
+        raise ValueError('invalid perception action')
+
+    def companion_collect(self, payload):
+        if not isinstance(payload, dict) or payload.get('consent') is not True:
+            raise ValueError('explicit window text collection consent required')
+        if payload.get('kind') == 'pdf':
+            return self._companion_collect_pdf(payload)
+        handle, pid = payload.get('handle'), payload.get('process_id')
+        kind, selected = payload.get('kind', 'web'), payload.get('selected', False)
+        if type(handle) is not int or handle <= 0 or type(pid) is not int or pid <= 0:
+            raise ValueError('positive window handle and process id required')
+        if kind not in ('web', 'ebook', 'document') or type(selected) is not bool:
+            raise ValueError('invalid content kind or selection mode')
+        self._passive_browser.stop()
+        collection_token = self._companion.collection_token()
+        root = Path(__file__).resolve().parents[1]
+        from extensions.desktop.runtime import capability_python
+        interpreter = capability_python('desktop', root=root)
+        if interpreter is None:
+            raise RuntimeError('desktop text collector environment is unavailable')
+        command = [str(interpreter), '-X', 'utf8', '-B', '-m', 'extensions.companion.windows_text',
+                   '--handle', str(handle), '--process-id', str(pid), '--kind', kind]
+        if selected:
+            command.append('--selected')
+        result = subprocess.run(command, cwd=root, capture_output=True, text=True, encoding='utf8',
+                                timeout=15, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        if result.returncode:
+            raise RuntimeError('window text collection unavailable; check window identity and accessibility')
+        return self.companion_observe(json.loads(result.stdout), collection_token=collection_token)
+
+    def _companion_collect_pdf(self, payload):
+        """Explicit file/page selection; does not infer a reader's current page."""
+        from extensions.desktop.runtime import capability_python
+        filename, page = payload.get('pdf_path'), payload.get('page')
+        if (not isinstance(filename, str) or not Path(filename).is_absolute()
+                or type(page) is not int or page < 1):
+            raise ValueError('absolute PDF file and one-based current page required')
+        self._passive_browser.stop()
+        token = self._companion.collection_token()
+        root = Path(__file__).resolve().parents[1]
+        # Package uses the standalone desktop runtime. Development fallback reuses
+        # the enabled Office skill, which rechecks configuration per invocation.
+        launcher = root/'.agents/skills/sumika-office/scripts/run.py'
+        try:
+            path = Path(filename).resolve(strict=True)
+            if not path.is_file() or path.suffix.lower() != '.pdf':
+                raise ValueError('PDF file required')
+            bundled = root/'runtime/desktop/python.exe'
+            explicit = os.environ.get('SUMIKA_DESKTOP_PYTHON')
+            if bundled.is_file() or explicit is not None:
+                interpreter = capability_python('desktop', root=root)
+                if interpreter is None:
+                    raise RuntimeError('PDF desktop environment is unavailable')
+                command = [str(interpreter), '-X', 'utf8', '-B',
+                    str(root/'extensions/companion/pdf_learning.py')]
+            else:
+                if not launcher.is_file():
+                    raise RuntimeError('PDF Office environment is unavailable')
+                command = [sys.executable, '-X', 'utf8', '-B', str(launcher),
+                    'exec', str(root/'extensions/companion/pdf_learning.py')]
+            result = subprocess.run([*command, '--pdf', str(path), '--page', str(page)], cwd=root,
+                capture_output=True, text=True, encoding='utf8', timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if result.returncode:
+                raise RuntimeError('PDF page collection failed; check Office capability, file and page')
+            return self.companion_observe(json.loads(result.stdout), collection_token=token)
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):
+            self._companion_clear(collection_token=token)
+            raise
+
+    def companion_video(self, payload):
+        """Accept a bounded subtitle window from a player adapter."""
+        if not isinstance(payload, dict) or payload.get('consent') is not True:
+            raise ValueError('explicit video subtitle consent required')
+        subtitles = payload.get('subtitles')
+        if subtitles is None and isinstance(payload.get('webvtt'), str):
+            subtitles, _ = cues(payload['webvtt'], at_seconds=payload.get('media_time_seconds'))
+        if not isinstance(subtitles, str):
+            raise ValueError('subtitle text or current WebVTT cue required')
+        target = payload.get('target')
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError('video target required')
+        bundle = video(target=target, subtitles=subtitles[:12000],
+                       media_time_seconds=payload.get('media_time_seconds'),
+                       title=payload.get('title'), audio_transcript=payload.get('audio_transcript'))
+        return self.companion_observe({
+            'observed_at': payload.get('observed_at'), 'source': bundle.source,
+            'target': bundle.target, 'valid': bundle.valid, 'text': bundle.text,
+            'media_time_seconds': bundle.media_time_seconds, 'metadata': bundle.metadata})
+
+    def companion_capture(self, payload):
+        if not isinstance(payload, dict) or payload.get('consent') is not True:
+            raise ValueError('explicit window visual collection consent required')
+        handle, pid = payload.get('handle'), payload.get('process_id')
+        if type(handle) is not int or handle <= 0 or type(pid) is not int or pid <= 0:
+            raise ValueError('positive window handle and process id required')
+        self._passive_browser.stop()
+        token = self._companion.collection_token()
+        root = Path(__file__).resolve().parents[1]
+        from extensions.desktop.runtime import capability_python
+        interpreter = capability_python('desktop', root=root)
+        try:
+            if interpreter is None:
+                raise RuntimeError('desktop capture environment is unavailable')
+            result = subprocess.run([str(interpreter), '-X', 'utf8', '-B', '-m',
+                'extensions.companion.windows_visual', '--handle', str(handle), '--process-id', str(pid)],
+                cwd=root, capture_output=True, text=True, encoding='utf8', timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if result.returncode:
+                raise RuntimeError('window visual collection failed; verify target identity and WGC availability')
+            return self.companion_observe(json.loads(result.stdout), collection_token=token)
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):
+            self._companion_clear(collection_token=token)
+            raise
+
+    def companion_browser_video(self, payload):
+        from extensions.companion.browser_video import collect_browser_video
+        from extensions.desktop.browser_skill import BrowserSkillClient
+        if not isinstance(payload, dict) or payload.get('consent') is not True:
+            raise ValueError('explicit browser video collection consent required')
+        site = payload.get('site')
+        if not isinstance(site, str) or not site.strip():
+            raise ValueError('authorized browser site required')
+        self._passive_browser.stop()
+        token = self._companion.collection_token()
+        client = BrowserSkillClient(registry=self.settings_path.parent/'browser-authorizations.json')
+        try:
+            capture_frame = payload.get('capture_frame', False)
+            if type(capture_frame) is not bool:
+                raise ValueError('capture_frame must be boolean')
+            bundle = collect_browser_video(client, site, capture_frame=capture_frame)
+        except (ValueError, RuntimeError, TypeError, OSError, KeyError, subprocess.SubprocessError):
+            self._companion_clear(collection_token=token)
+            raise
+        return self.companion_observe({'observed_at': bundle.observed_at,
+            'source': bundle.source, 'target': bundle.target, 'valid': bundle.valid,
+            'text': bundle.text, 'image': bundle.image, 'media_time_seconds': bundle.media_time_seconds,
+            'metadata': bundle.metadata}, collection_token=token)
+
+    def _companion_passive_publish(self, bundle):
+        # receive holds the grant lock through publication. Grant revocation
+        # fences callbacks; content changes advance the question generation,
+        # which is distinct from this continuous collection's permission.
+        token = self._companion.collection_token()
+        return self.companion_observe(self._observation_payload(bundle),
+            collection_token=token, continuous=True)
+
+    def companion_passive_browser(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError('passive browser action required')
+        action = payload.get('action')
+        if action == 'pending':
+            return {'requests':self._passive_browser.pending_connections()}
+        if action == 'approve':
+            return self._passive_browser.approve_connection(payload, before_start=self.companion_revoke)
+        if action == 'start':
+            self._passive_browser.validate_selection(payload)
+            self.companion_revoke()
+            return self._passive_browser.start(payload)
+        if action == 'resume':
+            result = self._passive_browser.resume()
+            return result
+        if action in ('pause', 'stop', 'status'):
+            return getattr(self._passive_browser, action)()
+        raise ValueError('invalid passive browser action')
+
     def stop_speech(self, *, closing=False):
         failures = []
+        try:
+            self._application_audio.stop()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            failures.append(error)
+        try:
+            self._microphone.stop()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            failures.append(error)
         for service in (self.speech, self.playback):
             try:
                 service.close() if closing else service.cancel_active()
@@ -468,8 +988,13 @@ class Bridge:
         # Fence new admissions before waiting for the current writer. A failed
         # stop remains fenced: only reads and explicit shutdown retry are safe.
         self._shutdown_requested.set()
+        self._passive_browser.stop()
+        self._application_audio.stop()
+        self._microphone.stop()
+        self._perception.stop()
         self.stop_speech(closing=True)
         with self._chat_lock:
+            self._pet_host.stop()
             if self._closing:
                 return
             self.workbench.stop()
@@ -607,6 +1132,11 @@ def _handler(bridge):
             path = urlparse(self.path).path
             if not self._authorize():
                 return
+            if path == '/api/companion/windows':
+                try:
+                    return self._json(200, list_window_targets())
+                except (OSError, RuntimeError, ValueError) as error:
+                    return self._json(400, {'error':str(error)})
             if path.startswith('/api/manage/'):
                 return self._manage('GET')
             try:
@@ -637,7 +1167,8 @@ def _handler(bridge):
                     return self._json(200, bridge.schedule.state())
                 if path == "/api/readiness":
                     return self._json(200, {"capabilities": readiness_probes(
-                        Path(__file__).resolve().parents[1])})
+                        bridge.workbench.root,
+                        asr_model=load_settings(bridge.settings_path)['voice']['asr_model'])})
                 if path == "/api/voice/devices":
                     return self._json(200, bridge.voice_devices())
                 if path == '/api/voice/input':
@@ -711,6 +1242,32 @@ def _handler(bridge):
             self.end_headers()
 
         def do_POST(self):
+            route = urlparse(self.path).path
+            if route in ('/api/companion/passive-browser/push',
+                         '/api/companion/passive-browser/request',
+                         '/api/companion/passive-browser/receipt',
+                         '/api/companion/passive-browser/cancel'):
+                # Narrow extension ingress: never grants access to management
+                # or arbitrary observation APIs. No website CORS is enabled.
+                if self.headers.get('Host') != f'127.0.0.1:{self.server.server_port}':
+                    return self._json(403, {'error':'unexpected client host'})
+                if bridge._closing or bridge._shutdown_requested.is_set():
+                    return self._json(503, {'error':'bridge is shutting down'})
+                authorization = self.headers.get('Authorization', '')
+                token = authorization[7:] if authorization.startswith('Bearer ') else ''
+                try:
+                    if route.endswith('/request'):
+                        return self._json(200, bridge._passive_browser.request_connection(
+                            self.headers.get('Origin'), self._body()))
+                    if route.endswith('/receipt') or route.endswith('/cancel'):
+                        return self._json(200, bridge._passive_browser.connection_receipt(
+                            self.headers.get('Origin'), self._body(), cancel=route.endswith('/cancel')))
+                    return self._json(200, bridge._passive_browser.receive(token,
+                        self.headers.get('Origin'), self._body()))
+                except PermissionError as error:
+                    return self._json(403, {'error':str(error)})
+                except (ValueError, TypeError, KeyError, OSError) as error:
+                    return self._json(400, {'error':str(error)})
             if not self._authorize(write=True):
                 return
             # Shutdown must announce its fence before acquiring the writer lock.
@@ -719,6 +1276,64 @@ def _handler(bridge):
                 return self._post()
             if bridge._closing or bridge._shutdown_requested.is_set():
                 return self._json(503, {'error': 'bridge is shutting down; request was not applied'})
+            route = urlparse(self.path).path
+            if route == '/api/companion/pet':
+                try:
+                    with bridge._chat_lock:
+                        return self._json(200, bridge.companion_pet(self._body()))
+                except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error':str(error)})
+            # Consent withdrawal must not wait for a model holding the writer
+            # lock. Starting/resuming capture still uses normal admission below.
+            if route == '/api/companion/revoke':
+                return self._post()
+            if route == '/api/companion/passive-browser':
+                try:
+                    payload = self._body()
+                    if isinstance(payload, dict) and payload.get('action') in ('pause','stop','status'):
+                        return self._json(200, bridge.companion_passive_browser(payload))
+                    with bridge._chat_lock:
+                        if bridge._closing or bridge._shutdown_requested.is_set():
+                            return self._json(503, {'error':'bridge is shutting down'})
+                        return self._json(200, bridge.companion_passive_browser(payload))
+                except (ValueError, PermissionError, RuntimeError, OSError) as error:
+                    return self._json(400, {'error':str(error)})
+            if route == '/api/companion/microphone':
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict):
+                        raise ValueError('microphone action required')
+                    self._microphone_payload = payload
+                    if payload.get('action') in ('pause', 'stop', 'status'):
+                        return self._json(200, bridge.companion_microphone(payload))
+                except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/audio':
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict):
+                        raise ValueError('application audio action required')
+                    self._audio_payload = payload
+                    if payload.get('action') in ('pause', 'stop', 'status'):
+                        return self._json(200, bridge.companion_audio(payload))
+                except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/media-state':
+                try:
+                    payload = self._body()
+                    self._media_state_payload = payload
+                except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/perception':
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict):
+                        raise ValueError('perception action object required')
+                    self._perception_payload = payload
+                    if payload.get('action') in ('pause', 'stop', 'status'):
+                        return self._json(200, bridge.companion_perception(payload))
+                except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
             # Share admission with chat persistence and shutdown. A queued write
             # must recheck closing after obtaining the lock, not before it.
             with bridge._chat_lock:
@@ -730,7 +1345,7 @@ def _handler(bridge):
 
         def _post(self):
             route = urlparse(self.path).path
-            if route not in ('/api/manage/role-relocation/resume','/api/manage/role-relocation/rollback','/api/lifecycle/shutdown'):
+            if route not in ('/api/manage/role-relocation/resume','/api/manage/role-relocation/rollback','/api/lifecycle/shutdown', '/api/companion/revoke'):
                 from extensions.roles.relocation import require_settled
                 try: require_settled(bridge.settings_path)
                 except ValueError as error: return self._json(409, {'error':str(error)})
@@ -846,6 +1461,97 @@ def _handler(bridge):
                     return self._json(502, {'status':'unknown', 'error':str(error)})
                 except (ValueError, OSError, KeyError) as error:
                     return self._json(400, {"error": str(error)})
+            if route == "/api/companion/collect":
+                try:
+                    return self._json(200, bridge.companion_collect(self._body()))
+                except (ValueError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/companion/video":
+                try:
+                    return self._json(200, bridge.companion_video(self._body()))
+                except (ValueError, RuntimeError, TypeError, OSError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/companion/capture":
+                try:
+                    return self._json(200, bridge.companion_capture(self._body()))
+                except (ValueError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == '/api/companion/perception':
+                try:
+                    payload = self._perception_payload if hasattr(self, '_perception_payload') else self._body()
+                    return self._json(200, bridge.companion_perception(payload))
+                except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/audio':
+                try:
+                    payload = self._audio_payload if hasattr(self, '_audio_payload') else self._body()
+                    return self._json(200, bridge.companion_audio(payload))
+                except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/media-state':
+                try:
+                    payload = self._media_state_payload if hasattr(self, '_media_state_payload') else self._body()
+                    return self._json(200, bridge.companion_media_state(payload))
+                except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/microphone':
+                try:
+                    payload = self._microphone_payload if hasattr(self, '_microphone_payload') else self._body()
+                    return self._json(200, bridge.companion_microphone(payload))
+                except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == "/api/companion/browser-video":
+                try:
+                    return self._json(200, bridge.companion_browser_video(self._body()))
+                except (ValueError, RuntimeError, TypeError, OSError, KeyError, subprocess.SubprocessError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/companion/observe":
+                try:
+                    return self._json(200, bridge.companion_observe(self._body()))
+                except (ValueError, TypeError, OSError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == '/api/companion/ask-stream':
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict) or not isinstance(payload.get('question'), str) or not payload['question'].strip():
+                        raise ValueError('question required')
+                except (ValueError, TypeError) as error:
+                    return self._json(400, {'error':str(error)})
+                self.send_response(200)
+                self._cors()
+                self.send_header('Content-Type', 'application/x-ndjson; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.close_connection = True
+                def emit(kind, value):
+                    self.wfile.write((json.dumps({'event':kind, **value}, ensure_ascii=False)+'\n').encode('utf8'))
+                    self.wfile.flush()
+                try:
+                    result = bridge.companion_ask(payload.get('question'),
+                        session_id=payload.get('session') or 'companion',
+                        expected_target=payload.get('expected_target'),
+                        on_delta=lambda value: emit('delta', value))
+                    emit('complete', result)
+                except (CloudError, OllamaError, ValueError, RuntimeError, TypeError, OSError, KeyError) as error:
+                    try: emit('error', {'status':'unknown', 'kind':getattr(error,'kind',type(error).__name__),
+                                      'fallback_used':False, 'usage_status':'unknown'})
+                    except OSError: pass
+                return
+            if route == "/api/companion/ask":
+                try:
+                    payload = self._body()
+                    return self._json(200, bridge.companion_ask(payload.get('question'), session_id=payload.get('session') or 'companion'))
+                except (CloudError, OllamaError) as error:
+                    return self._json(502, {"status": "unknown", "kind": getattr(error, "kind", "unknown"),
+                                            "message": str(error), "fallback_used": False})
+                except (ValueError, RuntimeError, TypeError, OSError, KeyError) as error:
+                    return self._json(400, {"error": str(error)})
+            if route == "/api/companion/revoke":
+                try:
+                    return self._json(200, bridge.companion_revoke())
+                except (ValueError, RuntimeError, TypeError, OSError, KeyError) as error:
+                    return self._json(400, {"error": str(error)})
             if route != "/api/role/chat":
                 return self._json(404, {"error": "unknown endpoint"})
             try:
@@ -890,6 +1596,9 @@ def serve(settings_path=None, *, host="127.0.0.1", port=8765, capability_databas
     lease = DataLease((Path(settings_path) if settings_path else default_path()).parent).acquire()
 
     class OwnedServer(ThreadingHTTPServer):
+        # Windows rejects excess pending connections during parallel UI loading.
+        request_queue_size = 64
+
         def server_close(self):
             # Do not release the personal-data lease while admitted writes or an
             # owned workbench remain active. Failed stop retains ownership.
@@ -911,6 +1620,7 @@ def serve(settings_path=None, *, host="127.0.0.1", port=8765, capability_databas
         bridge = Bridge(settings_path, capability_database=capability_database,
                         workbench_root=workbench_root, schedule_directory=schedule_directory)
         httpd = OwnedServer((host, port), _handler(bridge))
+        bridge.listen_port = httpd.server_port
         httpd.sumika_bridge = bridge
         return httpd
     except BaseException:
@@ -931,11 +1641,27 @@ def main():
                   schedule_directory=args.schedules)
     print(json.dumps({"listening": f"http://127.0.0.1:{args.port}/", "settings": str(args.settings)},
                      ensure_ascii=False), flush=True)
+    from extensions.desktop.reference_monitor import ReferenceMonitor
+    from extensions.desktop.reference_runner import ReferenceRunner
+    from extensions.desktop.reference_analysis import ConfiguredReferenceAnalyzer
+    root = UI_ROOT.parent
+    registry = root/'docs/project/reference-projects.json'
+    if not registry.is_file():
+        registry = root/'extensions/desktop/reference-projects.json'
+    def analyzer_factory():
+        settings = load_settings(httpd.sumika_bridge.settings_path)
+        return (ConfiguredReferenceAnalyzer(httpd.sumika_bridge.settings_path)
+                if settings['auxiliary']['enabled'] else None)
+    research = ReferenceRunner(ReferenceMonitor(registry,
+        httpd.sumika_bridge.settings_path.parent/'reference-projects.sqlite3'),
+        notify=httpd.sumika_bridge.schedule.notify, analyzer_factory=analyzer_factory)
     try:
+        research.start()
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        research.stop()
         httpd.server_close()
 
 

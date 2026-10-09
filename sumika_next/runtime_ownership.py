@@ -82,5 +82,7 @@ class ProfileLease:
 
     def release(self):
         if self.file is not None:
-            self._write({})
-            self.file.close();self.file=None
+            try:
+                self._write({})
+            finally:
+                self.file.close();self.file=None

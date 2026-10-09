@@ -4,500 +4,17 @@
 <meta charset="UTF-8">
 <title>晴日部室 · Sumika</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23567f6c'/%3E%3Cstop offset='1' stop-color='%23b4496a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3C/svg%3E">
-<style>
-  /* ============ 设计令牌（旧版清爽日系：米白 / 墨绿 / 玫红 / 水色） ============ */
-  :root{
-    --bg:#f5f3ea;
-    --paper:#fffdf8;
-    --paper-2:#faf8f0;
-    --ink:#2f3a34;
-    --muted:#6e7a72;
-    --line:#ddd9c8;
-    --rose:#b4496a;        /* 玫红主强调（中和旧版 #a94067 与初版 #c24e6e） */
-    --rose-deep:#9c3a56;
-    --rose-soft:#f9e8ed;
-    --green:#567f6c;       /* 绿辅助（中和旧版 #47746a） */
-    --green-soft:#e8f1ea;
-    --mizu:#7aa8c7;        /* 水色点缀 */
-    --mizu-soft:#e9f1f7;
-    --amber:#9a7038;
-    --amber-soft:#f7efdd;
-    --danger:#a6404d;
-    --chara:#b4496a;       /* 当前在场角色强调色（JS 可切换） */
-    --chara-soft:#f9e8ed;
-    --radius:9px;
-    --shadow:0 4px 14px rgba(80,75,50,.06);
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%}
-  body{
-    width:1440px;height:900px;overflow:hidden;
-    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
-    background:var(--bg);color:var(--ink);
-  }
-  button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
-  ::-webkit-scrollbar{width:0;height:0}
-
-  /* ============ 顶栏（旧版 workbench-v2 式：细线 · 文本导航 · 大留白） ============ */
-  .topbar{
-    height:64px;display:flex;align-items:stretch;gap:22px;padding:0 26px;
-    background:var(--paper);border-bottom:1px solid var(--line);position:relative;z-index:10;
-  }
-  .topbar>*{align-self:center}
-  .brand{display:flex;align-items:baseline;gap:10px}
-  .brand .jp{font:700 20px Georgia,"SimSun",serif;letter-spacing:2px}
-  .brand .jp em{font-style:normal;color:var(--rose)}
-  .brand .ver{font-size:9px;color:var(--green);border:1px solid #cfe0d4;background:var(--green-soft);border-radius:99px;padding:2px 8px;letter-spacing:1px}
-  .crumb{font-size:11px;color:var(--muted);letter-spacing:1px}
-  .crumb b{color:var(--ink);font-weight:500}
-  /* 全局导航：唯一权威入口，与场景无关（旧版式：激活项底部 3px 玫红条） */
-  .gnav{display:flex;gap:30px;margin:0 auto;align-self:stretch}
-  .gnav button{position:relative;padding:0 4px;font-size:13px;color:var(--muted);letter-spacing:1px}
-  .gnav button:hover{color:var(--ink)}
-  .gnav button.active{color:var(--rose-deep);font-weight:600}
-  .gnav button.active::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--rose);border-radius:3px 3px 0 0}
-  .top-right{margin-left:auto;display:flex;align-items:center;gap:12px}
-  .model-chip{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--green);border:1px solid #cfe0d4;background:#f5faf5;border-radius:99px;padding:5px 13px}
-  .model-chip i{width:7px;height:7px;border-radius:50%;background:#58a86b}
-  .proto{font-size:10px;color:var(--amber);background:var(--amber-soft);border:1px solid #e8d9b8;border-radius:8px;padding:4px 9px}
-  .back-btn{display:flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:6px 13px;background:var(--paper);color:var(--muted)}
-  .back-btn:hover{color:var(--rose-deep);border-color:#e6c3cf}
-
-  .screen{display:none;height:calc(100% - 64px);position:relative}
-  .screen.show{display:block}
-
-  /* ============================================================
-     桌宠小窗（L0：跨页常驻的可拖动浮动小窗，陪伴页自动隐藏）
-  ============================================================ */
-  .deskpet{position:fixed;right:14px;bottom:14px;z-index:50;display:flex;flex-direction:column;align-items:flex-end;gap:6px;cursor:grab;user-select:none;touch-action:none}
-  .deskpet:active{cursor:grabbing}
-  .deskpet.dragging{transition:none}
-  body.on-room .deskpet{display:none}
-  /* ---- 聊天气泡 / 历史记录 ----
-     默认收起：只显示最近 3 条；悬停展开为完整记录（可滚动），点击固定展开以便翻更早内容。
-     关键：气泡采用「向上生长」的绝对定位——展开时不推挤下方取景框，
-     小窗总高度保持不变，鼠标在气泡与取景框之间移动时不会因布局跳动而抖动。 */
-  .dp-bubble{position:absolute;left:0;right:0;bottom:100%;margin-bottom:6px;
-    border:1px solid var(--line);border-left:3px solid var(--chara);border-radius:9px;
-    background:var(--paper);box-shadow:0 10px 24px rgba(120,100,60,.16);padding:7px 10px;
-    font-size:10.5px;line-height:1.6;box-sizing:border-box;cursor:pointer;
-    transition:box-shadow .2s,border-color .2s}
-  /* 气泡的定位参照系：小窗里的「取景框行」，气泡悬于其正上方 */
-  .dp-stage{position:relative}
-  .dp-bubble:hover{border-color:#e6c3cf;box-shadow:0 8px 20px rgba(120,100,60,.18)}
-  .dp-bubble .st{display:flex;align-items:center;justify-content:space-between;font-size:9px;color:var(--chara);letter-spacing:1px;margin-bottom:4px}
-  .dp-bubble .st i{font-style:normal;color:#b3ab8f;letter-spacing:0;font-size:8.5px}
-  /* 消息列表：收起态固定露出「最近三条」，展开态可滚到更早。
-     用 :nth-last-child 而不是靠 max-height 去猜高度——消息一旦换行，
-     按像素裁就会出现「只露两条 / 第二条被切一半」的不确定结果。 */
-  .dp-log{display:flex;flex-direction:column;gap:5px;max-height:88px;overflow:hidden;transition:max-height .28s ease}
-  .dp-bubble:not(.open) .dp-msg:not(:nth-last-child(-n+3)){display:none}
-  .dp-bubble.open .dp-log{max-height:210px;overflow-y:auto;touch-action:pan-y;scrollbar-width:thin}
-  .dp-bubble.no-more .more{display:none}
-  .dp-msg{display:flex;gap:6px;align-items:baseline}
-  .dp-msg b{flex:none;font-weight:600;font-size:9px;letter-spacing:.5px;color:var(--chara)}
-  .dp-msg.me b{color:#8d9c93}
-  .dp-msg span{color:var(--ink);word-break:break-word}
-  .dp-msg.me span{color:var(--muted)}
-  .dp-bubble .more{display:block;margin-top:5px;font-size:8.5px;color:#a89f85;letter-spacing:.5px;text-align:center}
-  .dp-bubble.open .more .lbl-open{display:inline}
-  .dp-bubble.open .more .lbl-closed{display:none}
-  .dp-bubble .more .lbl-open{display:none}
-  /* 小窗竖向流：取景框 → 操作行 → 输入框。
-     聊天气泡不占文档流（绝对定位悬在取景框上方），因此展开时不会推挤下方内容。 */
-  .dp-main{display:flex;flex-direction:column;align-items:stretch;gap:6px;width:300px}
-  /* 取景框行：既是「取景框 + 操作按钮」的容器，也是气泡的定位参照系
-     （气泡绝对定位到它的上边缘之上，向上生长） */
-  .dp-stage{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px}
-  /* 桌宠取景框：内部放「房间场景克隆」，故必须裁剪溢出，并建立独立层叠上下文，
-     把克隆房间的一切（含 z-index:3 的角色层、z-index:2 的 VRM 层）都关在框内 */
-  .dp-chara{position:relative;isolation:isolate;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--bg);
-    box-shadow:0 6px 16px rgba(120,100,60,.16);width:300px;height:336px}
-  .dp-chara>svg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:262px;height:284px}
-  .dp-scene{position:absolute;inset:0;z-index:0}
-  /* 克隆进来的房间：只作为「世界画布」被窗口化截取，自身尺寸与舞台一致后按 zoom 变换 */
-  .dp-scene>*{position:absolute;left:0;top:0;pointer-events:none;transform-origin:0 0}
-  .dp-scene .vport-frame,.dp-scene .vport-tag,.dp-scene .vport-ratio,.dp-scene .obj3d,
-  .dp-scene .d-caption,.dp-scene .layers,.dp-scene .cam-cap,
-  .dp-scene .gshadow,.dp-scene .chara-name-tag,.dp-scene .standee{display:none!important}
-  /* 小窗专属 VRM 实例容器：与主持屏角色层同位同尺寸（.vport = 300×430）。
-     画布是透明的（渲染器 alpha:true + 清屏 alpha 0），所以它会自然"贴"在房间之上，
-     人站在房间里的效果由「房间层 + 透明人层」叠加得到，不需要再挖空或压暗背景。
-     容器高度取 .vport 的 430，超出取景框 336 的部分由 overflow:hidden 裁掉。 */
-  .dp-scene .dp-vrm{position:absolute;left:0;bottom:0;width:300px;height:430px;z-index:2}
-  .dp-scene .dp-vrm canvas{display:block;width:100%!important;height:100%!important;background:transparent!important}
-  .dp-scene .dp-vrm .vrm-renderer-status{display:none!important}
-  /* VRM 生效时，小窗内的占位立绘必须让位。
-     用 CSS 由 data 属性驱动，而不是依赖脚本时序去改 style.display——
-     小窗的立绘有三处副本（外层占位、克隆角色层内、主持屏），逐一改样式极易漏改或时序错位。
-     注意：选择器必须覆盖「克隆体内所有层级的 .chara-svg」。
-     初版只写了 .dp-scene .vport .chara-svg，一旦角色层的类名被 .pos-work / .pos-rest 改过、
-     或立绘被放进更深一层，规则就失配——结果小窗里同时出现「占位立绘 + VRM」两个角色。
-     这里改用兜底写法，凡克隆房间内的立绘/地影一律隐藏。 */
-  #deskpet[data-vrm="on"] .dp-chara > svg,
-  #deskpet[data-vrm="on"] .dp-scene .chara-svg,
-  #deskpet[data-vrm="on"] .dp-scene .gshadow,
-  #deskpet[data-vrm="on"] .dp-scene .standee{display:none!important}
-  #deskpet[data-vrm="off"] .dp-vrm{display:none!important}
-  /* 占位立绘模式（未绑定 VRM 的角色）时，.dp-scene 里的居中立绘会与最外层立绘重叠，
-     同样只留最外层那一张 */
-  #deskpet[data-vrm="off"] .dp-scene .chara-svg{display:none!important}
-  /* 操作行：仅保留「收起」（取景切换与放大入口已移除，放大与顶栏「回活动室」重复） */
-  .dp-ops{display:flex;gap:4px}
-  .dp-ops button{border:1px solid var(--line);background:var(--paper);font-size:9.5px;color:var(--muted);border-radius:7px;padding:3px 10px;white-space:nowrap}
-  .dp-ops button:hover{color:var(--rose-deep);border-color:#e6c3cf;background:#fdf4f7}
-  .dp-mini{display:none;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow);font-size:14px;color:var(--chara);font-family:Georgia,"SimSun",serif;place-items:center}
-  .deskpet.mini .dp-main,.deskpet.mini .dp-chat,.deskpet.mini .dp-bubble{display:none}
-  .deskpet.mini .dp-mini{display:grid}
-  /* 桌宠闲聊输入框 */
-  .dp-chat{display:flex;align-items:center;gap:6px;width:300px;border:1px solid var(--line);border-radius:11px;background:var(--paper);box-shadow:var(--shadow);padding:5px 6px 5px 10px}
-  .dp-chat input{flex:1;min-width:0;border:none;outline:none;background:none;font:inherit;font-size:11.5px;color:var(--ink)}
-  .dp-chat input::placeholder{color:#b5b098}
-  .dp-chat [data-dp-send]{width:26px;height:26px;border-radius:8px;background:var(--chara);display:grid;place-items:center;flex:none;transition:background .2s;color:#fff;font-size:11px;border:none}
-  .dp-chat [data-dp-send]:hover{filter:brightness(1.08)}
-
-  /* ============================================================
-     屏 1：活动室（部员名册 | 舞台 | 对话）
-  ============================================================ */
-  .room-wrap{height:100%;display:grid;grid-template-columns:216px minmax(0,1fr) 336px}
-
-  /* ---- 部员名册（多角色排布演示） ---- */
-  .roster{border-right:1px solid var(--line);background:var(--paper-2);padding:16px 12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto}
-  .roster h3{font-size:10px;color:var(--muted);letter-spacing:2px;margin:0 6px 8px;display:flex;justify-content:space-between}
-  .roster h3 b{font-weight:400;color:#b3ab8f}
-  .member{
-    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
-    border:1px solid transparent;border-radius:9px;padding:9px 10px;position:relative;
-  }
-  .member:hover{background:#f1eee0}
-  .member.active{background:var(--paper);border-color:var(--line);box-shadow:var(--shadow)}
-  .member.active::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:3px;background:var(--mc,#c24e6e)}
-  .member .ava{width:34px;height:34px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:13px;color:#fff;font-family:Georgia,serif}
-  .member .nm{font-size:12.5px;font-weight:600}
-  .member .st{display:block;font-size:9.5px;color:var(--muted);margin-top:1px;font-weight:400}
-  .member .bind{margin-left:auto;font-size:8.5px;color:var(--mizu);border:1px solid #cfdfea;background:var(--mizu-soft);border-radius:99px;padding:1px 6px;white-space:nowrap}
-  .member.rsv{border:1px dashed #d8cfb4;background:transparent;color:#a39e8b}
-  .member.rsv:hover{background:#f5f1e4}
-  .member.rsv .nm{color:#a39e8b;font-weight:500}
-  .member.rsv .ava{border:1.5px dashed #cfc6a8;color:#b3ab8f;background:transparent}
-  .roster-note{border:1px dashed #d8d2ba;border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7;margin-top:4px}
-  .roster-note b{color:var(--green)}
-  .roster-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px}
-  .import-btn{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:10px;padding:8px;background:var(--amber-soft)}
-  .coop{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);padding:2px 4px}
-  .coop .tag{font-size:8.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:99px;padding:0 6px}
-
-  /* ---- 舞台（镜头窗口：她的房间） ---- */
-  .stage{position:relative;overflow:hidden;
-    background:
-      /* 木地板拼缝 */
-      repeating-linear-gradient(90deg,transparent 0 132px,rgba(140,104,66,.13) 132px 133px),
-      /* 踢脚线 */
-      linear-gradient(180deg,transparent 0 60.2%,rgba(255,252,244,.92) 60.2% 61.6%,rgba(176,137,94,.35) 61.6% 62.1%,transparent 62.1%),
-      /* 地板：暖木色 */
-      linear-gradient(180deg,transparent 0 60%,#d2ac7f 60%,#c39a6a 82%,#ba8f5e 100%),
-      /* 墙面：暖奶油色（贴合暖色系 VRM 模型肤色与服装） */
-      linear-gradient(180deg,#f4e7d2 0%,#f7eddc 40%,#f3e6ce 60%,#efdfc4 60.5%,#e9d8bb 100%)}
-  .cam-view{position:absolute;inset:0;transition:transform .9s cubic-bezier(.4,0,.2,1);transform-origin:73% 62%}
-  /* 地板近处的柔和明暗，避免大面积平涂 */
-  .cam-view::after{content:"";position:absolute;left:0;right:0;top:60%;bottom:0;pointer-events:none;
-    background:
-      radial-gradient(120% 90% at 20% 110%,rgba(120,86,48,.16),transparent 62%),
-      radial-gradient(90% 70% at 86% 10%,rgba(255,246,228,.22),transparent 60%)}
-  /* 取景框 */
-  .vf{position:absolute;inset:12px;z-index:6;pointer-events:none}
-  .vf i{position:absolute;width:22px;height:22px;border:2px solid rgba(122,168,199,.65)}
-  .vf i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
-  .vf i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
-  .vf i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 6px}
-  .vf i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 6px 0}
-  .cam-chip{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:7;display:flex;align-items:center;gap:7px;
-    font-size:9.5px;color:var(--mizu);letter-spacing:1px;background:rgba(255,253,248,.92);border:1px solid #cfdfea;border-radius:99px;padding:5px 13px}
-  .cam-chip i{width:7px;height:7px;border-radius:50%;background:#d06a6a;box-shadow:0 0 0 3px rgba(208,106,106,.18)}
-  .cam-chip b{color:var(--ink);font-weight:500}
-  /* 镜头模式与活动演示 */
-  .d-ctrls{position:absolute;top:16px;right:16px;z-index:7;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
-  .d-ctrl{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--ink);border:1px solid var(--line);background:rgba(255,253,248,.92);border-radius:99px;padding:5px 12px}
-  .d-ctrl .on{color:var(--green);font-size:9px}
-  .d-ctrl.rsv{color:var(--muted);border-style:dashed}
-  .d-ctrl.rsv .on{color:var(--amber)}
-  .cam-modes{display:flex;gap:4px}
-  .cam-modes button{font-size:10px;border:1px solid var(--line);border-radius:99px;padding:5px 11px;color:var(--muted);background:rgba(255,253,248,.92)}
-  .cam-modes button.active{color:var(--mizu);border-color:#cfdfea;background:var(--mizu-soft);font-weight:600}
-  .act-demos{display:flex;flex-direction:column;gap:5px;align-items:flex-end;border:1px dashed #d9c49a;background:rgba(255,253,248,.94);border-radius:12px;padding:8px 10px}
-  .act-demos .lab{font-size:8.5px;color:var(--amber);letter-spacing:1px}
-  .act-demos .row{display:flex;gap:4px}
-  .act-demos button{font-size:10px;border:1px solid var(--line);border-radius:99px;padding:4px 10px;color:var(--muted);background:var(--paper)}
-  .act-demos button.active{color:var(--rose-deep);border-color:#e6c3cf;background:var(--rose-soft);font-weight:600}
-  /* 渲染图层图例 */
-  .layers{position:absolute;left:16px;bottom:16px;z-index:7;display:flex;gap:6px}
-  .layers span{font-size:8.5px;letter-spacing:.5px;border-radius:99px;padding:3px 10px;border:1px solid var(--line);background:rgba(255,253,248,.9);color:var(--muted)}
-  .layers .l2d{color:var(--green);border-color:#cfe0d4;background:rgba(232,241,234,.92)}
-  .layers .l3d{color:var(--mizu);border-color:#cfdfea;background:rgba(233,241,247,.92)}
-  .layers .lvrm{color:var(--amber);border-style:dashed;border-color:#d9c49a;background:rgba(247,239,221,.92)}
-  .d-caption{position:absolute;top:16px;left:18px;z-index:7;font-size:10px;color:#a2937a;line-height:1.7;letter-spacing:1px}
-  .d-caption b{color:var(--rose-deep);font-weight:600}
-  .d-caption .act{color:var(--green)}
-  /* 午后阳光在地板上的暖色光斑（贴合暖色调角色） */
-  .d-glow{position:absolute;top:58%;left:0;right:0;bottom:0;pointer-events:none;
-    background:
-      radial-gradient(58% 40% at 66% 4%,rgba(255,240,208,.66),transparent 68%),
-      radial-gradient(42% 32% at 12% 88%,rgba(255,232,196,.34),transparent 70%)}
-  /* 窗与暖色天光 */
-  .d-win{position:absolute;top:9%;right:8%;width:216px;height:254px;border-radius:12px;
-    background:linear-gradient(165deg,#a9d0e2,#d9ecf0 52%,#f6ecd0 78%,#f0dcb6);border:9px solid #fffaf0;box-shadow:0 10px 26px rgba(140,105,60,.2)}
-  .d-win::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:6px;margin-left:-3px;background:#fffaf0}
-  .d-win::after{content:"";position:absolute;top:50%;left:0;right:0;height:6px;margin-top:-3px;background:#fffaf0}
-  .d-curtain{position:absolute;top:calc(9% - 10px);width:30px;height:270px;background:rgba(255,250,240,.62);border:1px solid rgba(196,172,136,.55);border-radius:8px}
-  .d-light{position:absolute;top:12%;right:2%;width:330px;height:420px;background:radial-gradient(closest-side,rgba(255,226,170,.42),transparent);transform:skewX(-12deg)}
-  /* 挂轴 */
-  .d-scroll{position:absolute;top:12%;left:33%;width:84px;height:124px;background:#fffef6;border:5px solid #ddd2b6;border-radius:4px;box-shadow:0 6px 14px rgba(120,110,70,.12)}
-  .d-scroll::before{content:"花";position:absolute;inset:0;display:grid;place-items:center;font:400 30px Georgia,"SimSun",serif;color:var(--rose)}
-  /* 植物 */
-  .d-plant{position:absolute;bottom:14%;left:37%;width:56px;height:88px;z-index:1}
-  .d-plant .pot{position:absolute;bottom:0;left:9px;width:40px;height:30px;background:#e6d3b4;border:1px solid #d3bd97;border-radius:5px 5px 12px 12px}
-  .d-plant .leaf{position:absolute;border-radius:50%;background:#a4c3a5}
-  /* 入口物件（物件即界面 · 清风版）——已废弃：场景物件仅为陈设，不绑定功能 */
-  .d-board{position:absolute;top:9%;left:5%;width:200px;height:148px;background:#f3e6cb;border:6px solid #c8a172;border-radius:10px;box-shadow:0 8px 20px rgba(120,86,44,.16)}
-  .d-board .pn{position:absolute;border-radius:3px;border:1px solid rgba(140,120,80,.25)}
-  .d-desk2{position:absolute;bottom:12%;left:5%;width:270px;height:14px;background:#c9a273;border:1px solid #b98d5c;border-radius:6px;box-shadow:0 8px 20px rgba(120,86,44,.2)}
-  .d-desk2::before,.d-desk2::after{content:"";position:absolute;top:13px;width:12px;height:96px;background:#bd9564;border:1px solid #ad8552;border-radius:5px}
-  .d-desk2::before{left:18px}.d-desk2::after{right:18px}
-  .d-desk2 .mon{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:7px;width:128px;height:88px;background:#f7f2e4;border:1px solid #d3c5a4;border-radius:9px;box-shadow:0 8px 20px rgba(120,86,44,.18)}
-  .d-desk2 .mon::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);width:44px;height:11px;background:#e3d8bd;border:1px solid #d3c5a4;border-top:0;border-radius:0 0 6px 6px}
-  .d-desk2 .mon .scr{position:absolute;inset:8px;border-radius:5px;background:linear-gradient(160deg,#dfeaf0,#eef4ef)}
-  .d-desk2 .mon .scr i{position:absolute;left:8px;height:4px;border-radius:2px}
-  .d-desk2 .cup{position:absolute;bottom:100%;left:12px;margin-bottom:4px;width:20px;height:22px;background:var(--mizu-soft);border:1px solid #cfdfea;border-radius:4px 4px 8px 8px}
-  .d-shelf2{position:absolute;bottom:12%;left:31%;width:148px;height:224px;background:#eedfbe;border:1px solid #d3b88c;border-radius:9px;box-shadow:0 8px 20px rgba(120,86,44,.18)}
-  .d-shelf2 .sl{position:absolute;left:7px;right:7px;height:6px;background:#c8a172;border-radius:3px}
-  .d-shelf2 .brow{position:absolute;left:12px;right:12px;display:flex;gap:3px;align-items:flex-end}
-  .d-shelf2 .brow i{width:12px;border-radius:2px 2px 0 0}
-  /* 挂钟 */
-  .d-clock{position:absolute;top:13%;left:46%;width:72px;height:72px;border-radius:50%;background:#fffdf6;border:5px solid #cbab79;box-shadow:0 8px 18px rgba(120,86,44,.18)}
-  .d-clock i{position:absolute;left:calc(50% - 1.5px);width:3px;background:#8a8272;border-radius:2px;transform-origin:bottom center}
-  .d-clock .h{top:calc(50% - 15px);height:15px;transform:rotate(-55deg)}
-  .d-clock .m{top:calc(50% - 21px);height:21px;transform:rotate(35deg)}
-  .d-clock::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#8a8272}
-  /* 地毯 */
-  .d-rug{position:absolute;bottom:4%;left:44%;width:420px;height:92px;border-radius:50%;background:radial-gradient(closest-side,#f7e3e6,#f2ded2);border:1px solid rgba(186,140,124,.3)}
-  /* VRM 角色层（位置可随活动状态迁移） */
-  .vport{position:absolute;left:calc(88% - 300px);bottom:7.5%;width:300px;height:430px;z-index:3;
-    transition:left 1s cubic-bezier(.4,0,.2,1),bottom 1s cubic-bezier(.4,0,.2,1),transform 1s cubic-bezier(.4,0,.2,1);
-    transform-origin:50% 100%}
-  .vport.pos-work{left:calc(5% - 52px);bottom:9.5%;transform:scale(.8)}
-  .vport.pos-rest{left:33%;bottom:8%;transform:scale(.92)}
-  .vport-frame{position:absolute;inset:0;border:1.5px dashed rgba(122,168,199,.55);border-radius:16px;background:rgba(255,255,255,.18)}
-  .vport-tag{position:absolute;top:-11px;left:14px;display:flex;align-items:center;gap:6px;font-size:9px;color:var(--mizu);letter-spacing:1px;background:var(--mizu-soft);border:1px solid #cfdfea;border-radius:99px;padding:3px 10px}
-  .vport-tag i{width:6px;height:6px;border-radius:50%;background:#58a86b}
-  .vport-ratio{position:absolute;top:-11px;right:14px;font-size:9px;color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
-  .vport .chara-svg{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);width:262px;height:284px;filter:drop-shadow(0 10px 18px rgba(120,100,60,.16))}
-  /* VRM 实机渲染层：与占位立绘同视口互斥显示 */
-  .vrm-live{position:absolute;inset:0;z-index:2;display:none}
-  .vrm-live canvas{display:block;width:100%!important;height:100%!important}
-  .vrm-live .vrm-renderer-status{position:absolute;left:0;right:0;top:44%;text-align:center;font-size:10px;color:var(--muted);letter-spacing:1px}
-  #vport.show-vrm .vrm-live{display:block}
-  #vport.show-vrm .chara-svg{display:none}
-  /* 实机渲染时去掉「预留占位」观感：虚线取景框变实线、隐藏比例标注 */
-  #vport.show-vrm .vport-frame{border-style:solid;border-color:rgba(122,168,199,.32);background:rgba(255,255,255,.1)}
-  #vport.show-vrm .vport-ratio{display:none}
-  .vport-swap{position:absolute;top:16px;right:14px;z-index:5;font-size:9.5px;color:var(--mizu);border:1px solid #cfdfea;background:var(--paper);border-radius:99px;padding:4px 12px;box-shadow:var(--shadow)}
-  .vport-swap:hover{color:var(--rose-deep);border-color:#e6c3cf}
-  .vport .gshadow{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:210px;height:26px;border-radius:50%;background:radial-gradient(closest-side,rgba(120,100,55,.22),transparent)}
-  .chara-name-tag{position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);white-space:nowrap;display:flex;align-items:center;gap:8px;font-size:11px;border:1px solid var(--line);background:var(--paper);border-radius:99px;padding:5px 14px;box-shadow:var(--shadow)}
-  .chara-name-tag b{color:var(--chara);font-family:Georgia,"SimSun",serif}
-  /* 次要角色站位（多人同屏预留演示） */
-  .standee{position:absolute;bottom:8%;right:calc(12% + 320px);width:120px;text-align:center;z-index:2;opacity:.62}
-  .standee svg{width:96px;height:104px;filter:grayscale(.55)}
-  .standee .cap{font-size:8.5px;color:var(--muted);border:1px dashed #d8cfb4;border-radius:99px;padding:2px 9px;background:rgba(255,253,248,.85);white-space:nowrap}
-  /* 电脑椅（3D 关键物件占位） */
-  .d-chair{position:absolute;bottom:9.5%;left:calc(5% + 104px);width:58px;height:78px;z-index:2}
-  .d-chair .back{position:absolute;bottom:30px;left:0;width:11px;height:48px;background:#d3ba92;border:1px solid #cbb183;border-radius:5px}
-  .d-chair .seat{position:absolute;bottom:20px;left:0;width:58px;height:12px;background:#dcc49c;border:1px solid #d0b98e;border-radius:6px}
-  .d-chair .leg{position:absolute;bottom:0;width:8px;height:22px;background:#cbb183;border-radius:4px}
-  /* 3D 物件标注 */
-  .obj3d{position:absolute;font-size:8px;letter-spacing:.5px;color:var(--mizu);border:1px solid #cfdfea;background:rgba(233,241,247,.92);border-radius:99px;padding:1px 7px;z-index:3;white-space:nowrap}
-
-  /* ---- 对话栏（按角色着色） ---- */
-  .chat{border-left:1px solid var(--line);background:var(--paper);display:grid;grid-template-rows:auto minmax(0,1fr) auto}
-  .chat-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
-  .chat-head h2{font:600 15px Georgia,"SimSun",serif}
-  .chat-head h2 b{color:var(--chara)}
-  .chat-head .sub{font-size:9.5px;color:var(--muted);margin-top:2px}
-  .chat-msgs{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
-  .cm{max-width:94%;display:flex;flex-direction:column;gap:4px}
-  .cm .who{font-size:9.5px;color:var(--muted);padding:0 3px}
-  .cm .bub{border:1px solid var(--line);border-radius:8px;background:var(--paper-2);padding:10px 13px;font-size:12.5px;line-height:1.75}
-  .cm.agent .bub{border-left:3px solid var(--chara)}
-  .cm.agent .who b{color:var(--chara)}
-  .cm.user{align-self:flex-end}
-  .cm.user .bub{background:var(--mizu-soft);border-color:#d4e2ec}
-  .chat-composer{margin:0 13px 13px;border:1px solid var(--line);border-radius:9px;background:var(--paper);box-shadow:var(--shadow);padding:10px 12px}
-  .chat-composer .input{color:#aaa894;font-size:12.5px;padding:2px 4px 10px}
-  .chat-composer footer{display:flex;align-items:center;gap:8px;border-top:1px dashed var(--line);padding-top:9px}
-  .voice{width:30px;height:30px;border-radius:9px;border:1px dashed #d9c49a;color:var(--amber);display:grid;place-items:center;font-size:12px;position:relative}
-  .voice span{position:absolute;top:-8px;right:-9px;font-size:8px;background:var(--amber-soft);border:1px solid #e8d3ab;border-radius:99px;padding:0 4px}
-  .at-chip{font-size:9.5px;color:var(--chara);border:1px solid var(--line);border-radius:99px;padding:3px 10px;background:var(--chara-soft)}
-  .chat-composer .hint{font-size:9px;color:#b5b098;margin-left:auto}
-  .send{width:32px;height:32px;border-radius:10px;background:var(--chara);display:grid;place-items:center;transition:background .2s}
-
-  /* ============================================================
-     屏 2：工作台（Codex/ZCode 式：项目▸任务树侧栏 | 时间线）
-  ============================================================ */
-  .wb-wrap{height:100%;display:grid;grid-template-columns:248px minmax(0,1fr)}
-  .wb-side{border-right:1px solid var(--line);background:var(--paper-2);padding:16px 12px;display:flex;flex-direction:column;gap:14px;overflow-y:auto}
-  .new-task-d{display:flex;align-items:center;justify-content:center;gap:7px;height:38px;border-radius:8px;background:var(--rose);color:#fff;font-size:12.5px;font-weight:600;box-shadow:0 3px 10px rgba(180,73,106,.22)}
-  .wb-search{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:7px 11px;color:var(--muted);font-size:11.5px}
-  /* 项目 ▸ 任务 树：项目行 + 缩进任务行（左侧引导线） */
-  .wb-proj-head{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 9px;border-radius:9px;font-size:12px;font-weight:600}
-  .wb-proj-head:hover{background:#f0ecdd}
-  .wb-proj-head .dot{width:8px;height:8px;border-radius:3px;flex:none}
-  .wb-proj-head .nm{flex:1;min-width:0}
-  .wb-proj-head .nm small{display:block;color:var(--muted);font-size:9.5px;margin-top:1px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .wb-proj-head b{font-weight:400;color:#b3ab8f;font-size:10px}
-  .wb-proj-head .chev{color:var(--muted);transition:transform .18s;flex:none}
-  .wb-proj:not(.open) .chev{transform:rotate(-90deg)}
-  .wb-proj:not(.open) .wb-tasks{display:none}
-  .wb-tasks{margin:2px 0 6px 13px;padding-left:9px;border-left:1px solid #e2dcc6;display:flex;flex-direction:column;gap:2px}
-  .wb-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 9px;border-radius:8px;font-size:12px;border:1px solid transparent}
-  .wb-item:hover{background:#f0ecdd}
-  .wb-item.active{background:#f6e9ee;border-color:#e6c3cf;color:var(--rose-deep);font-weight:600}
-  .wb-item .dot{width:8px;height:8px;border-radius:3px;flex:none}
-  .wb-item small{display:block;color:var(--muted);font-size:9.5px;margin-top:1px;font-weight:400}
-  .wb-task{padding:6px 9px;font-size:11.5px;gap:7px}
-  .wb-task .st{width:6px;height:6px;border-radius:99px;flex:none;margin:0 1px}
-  .wb-arch{font-size:11px;color:var(--muted)}
-  .wb-arch summary{cursor:pointer;padding:6px 9px;list-style:none}
-  .wb-arch summary::-webkit-details-marker{display:none}
-  .wb-arch summary b{font-weight:400;color:#b3ab8f}
-  .wb-arch .wb-item{font-size:11px;padding:5px 9px;color:var(--muted)}
-  .wb-foot{margin-top:auto;border:1px dashed #d8d2ba;border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7}
-  .wb-foot b{color:var(--green)}
-  .wb-main{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--paper)}
-  .wb-head{display:flex;align-items:center;gap:14px;padding:13px 24px;border-bottom:1px solid var(--line)}
-  .wb-crumb{font-size:10px;color:var(--muted);letter-spacing:1px}
-  .wb-head h1{font:600 18px Georgia,"SimSun",serif;margin-top:2px}
-  .wb-head h1 em{font-style:normal;color:var(--rose)}
-  .wb-head .pills{display:flex;gap:8px;margin-left:auto}
-  .pill-d{font-size:9.5px;border-radius:99px;padding:4px 11px;border:1px solid var(--line);color:var(--muted)}
-  .pill-d.run{color:var(--green);border-color:#cfe0d4;background:var(--green-soft)}
-  .pill-d.wait{color:var(--amber);border-color:#e8d3ab;background:var(--amber-soft)}
-  .wb-timeline{padding:20px 28px;overflow-y:auto;display:flex;flex-direction:column;gap:15px}
-  .wb-timeline .cm{max-width:76%}
-  .wb-composer{margin:0 24px 16px}
-  .tool-d{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-left:3px solid var(--green);background:var(--paper);border-radius:10px;padding:9px 12px;font-size:11.5px;max-width:76%}
-  .tool-d code{font-family:Consolas,monospace;font-size:11px}
-  .tool-d .df{margin-left:auto;font-family:Consolas,monospace;font-size:10.5px;white-space:nowrap}
-  .tool-d .df b{color:#4c9464}.tool-d .df i{color:#c06a6a;font-style:normal}
-  .tool-d .ok{margin-left:auto;color:#4c9464;font-size:10.5px;white-space:nowrap}
-  .confirm-d{
-    margin-top:20px;border:1px solid #ecd3ae;background:linear-gradient(135deg,#fffdf6,#fbf4e4);
-    border-radius:var(--radius);padding:17px 20px;box-shadow:var(--shadow);
-  }
-  .confirm-d header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-  .confirm-d .flag{font-size:9.5px;font-weight:700;color:#fff;background:var(--amber);border-radius:6px;padding:3px 8px;letter-spacing:1px}
-  .confirm-d h3{font-size:14.5px}
-  .confirm-d>p{font-size:11px;color:var(--muted);line-height:1.75;max-width:720px}
-  .cd-grid{display:grid;grid-template-columns:repeat(4,140px);gap:10px;margin:13px 0}
-  .cd-grid div{border:1px solid var(--line);border-radius:10px;text-align:center;padding:8px 4px;background:var(--paper)}
-  .cd-grid b{display:block;font-size:15px}
-  .cd-grid b.up{color:#4c9464}.cd-grid b.down{color:#c06a6a}
-  .cd-grid span{font-size:9px;color:var(--muted)}
-  .cd-foot{display:flex;align-items:center;gap:11px}
-  .btn-y-d{background:var(--rose);color:#fff;border-radius:10px;padding:9px 24px;font-size:12.5px;font-weight:600;box-shadow:0 5px 14px rgba(194,78,110,.3)}
-  .btn-n-d{border:1px solid var(--line);border-radius:10px;padding:9px 18px;font-size:12.5px;color:var(--muted);background:var(--paper)}
-  .ckpt-d{margin-left:auto;font-size:10px;color:var(--muted)}
-  .ckpt-d code{font-family:Consolas,monospace;background:var(--green-soft);border-radius:6px;padding:2px 7px;color:var(--green)}
-
-  /* ============================================================
-     屏 3：能力（卡片架）
-  ============================================================ */
-  .cap-wrap{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 300px}
-  .cap-main{overflow-y:auto;padding:22px 28px 36px;background:var(--bg)}
-  .cap-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
-  .cap-head h1{font:600 20px Georgia,"SimSun",serif}
-  .cap-head h1 em{font-style:normal;color:var(--rose)}
-  .cap-head p{font-size:10.5px;color:var(--muted);margin-top:5px}
-  .cap-note{font-size:10px;color:var(--green);background:var(--green-soft);border:1px solid #cfe0d4;border-radius:99px;padding:5px 13px;white-space:nowrap}
-  .cap-group{margin-top:20px}
-  .cap-group>h2{font-size:11px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:11px}
-  .cap-group>h2::after{content:"";flex:1;height:1px;background:var(--line)}
-  .cap-group>h2 b{color:var(--rose);font-weight:600;letter-spacing:1px}
-  .cap-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
-  .cap-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:13px;display:flex;flex-direction:column;gap:7px;min-height:168px;transition:.15s}
-  .cap-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:#e6c3cf}
-  .cap-card .top{display:flex;align-items:center;gap:9px}
-  .cap-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none;font-size:14px}
-  .cap-card h4{font-size:12.5px}
-  .cap-card .st{margin-left:auto}
-  .st{font-size:8.5px;border-radius:99px;padding:2px 8px;white-space:nowrap}
-  .st.on{color:var(--green);background:var(--green-soft);border:1px solid #cfe0d4}
-  .st.basic{color:#5a84a0;background:var(--mizu-soft);border:1px solid #cfdfea}
-  .st.rsv{color:var(--amber);background:var(--amber-soft);border:1px dashed #dec79b}
-  .cap-card p{font-size:10.5px;color:var(--muted);line-height:1.65;flex:1}
-  .cap-card .foot{display:flex;align-items:center;gap:8px;border-top:1px dashed var(--line);padding-top:9px}
-  .cap-card .foot .src{font-size:9px;color:#aba58c}
-  .sw2{width:32px;height:19px;border-radius:99px;background:#d8d4c2;position:relative;margin-left:auto}
-  .sw2::after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18)}
-  .sw2.on{background:var(--green)}.sw2.on::after{left:16px}
-  .cap-card.reserved{background:repeating-linear-gradient(-45deg,#fcfaf3,#fcfaf3 10px,#f7f4e9 10px,#f7f4e9 20px);border-style:dashed}
-  .cap-card.reserved h4,.cap-card.reserved p{color:#a39e8b}
-  .add-tile{border:1.5px dashed #dab9c6;border-radius:var(--radius);min-height:168px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:var(--rose);background:#fffafc}
-  .add-tile b{font-size:24px;font-weight:400}
-  .add-tile span{font-size:10.5px}
-  .cap-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
-  .panel{border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:12px 14px}
-  .panel h3{font-size:9.5px;color:var(--muted);letter-spacing:2px;margin-bottom:9px;display:flex;justify-content:space-between}
-  .panel h3 b{font-weight:400;color:#b3ab8f}
-  .kv{display:flex;justify-content:space-between;font-size:11px;padding:6px 0;border-bottom:1px dashed var(--line)}
-  .kv:last-child{border-bottom:0}
-  .kv span{color:var(--muted)}.kv b{font-weight:500}
-  .kv b.ok{color:var(--green)}
-  .hero-d{border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:15px;text-align:center}
-  .hero-d .cap-ic{margin:0 auto 7px;width:40px;height:40px;border-radius:11px}
-  .hero-d h4{font-size:14px}
-  .hero-d p{font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6}
-  .st-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-  .st-grid div{border:1px solid var(--line);border-radius:10px;background:var(--paper-2);text-align:center;padding:8px 3px}
-  .st-grid b{display:block;font-size:15px;color:var(--rose-deep)}
-  .st-grid span{font-size:9px;color:var(--muted)}
-  .note-p{font-size:10px;color:var(--muted);line-height:1.8}
-
-  /* ============================================================
-     屏 4：设置
-  ============================================================ */
-  .set-wrap{height:100%;display:grid;grid-template-columns:208px minmax(0,1fr) 296px}
-  .set-nav{border-right:1px solid var(--line);background:var(--paper-2);padding:18px 12px;display:flex;flex-direction:column;gap:4px}
-  .set-nav h3{font-size:10px;color:var(--muted);letter-spacing:2px;margin:0 8px 10px;display:flex;justify-content:space-between}
-  .set-nav h3 b{font-weight:400;color:#b3ab8f}
-  .set-nav button{width:100%;text-align:left;padding:9px 12px;border-radius:10px;font-size:12.5px;color:var(--muted)}
-  .set-nav button:hover{background:#f0ecdd;color:var(--ink)}
-  .set-nav button.active{background:var(--rose-soft);color:var(--rose-deep);font-weight:600;box-shadow:inset 3px 0 0 var(--rose)}
-  .set-nav-foot{margin-top:auto;border:1px dashed #d8d2ba;border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7}
-  .set-main{overflow-y:auto;padding:22px 28px 36px;background:var(--bg)}
-  .set-group{margin-top:22px}
-  .set-group>h2{font-size:11px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:11px}
-  .set-group>h2::after{content:"";flex:1;height:1px;background:var(--line)}
-  .set-group>h2 b{color:var(--rose);font-weight:600;letter-spacing:1px}
-  .set-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:5px 17px}
-  .set-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
-  .set-row:last-child{border-bottom:0}
-  .set-row small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
-  .set-row .val{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--muted)}
-  .set-row .val b{color:var(--ink);font-weight:500}
-  .set-row .val b.ok{color:var(--green)}
-  .seg{display:flex;gap:6px;margin-left:auto}
-  .seg button{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:5px 13px;color:var(--muted);background:var(--paper)}
-  .seg button.active{color:var(--rose-deep);border-color:#e6c3cf;background:var(--rose-soft);font-weight:600}
-  .seg button:disabled{opacity:.55;cursor:default;border-style:dashed}
-  .mini-btn{font-size:11px;border:1px solid var(--line);border-radius:9px;padding:5px 13px;color:var(--ink);background:var(--paper)}
-  .mini-btn:hover{border-color:#e6c3cf;color:var(--rose-deep)}
-  .mini-btn.danger{color:var(--danger);border-color:#e0b3b3}
-  .rsv-tag{font-size:8.5px;color:var(--amber);border:1px dashed #d9c49a;border-radius:99px;padding:1px 7px}
-  .set-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
-</style>
+<link rel="stylesheet" href="/app/tokens.css">
+<link rel="stylesheet" href="/app/css/base.css">
+<link rel="stylesheet" href="/app/css/topbar.css">
+<link rel="stylesheet" href="/app/css/room.css">
+<link rel="stylesheet" href="/app/css/shelf.css">
+<link rel="stylesheet" href="/app/css/settings.css">
+<link rel="stylesheet" href="/app/css/deskpet.css">
 <link rel="stylesheet" href="/app/layout.css">
 </head>
 <body>
+<script>if(new URLSearchParams(location.search).get('pet')==='1')document.documentElement.classList.add('pet-host');</script>
 
 <header class="topbar">
   <div class="brand">
@@ -505,46 +22,22 @@
     <span class="ver">NEXT · P4-UI</span>
   </div>
   <nav class="gnav" id="gnav">
-    <button data-go="room" class="active">活动室</button>
-    <button data-go="board">工作台</button>
-    <button data-go="shelf">能力</button>
-    <button data-go="settings">设置</button>
+    <button data-go="room" class="active"><i data-icon="nav-room" data-icon-size="15"></i>活动室</button>
+    <button data-go="board"><i data-icon="nav-board" data-icon-size="15"></i>工作台</button>
+    <button data-go="shelf"><i data-icon="nav-shelf" data-icon-size="15"></i>能力</button>
+    <button data-go="settings"><i data-icon="nav-settings" data-icon-size="15"></i>设置</button>
   </nav>
   <div class="top-right">
-    <button class="back-btn" id="backBtn" style="display:none">← 回活动室</button>
     <div class="model-chip"><i></i>DeepSeek V4 Pro ▾</div>
     <span class="proto">设计原型 · 模拟数据</span>
   </div>
 </header>
 
-<!-- ============ 屏 1：活动室 ============ -->
+<!-- ============ 屏 1：活动室（版C · 对话优先紧凑） ============ -->
 <section class="screen show" id="screen-room">
   <div class="room-wrap">
-
-    <!-- 部员名册：多角色排布演示 -->
-    <aside class="roster">
-      <h3>部员名册 <b id="memberCount">2</b></h3>
-      <button class="member active" data-name="澄花" data-sub="搭档 Lv.3 · 心情：专注" data-color="#c24e6e" data-soft="#f9e8ed"
-              data-speech="下午好～--dry-run 已经验收通过啦。今天想先做点什么？任务和能力都在顶栏，房间里这些陈设就是我的小天地。">
-        <span class="ava" style="background:linear-gradient(135deg,#c98a9e,#c24e6e)">花</span>
-        <span><span class="nm">澄花</span><span class="st">搭档 Lv.3 · 专注</span></span>
-      </button>
-      <button class="member" data-name="昴" data-sub="示例角色卡 · 心情：元气" data-color="#7aa8c7" data-soft="#e9f1f7"
-              data-speech="哟！我是昴，VRM 模型绑定演示位——以后从角色卡导入的伙伴，都会这样排在名册里。">
-        <span class="ava" style="background:linear-gradient(135deg,#9dbfd8,#7aa8c7)">昴</span>
-        <span><span class="nm">昴</span><span class="st">示例角色卡 · 元气</span></span>
-        <span class="bind">VRM</span>
-      </button>
-      <button class="member rsv" disabled>
-        <span class="ava">＋</span>
-        <span><span class="nm">角色卡 C</span><span class="st">预留 · P6 导入后列于此</span></span>
-      </button>
-      <div class="roster-note">角色卡与视觉模型绑定完整后出现在名册中。点名字切换角色，<b>不打断工作台任务</b>。</div>
-      <div class="roster-foot">
-        <span class="coop">多人同屏 <span class="tag">预留 · P6</span></span>
-        <span class="import-btn">＋ 导入角色卡 · 预留 P6</span>
-      </div>
-    </aside>
+    <!-- 左列：舞台（上）+ 部员名册条（下，默认收起，悬停停留后上浮） -->
+    <div class="room-left">
 
     <!-- 舞台 = 看向「她的房间」的镜头窗口 -->
     <main class="stage">
@@ -678,6 +171,46 @@
 
     </main>
 
+    <!-- ---- 部员名册条：默认收起；鼠标靠近并停留 ≈420ms 后上浮展开 ---- -->
+    <div class="roster-dock" id="rosterDock">
+      <button type="button" class="roster-bar" id="rosterBar" aria-expanded="false" aria-controls="rosterPanel">
+        <span class="handle"></span>
+        <span class="title">部员名册 <b id="memberCount">2</b></span>
+        <span class="peek" id="rosterPeek"></span>
+        <span class="hint"><span class="lbl-closed">悬停展开</span><span class="lbl-open">移开即收起</span></span>
+      </button>
+
+      <div class="roster-panel" id="rosterPanel" role="region" aria-label="部员名册">
+        <div class="roster-head">
+          <h3>部员名册 <b>点名字切换在场角色 · 不打断工作台任务</b></h3>
+          <div class="roster-foot">
+            <span class="coop">多人同屏 <span class="tag">预留 · P6</span></span>
+            <span class="import-btn"><i data-icon="act-plus" data-icon-size="13"></i>导入角色卡 · 预留 P6</span>
+          </div>
+        </div>
+
+        <div class="roster-list" id="rosterList">
+          <button class="member active" data-name="澄花" data-sub="搭档 Lv.3 · 心情：专注" data-color="#c24e6e" data-soft="#f9e8ed"
+                  data-speech="下午好～--dry-run 已经验收通过啦。今天想先做点什么？任务和能力都在顶栏，房间里这些陈设就是我的小天地。">
+            <span class="ava" style="background:linear-gradient(135deg,#c98a9e,#c24e6e)">花</span>
+            <span><span class="nm">澄花</span><span class="st">搭档 Lv.3 · 专注</span></span>
+          </button>
+          <button class="member" data-name="昴" data-sub="示例角色卡 · 心情：元气" data-color="#7aa8c7" data-soft="#e9f1f7"
+                  data-speech="哟！我是昴，VRM 模型绑定演示位——以后从角色卡导入的伙伴，都会这样排在名册里。">
+            <span class="ava" style="background:linear-gradient(135deg,#9dbfd8,#7aa8c7)">昴</span>
+            <span><span class="nm">昴</span><span class="st">示例角色卡 · 元气</span></span>
+            <span class="bind">VRM</span>
+          </button>
+          <button class="member rsv" disabled>
+            <span class="ava">＋</span>
+            <span><span class="nm">角色卡 C</span><span class="st">预留 · P6 导入后列于此</span></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- /room-left -->
+
     <!-- 对话栏 -->
     <aside class="chat">
       <div class="chat-head">
@@ -705,7 +238,7 @@
           <button type="button" class="voice" title="录音 5 秒，识别后填入草稿" aria-label="语音输入">♪</button>
           <span class="at-chip" id="atChip">@澄花</span>
           <span class="hint">Enter 发送</span>
-          <div class="send" id="sendBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12L20 4L14 20L11 13L4 12Z" fill="#fff"/></svg></div>
+          <div class="send" id="sendBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12L20 4L14 20L11 13L4 12Z" fill="var(--plain)"/></svg></div>
         </footer>
       </div>
     </aside>
@@ -731,27 +264,27 @@
         <h2><b>开发工具</b> DSH 原生 · 已验收</h2>
         <div class="cap-grid">
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">⌨</div><h4>终端执行</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)"><i data-icon="cap-terminal" data-icon-size="17"></i></div><h4>终端执行</h4><span class="st on">已启用</span></div>
             <p>受管终端命令、测试与构建，高危操作进入待确认。</p>
             <div class="foot"><span class="src">DSH 原生</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">✎</div><h4>文件编辑</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)"><i data-icon="cap-edit" data-icon-size="17"></i></div><h4>文件编辑</h4><span class="st on">已启用</span></div>
             <p>代码搜索、阅读与补丁写入，写入前创建检查点。</p>
             <div class="foot"><span class="src">DSH 原生</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">⧉</div><h4>子代理</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)"><i data-icon="cap-subagent" data-icon-size="17"></i></div><h4>子代理</h4><span class="st on">已启用</span></div>
             <p>独立任务与代码审查交由原生子 Agent，可并行。</p>
             <div class="foot"><span class="src">DSH 原生</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">❖</div><h4>Skills</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)"><i data-icon="cap-skills" data-icon-size="17"></i></div><h4>Skills</h4><span class="st on">已启用</span></div>
             <p>领域技能包，安装前经安全审查。</p>
             <div class="foot"><span class="src">原生扩展</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--green-soft)">⬡</div><h4>MCP 连接</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--green-soft)"><i data-icon="cap-mcp" data-icon-size="17"></i></div><h4>MCP 连接</h4><span class="st on">已启用</span></div>
             <p>第三方工具服务器，按来源与作用域显式授权。</p>
             <div class="foot"><span class="src">原生扩展</span><span class="sw2 on"></span></div>
           </div>
@@ -762,27 +295,27 @@
         <h2><b>办公与扩展</b> 独立扩展层</h2>
         <div class="cap-grid">
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--mizu-soft)">▤</div><h4>Office 文档</h4><span class="st basic">基础可用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--mizu-soft)"><i data-icon="obj-file" data-icon-size="17"></i></div><h4>Office 文档</h4><span class="st basic">基础可用</span></div>
             <p>Word / Excel / PPT / PDF 读写修改已验收；版式渲染与公式重算未验收。</p>
             <div class="foot"><span class="src">独立扩展 sumika-office</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">◑</div><h4>OCR · 截屏翻译</h4><span class="st rsv">预留 · P5</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="obj-image" data-icon-size="17"></i></div><h4>OCR · 截屏翻译</h4><span class="st rsv">预留 · P5</span></div>
             <p>屏幕文字识别与翻译，同一能力可切换不同实现。</p>
             <div class="foot"><span class="src">复用方案调研中</span><span class="sw2"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">▣</div><h4>桌面软件控制</h4><span class="st rsv">预留 · P5</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="sys-app" data-icon-size="17"></i></div><h4>桌面软件控制</h4><span class="st rsv">预留 · P5</span></div>
             <p>通用桌面软件的观察、点击、输入与窗口控制。</p>
             <div class="foot"><span class="src">复用方案调研中</span><span class="sw2"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">⧈</div><h4>内置浏览器</h4><span class="st rsv">预留 · P5</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="sys-globe" data-icon-size="17"></i></div><h4>内置浏览器</h4><span class="st rsv">预留 · P5</span></div>
             <p>隔离 Profile 的网页 AI 咨询，页面统一管理。</p>
             <div class="foot"><span class="src">独立 UI 层</span><span class="sw2"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">◔</div><h4>定时任务</h4><span class="st rsv">预留 · P5</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="obj-calendar" data-icon-size="17"></i></div><h4>定时任务</h4><span class="st rsv">预留 · P5</span></div>
             <p>一次性 / 每日 / 每周计划，区分提醒与真正执行。</p>
             <div class="foot"><span class="src">复用方案调研中</span><span class="sw2"></span></div>
           </div>
@@ -794,32 +327,32 @@
         <h2><b>陪伴与记录</b> 连续性 · 角色</h2>
         <div class="cap-grid">
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--rose-soft)">✿</div><h4>连续记录</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--rose-soft)"><i data-icon="cap-workflow" data-icon-size="17"></i></div><h4>连续记录</h4><span class="st on">已启用</span></div>
             <p>continuity 扩展：自动捕获上下文，支持交接查询。</p>
             <div class="foot"><span class="src">独立扩展</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card">
-            <div class="top"><div class="cap-ic" style="background:var(--rose-soft)">✓</div><h4>成果回执</h4><span class="st on">已启用</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--rose-soft)"><i data-icon="state-ok" data-icon-size="17"></i></div><h4>成果回执</h4><span class="st on">已启用</span></div>
             <p>receipt 命令规范化成果 JSON，绑定 Git HEAD。</p>
             <div class="foot"><span class="src">核心内置</span><span class="sw2 on"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">❈</div><h4>长期记忆</h4><span class="st rsv">预留 · P6</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="cap-agent" data-icon-size="17"></i></div><h4>长期记忆</h4><span class="st rsv">预留 · P6</span></div>
             <p>按角色隔离的长期回忆，优先接入社区插件方案。</p>
             <div class="foot"><span class="src">插件选型中</span><span class="sw2"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">♪</div><h4>语音交流</h4><span class="st rsv">预留 · P6</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="chara-voice" data-icon-size="17"></i></div><h4>语音交流</h4><span class="st rsv">预留 · P6</span></div>
             <p>语音对话与经授权的屏幕、摄像头感知。</p>
             <div class="foot"><span class="src">角色系统配套</span><span class="sw2"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">✦</div><h4>角色卡 · 世界书</h4><span class="st rsv">预留 · P6</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="obj-library" data-icon-size="17"></i></div><h4>角色卡 · 世界书</h4><span class="st rsv">预留 · P6</span></div>
             <p>导入角色卡、模型与场景资源，管理背景设定与主题配色。</p>
             <div class="foot"><span class="src">角色系统基础</span><span class="sw2"></span></div>
           </div>
           <div class="cap-card reserved">
-            <div class="top"><div class="cap-ic" style="background:#f4ecdc">❀</div><h4>桌宠模式</h4><span class="st rsv">预留 · P7</span></div>
+            <div class="top"><div class="cap-ic" style="background:var(--amber-soft-2)"><i data-icon="chara-sparkle" data-icon-size="17"></i></div><h4>桌宠模式</h4><span class="st rsv">预留 · P7</span></div>
             <p>透明桌面形态，与主窗口共享会话与草稿。</p>
             <div class="foot"><span class="src">桌面壳</span><span class="sw2"></span></div>
           </div>
@@ -829,7 +362,7 @@
 
     <aside class="cap-side">
       <div class="hero-d">
-        <div class="cap-ic" style="background:var(--green-soft)">⌨</div>
+        <div class="cap-ic" style="background:var(--green-soft)"><i data-icon="cap-terminal" data-icon-size="20"></i></div>
         <h4>终端执行</h4>
         <p>模块详情 · 点选左侧卡片切换查看</p>
       </div>
@@ -862,11 +395,11 @@
   <div class="set-wrap">
     <aside class="set-nav">
       <h3>设置 <b>SETTINGS</b></h3>
-      <button class="active">外观</button>
-      <button>模型与连接</button>
-      <button>连接与权限</button>
-      <button>数据与存储</button>
-      <button>关于</button>
+      <button class="active"><i data-icon="ui-theme-light" data-icon-size="15"></i>外观</button>
+      <button><i data-icon="cap-cpu" data-icon-size="15"></i>模型与连接</button>
+      <button><i data-icon="sys-shield" data-icon-size="15"></i>连接与权限</button>
+      <button><i data-icon="sys-disk" data-icon-size="15"></i>数据与存储</button>
+      <button><i data-icon="act-info" data-icon-size="15"></i>关于</button>
     </aside>
 
     <main class="set-main">
@@ -880,13 +413,13 @@
       <section class="set-group">
         <h2><b>外观</b> APPEARANCE</h2>
         <div class="set-card">
-          <div class="set-row"><div>主题配色<small>当前原型即「晴日部室 · 清风日系」方向</small></div>
+          <div class="set-row"><div class="lbl">主题配色<span class="sumika-field-help" data-help="当前原型即「晴日部室 · 清风日系」方向"></span></div>
             <div class="seg"><button class="active">晴日 · 浅</button><button disabled>夜间<span class="rsv-tag">预留</span></button></div>
           </div>
-          <div class="set-row"><div>背景<small>沿用旧版本地背景图能力，图片不出本机</small></div>
+          <div class="set-row"><div class="lbl">背景<span class="sumika-field-help" data-help="沿用旧版本地背景图能力，图片不出本机"></span></div>
             <div class="seg"><button class="active">部室午后</button><button>本地背景图…</button></div>
           </div>
-          <div class="set-row"><div>界面密度<small>影响列表与卡片间距</small></div>
+          <div class="set-row"><div class="lbl">界面密度<span class="sumika-field-help" data-help="影响列表与卡片间距"></span></div>
             <div class="seg"><button class="active">舒适</button><button>紧凑</button></div>
           </div>
         </div>
@@ -895,13 +428,13 @@
       <section class="set-group">
         <h2><b>模型与连接</b> MODELS</h2>
         <div class="set-card">
-          <div class="set-row"><div>工作模型<small>任务、编辑、文档处理均使用此模型</small></div>
+          <div class="set-row"><div class="lbl">工作模型<span class="sumika-field-help" data-help="任务、编辑、文档处理均使用此模型"></span></div>
             <div class="val"><b class="ok">● 已连接</b><b>DeepSeek V4 Pro ▾</b></div>
           </div>
-          <div class="set-row"><div>角色模型<small>陪伴对话口吻，按角色独立绑定</small></div>
+          <div class="set-row"><div class="lbl">角色模型<span class="sumika-field-help" data-help="陪伴对话口吻，按角色独立绑定"></span></div>
             <div class="val"><span class="rsv-tag">预留 · P6</span></div>
           </div>
-          <div class="set-row"><div>API 凭据<small>本地加密保存，不上传、不进 Git</small></div>
+          <div class="set-row"><div class="lbl">API 凭据<span class="sumika-field-help" data-help="本地加密保存，不上传、不进 Git"></span></div>
             <div class="val"><b>已配置 1 项</b><button class="mini-btn">管理…</button></div>
           </div>
         </div>
@@ -911,10 +444,10 @@
       <section class="set-group">
         <h2><b>连接与权限</b> PERMISSIONS</h2>
         <div class="set-card">
-          <div class="set-row"><div>MCP 服务器<small>按来源与作用域显式授权</small></div>
+          <div class="set-row"><div class="lbl">MCP 服务器<span class="sumika-field-help" data-help="按来源与作用域显式授权"></span></div>
             <div class="val"><b>2 项已授权</b><button class="mini-btn">管理…</button></div>
           </div>
-          <div class="set-row"><div>高危操作<small>写盘、删改、外发统一进入待确认入口</small></div>
+          <div class="set-row"><div class="lbl">高危操作<span class="sumika-field-help" data-help="写盘、删改、外发统一进入待确认入口"></span></div>
             <div class="val"><b class="ok">始终确认</b></div>
           </div>
         </div>
@@ -923,13 +456,13 @@
       <section class="set-group">
         <h2><b>数据与存储</b> DATA</h2>
         <div class="set-card">
-          <div class="set-row"><div>运行数据目录<small>会话、回执、检查点均在本地</small></div>
+          <div class="set-row"><div class="lbl">运行数据目录<span class="sumika-field-help" data-help="会话、回执、检查点均在本地"></span></div>
             <div class="val"><code style="font-family:Consolas,monospace;font-size:11px">.sumika-next/</code><b class="ok">本地优先</b></div>
           </div>
-          <div class="set-row"><div>检查点<small>写入前自动创建，可随时回滚</small></div>
+          <div class="set-row"><div class="lbl">检查点<span class="sumika-field-help" data-help="写入前自动创建，可随时回滚"></span></div>
             <div class="val"><b>最近 a3f9c21</b><button class="mini-btn">查看…</button></div>
           </div>
-          <div class="set-row"><div>清除本地数据<small>删除全部会话与检查点，不可恢复</small></div>
+          <div class="set-row"><div class="lbl">清除本地数据<span class="sumika-field-help" data-help="删除全部会话与检查点，不可恢复"></span></div>
             <div class="val"><button class="mini-btn danger">清除…</button></div>
           </div>
         </div>
@@ -938,7 +471,7 @@
 
     <aside class="set-side">
       <div class="hero-d">
-        <div class="cap-ic" style="background:var(--rose-soft)">⚙</div>
+        <div class="cap-ic" style="background:var(--rose-soft)"><i data-icon="nav-settings" data-icon-size="17"></i></div>
         <h4>设置</h4>
       </div>
       <div class="panel">
@@ -952,7 +485,7 @@
 </section>
 
 <script>
-  document.querySelectorAll('.roster .member').forEach(node => node.remove());
+  document.querySelectorAll('.roster-list .member').forEach(node => node.remove());
   document.querySelector('#screen-room .chat-msgs').replaceChildren();
   for (const id of ['roomOwner', 'stageChara', 'chatChara']) {
     document.getElementById(id).textContent = '正在加载角色';
@@ -969,13 +502,40 @@
     const key = (location.hash || '#room').slice(1);
     const target = screens[key] || 'screen-room';
     document.querySelectorAll('.screen').forEach(s => s.classList.toggle('show', s.id === target));
-    document.getElementById('backBtn').style.display = (key === 'room' || !screens[key]) ? 'none' : 'flex';
     document.querySelectorAll('#gnav button').forEach(b => b.classList.toggle('active', b.dataset.go === (screens[key] ? key : 'room')));
     document.body.classList.toggle('on-room', target === 'screen-room'); /* 陪伴页显示镜头窗口，桌宠小窗自动隐藏 */
   }
-  document.getElementById('backBtn').addEventListener('click', () => location.hash = 'room');
   document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => location.hash = b.dataset.go));
   window.addEventListener('hashchange', applyHash);
+
+  /* ---- 部员名册条：默认收起；鼠标靠近并停留 HOVER_DELAY 后上浮展开 ---- */
+  const HOVER_DELAY = 420;
+  (function rosterDock(){
+    const dock = document.getElementById('rosterDock');
+    const bar  = document.getElementById('rosterBar');
+    if (!dock || !bar) return;
+    let timer = null;
+
+    const open  = () => dock.classList.add('hover-open');
+    const close = () => { clearTimeout(timer); timer = null; dock.classList.remove('hover-open'); };
+    const arm   = () => { if (timer || dock.classList.contains('hover-open')) return; timer = setTimeout(() => { timer = null; open(); }, HOVER_DELAY); };
+
+    // 悬停停留后展开；移出（含移到面板外）立刻收回
+    dock.addEventListener('mouseenter', arm);
+    dock.addEventListener('mouseleave', close);
+    // 触屏与键盘：点击标题条切换（保持无悬停设备可用）
+    bar.addEventListener('click', () => {
+      const next = !dock.classList.contains('open');
+      dock.classList.toggle('open', next);
+      bar.setAttribute('aria-expanded', String(next));
+      if (next) { clearTimeout(timer); timer = null; }
+    });
+    // Esc 收起
+    dock.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') { close(); dock.classList.remove('open'); bar.setAttribute('aria-expanded', 'false'); }
+    });
+  })();
+
   /* ---- 工作台侧栏：项目折叠/展开（任务作为项目子项） ---- */
   document.querySelectorAll('[data-proj-toggle]').forEach(h => h.addEventListener('click', () => {
     h.closest('.wb-proj').classList.toggle('open');
@@ -988,7 +548,7 @@
   function buildDeskpet(){
     const svg = document.querySelector('#vport svg');
     const el = document.createElement('div');
-    el.className = 'deskpet mini';
+    el.className = document.documentElement.classList.contains('pet-host') ? 'deskpet' : 'deskpet mini';
     el.id = 'deskpet';
     el.title = '桌宠小窗 · 按住拖动，可放到任意位置';
     el.innerHTML =
@@ -1043,8 +603,14 @@
     el.querySelector('.dp-chara').appendChild(scene);
     el.querySelector('.dp-chara').appendChild(svg);   /* 占位立绘层（澄花等未绑定 VRM 的角色） */
     document.body.appendChild(el);
-    el.querySelector('[data-dp-min]').addEventListener('click', () => el.classList.add('mini'));
-    el.querySelector('[data-dp-restore]').addEventListener('click', () => el.classList.remove('mini'));
+    el.querySelector('[data-dp-min]').addEventListener('click', () => {
+      el.classList.add('mini');
+      if (document.documentElement.classList.contains('pet-host')) window.chrome?.webview?.postMessage('sumika:compact');
+    });
+    el.querySelector('[data-dp-restore]').addEventListener('click', () => {
+      el.classList.remove('mini');
+      if (document.documentElement.classList.contains('pet-host')) window.chrome?.webview?.postMessage('sumika:expand');
+    });
     layoutDeskpet();
     /* ---- 记录区：只显示真实对话，不再预置任何编造内容 ---- */
     const MAX_LOG = 60;
@@ -1109,15 +675,27 @@
       if (dpPinned) logEl.scrollTop = logEl.scrollHeight;   /* 固定展开时回到最新一条 */
       el.querySelector('[data-dp-hint]').textContent = dpPinned ? '点击收起记录' : '悬停展开 · 最近 3 条';
     });
-    const say = () => {
+    let sending = false;
+    const say = async () => {
       const inp = el.querySelector('[data-dp-input]');
       const v = inp.value.trim();
-      if (!v) return;
+      if (!v || sending) return;
       inp.value = '';
       pushMsg('me', v);
+      sending=true;
+      el.querySelector('[data-dp-send]').disabled=true;
+      let reply=null;
+      try {
+        const {sendCompanionText}=await import('/app/companion-text.js');
+        const handled=await sendCompanionText(v, text=>{
+          if(!reply) {reply={who:'her',text};dpLog.push(reply);}
+          else reply.text=text;
+          renderLog();
+        });
+        if(handled) return;
       /* 走真实角色服务：失败就在记录里如实显示，不替她编一句话 */
       const session = encodeURIComponent(window.sumikaRoomSession?.() || 'room-default');
-      fetch('/api/role/chat', {
+      await fetch('/api/role/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: v, session: decodeURIComponent(session) }),
@@ -1131,6 +709,11 @@
           pushMsg('her', `发送失败：${error.message}`);
           window.sumikaRoomReload?.();
         });
+      } catch(error) {
+        if(reply) {reply.text=`发送失败：${error.message}`;renderLog();}
+        else pushMsg('her',`发送失败：${error.message}`);
+      }
+      finally {sending=false;el.querySelector('[data-dp-send]').disabled=false;}
     };
     el.querySelector('[data-dp-send]').addEventListener('click', say);
     el.querySelector('[data-dp-input]').addEventListener('keydown', e => { if (e.key === 'Enter') say(); });
@@ -1138,6 +721,10 @@
     el.addEventListener('pointerdown', e => {
       /* 可交互区不参与拖动：按钮、输入框、聊天记录面板（要能点开翻历史、滚动） */
       if (e.target.closest('button,input,[data-dp-log]')) return;
+      if (document.documentElement.classList.contains('pet-host') && window.chrome?.webview) {
+        if (e.button === 0) window.chrome.webview.postMessage('sumika:drag');
+        return;
+      }
       const r = el.getBoundingClientRect();
       const ox = e.clientX - r.left, oy = e.clientY - r.top;
       el.classList.add('dragging');
@@ -1456,7 +1043,7 @@
     if (!wanted) {
       vportEl.classList.remove('show-vrm');
       swapBtn.hidden = true;
-      setTag('未绑定视觉模型', '#c9a24a');
+      setTag('未绑定视觉模型', 'var(--amber)');
       return;
     }
     setTag(`模型加载中…（${wanted.name || '未命名'}）`);
@@ -1468,7 +1055,7 @@
       setTag('');
     } else {
       vportEl.classList.remove('show-vrm');
-      setTag('模型加载失败，请检查角色资源', '#c05a5a');
+      setTag('模型加载失败，请检查角色资源', 'var(--danger)');
     }
   }
   /* 主屏「实机/立绘」互斥切换时，小窗跟随同一状态（同样只改 data 属性，交由 CSS 生效） */
@@ -1495,6 +1082,16 @@
   window.addEventListener('load', () => setTimeout(refreshDeskpetLayout, 300));
 </script>
 <!-- Sumika data binding: replaces the design mock data with the real backend. -->
+<!-- 图标先于绑定就绪：icons.js 同步给 <i data-icon> 占位补全为真实 <svg>。
+     同时把补全函数挂到 window，供动态渲染的模块（appearance.js / management.js）调用。 -->
+<script type="module">
+  import { initIcons, hydrateIcons } from '/app/icons.js';
+  import { hydrateHelp, observeHelpRegions } from '/app/tooltip.js';
+  window.sumikaHydrateIcons = hydrateIcons;
+  window.sumikaHydrateHelp = hydrateHelp;
+  window.sumikaObserveHelp = observeHelpRegions;
+  window.sumikaIconsReady = initIcons().then(() => { hydrateIcons(document); hydrateHelp(document); });
+</script>
 <script type="module" src="/app/bind.js"></script>
 <script type="module" src="/app/management.js"></script>
 <script type="module" src="/app/handoff.js"></script>

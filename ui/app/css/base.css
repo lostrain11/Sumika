@@ -1,0 +1,39 @@
+/* ============================================================================
+   基础层：重置、全局排版、屏幕容器
+   令牌来源：tokens.css（唯一颜色来源）
+   ========================================================================== */
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  overflow:hidden;
+  font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+  background:var(--bg);color:var(--ink);
+}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::-webkit-scrollbar{width:0;height:0}
+
+.screen{display:none;height:calc(100% - var(--topbar-h));position:relative}
+.screen.show{display:block}
+
+/* 通用卡片基类：能力卡 / 设置卡 / 侧栏面板共用同一骨架 */
+.sumika-card{
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--paper);
+  padding:var(--card-pad);
+}
+
+/* 统一栅格：宽窗自然多列，窄窗自动换行，卡片不被挤压 */
+.sumika-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(var(--grid-min),1fr));
+  gap:var(--gap);
+}
+
+/* 离线状态条（bind.js:1143 动态创建，勿删） */
+.sumika-network-notice{
+  position:fixed;top:calc(var(--topbar-h) + 4px);left:50%;transform:translateX(-50%);z-index:1000;
+  max-width:calc(100vw - 32px);padding:10px 16px;border:1px solid var(--line);border-radius:10px;
+  background:var(--paper);color:var(--ink);box-shadow:var(--shadow);font-size:12px;
+}

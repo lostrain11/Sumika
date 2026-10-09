@@ -1,8 +1,8 @@
 // Non-destructive visual audit: navigation and native sidebar controls only.
-import {createRequire} from 'node:module';
+import {loadPlaywright} from './lib/playwright.mjs';
 import {mkdir, writeFile} from 'node:fs/promises';
-const require = createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
-const {chromium} = require('playwright');
+import {findNativeFrame, waitForNativeFrame} from './lib/native-frame.mjs';
+const {chromium} = loadPlaywright();
 const base = process.argv[2] || 'http://127.0.0.1:8765';
 const dir = '.sumika-next/evidence/ui-v2';
 await mkdir(dir, {recursive: true});
@@ -23,7 +23,7 @@ try {
       await page.locator(`#gnav [data-go="${screen}"]`).click();
       if (screen==='board') {
         await page.locator('#sumika-workbench-frame').waitFor({timeout:120000});
-        const frame = page.frames().find(f => f.url().includes(':5175'));
+        const frame = findNativeFrame(page, base);
         if (frame) await frame.locator('body').waitFor();
       }
       await page.waitForTimeout(screen==='board'?1500:300);
@@ -36,17 +36,42 @@ try {
       await page.screenshot({path:`${dir}/${screen}-${size.width}.png`});
     }
   }
-  const frame=page.frames().find(f=>f.url().includes(':5175'));
-  if (frame) {
-    const theme=await frame.evaluate(()=>({palette:document.documentElement.dataset.sumikaPalette,base:getComputedStyle(document.body).getPropertyValue('--dsw-alias-bg-base').trim(),sidebar:getComputedStyle(document.body).getPropertyValue('--dsw-specific-sidebar-fill').trim()}));
-    results.push({theme});
-    if(theme.palette!=='light'||theme.base!=='#fffdf8') errors.push('Sumika theme overlay did not apply');
-    const toggle=frame.locator('[class*="_logoRow"] [class*="_toggle"]').first();
-    await toggle.click({timeout:5000});
-    await toggle.hover();
-    await page.screenshot({path:`${dir}/sidebar-toggled.png`});
-    await toggle.click({timeout:5000});
+  // 用 waitForNativeFrame 而非 if (frame)：取不到时必须失败，
+  // 否则主题叠加层与侧栏开关的断言会被静默跳过，把失败伪装成通过。
+  const frame=await waitForNativeFrame(page, base, 15000);
+  // DSH 0.2 adds a preview notice before the configuration dialog.
+  if (await frame.getByText('预览版说明', {exact:true}).count()) {
+    await frame.getByRole('button', {name:'继续', exact:true}).click();
   }
+  for (const label of ['稍后配置', 'Later', 'Skip']) {
+    const button = frame.getByRole('button', {name: label, exact:true});
+    if (await button.count()) { await button.first().click(); break; }
+  }
+  const theme=await frame.evaluate(()=>({palette:document.documentElement.dataset.sumikaPalette,base:getComputedStyle(document.body).getPropertyValue('--dsw-alias-bg-base').trim(),sidebar:getComputedStyle(document.body).getPropertyValue('--dsw-specific-sidebar-fill').trim()}));
+  // 这里断言的是「外壳与工作台配色一致」这个真实不变量，而不是写死浅色。
+  // 主题偏好属于用户数据，light / dark 都合法；写死浅色会在用户选了暗色时
+  // 把正确状态报成缺陷。
+  const shellTheme=await page.evaluate(()=>document.documentElement.dataset.theme);
+  const expectedBase={light:'#fffdf8',dark:'#151517'}[shellTheme];
+  results.push({theme,shellTheme,expectedBase});
+  if(theme.palette!==shellTheme) errors.push(`工作台配色 ${theme.palette} 与外壳 ${shellTheme} 不一致`);
+  else if(expectedBase&&theme.base!==expectedBase) errors.push(`${shellTheme} 主题的工作台底色为 ${theme.base}，期望 ${expectedBase}`);
+  // DSH 自己的首次配置弹窗在全新浏览器上下文里会盖住工作台：它带一层拦截指针事件的
+  // 遮罩，会让下面点侧栏开关的动作永远等不到可点击状态（表现为超时，而不是报出遮罩）。
+  // 用弹窗自己的「稍后配置」关掉它再继续。
+  for (const label of ['稍后配置','Later','Skip']) {
+    const button=frame.getByRole('button',{name:label});
+    if (await button.count().catch(()=>0)) {
+      await button.first().click().catch(()=>{});
+      await page.waitForTimeout(800);
+      break;
+    }
+  }
+  const toggle=frame.locator('[class*="_logoRow"] [class*="_toggle"]').first();
+  await toggle.click({timeout:5000});
+  await toggle.hover();
+  await page.screenshot({path:`${dir}/sidebar-toggled.png`});
+  await toggle.click({timeout:5000});
 } catch(error) {errors.push(clean(error.message));}
 finally {await browser.close();}
 const result={results,errors,status:errors.length||results.some(r=>r.clipped?.length)?'failed':'passed'};

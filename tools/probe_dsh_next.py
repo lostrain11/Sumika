@@ -1,5 +1,6 @@
 """Isolated real DSH lifecycle acceptance, without model calls or credentials."""
 import json
+import argparse
 import html
 import re
 from pathlib import Path
@@ -17,6 +18,9 @@ from sumika_next.execution import Execution
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runtime', type=Path, help='Explicit isolated candidate runtime')
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     base = root / ".sumika-next"
     base.mkdir(exist_ok=True)
@@ -24,7 +28,7 @@ def main():
         home = Path(tmp) / "home"
         workspace = Path(tmp) / "workspace"
         workspace.mkdir()
-        adapter = Dsh(root, home)
+        adapter = Dsh(root, home, runtime=args.runtime)
         executor = None
         try:
             adapter.start()

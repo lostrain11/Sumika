@@ -2,7 +2,8 @@
 // No approval/request RPC is issued and no host authority is created.
 import {createRequire} from 'node:module';
 import {readFile,writeFile} from 'node:fs/promises';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
+import {isNativeOrigin} from './lib/native-frame.mjs';
+const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
 const {chromium}=require('playwright');
 const source=await readFile('runtime/dsh/node_modules/.pnpm/@deepseek-ai+dsh-client-ui-_0042ab2fbacdc55b3b6e01cd122ef81e/node_modules/@deepseek-ai/dsh-client-ui-approval/lib/client.js','utf8');
 const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
@@ -21,7 +22,7 @@ try{
   await page.goto('http://127.0.0.1:8765/#board');
   await page.locator('iframe').waitFor({timeout:120000});
   const frame=await (await page.locator('iframe').elementHandle()).contentFrame();
-  await frame.waitForURL(url=>url.port==='5175');
+  await frame.waitForURL(url=>isNativeOrigin(url.href,'http://127.0.0.1:8765'));
   await frame.waitForFunction(()=>typeof window.__approvalFixtureRequire==='function');
   await frame.locator('html[data-sumika-palette]').waitFor();
   await page.locator('#gnav [data-go="settings"]').click();
@@ -78,12 +79,26 @@ try{
     await page.getByLabel('主题配色').selectOption(theme);
     await frame.waitForFunction(theme=>document.documentElement.dataset.sumikaPalette===theme,theme);
     await page.locator('#gnav [data-go="board"]').click();
-    const colors=await frame.evaluate(()=>{
-      const values=el=>({tag:el.tagName,id:el.id,cls:el.className,bg:getComputedStyle(el).backgroundColor,token:getComputedStyle(el).getPropertyValue('--dsw-alias-bg-base')});
-      return {root:values(document.documentElement),body:values(document.body),fixture:values(document.querySelector('#approval-fixture')),card:values(document.querySelector('[data-approval-key]')),roots:[...document.body.children].slice(0,6).map(values)};
-    });
+    // 轮询直到配色真正落到**计算样式**上，而不是只等 data-sumika-palette 属性。
+    // 属性翻转只是中间信号：属性对了、颜色还没跟上时单次读数会误判为回归。
+    // 这里以「计算背景色」为判据（观察到的终态），超时则把完整状态抛出去。
     const expected=theme==='light'?'rgb(255, 253, 248)':'rgb(21, 21, 23)';
-    if(colors.fixture.bg!==expected)throw new Error(`${theme} palette stale: ${colors.fixture.bg}`);
+    let colors;
+    const startedAt=Date.now();
+    const deadline=startedAt+8000;
+    for(;;){
+      colors=await frame.evaluate(()=>{
+        const values=el=>({tag:el.tagName,id:el.id,cls:el.className,bg:getComputedStyle(el).backgroundColor,token:getComputedStyle(el).getPropertyValue('--dsw-alias-bg-base'),palette:el.dataset?el.dataset.sumikaPalette:undefined});
+        return {root:values(document.documentElement),body:values(document.body),fixture:values(document.querySelector('#approval-fixture')),card:values(document.querySelector('[data-approval-key]')),roots:[...document.body.children].slice(0,6).map(values)};
+      });
+      if(colors.fixture.bg===expected)break;
+      if(Date.now()>=deadline){
+        const state=JSON.stringify({theme,want:expected,select:await page.getByLabel('主题配色').inputValue().catch(()=>null),root:colors.root,body:colors.body,fixture:colors.fixture,card:colors.card,roots:colors.roots});
+        throw new Error(`${theme} palette stale after 8000ms: ${colors.fixture.bg}\nstate=${state}`);
+      }
+      await page.waitForTimeout(60);
+    }
+    const settleMs=Date.now()-startedAt;
     const contrast=await buttons.first().evaluate(el=>{
       const s=getComputedStyle(el);
       const lum=value=>{
@@ -94,7 +109,7 @@ try{
       return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
     });
     if(contrast<4.5)throw new Error(`${theme} reject contrast below 4.5: ${contrast}`);
-    checks.push(`${theme} computed background and reject text contrast pass`);
+    checks.push(`${theme} computed background and reject text contrast pass (settle ${settleMs}ms)`);
     await page.screenshot({path:`.sumika-next/evidence/ui-v2/approval-${theme}.png`});
   }
 }catch(error){errors.push(String(error.message).replace(/(https?:\/\/[^\s?]+)\?[^\s]*/g,'$1?[redacted]'));}

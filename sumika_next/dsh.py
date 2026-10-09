@@ -1,4 +1,4 @@
-"""DSH 0.1.5-rc.2 Remote API adapter. No private Agent loop or paid fallback."""
+"""Managed DSH Remote API adapter. No private Agent loop or paid fallback."""
 import hashlib
 from collections import deque
 import http.cookiejar
@@ -28,8 +28,11 @@ class Dsh:
     # Prompt/model dispatch belongs to native Web; no silent fallback.
     ACTIONS = {"workspace.create": "workspace/create", "session.create": "session/create", "session.cancel": "session/cancel"}
 
-    def __init__(self, root: Path, home: Path):
+    def __init__(self, root: Path, home: Path, *, runtime: Path | None = None):
         self.root, self.home = root.resolve(), home.resolve()
+        # Only the trusted host selects this path; never accept it from Remote RPC.
+        # Candidate verification can use an isolated runtime without switching daily use.
+        self.runtime = (runtime or self.root / "runtime/dsh").resolve()
         self.process = None
         self.instance = HarnessInstance("dsh", secrets.token_hex(16), Trust.UNVERIFIED)
         self.sessions = set()
@@ -47,8 +50,8 @@ class Dsh:
             raise DshError("invalid port")
         if self.process is not None and self.process.poll() is None:
             raise DshError("instance is already running")
-        release = json.loads((self.root / "runtime/dsh/release.json").read_text(encoding="utf-8"))
-        runtime = self.root / "runtime/dsh"
+        runtime = self.runtime
+        release = json.loads((runtime / "release.json").read_text(encoding="utf-8"))
         for name, digest in release["files"].items():
             if hashlib.sha256((runtime / name).read_bytes()).hexdigest() != digest:
                 raise DshError("release manifest mismatch")
@@ -254,7 +257,7 @@ class Dsh:
         if before_seq is not None:
             args['beforeSeq'] = before_seq
         page = self._rpc('session/page', args)
-        release = json.loads((self.root / 'runtime/dsh/release.json').read_text(encoding='utf8'))
+        release = json.loads((self.runtime / 'release.json').read_text(encoding='utf8'))
         return project_page(page, session=binding.session_id, version=release['version'],
                             through_seq=through_seq, before_seq=before_seq)
 

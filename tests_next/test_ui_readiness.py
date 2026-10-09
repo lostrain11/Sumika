@@ -7,6 +7,50 @@ from ui import readiness
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_sensevoice_discovery_uses_selected_runtime_and_configured_model(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {}, clear=True):
+            root = Path(folder)
+            runtime = root/'runtime/voice'
+            site = runtime/'Lib/site-packages'
+            for package in ('sherpa_onnx', 'numpy', 'sounddevice'):
+                (site/package).mkdir(parents=True)
+            (runtime/'python.exe').touch()
+            model = root/'custom-model'
+            model.mkdir()
+            (model/'model.int8.onnx').touch()
+            (model/'tokens.txt').touch()
+            with patch('ui.readiness._module', return_value=False):
+                entries = readiness.service_capabilities(root, home=root, asr_model='custom-model')
+                asr = next(row for row in entries if row['id'] == 'asr')
+                self.assertEqual(asr['provider'], 'sherpa-onnx-sensevoice')
+                self.assertEqual(asr['options']['model'], str(model.resolve()))
+                rows = {row['id']: row for row in readiness.probes(root, home=root, asr_model='custom-model')}
+                self.assertTrue(rows['voice']['ready'])
+                # Bridge imports cannot mask a missing dependency in the runtime.
+                (site/'numpy').rmdir()
+            with patch('ui.readiness._module', return_value=True):
+                self.assertNotIn('sherpa-onnx-sensevoice', [row['provider'] for row in
+                    readiness.service_capabilities(root, home=root, asr_model=str(model))])
+                self.assertFalse(next(row for row in readiness.probes(root, home=root,
+                    asr_model=str(model)) if row['id'] == 'voice')['ready'])
+
+    def test_sensevoice_requires_model_files_and_honors_invalid_explicit_runtime(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {}, clear=True):
+            root = Path(folder)
+            model = root/'.sumika-next/voice-models/sensevoice'
+            model.mkdir(parents=True)
+            (model/'tokens.txt').touch()
+            with patch('ui.readiness._module', return_value=True):
+                self.assertNotIn('sherpa-onnx-sensevoice', [row['provider'] for row in
+                    readiness.service_capabilities(root, home=root)])
+                (model/'model.onnx').touch()
+                self.assertIn('sherpa-onnx-sensevoice', [row['provider'] for row in
+                    readiness.service_capabilities(root, home=root)])
+                self.assertIsNone(readiness.voice_model(root, home=root), 'SenseVoice is not a Vosk model')
+                with patch.dict('os.environ', {'SUMIKA_VOICE_PYTHON': str(root/'missing.exe')}):
+                    self.assertNotIn('sherpa-onnx-sensevoice', [row['provider'] for row in
+                        readiness.service_capabilities(root, home=root)])
+
     def _probes(self, folder, present_modules=(), tesseract=None):
         root = Path(folder)
         def fake_find_spec(name, *args, **kwargs):
@@ -29,7 +73,7 @@ class ReadinessTests(unittest.TestCase):
             self.assertFalse(rows["memory-semantic"]["ready"])
             self.assertTrue(rows["schedule"]["ready"])
             self.assertEqual(set(rows), {"ocr", "voice", "browser", "desktop", "office",
-                                        "camera", "memory-semantic", "schedule"})
+                                "camera", "memory-semantic", "schedule", "pet"})
 
     def test_present_dependencies_flip_only_their_own_capability(self):
         with tempfile.TemporaryDirectory() as d:

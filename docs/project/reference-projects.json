@@ -1,0 +1,846 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-10-08",
+  "relevance_paths": {
+    "neko": [
+      "main_logic/proactive*",
+      "main_logic/proactive_chat/*",
+      "utils/screen*",
+      "utils/*audio*",
+      "utils/*voice*",
+      "requirements*",
+      "LICENSE*"
+    ],
+    "pipecat": [
+      "src/pipecat/audio/*",
+      "src/pipecat/processors/*",
+      "src/pipecat/pipeline/*",
+      "src/pipecat/services/*",
+      "src/pipecat/transports/*",
+      "src/pipecat/frames/*",
+      "pyproject.toml",
+      "LICENSE*"
+    ]
+  },
+  "source_reviews": [
+    {
+      "id": "naudio-process-loopback",
+      "checked": "2026-10-08",
+      "revision": "603d4d2487237377f5997ec10c54e7c5cd6d38a7",
+      "license": "MIT (root LICENSE reviewed)",
+      "local_cache": "E:/SumikaBuild/reference-code/naudio",
+      "adoption": "NAudio.Wasapi 3.1.0 pinned in native process audio helper; compiled and OS probe verified; connected through application audio worker, bridge and default-off UI consent; hardware capture/isolation not accepted",
+      "sources": [
+        "https://github.com/naudio/NAudio/blob/603d4d2487237377f5997ec10c54e7c5cd6d38a7/samples/NAudioConsoleTest/Wasapi/Tests/WasapiProcessLoopbackTest.cs"
+      ],
+      "borrow": [
+        "WithProcessLoopback includes explicit target process tree",
+        "WithFormat requests 16kHz mono PCM"
+      ],
+      "limits": [
+        "Reviewed head differs from installed release; release API compiled",
+        "NuGet 22.0.0 lacks this API; use verified 3.1.0",
+        "Process lifecycle covered by fixtures; actual capture/isolation remains unverified"
+      ]
+    },
+    {
+      "id": "microsoft-application-loopback",
+      "checked": "2026-10-08",
+      "revision": "434f6002bdf9cf9829406c3ff2b33387982d6168",
+      "license": "MIT; root LICENSE retained in source cache",
+      "local_cache": "E:/SumikaBuild/reference-code/windows-classic-samples",
+      "adoption": "architecture/reference only; use NAudio implementation instead of copying WAV writer",
+      "sources": [
+        "https://github.com/microsoft/Windows-classic-samples/blob/434f6002bdf9cf9829406c3ff2b33387982d6168/Samples/ApplicationLoopback/README.md"
+      ],
+      "borrow": [
+        "ActivateAudioInterfaceAsync process tree loopback",
+        "Minimum Windows build 20348"
+      ],
+      "limits": [
+        "Endpoint-independent; no user device selection",
+        "Browser child audio process membership needs real verification"
+      ]
+    },
+    {
+      "id": "neko",
+      "checked": "2026-10-08",
+      "revision": "c8bf3505e455826ca9a3320e7f7dcace240b73c8",
+      "license": "Apache-2.0 (root LICENSE reviewed; assets/dependencies require separate review)",
+      "local_cache": "D:/Caches/tooling/reference-code/neko",
+      "adoption": "source-reviewed; playback gating, cue coalescing and TTL inform Sumika ObservationScheduler and voice integration; no NEKO code copied or runtime integrated",
+      "sources": [
+        "https://github.com/Project-N-E-K-O/N.E.K.O/blob/c8bf3505e455826ca9a3320e7f7dcace240b73c8/main_logic/proactive_delivery.py",
+        "https://github.com/Project-N-E-K-O/N.E.K.O/blob/c8bf3505e455826ca9a3320e7f7dcace240b73c8/main_logic/proactive_chat/decisions.py",
+        "https://github.com/Project-N-E-K-O/N.E.K.O/blob/c8bf3505e455826ca9a3320e7f7dcace240b73c8/utils/screen_comment_guard.py"
+      ],
+      "borrow": [
+        "Gate proactive delivery by actual playback end, not generation end",
+        "Coalesce cues, enforce TTL and queue byte/count budgets",
+        "Avoid repeated screen narration in projected model history"
+      ],
+      "limits": [
+        "Sumika scheduler is bound to voice playback events with fixture acceptance; real device timing remains unverified",
+        "Windows desktop screenshot implementation is not an HWND-only WGC replacement",
+        "No full NEKO runtime acceptance performed"
+      ]
+    },
+    {
+      "id": "pipecat",
+      "checked": "2026-10-08",
+      "revision": "5648cfa3f6a83e52f23b0bd9600e6c2c40555268",
+      "license": "BSD-2-Clause (root LICENSE and pyproject reviewed)",
+      "local_cache": "D:/Caches/tooling/reference-code/pipecat",
+      "adoption": "source-reviewed; pipecat-ai==1.12.0 used by VADProcessor/PipelineWorker adapter in isolated microphone process, connected to bridge and companion UI; physical voice runtime packaged in candidate Q; real speech/playback not accepted",
+      "sources": [
+        "https://github.com/pipecat-ai/pipecat/blob/5648cfa3f6a83e52f23b0bd9600e6c2c40555268/src/pipecat/processors/frame_processor.py",
+        "https://github.com/pipecat-ai/pipecat/blob/5648cfa3f6a83e52f23b0bd9600e6c2c40555268/src/pipecat/services/tts_service.py"
+      ],
+      "borrow": [
+        "Interruption cancels and recreates processing tasks and resets interruptible queues",
+        "Clear TTS aggregation and audio contexts on interruption",
+        "Keep application audio separate from user VAD input"
+      ],
+      "limits": [
+        "Existing synchronous coordinator remains separate; optional native worker adapter has fixture acceptance only",
+        "Local Vosk PCM and model cancellation bridge implemented; real speech quality and segmented TTS not accepted",
+        "Installed release APIs differ from reviewed Git revision; Windows Python 3.14 imports and pip check passed"
+      ]
+    },
+    {
+      "id": "windrecorder-token-attention",
+      "checked": "2026-10-08",
+      "revision": "df06bfb4af4fc122b72e05a6b9e56a138b62bb0f",
+      "license": "not rechecked; architecture review only",
+      "adoption": "source-reviewed only; no product changes",
+      "sources": [
+        "https://github.com/yuka-friends/Windrecorder/blob/df06bfb4af4fc122b72e05a6b9e56a138b62bb0f/windrecorder/record.py"
+      ],
+      "borrow": [
+        "Local frame similarity gates OCR; accepted OCR advances frame baseline",
+        "OCR text similarity skips duplicate index content; configured edges masked before OCR"
+      ],
+      "limits": [
+        "Reduces OCR/index redundancy, not measured LLM token savings",
+        "Whole-frame similarity is insufficient for moving video/danmaku; no site-aware ROI confirmed"
+      ],
+      "source_sha256": "6adbd78e82e1ad6f03513cbd71437e65466f71069a9438be75085943f8601990"
+    },
+    {
+      "id": "open-llm-vtuber-image-history",
+      "checked": "2026-10-08",
+      "revision": "992309c0aa19845960228f880013d4685fde93b5",
+      "license": "not rechecked; architecture review only",
+      "adoption": "source-reviewed BasicMemoryAgent only; no product changes",
+      "sources": [
+        "https://github.com/Open-LLM-VTuber/Open-LLM-VTuber/blob/992309c0aa19845960228f880013d4685fde93b5/src/open_llm_vtuber/agent/agents/basic_memory_agent.py"
+      ],
+      "borrow": [
+        "Current input images attached to current request; ordinary memory retains text prompt rather than current input image bytes",
+        "Consecutive identical role/text messages skipped"
+      ],
+      "limits": [
+        "Does not prove all agents/tool image paths prune images",
+        "No content-specific crop or bounded long-term history confirmed in reviewed class",
+        "Future questions needing old visual detail require retained evidence or fresh capture"
+      ],
+      "source_sha256": "d0124df26b4ca24fd5e135959927b355f9e388350f4d9bbbae575dc714d2e1b7"
+    },
+    {
+      "id": "browserskill-user-tab-boundary",
+      "checked": "2026-10-09",
+      "revision": "f8b9786d9dd8ac121c9625ef00b9f80f294006e9",
+      "license": "MIT; inspected root LICENSE at pinned revision",
+      "local_cache": "E:/SumikaBuild/reference-source-browserskill-20261009",
+      "adoption": "Use native DSH plugin and management for Agent Window automation; use independent opt-in passive companion ingress for in-place original tabs. No upstream modifications.",
+      "sources": [
+        "https://github.com/Tencent/BrowserSkill/blob/f8b9786d9dd8ac121c9625ef00b9f80f294006e9/apps/extension/src/tools/evaluate.ts",
+        "https://github.com/Tencent/BrowserSkill/blob/f8b9786d9dd8ac121c9625ef00b9f80f294006e9/apps/extension/src/tools/tabs.ts",
+        "https://github.com/Tencent/BrowserSkill/blob/f8b9786d9dd8ac121c9625ef00b9f80f294006e9/README.md"
+      ],
+      "borrow": [
+        "Agent Window guard and explicit tab inventory/borrow distinction",
+        "Fixed passive collector remains Sumika-owned; no arbitrary evaluation on user tabs"
+      ],
+      "limits": [
+        "Latest evaluate explicitly enforces Agent Window; matching releases alone do not provide original-tab evaluation.",
+        "GitHub release/tree REST queries rate-limited (403); revision obtained via git transport and source clone, not latest-release API.",
+        "No user tab was borrowed or moved; MV3 original-tab bridge remains unverified."
+      ]
+    }
+  ],
+  "market_observation": {
+    "checked": "2026-10-07",
+    "source": "npm search dsh --json --searchlimit=50",
+    "automatic_install": false,
+    "candidates": [
+      {
+        "id": "dsh-automation",
+        "name": "@michengai/dsh-automation",
+        "url": "https://github.com/MichengAI/dsh-automation",
+        "version": "0.1.58",
+        "license": "Apache-2.0",
+        "status": "needs-validation",
+        "focus": [
+          "scheduled isolated DSH sessions",
+          "task management"
+        ],
+        "limits": [
+          "community plugin; check peer range, permissions and duplicate scheduling UI"
+        ]
+      },
+      {
+        "id": "dsh-find-plugin",
+        "name": "dsh-find-plugin",
+        "url": "https://github.com/awesome-dsh-plugin/dsh-find-plugin",
+        "version": "0.4.0",
+        "license": "verify per revision",
+        "status": "needs-validation",
+        "focus": [
+          "GitHub plugin discovery"
+        ],
+        "limits": [
+          "discovery only; never auto-install"
+        ]
+      },
+      {
+        "id": "dsh-skill-explorer",
+        "name": "@linxin666/dsh-client-ui-skill-explorer",
+        "url": "https://github.com/zhu1090093659/dsh-web",
+        "version": "0.4.5",
+        "license": "BSD-3-Clause",
+        "status": "needs-validation",
+        "focus": [
+          "skill inventory UI",
+          "enable/disable/create/delete"
+        ],
+        "limits": [
+          "UI slot and single-entry conflict with Sumika must be checked"
+        ]
+      },
+      {
+        "id": "dsh-plugin-manager-ui",
+        "name": "@linxin666/dsh-client-ui-plugin-manager",
+        "url": "https://www.npmjs.com/package/@linxin666/dsh-client-ui-plugin-manager",
+        "version": "0.4.5",
+        "license": "verify per revision",
+        "status": "needs-validation",
+        "focus": [
+          "plugin update checks",
+          "runtime minimum gating"
+        ],
+        "limits": [
+          "compare with official DSH plugin-manager before adoption"
+        ]
+      },
+      {
+        "id": "dsh-repeat-tool-breaker",
+        "name": "dsh-repeat-tool-breaker",
+        "url": "https://github.com/snailium/dsh-repeat-tool-breaker",
+        "version": "0.11.2",
+        "license": "verify per revision",
+        "status": "needs-validation",
+        "focus": [
+          "semantic repeat tool-call guard"
+        ],
+        "limits": [
+          "requires dsh >= 0.1.7; candidate 0.2.0 should be tested in an isolated profile"
+        ]
+      }
+    ]
+  },
+  "policy": {
+    "weekly_check": "Monday 10:00 Asia/Shanghai while Sumika is running; merge missed check on next startup",
+    "monthly_discovery": "first weekly run of each month",
+    "deep_analysis_limit": 5,
+    "new_candidates_limit": 3,
+    "automatic_install_or_upgrade": false,
+    "no_change_model_calls": 0
+  },
+  "projects": [
+    {
+      "id": "neko",
+      "name": "N.E.K.O",
+      "url": "https://github.com/Project-N-E-K-O/N.E.K.O",
+      "focus": [
+        "screen understanding",
+        "proactive triggers",
+        "playback gating",
+        "context"
+      ],
+      "license": "verify per revision",
+      "status": "worth-borrowing",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "reuse architecture only; verify license and platform details"
+      ]
+    },
+    {
+      "id": "airi",
+      "name": "AIRI",
+      "url": "https://github.com/moeru-ai/airi",
+      "focus": [
+        "desktop companion",
+        "voice",
+        "avatar"
+      ],
+      "license": "verify per revision",
+      "status": "worth-borrowing",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "provider and runtime assumptions require adaptation"
+      ]
+    },
+    {
+      "id": "open-llm-vtuber",
+      "name": "Open-LLM-VTuber",
+      "url": "https://github.com/Open-LLM-VTuber/Open-LLM-VTuber",
+      "focus": [
+        "VTuber pipeline",
+        "streaming voice"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "desktop capture and licensing must be checked"
+      ]
+    },
+    {
+      "id": "pipecat",
+      "name": "Pipecat",
+      "url": "https://github.com/pipecat-ai/pipecat",
+      "focus": [
+        "VAD",
+        "streaming ASR/TTS",
+        "interruptions"
+      ],
+      "license": "BSD-2-Clause",
+      "status": "worth-borrowing",
+      "checked": "2026-10-07",
+      "revision": "PyPI 1.12.0 observed",
+      "limits": [
+        "Python/runtime dependency size"
+      ]
+    },
+    {
+      "id": "livekit-agents",
+      "name": "LiveKit Agents",
+      "url": "https://github.com/livekit/agents",
+      "focus": [
+        "realtime pipeline",
+        "audio/video transport"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "old vision examples may be stale"
+      ]
+    },
+    {
+      "id": "gemini-live-console",
+      "name": "Gemini Live API web console",
+      "url": "https://github.com/google-gemini/live-api-web-console",
+      "focus": [
+        "live multimodal interaction"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "provider-specific API"
+      ]
+    },
+    {
+      "id": "deeptutor",
+      "name": "DeepTutor",
+      "url": "https://github.com/HKUDS/DeepTutor",
+      "focus": [
+        "video subtitles/time anchors",
+        "reading location"
+      ],
+      "license": "verify per revision",
+      "status": "worth-borrowing",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "education workflow components require integration"
+      ]
+    },
+    {
+      "id": "page-assist",
+      "name": "Page Assist",
+      "url": "https://github.com/n4ze3m/page-assist",
+      "focus": [
+        "web page context",
+        "selection"
+      ],
+      "license": "verify per revision",
+      "status": "worth-borrowing",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "browser extension permission model"
+      ]
+    },
+    {
+      "id": "windrecorder",
+      "name": "Windrecorder",
+      "url": "https://github.com/yuka-friends/Windrecorder",
+      "focus": [
+        "screen history/search"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "privacy and storage scope"
+      ]
+    },
+    {
+      "id": "screenpipe",
+      "name": "screenpipe",
+      "url": "https://github.com/mediar-ai/screenpipe",
+      "focus": [
+        "screen/audio capture architecture"
+      ],
+      "license": "commercial license; verify current terms",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "architecture reference only in first round"
+      ]
+    },
+    {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "focus": [
+        "native agent/tools/plugins/desktop"
+      ],
+      "license": "verify per revision",
+      "status": "worth-borrowing",
+      "checked": "2026-10-07",
+      "revision": "0.2.0-rc.2 candidate installed in isolation",
+      "limits": [
+        "Sumika stays an extension, not an upstream fork"
+      ]
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "url": "https://github.com/zai-org/ZCode",
+      "focus": [
+        "open desktop coding workflow"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "adapter required"
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "url": "https://github.com/openai/codex",
+      "focus": [
+        "agent runtime",
+        "approval/tool boundaries"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "product-specific internals"
+      ]
+    },
+    {
+      "id": "cua",
+      "name": "CUA",
+      "url": "https://github.com/trycua/cua",
+      "focus": [
+        "desktop interaction",
+        "computer use"
+      ],
+      "license": "verify per revision",
+      "status": "needs-validation",
+      "checked": "2026-10-07",
+      "revision": "latest repository default branch at check date",
+      "limits": [
+        "control is out of first companion scope"
+      ]
+    },
+    {
+      "id": "sherpa-onnx",
+      "name": "sherpa-onnx",
+      "url": "https://github.com/k2-fsa/sherpa-onnx",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "99ddefaa92129858b80a71a426903dd4215c83fa",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "sensevoice",
+      "name": "sensevoice",
+      "url": "https://github.com/FunAudioLLM/SenseVoice",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "586bbdb2b052f4fe19322581825228b6810a9fb3",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "funasr",
+      "name": "funasr",
+      "url": "https://github.com/modelscope/FunASR",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "75494e73ea925a430872aeb54b0abc2fddbf4ef4",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "faster-whisper",
+      "name": "faster-whisper",
+      "url": "https://github.com/SYSTRAN/faster-whisper",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "9fa78645d7913ff9d94d0907a2156526b19b4556",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "rapidocr",
+      "name": "rapidocr",
+      "url": "https://github.com/RapidAI/RapidOCR",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "deea2a03e670bfbcbe06536d4df75cd20ec7f6f9",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "silero-vad",
+      "name": "silero-vad",
+      "url": "https://github.com/snakers4/silero-vad",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "1e261b036686cd0017d500ee96acd1c4ba572a9d",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "kokoro",
+      "name": "kokoro",
+      "url": "https://github.com/hexgrad/kokoro",
+      "focus": [
+        "local speech/OCR companion assistance"
+      ],
+      "license": "see source LICENSE; model license separate",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "dfb907a02bba8152ca444717ca5d78747ccb4bec",
+      "limits": [
+        "README/LICENSE source snapshot only; no product acceptance"
+      ]
+    },
+    {
+      "id": "bilibili-evolved",
+      "name": "Bilibili-Evolved",
+      "url": "https://github.com/the1812/Bilibili-Evolved",
+      "focus": [
+        "Bilibili subtitle selection/time cues",
+        "timestamped danmaku",
+        "player settings and site selectors"
+      ],
+      "license": "MIT with redistribution/support conditions; see LICENCE.md",
+      "status": "worth-borrowing",
+      "checked": "2026-10-08",
+      "revision": "fa06dcec095dbccaba82f50ae2318c8d61c26671",
+      "source_paths": [
+        "registry/lib/components/video/subtitle/download/utils.ts",
+        "registry/lib/components/video/danmaku/download/utils.ts",
+        "LICENCE.md"
+      ],
+      "limits": [
+        "Not a DSH plugin; no stable Sumika export bridge verified",
+        "Do not fetch complete danmaku/video on every observation",
+        "Official summary availability and actual logged-in integration unverified"
+      ],
+      "evidence": "E:/SumikaBuild/bilibili-research-20261008"
+    },
+    {
+      "id": "pakku",
+      "name": "pakku",
+      "url": "https://github.com/xmcp/pakku.js",
+      "focus": [
+        "danmaku similarity filtering and deduplication"
+      ],
+      "license": "unverified",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "unverified; GitHub API rate limited",
+      "limits": [
+        "Linked by verified Bilibili-Evolved README; source and license not inspected this round"
+      ]
+    },
+    {
+      "id": "bewlybewly",
+      "name": "BewlyBewly",
+      "url": "https://github.com/BewlyBewly/BewlyBewly",
+      "focus": [
+        "Bilibili page adaptation and layout compatibility"
+      ],
+      "license": "unverified",
+      "status": "needs-validation",
+      "checked": "2026-10-08",
+      "revision": "unverified; GitHub API rate limited",
+      "limits": [
+        "Referenced by verified Bilibili-Evolved README; not evidence of content extraction capability"
+      ]
+    },
+    {
+      "id": "bilibili-api-collect",
+      "name": "bilibili-API-collect",
+      "url": "https://github.com/SocialSisterYi/bilibili-API-collect",
+      "focus": [
+        "historical API documentation status"
+      ],
+      "license": "unverified",
+      "status": "temporarily-unrelated",
+      "checked": "2026-10-08",
+      "revision": "4c00347d4f3494318903eeb11fb00d7b9c1f8c68",
+      "limits": [
+        "Archived repository README states permanently closed and documents removed; not a current API contract"
+      ],
+      "evidence": "E:/SumikaBuild/bilibili-research-20261008/SocialSisterYi__bilibili-API-collect.json"
+    },
+    {
+      "id": "browserskill",
+      "name": "BrowserSkill",
+      "url": "https://github.com/Tencent/BrowserSkill",
+      "focus": [
+        "native DSH browser plugin",
+        "extension permission boundaries",
+        "protocol compatibility"
+      ],
+      "license": "MIT",
+      "status": "worth-borrowing",
+      "checked": "2026-10-09",
+      "revision": "f8b9786d9dd8ac121c9625ef00b9f80f294006e9",
+      "limits": [
+        "Latest evaluate explicitly enforces Agent Window; matching releases alone do not provide original-tab evaluation.",
+        "GitHub release/tree REST queries rate-limited (403); revision obtained via git transport and source clone, not latest-release API.",
+        "No user tab was borrowed or moved; MV3 original-tab bridge remains unverified."
+      ]
+    }
+  ],
+  "local_tool_upgrade": {
+    "schema_version": 1,
+    "checked": "2026-10-08",
+    "hardware": {
+      "os": "Windows",
+      "cpu_runtime": "desktop-runtime-20261008 Python 3.14",
+      "gpu": "AMD Radeon RX 5700 XT",
+      "ram_gb": 32
+    },
+    "current": {
+      "asr": "Vosk 0.3.45 + vosk-model-small-cn-0.22",
+      "model_path": "E:/Models/Speech/sumika/vosk-model-small-cn-0.22",
+      "evidence": "E:/SumikaBuild/bilibili-product-audio-20261008-c/audio/report.json",
+      "limits": [
+        "教程术语错误明显",
+        "首段 final 约 20.32 秒，不能作为实时体验"
+      ]
+    },
+    "candidates": [
+      {
+        "id": "sherpa-onnx-sensevoice",
+        "project": "sherpa-onnx",
+        "repository": "https://github.com/k2-fsa/sherpa-onnx",
+        "revision": "99ddefaa92129858b80a71a426903dd4215c83fa",
+        "package": "sherpa-onnx==1.13.8",
+        "license": "Apache-2.0",
+        "model": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+        "model_revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+        "role": "首选候选；本地 CPU，中文和多语种，配合 Silero VAD 做连续识别",
+        "status": "wired_fixture_verified_real_queue_overflow_unresolved",
+        "site": "E:/SumikaBuild/local-asr-site-20261008",
+        "limits": [
+          "Product worker/factory/Bridge wired, but real first decode stalled and queue overflowed; no default switch",
+          "Model license original-weight terms still require validation",
+          "Candidate runtime is checkout-bound development runtime, not final package"
+        ],
+        "evidence": "E:/SumikaBuild/local-tools-review-20261008/sensevoice-report.json; E:/SumikaBuild/bilibili-asr-compare-20261008-a/audio/report.json",
+        "product_evidence": [
+          "E:/SumikaBuild/voice-runtime-sensevoice-20261008-a-report.json",
+          "E:/SumikaBuild/bilibili-product-sensevoice-20261008-d/audio/report.json"
+        ]
+      },
+      {
+        "id": "sherpa-onnx-paraformer",
+        "project": "sherpa-onnx",
+        "repository": "https://github.com/k2-fsa/sherpa-onnx",
+        "revision": "99ddefaa92129858b80a71a426903dd4215c83fa",
+        "license": "Apache-2.0",
+        "model": "sherpa-onnx-paraformer-zh-2024-03-09",
+        "role": "中文教程术语的第二候选；离线或模拟流式，作为 SenseVoice 对照",
+        "status": "research_candidate",
+        "limits": [
+          "需要单独下载模型并确认流式缓存行为",
+          "尚未验证实时延迟"
+        ]
+      },
+      {
+        "id": "faster-whisper",
+        "project": "faster-whisper",
+        "repository": "https://github.com/SYSTRAN/faster-whisper",
+        "revision": "9fa78645d7913ff9d94d0907a2156526b19b4556",
+        "package": "faster-whisper==1.2.1",
+        "license": "MIT",
+        "role": "高质量分段转写和视频回看；不作为首版实时默认",
+        "status": "research_candidate",
+        "limits": [
+          "CPU small 模型约 1.5GB 内存且首字延迟需实测",
+          "GPU 文档主要针对 NVIDIA CUDA，本机 AMD 不走该路径"
+        ]
+      },
+      {
+        "id": "funasr-sensevoice",
+        "project": "FunASR",
+        "repository": "https://github.com/modelscope/FunASR",
+        "revision": "75494e73ea925a430872aeb54b0abc2fddbf4ef4",
+        "license": "MIT",
+        "role": "CPU SenseVoice 和 Paraformer 参考实现；可用于离线批处理",
+        "status": "research_candidate",
+        "limits": [
+          "PyTorch/模型体积增加打包成本",
+          "没有先引入产品运行时"
+        ]
+      }
+    ],
+    "decision": {
+      "next": "SenseVoice 在同一 B 站 5 秒 PCM 片段上明显快于 Vosk 且术语/断句更好；下一步应增加独立 offline-segment capability，而不是伪装成 Vosk streaming provider。Paraformer 仍需对照。",
+      "default_switch": false,
+      "rollback": "继续使用现有 vosk capability 和模型目录，候选运行时不写入日用配置。"
+    },
+    "sources": {
+      "local_snapshot": "E:/SumikaBuild/local-tools-review-20261008/sources.json",
+      "sherpa_readme": "E:/SumikaBuild/local-tools-review-20261008/sherpa-onnx-README.md",
+      "faster_whisper_readme": "E:/SumikaBuild/local-tools-review-20261008/faster-whisper-README.md",
+      "funasr_readme": "E:/SumikaBuild/local-tools-review-20261008/funasr-README.md",
+      "silero_vad_readme": "E:/SumikaBuild/local-tools-review-20261008/silero-vad-README.md"
+    }
+  },
+  "bilibili_attention_review": {
+    "checked": "2026-10-08",
+    "status": "research_only_not_implemented",
+    "assets": {
+      "extensions/companion/browser_video_snapshot.js": "adapt existing fixed read-only collector; generic TextTrack misses custom Bilibili captions",
+      "extensions/companion/browser_video.py": "reuse authorized tab and provenance validation",
+      "extensions/companion/context_fusion.py": "reuse bounded current-context fusion",
+      "tools/inspect_companion_bilibili.mjs": "reuse actual video/pause/seek probe"
+    },
+    "recommendation": [
+      "Official page summary as cached video/part overview; availability/account conditions unverified, cannot replace current evidence",
+      "Prefer native captions near playback position, then bounded local ASR; crop player diagrams as supplemental images",
+      "Read only relevant current-time danmaku; local normalization/dedup before model; keep community opinions distinct from teaching facts",
+      "Treat comments/player focus as activity evidence, not automatic intent certainty; preserve user-selected scope",
+      "Browser enhancements are optional adapters/reference sources, not mandatory product dependencies or DSH plugins"
+    ],
+    "limits": [
+      "No official summary or danmaku captured from user session this round",
+      "GitHub rate limit prevented pakku/Bewly source/license review; retain needs-validation",
+      "No product UI, installation or default changes"
+    ],
+    "video_layer_probe": {
+      "status": "single_public_video_readonly_probe_verified",
+      "evidence": "E:/SumikaBuild/bilibili-video-layer-20261008-a/report.json",
+      "verified": "Paused Bilibili BV1Lf4y1M72V HTML video drawImage/getImageData produces readable nonblack 640x360 frame; danmaku-box/wrap are outside video element",
+      "decision": "Prefer clean video-element frames plus separately timestamped/deduplicated danmaku; preserve user display. Whole-window capture remains fallback. Do not mask whole stripes and miss formulas.",
+      "limits": [
+        "No actual moving-danmaku pair comparison or full-screen/special-danmaku acceptance",
+        "No continuous product browser frame ingestion yet"
+      ],
+      "audio_decision": "Existing NAudio 3.1.0 WithProcessLoopback IncludeTargetProcessTree captures digital process audio; no microphone speaker requirement. System/master, browser/session and player mute/low-volume behavior still need independent tests; virtual cable optional fallback, not mandatory.",
+      "next": "Verify clean frames stable under moving overlays and changed formula sensitivity; test volume/mute routing without changing global user settings."
+    }
+  },
+  "discovery_baseline_2026_10": {
+    "checked_at": "2026-10-09",
+    "source": "GitHub repository search API; metadata only, no source review or adoption recommendation",
+    "candidates": [
+      {
+        "repository": "etherfunlab/eros-engine",
+        "url": "https://github.com/etherfunlab/eros-engine",
+        "classification": "needs-validation",
+        "description": "An open-source Rust engine for AI companions with memory, relationship state, and structured user insight.",
+        "stars": 66,
+        "updated_at": "2026-10-08T22:07:12Z",
+        "license": "AGPL-3.0"
+      },
+      {
+        "repository": "saylordotorg/moodle-local_ai_course_assistant",
+        "url": "https://github.com/saylordotorg/moodle-local_ai_course_assistant",
+        "classification": "needs-validation",
+        "description": "SOLA - Saylor Online Learning Assistant: AI-powered learning coach Moodle plugin",
+        "stars": 16,
+        "updated_at": "2026-10-08T18:21:43Z",
+        "license": "GPL-3.0"
+      },
+      {
+        "repository": "Cometline/cometline",
+        "url": "https://github.com/Cometline/cometline",
+        "classification": "needs-validation",
+        "description": "AI companion for your workspace, with per‑project memory, coding agents, and a native desktop chat UI",
+        "stars": 29,
+        "updated_at": "2026-10-08T15:59:58Z",
+        "license": "Apache-2.0"
+      }
+    ],
+    "evidence": "E:/SumikaBuild/reference-live-baseline-20261009/report.json",
+    "limits": "Only three metadata candidates; no installation or code reuse. Full revision baseline interrupted by public API quota after ten projects."
+  }
+}

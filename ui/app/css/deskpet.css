@@ -1,0 +1,101 @@
+/* ============================================================================
+   桌宠小窗（L0：跨页常驻的可拖动浮动小窗）
+   内容 = 活动室舞台的缩小克隆；活动室屏隐藏，其余页面显示。
+   注：OS 级独立置顶窗口（最小化可见）属 P7，需桌面壳，不在此层实现。
+   ========================================================================== */
+
+.deskpet{position:fixed;right:14px;bottom:14px;z-index:50;display:flex;flex-direction:column;align-items:flex-end;gap:6px;cursor:grab;user-select:none;touch-action:none}
+.pet-host,.pet-host body{overflow:hidden;background:transparent!important}
+.pet-host .screen{position:fixed!important;left:-10000px!important;top:0;width:1000px;height:800px;pointer-events:none}
+.pet-host .topbar,.pet-host main,.pet-host .sidebar,.pet-host .room{display:none!important}
+.pet-host .deskpet .dp-chat{display:flex!important;max-width:calc(100vw - 16px);box-sizing:border-box}
+.pet-host .deskpet{display:flex!important;right:8px;bottom:8px}
+.pet-host body.on-room .deskpet{display:flex!important}
+.pet-host .deskpet .dp-main{width:300px}
+.pet-host .deskpet .dp-chara{border-color:transparent;background:transparent;box-shadow:none}
+.pet-host .deskpet.mini .dp-main,.pet-host .deskpet.mini .dp-chat,.pet-host .deskpet.mini .dp-bubble{display:none!important}
+.deskpet:active{cursor:grabbing}
+.deskpet.dragging{transition:none}
+body.on-room .deskpet{display:none}
+
+/* ---- 聊天气泡 / 历史记录 ----
+   默认收起：只显示最近 3 条；悬停展开为完整记录（可滚动），点击固定展开以便翻更早内容。
+   关键：气泡采用「向上生长」的绝对定位——展开时不推挤下方取景框，
+   小窗总高度保持不变，鼠标在气泡与取景框之间移动时不会因布局跳动而抖动。 */
+.dp-bubble{position:absolute;left:0;right:0;bottom:100%;margin-bottom:6px;
+  border:1px solid var(--line);border-left:3px solid var(--chara);border-radius:var(--radius);
+  background:var(--paper);box-shadow:var(--shadow-pop);padding:7px 10px;
+  font-size:10.5px;line-height:1.6;box-sizing:border-box;cursor:pointer;
+  transition:box-shadow .2s,border-color .2s}
+/* 气泡的定位参照系：小窗里的「取景框行」，气泡悬于其正上方 */
+.dp-stage{position:relative}
+.dp-bubble:hover{border-color:var(--rose-line);box-shadow:var(--shadow-pop-2)}
+.dp-bubble .st{display:flex;align-items:center;justify-content:space-between;font-size:9px;color:var(--chara);letter-spacing:1px;margin-bottom:4px}
+.dp-bubble .st i{font-style:normal;color:var(--muted-2);letter-spacing:0;font-size:8.5px}
+/* 消息列表：收起态固定露出「最近三条」，展开态可滚到更早。
+   用 :nth-last-child 而不是靠 max-height 去猜高度——消息一旦换行，
+   按像素裁就会出现「只露两条 / 第二条被切一半」的不确定结果。 */
+.dp-log{display:flex;flex-direction:column;gap:5px;max-height:88px;overflow:hidden;transition:max-height .28s ease}
+.dp-bubble:not(.open) .dp-msg:not(:nth-last-child(-n+3)){display:none}
+.dp-bubble.open .dp-log{max-height:210px;overflow-y:auto;touch-action:pan-y;scrollbar-width:thin}
+.dp-bubble.no-more .more{display:none}
+.dp-msg{display:flex;gap:6px;align-items:baseline}
+.dp-msg b{flex:none;font-weight:600;font-size:9px;letter-spacing:.5px;color:var(--chara)}
+.dp-msg.me b{color:var(--muted)}
+.dp-msg span{color:var(--ink);word-break:break-word}
+.dp-msg.me span{color:var(--muted)}
+.dp-bubble .more{display:block;margin-top:5px;font-size:8.5px;color:var(--muted-2);letter-spacing:.5px;text-align:center}
+.dp-bubble.open .more .lbl-open{display:inline}
+.dp-bubble.open .more .lbl-closed{display:none}
+.dp-bubble .more .lbl-open{display:none}
+
+/* 小窗竖向流：取景框 → 操作行 → 输入框。
+   聊天气泡不占文档流（绝对定位悬在取景框上方），因此展开时不会推挤下方内容。 */
+.dp-main{display:flex;flex-direction:column;align-items:stretch;gap:6px;width:300px}
+/* 取景框行：既是「取景框 + 操作按钮」的容器，也是气泡的定位参照系 */
+.dp-stage{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px}
+/* 桌宠取景框：内部放「房间场景克隆」，故必须裁剪溢出，并建立独立层叠上下文 */
+.dp-chara{position:relative;isolation:isolate;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--bg);
+  box-shadow:var(--shadow-pop);width:300px;height:336px}
+.dp-chara>svg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:262px;height:284px}
+.dp-scene{position:absolute;inset:0;z-index:0}
+/* 克隆进来的房间：只作为「世界画布」被窗口化截取，自身尺寸与舞台一致后按 zoom 变换 */
+.dp-scene>*{position:absolute;left:0;top:0;pointer-events:none;transform-origin:0 0}
+.dp-scene .vport-frame,.dp-scene .vport-tag,.dp-scene .vport-ratio,.dp-scene .obj3d,
+.dp-scene .d-caption,.dp-scene .layers,.dp-scene .cam-cap,
+.dp-scene .gshadow,.dp-scene .chara-name-tag,.dp-scene .standee{display:none!important}
+/* 小窗专属 VRM 实例容器：与主持屏角色层同位同尺寸（.vport = 300×430）。
+   画布是透明的（渲染器 alpha:true + 清屏 alpha 0），所以它会自然"贴"在房间之上，
+   人站在房间里的效果由「房间层 + 透明人层」叠加得到。
+   容器高度取 .vport 的 430，超出取景框 336 的部分由 overflow:hidden 裁掉。 */
+.dp-scene .dp-vrm{position:absolute;left:0;bottom:0;width:300px;height:430px;z-index:2}
+.dp-scene .dp-vrm canvas{display:block;width:100%!important;height:100%!important;background:transparent!important}
+.dp-scene .dp-vrm .vrm-renderer-status{display:none!important}
+/* VRM 生效时，小窗内的占位立绘必须让位。
+   用 CSS 由 data 属性驱动，而不是依赖脚本时序去改 style.display——
+   小窗的立绘有三处副本（外层占位、克隆角色层内、主持屏），逐一改样式极易漏改或时序错位。
+   注意：选择器必须覆盖「克隆体内所有层级的 .chara-svg」。 */
+#deskpet[data-vrm="on"] .dp-chara > svg,
+#deskpet[data-vrm="on"] .dp-scene .chara-svg,
+#deskpet[data-vrm="on"] .dp-scene .gshadow,
+#deskpet[data-vrm="on"] .dp-scene .standee{display:none!important}
+#deskpet[data-vrm="off"] .dp-vrm{display:none!important}
+/* 占位立绘模式下，.dp-scene 里的居中立绘会与最外层立绘重叠，同样只留最外层那一张 */
+#deskpet[data-vrm="off"] .dp-scene .chara-svg{display:none!important}
+
+/* 操作行：仅保留「收起」 */
+.dp-ops{display:flex;gap:4px}
+.dp-ops button{display:flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--paper);font-size:9.5px;color:var(--muted);border-radius:var(--radius-sm);padding:3px 10px;white-space:nowrap}
+.dp-ops button:hover{color:var(--rose-deep);border-color:var(--rose-line);background:var(--rose-soft)}
+.dp-ops button svg{width:11px;height:11px}
+.dp-mini{display:none;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow);color:var(--chara);place-items:center}
+.dp-mini svg{width:18px;height:18px}
+.deskpet.mini .dp-main,.deskpet.mini .dp-chat,.deskpet.mini .dp-bubble{display:none}
+.deskpet.mini .dp-mini{display:grid}
+
+/* 桌宠闲聊输入框 */
+.dp-chat{display:flex;align-items:center;gap:6px;width:300px;border:1px solid var(--line);border-radius:11px;background:var(--paper);box-shadow:var(--shadow);padding:5px 6px 5px 10px}
+.dp-chat input{flex:1;min-width:0;border:none;outline:none;background:none;font:inherit;font-size:11.5px;color:var(--ink)}
+.dp-chat input::placeholder{color:var(--muted-2)}
+.dp-chat [data-dp-send]{width:26px;height:26px;border-radius:8px;background:var(--chara);display:grid;place-items:center;flex:none;transition:background .2s;color:var(--plain);border:none}
+.dp-chat [data-dp-send]:hover{filter:brightness(1.08)}

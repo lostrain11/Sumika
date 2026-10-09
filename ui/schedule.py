@@ -84,6 +84,18 @@ class ScheduleController:
         finally:
             service.close()
 
+    def notify(self, key, text):
+        if not isinstance(key, str) or not key.startswith('reference-research/'):
+            raise ValueError('reference notification key required')
+        if not isinstance(text, str) or not text or len(text) > 20000:
+            raise ValueError('bounded reference notification required')
+        service = self._service()
+        try:
+            with service.runner.db:
+                service.runner.db.execute('INSERT OR IGNORE INTO reminders(key,text) VALUES (?,?)', (key,text))
+        finally:
+            service.close()
+
     def tick(self, now=None):
         service = self._service()
         try:

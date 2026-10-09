@@ -8,10 +8,65 @@ import unittest
 from unittest.mock import patch
 
 from tools.verify_portable_staging import REQUIRED, verify, safe_path
-from tools.build_portable_staging import browser_runtime_files, verify_reviewed_assets
+from tools.build_portable_staging import browser_runtime_files, verify_reviewed_assets, physical_files, reference_registry_asset, executable_asset
 
 
 class PortableInventoryTests(unittest.TestCase):
+    def test_launcher_requires_real_pe_header_not_renamed_script(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'Sumika.exe'
+            for contents in (b'param()\n', b'MZ'+bytes(62), b'MZ'+bytes(58)+(64).to_bytes(4,'little')+b'noPE'):
+                path.write_bytes(contents)
+                with self.assertRaises(ValueError):
+                    executable_asset(path)
+            path.write_bytes(b'MZ'+bytes(58)+(64).to_bytes(4,'little')+b'PE\x00\x00')
+            self.assertEqual(executable_asset(path),path.resolve())
+
+    def test_runtime_cache_excluded_but_dependencies_and_secrets_preserved_for_validation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ('Lib/__pycache__/cached.pyc', 'Lib/loose.PYC',
+                         'node_modules/pkg/index.js', 'Lib/site-packages/engine.pyd',
+                         'private.key'):
+                path = root/name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixture')
+            selected = {relative.as_posix() for _, relative in physical_files(root)}
+            self.assertEqual(selected, {'node_modules/pkg/index.js',
+                                        'Lib/site-packages/engine.pyd', 'private.key'})
+            with self.assertRaises(ValueError):
+                safe_path('runtime/desktop/private.key')
+
+    def test_reference_registry_relocates_as_exact_product_asset(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            source=root/'docs/project/reference-projects.json'
+            source.parent.mkdir(parents=True)
+            source.write_text(json.dumps({'schema_version':1,'projects':[{'id':'demo'}]}))
+            selected,relative=reference_registry_asset(root)
+            self.assertEqual(selected,source)
+            self.assertEqual(safe_path(relative.as_posix()),'extensions/desktop/reference-projects.json')
+            source.write_text('{}')
+            with self.assertRaises(ValueError): reference_registry_asset(root)
+    def test_certifi_public_bundle_is_only_pem_exception(self):
+        for runtime in ('python', 'desktop', 'voice'):
+            name = f'runtime/{runtime}/Lib/site-packages/certifi/cacert.pem'
+            self.assertEqual(safe_path(name), name)
+        for invalid in ('ui/cacert.pem', 'runtime/python/Lib/site-packages/certifi/private.key',
+                        'runtime/python/Lib/site-packages/certifi/other.pem',
+                        'runtime/python/Lib/site-packages/other/cacert.pem',
+                        'runtime/voice/Lib/site-packages/certifi/private.pem',
+                        'runtime/other/Lib/site-packages/certifi/cacert.pem'):
+            with self.subTest(path=invalid), self.assertRaises(ValueError):
+                safe_path(invalid)
+    def test_current_ui_icons_and_notices_are_selected_for_distribution(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ('icon.svg', 'license.txt', 'tokens.css', 'secret.pyc'):
+                (root / name).write_text('fixture')
+            selected = {relative.name for _, relative in physical_files(root, product=True)}
+            self.assertEqual(selected, {'icon.svg', 'license.txt', 'tokens.css'})
+
     def test_windows_device_and_invalid_component_names(self):
         for name in ('CON', 'con.txt', 'CON .txt', 'AUX.json', 'NUL', 'COM1.txt',
                      'LPT9.txt', 'COM\u00b9.txt', 'LPT\u00b2.txt', 'CONIN$', 'CONOUT$.txt',

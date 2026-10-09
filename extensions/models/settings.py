@@ -6,6 +6,7 @@ accident.
 """
 import json
 import os
+import time
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -167,7 +168,7 @@ def validate(settings):
         raise ValueError('auxiliary section required')
     auxiliary.setdefault('capabilities', ['prompt_enhancement'])
     if (not isinstance(auxiliary['capabilities'], list) or
-            any(c not in ('prompt_enhancement', 'task_intent') for c in auxiliary['capabilities']) or
+            any(c not in ('prompt_enhancement', 'task_intent', 'learning_summary') for c in auxiliary['capabilities']) or
             len(set(auxiliary['capabilities'])) != len(auxiliary['capabilities'])):
         raise ValueError('invalid auxiliary capabilities')
     if type(auxiliary.get('enabled')) is not bool:
@@ -224,7 +225,21 @@ def save(settings, path=None):
     resolved = parent / target.name
     temporary = parent / (target.name + ".tmp")
     temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf8")
-    os.replace(temporary, resolved)
+    # Windows can briefly deny an atomic replacement while another reader has
+    # the profile open. Retry only the same replace; never fall back to a
+    # truncate/copy that could destroy the last valid profile.
+    try:
+        for attempt in range(5):
+            try:
+                os.replace(temporary, resolved)
+                break
+            except OSError as error:
+                if getattr(error, 'winerror', None) not in (5, 32, 33) or attempt == 4:
+                    raise
+                time.sleep(.02 * (attempt + 1))
+    finally:
+        if temporary.exists():
+            temporary.unlink()
     return resolved
 
 
@@ -238,7 +253,9 @@ def example(role_dir, database):
         "endpoint": "https://api.deepseek.com",
         "key_env": "DEEPSEEK_API_KEY",
         "timeout_seconds": 180,
-        "max_tokens": 1024,
+        # Reasoning-capable providers may spend part of the budget before
+        # emitting visible text, especially with OCR-backed study context.
+        "max_tokens": 4096,
         "temperature": 0.7,
         "context_length": 8192,
         "language": {"target": "zh-Hans", "policy": None, "allow_card_policy": True},

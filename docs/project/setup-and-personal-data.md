@@ -1,22 +1,29 @@
 # 单文件安装向导与旧数据接续
 
-当前文件：`.sumika-next/package/wizard-k/Sumika-Setup-2026.09.20-k.exe`。
-这是中文、当前用户级安装向导，不要求管理员或 WSL。封装已验证的 K 程序包，
+当前文件：`E:/SumikaBuild/wizard-l2/Sumika-Setup-2026.09.20-l.exe`。
+这是中文、当前用户级安装向导，不要求管理员或 WSL。封装 L 程序包，
 不包含个人角色、模型权重或密钥。公开发行审查仍后置。
 
 ## 在当前电脑安装
 
 1. 双击安装 EXE，选择一个尚不存在的新程序目录。默认是
-   `D:\Apps\Sumika\2026.09.20-k`；不覆盖旧安装。
-2. “个人数据位置”保持默认 `%LOCALAPPDATA%\Sumika`。
+   `D:\Apps\Sumika\2026.09.20-l`；不覆盖旧安装。
+2. 安装不再显示个人数据选择页，自动沿用 `%LOCALAPPDATA%\Sumika`，或设置中登记的迁移位置。
    当前电脑完整路径为 `C:\Users\Lostrain.DESKTOP-43S7UNP\AppData\Local\Sumika`。
-3. 可勾选桌面快捷方式。安装后从开始菜单中的 **Sumika 2026.09.20-k → Sumika**
-   或对应桌面快捷方式启动；快捷方式会传入所选个人数据目录。
+3. 可勾选桌面快捷方式。安装后从开始菜单中的 **Sumika 2026.09.20-l → Sumika**
+   或对应桌面快捷方式启动；快捷方式与直接启动 EXE 使用相同的数据位置。
 4. 安装器不自动启动程序、不自动停止旧服务。如果旧 Sumika 仍占用 8765，请先正常退出旧版。
 
-程序目录与个人数据目录不能互相包含。自选个人目录时请通过安装生成的快捷方式启动；
-直接运行 Sumika.exe 使用默认个人目录。卸载配置只清理安装文件与安装器创建的快捷方式，
-不配置任何个人目录删除操作。此次没有执行真实个人数据卸载测试。
+程序目录与个人数据目录不能互相包含。进入 **设置 → 数据与存储** 可查看、打开、迁移目录，
+或从已校验的备份恢复到新目录。目标须是现有父目录下尚不存在的目录。
+迁移先退出客户端，再备份、复制、校验和更新 `%LOCALAPPDATA%\Sumika-location.json`，最后重启。
+原目录和备份保留，外部模型权重不复制。失败不自动重试；界面给出迁移记录位置。
+高级命令行 `-DataDirectory` / `SUMIKA_DATA_DIR` 仍优先于迁移登记；日常请用普通快捷方式。
+
+卸载默认保留个人数据；可主动勾选删除，随后再次确认显示的完整目录。静默卸载始终保留。
+清理仅限已知 Sumika 数据文件，不跟随目录链接，不删除外部模型库、原始角色卡或未知文件。
+运行中的数据不能清理；失败会中止卸载。目录空壳和锁文件可能保留。
+本轮不执行真实用户数据删除测试。
 
 ## 哪些数据不用重新导入
 
@@ -26,7 +33,7 @@
 连接配置引用原有凭据来源，启动器继续读取该目录的 `env.ps1`（若存在）。
 本地模型库配置为 `E:\Models`，安装不会复制、移动或重新下载这些权重。
 
-如果选择新的空个人目录，会得到新用户状态，不会自动导入旧数据。
+高级启动参数如果指定新的空个人目录，会得到新用户状态，不会自动导入旧数据。
 安装器本身不写入旧个人目录；首次运行才由 Sumika 正常读取与维护该目录。
 
 ## 旧源码版工作台历史需要另外复制一次
@@ -57,11 +64,10 @@ DSH 的生成依赖目录不复制，由原生运行时重建；外部项目路�
 复用 Inno Setup 7.1.0（官方安装工具签名验证 Valid），脚本为 `packaging/Sumika.iss`：
 
 ```powershell
-python -B tools/build_setup.py .sumika-next/package/product-candidate-20260920-k --compiler D:/Tools/InnoSetup/7.1.0/ISCC.exe --output .sumika-next/package/new-wizard-output
+python -B tools/build_setup.py E:/SumikaBuild/product-candidate-20260920-l2 --compiler D:/Tools/InnoSetup/7.1.0/ISCC.exe --output E:/SumikaBuild/new-wizard-output
 ```
 
 工具先验证候选文件清单，再构建到新目录，保留编译日志及 EXE 哈希，不覆盖旧安装器。
 当前安装 EXE 未签署发布者代码签名；其 SHA-256 记录在旁边 `installer-report.json`。
-此轮实测：真实安装后 26,229 个包内文件哈希一致、个人目录哨兵未变、覆盖与嵌套目录被拒绝；
-已安装 EXE 的启动、复用、外来端口保护和授权退出通过。旧 Profile 复制有五项隔离测试。
-这些是本机安装验收，不能表述为新安装向导已重跑 Windows Sandbox。
+K 版已实测安装、完整性、覆盖与嵌套拒绝和 EXE 生命周期；L 版新证据见项目交接中的
+`installer_data_ux_checkpoint`。不能把 K 的证据或本机验收表述为 L 已重跑 Windows Sandbox。

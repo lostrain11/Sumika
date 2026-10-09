@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -14,7 +15,10 @@ def main():
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--version', help='Explicit internal build version, e.g. 2026.10.08-f')
     args = parser.parse_args()
+    if args.version is not None and not re.fullmatch(r'[0-9][A-Za-z0-9.-]{0,63}', args.version):
+        raise ValueError('Invalid build version')
     candidate = args.candidate.resolve(strict=True)
     compiler = args.compiler.resolve(strict=True)
     output = args.output.absolute()
@@ -25,8 +29,11 @@ def main():
     source = Path(__file__).resolve().parents[1] / 'packaging/Sumika.iss'
     report = {'passed': False, 'inventory': inventory, 'scope': 'Internal installer build, not installation acceptance'}
     try:
-        result = subprocess.run([str(compiler), '/Qp', '/DProductDir='+str(candidate),
-                                 '/DOutputDir='+str(output), str(source)],
+        command = [str(compiler), '/Qp', '/DProductDir='+str(candidate), '/DOutputDir='+str(output)]
+        if args.version:
+            command.append('/DBuildVersion='+args.version)
+        command.append(str(source))
+        result = subprocess.run(command,
                                 capture_output=True, timeout=600)
         (output/'compiler.log').write_bytes(result.stdout + b'\n' + result.stderr)
         if result.returncode != 0:
@@ -37,6 +44,7 @@ def main():
         with files[0].open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
         report.update(passed=True, installer=str(files[0]), sha256=digest,
+                      requested_version=args.version,
                       script_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     finally:
         (output/'build-report.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')

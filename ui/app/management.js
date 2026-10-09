@@ -3,6 +3,8 @@ import {bridgeFetch as fetch} from './bridge-client.js';
 import {bindBackground} from './appearance.js';
 import {getTheme,setTheme} from './theme.js';
 import {mountModelLibrary} from './model-library.js';
+import {mountCompanionSession} from './companion-session.js';
+import {mountPetSession} from './pet-session.js';
 let csrf;
 async function request(path, payload) {
   const response = await fetch('/api/manage/' + path, payload === undefined ? {} : {
@@ -169,6 +171,37 @@ async function buildSettings() {
   const data=sections.find(el=>el.dataset.settingsSection==='data');
   data.querySelector('h2 .rsv-tag')?.remove();
   const dataCard=data.querySelector('.set-card');dataCard.replaceChildren();
+  const storage=await request('personal-data');
+  const locationRow=field('个人数据目录',storage.directory);locationRow.input.readOnly=true;
+  dataCard.append(locationRow.row);
+  dataCard.append(node('p',storage.note,'sumika-form-note'));
+  const storageActions=node('div',undefined,'sumika-settings-actions');
+  const storageStatus=node('p','','sumika-form-note');storageStatus.setAttribute('role','status');
+  const beginRelocation=(fromBackup=false)=>{
+    const pane=dialog(fromBackup?'从备份恢复到新目录':'迁移个人数据');
+    const target=field('新的个人数据目录','');pane.append(target.row);
+    let snapshot;
+    if(fromBackup){snapshot=field('备份目录（含 snapshot.json）','');pane.append(snapshot.row);}
+    pane.append(node('p','将退出当前客户端，复制并校验后自动重新启动。原数据保留；外部模型库不复制。请先结束正在进行的任务。','sumika-form-note'));
+    pane.append(button('确认并重启',async()=>{
+      if(!target.input.value.trim())throw new Error('请输入新的目录');
+      const result=await request('personal-data/migrate',{destination:target.input.value.trim(),snapshot:snapshot?.input.value.trim()||null,confirmed:true});
+      storageStatus.textContent=`迁移已准备，正在退出。失败记录：${result.job}`;pane.close();
+      const response=await fetch('/api/lifecycle/shutdown',{method:'POST',headers:{'Content-Type':'application/json','X-Sumika-CSRF':csrf},body:'{}'});
+      if(!response.ok)throw new Error('退出未完成，迁移不会开始，请先处理活动任务');
+      storageStatus.textContent='正在复制并校验个人数据；完成后客户端会重启。请勿重复操作。';
+      storageActions.querySelectorAll('button').forEach(b=>b.disabled=true);
+      let attempts=0;
+      const poll=setInterval(async()=>{
+        try{const fresh=await request('personal-data');if(fresh.directory!==storage.directory){clearInterval(poll);location.reload();}}
+        catch{}
+        if(++attempts>=120){clearInterval(poll);storageStatus.textContent=`尚未确认重启结果，请查看 ${result.job}；不要重复迁移。`;}
+      },1500);
+    }));
+  };
+  storageActions.append(button('打开目录',()=>request('personal-data/open',{})),
+    button('迁移数据',()=>beginRelocation()),button('从备份恢复',()=>beginRelocation(true)));
+  dataCard.append(storageActions,storageStatus);
   add(dataCard,'记录角色用量','usage.enabled',values.usage.enabled,'checkbox');
   const about=group('关于','about');about.card.append(node('p','Sumika · 晴日部室。工作台由受管 DSH 提供，新增能力通过独立扩展接入。','sumika-form-note'));main.append(about.el);
   const permissions=sections.find(el=>el.dataset.settingsSection==='permissions');
@@ -531,6 +564,7 @@ async function capabilitySettings(id, host){
       }catch(error){await recoverModuleWrite(error);}
     });
   }
+  mountCompanionSession(host);
   host.dataset.ready='true';
 }
 
@@ -637,7 +671,9 @@ try {
   await window.sumikaSettingsReady;
   csrf=(await request('session')).csrf;
   await buildSettings();
-  const head=document.querySelector('.roster h3');
+  // 名册标题锚点：版C 把名册改为底部收起条，容器类名随之从 .roster 变为
+  // .roster-head；两种都试，避免结构再调整时这个按钮静默消失。
+  const head=document.querySelector('.roster-head h3, .roster h3');
   head?.after(button('管理角色与记忆',openRoles));
   document.querySelector('.cap-head')?.append(button('管理模块',openModules));
   window.addEventListener('sumika-capability-selected',event=>{
@@ -647,7 +683,11 @@ try {
       delete previous.dataset.preserveOnce;return;
     }
     previous?.remove();
-    if(id==='speech'||id==='memory'){
+    if(id==='pet'){
+      const host=node('section',undefined,'panel sumika-capability-settings');host.dataset.extraAction='';
+      host.dataset.capabilityId=id;side.querySelector('.hero-d').after(host);
+      mountPetSession(host);
+    }else if(id==='speech'||id==='memory'){
       const host=node('section',undefined,'panel sumika-capability-settings');host.dataset.extraAction='';
       host.dataset.capabilityId=id;
       host.append(node('p','正在读取配置…'));side.querySelector('.hero-d').after(host);

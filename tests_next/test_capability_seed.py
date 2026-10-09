@@ -15,6 +15,13 @@ from ui.server import Bridge
 
 
 class ServiceCapabilityTests(unittest.TestCase):
+    def setUp(self):
+        # Provider fixtures must not pick up the developer's selected runtime.
+        patcher = mock.patch.object(readiness, '_voice_resolve',
+            side_effect=lambda root, packages: readiness._resolve(root, packages, ('voice-env', 'desktop-env')))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_only_available_providers_are_registered(self):
         with mock.patch.object(readiness, "_resolve", return_value=([], "")):
             with mock.patch.object(readiness.shutil, "which", return_value=None):

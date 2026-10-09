@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import { writeFile } from 'node:fs/promises';
 
 const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/',
+  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
 );
 const { chromium } = require('playwright');
 
@@ -104,7 +104,10 @@ if (sidebarPath) {
 // is on the collapsed toggle, which reads as "the icon reverts on hover". Collapse
 // the column, hover the toggle, and record what the skin actually leaves visible.
 let rail = null;
-const toggle = page.locator("[class*='_toggle']").first();
+// 限定在侧栏品牌行里取折叠按钮。裸的 `[class*='_toggle']` 会命中页面里其它
+// 同后缀控件，`.first()` 很可能拿到不是侧栏开关的那一个，于是 click 一直等到超时
+// （表现为「产品坏了」，其实是选择器选错了元素）。verify_ui_v2 用的是同一条限定选择器。
+const toggle = page.locator("[class*='_logoRow'] [class*='_toggle']").first();
 if (await toggle.count().catch(() => 0)) {
   await toggle.click();
   await toggle.hover();
@@ -155,9 +158,14 @@ if (await page.locator("[class*='_headerUtilities']").count().catch(() => 0)) {
     ? { kind: await lineage.first().getAttribute('data-sumika-lineage'),
         text: (await lineage.first().innerText().catch(() => '')).trim() }
     : null;
+  // 面包屑的**数据标记**仍是 lineage=workspace（未改），但**显示文案**按用户
+  // 明确要求把「工作区」改成了「项目」（见 ui-design-coverage.md「用户术语修订：
+  // 工作区 → 项目」）。这条断言原本只认旧文案「工作区 · 」，于是把一次已批准
+  // 的更名误判成回归。仍然断言 kind=workspace（面包屑不能退化成会话标题），
+  // 只把可见文案对齐到现行用词。
   if (sessionStatus.lineage && sessionStatus.lineage.kind === 'workspace'
-      && !sessionStatus.lineage.text.startsWith('工作区 · ')) {
-    sessionStatusFailure = `session breadcrumb is not a workspace label: ${sessionStatus.lineage.text}`;
+      && !sessionStatus.lineage.text.startsWith('项目 · ')) {
+    sessionStatusFailure = `session breadcrumb is not a workspace/project label: ${sessionStatus.lineage.text}`;
   }
   if (sessionStatus.lineage && sessionStatus.lineage.text.includes('\n')) {
     sessionStatusFailure = `session breadcrumb repeats the title: ${JSON.stringify(sessionStatus.lineage.text)}`;

@@ -93,9 +93,12 @@ class RoleChat:
     def _session(self):
         return open_session(self.settings,for_chat=True)
 
-    def reply(self, message, *, session_id="role-chat", images=None, task_intent=False, source_message_id=None):
+    def reply(self, message, *, session_id="role-chat", images=None, task_intent=False, source_message_id=None,
+              memory_writes=True, on_delta=None):
         if not isinstance(message, str) or not message.strip():
             raise ValueError("message required")
+        if type(memory_writes) is not bool:
+            raise ValueError('memory_writes must be boolean')
         if source_message_id is not None and (not isinstance(source_message_id,str) or not source_message_id.strip()):
             raise ValueError('source message id must be nonempty text')
         if not self.enabled:
@@ -119,7 +122,7 @@ class RoleChat:
             marker = f'[sumika-intent-{uuid.uuid4().hex}]' if task_intent else None
             memory_policy = self.settings.get('memory', {})
             proposal_marker = None
-            if memory_policy.get('enabled', True) and memory_policy.get('model_proposals', False):
+            if memory_writes and memory_policy.get('enabled', True) and memory_policy.get('model_proposals', False):
                 from extensions.memory.model_proposer import instruction
                 proposal_marker = '[sumika-memory-'+uuid.uuid4().hex+']'
                 messages[0]['content'] += instruction(proposal_marker,task_intent=task_intent)
@@ -135,7 +138,8 @@ class RoleChat:
             max_tokens = max(self.settings["max_tokens"], 2048) if images else self.settings["max_tokens"]
             started = time.perf_counter()
             try:
-                result = self._generate(provider, messages, max_tokens, images)
+                result = (self._generate(provider, messages, max_tokens, images, on_delta=on_delta)
+                          if on_delta is not None else self._generate(provider, messages, max_tokens, images))
             except (CloudError, OllamaError):
                 # Fail closed: the same provider is not retried and nothing is substituted.
                 raise
@@ -165,7 +169,8 @@ class RoleChat:
                           for key in set(totals) | set(retry_totals)}
             usage_status = result.get("usage_status") or ("reported" if totals else "unknown")
             self._record_usage(session_id, result, totals, usage_status)
-            extracted = self._auto_extract(session, message, source_message_id or ('message-'+uuid.uuid4().hex))
+            extracted = (self._auto_extract(session, message, source_message_id or ('message-'+uuid.uuid4().hex))
+                         if memory_writes else [])
             history.extend([{"role": "user", "content": message},
                             {"role": "assistant", "content": localized["text"]}])
             del history[:-self.history_limit]
@@ -189,15 +194,18 @@ class RoleChat:
         finally:
             session.close()
 
-    def _generate(self, provider, messages, max_tokens, images):
+    def _generate(self, provider, messages, max_tokens, images, on_delta=None):
         """One provider call, with the same explicit settings for every attempt."""
         if self.settings["provider"] == "openai-compatible":
+            stream = {'on_delta': on_delta} if on_delta is not None else {}
             return provider.generate(model=self.settings["model"], messages=messages,
                                      max_tokens=max_tokens,
                                      temperature=self.settings["temperature"],
                                      images=images,
                                      max_images=(self.settings.get("multimodal") or {}).get("max_images", 4),
-                                     max_image_bytes=(self.settings.get("multimodal") or {}).get("max_image_bytes", 4_000_000))
+                                     max_image_bytes=(self.settings.get("multimodal") or {}).get("max_image_bytes", 4_000_000), **stream)
+        if on_delta is not None:
+            raise ValueError('streaming is not connected for the selected local provider')
         return provider.generate(model=self.settings["model"], messages=messages, options={
             "num_ctx": self.settings["context_length"],
             "num_predict": self.settings["max_tokens"],

@@ -3,6 +3,7 @@
 Only deterministic loopback model calls. No sandbox escalation responses.
 """
 import json
+import argparse
 from pathlib import Path
 import subprocess
 import sys
@@ -42,6 +43,9 @@ def finish(stream):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runtime', type=Path, default=ROOT/'runtime/dsh')
+    args = parser.parse_args()
     base = ROOT / '.sumika-next' / ('p2-recovery-' + uuid.uuid4().hex)
     base.mkdir()
     home, work = base / 'home', base / 'work'
@@ -49,7 +53,7 @@ def main():
     subprocess.run(['git', 'init', '-q', str(work)], check=True)
     report = {'checks': {}, 'complete': False}
     evidence = {}
-    adapter = Dsh(ROOT, home)
+    adapter = Dsh(ROOT, home, runtime=args.runtime)
     with ModelFixture() as model:
         (home / '.env').write_text('DEEPSEEK_API_KEY=p2-local-fixture-not-a-secret\n', encoding='utf-8')
         (home / 'cordis.patch.yml').write_text(json.dumps([
@@ -105,7 +109,7 @@ def main():
             report['checks']['reconnect'] = True
             count = len(model.requests)
             adapter.close()
-            adapter = Dsh(ROOT, home)
+            adapter = Dsh(ROOT, home, runtime=args.runtime)
             adapter.start()
             recovered = snapshot(adapter, session)
             after = adapter._rpc('session/page', {
@@ -133,7 +137,13 @@ def main():
                     'address': {'kind': 'session', 'sessionId': session}, 'throughSeq': cancelled['cursor']})['records']
                 evidence['cancel'] = records
                 new_events = [r['event'] for r in records if r.get('type') == 'event' and r['event']['seq'] > cursor]
-                if any(e['type'] == 'assistant/attempt' for e in new_events) and new_events[-1]['type'] == 'step/end':
+                cancelled_turn = any(e['type'] == 'turn/end' and
+                                     e['data']['reason'].get('kind') == 'aborted' and
+                                     e['data']['reason'].get('reason', {}).get('kind') == 'user'
+                                     for e in new_events)
+                legacy_cancel = (new_events and new_events[-1]['type'] == 'step/end' and
+                                 any(e['type'] == 'assistant/attempt' for e in new_events))
+                if cancelled_turn or legacy_cancel:
                     break
                 assert time.monotonic() < deadline, 'cancel not persisted'
                 time.sleep(.2)

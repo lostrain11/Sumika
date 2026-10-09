@@ -2,6 +2,18 @@
 
 新版 Sumika 基于 Harness 中立架构，默认适配 DSH，目标是 Codex 日用开发平替。
 
+## 当前交付状态（2026-10-07）
+
+源码分支 `codex/sumika-next-dsh` 已推送到
+[GitHub](https://github.com/lostrain11/Sumika/tree/codex/sumika-next-dsh)。GitHub 上已有一个
+`v0.1.0-internal.20260920` 草稿预发布，包含可安装的 K 版 EXE；它仍是内部使用的草稿，
+不是公开发行。当前较新的 L2 中文安装器已在本机完成安装、启动、个人数据迁移和卸载保留验证，
+文件位于 `E:/SumikaBuild/wizard-l2/Sumika-Setup-2026.09.20-l.exe`，尚未上传到 GitHub Release。
+
+源码仓库不包含安装包、个人数据、模型权重或运行缓存；安装和验收记录见
+[内部使用验收](docs/project/internal-use-acceptance.json)、[安装与个人数据](docs/project/setup-and-personal-data.md)
+和 [内部开发说明](docs/project/internal-use-development.md)。
+
 当前计划见 [用户批准的完整计划](docs/project/approved-plan.md)，恢复工作先读
 [交接记录](docs/project/handoff.json) 和 [阶段验收](docs/project/phase-03-acceptance.md)。
 

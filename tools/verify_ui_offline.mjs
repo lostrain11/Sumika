@@ -1,7 +1,8 @@
 // Browser-network outage only. Does not stop the user's server or send tasks.
 import {createRequire} from 'node:module';
 import {writeFile,mkdir} from 'node:fs/promises';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
+import {waitForNativeFrame} from './lib/native-frame.mjs';
+const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
 const {chromium}=require('playwright');
 const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
 const context=await browser.newContext({viewport:{width:1280,height:720}});
@@ -11,7 +12,7 @@ let editor,original;
 try {
   await page.goto('http://127.0.0.1:8765/#board');
   await page.locator('#sumika-workbench-frame').waitFor({timeout:120000});
-  const frame=page.frames().find(f=>f.url().includes(':5175'));
+  const frame=await waitForNativeFrame(page, 'http://127.0.0.1:8765');
   editor=frame.locator('[contenteditable="true"]').first();
   await editor.waitFor();original=await editor.innerText();
   if(original.trim())throw new Error('Existing draft found; refusing to replace it');

@@ -1,13 +1,26 @@
 import {createRequire} from 'node:module';
 import {writeFile} from 'node:fs/promises';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
-const {chromium}=require('playwright');
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+import {waitForNativeFrame} from './lib/native-frame.mjs';
+import {loadPlaywright} from './lib/playwright.mjs';
+const {chromium}=loadPlaywright();
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const page=await browser.newPage({viewport:{width:1280,height:720}});
 const errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 page.on('console',e=>{if(e.type()==='error')errors.push(e.text().slice(0,150));});
 const checks=[];
+/**
+ * 版C 把名册改成默认收起条：收起时 `.roster-panel` 是 `display:none`，
+ * 里面的入口「尺寸为 0」→ Playwright 判定不可见 → 点不到（会超时）。
+ * 面板的展开路径是「点击常驻的标题条」（键盘/触屏可用，见 index.html 的 rosterDock），
+ * 所以这里像用户一样先展开，再点面板内的入口。
+ */
+async function openRoster(){
+  const dock=page.locator('#rosterDock');
+  if(await dock.evaluate(el=>el.classList.contains('open')))return;
+  await page.locator('#rosterBar').click();
+  await dock.locator('.roster-panel').waitFor({state:'visible'});
+}
 try{
   // Handoff uses an isolated durable-store substitute; never insert test
   // messages or handoffs into the user's personal conversation database.
@@ -34,6 +47,7 @@ try{
   for(const act of ['work','rest','idle'])await page.locator(`[data-act="${act}"]`).click();
   checks.push('activity controls');
   // Read-only real scope, no user memory modifications or model calls.
+  await openRoster();
   await page.getByRole('button',{name:'管理角色与记忆',exact:true}).click();
   await page.locator('dialog h3').filter({hasText:'关系'}).waitFor({timeout:60000});
   checks.push('role memory dialog');
@@ -41,11 +55,28 @@ try{
   await page.getByLabel('ZIP 文件完整路径').waitFor();
   checks.push('role package import form');
   await page.locator('dialog').getByRole('button',{name:'关闭',exact:true}).click();
+  await openRoster();
   await page.getByRole('button',{name:'管理角色与记忆',exact:true}).click();
   await page.getByRole('button',{name:'管理角色资源',exact:true}).click();
   await page.getByRole('heading',{name:'角色资源',exact:true}).waitFor();
-  await page.getByRole('button',{name:'导出角色资源包',exact:true}).waitFor();
-  checks.push('role resource controls (read-only inspection)');
+  // 可用控件取决于该角色是否可编辑：内置示例角色是只读的，openRoleResources 会在
+  // 「自带示例资源只读。」处提前返回，不渲染导出/归档按钮（ui/app/management.js）。
+  // 所以先问一次真实状态，再断言「该状态下应当出现的东西」，
+  // 而不是假定当前角色一定可编辑——那会把正确行为报成缺陷。
+  const resources=await page.evaluate(async()=>{
+    const active=await (await fetch('/api/roles')).json();
+    const id=active.active?.id;
+    if(!id)return null;
+    const state=await (await fetch('/api/manage/roles/'+encodeURIComponent(id)+'/resources')).json();
+    return {id,editable:!!state.editable};
+  });
+  if(resources?.editable){
+    await page.getByRole('button',{name:'导出角色资源包',exact:true}).waitFor();
+    checks.push(`role resource controls (editable role ${resources.id}, read-only inspection)`);
+  }else{
+    await page.locator('dialog').getByText('自带示例资源只读。',{exact:true}).waitFor();
+    checks.push(`role resource controls (built-in role ${resources?.id} is read-only)`);
+  }
   await page.locator('dialog').getByRole('button',{name:'关闭',exact:true}).click();
   // Delay role A so it returns after role B; use synthetic data only.
   await page.route('**/api/roles',route=>route.fulfill({json:{active:{id:'a'},roles:[{id:'a',name:'角色A',complete:true},{id:'b',name:'角色B',complete:true}]}}));
@@ -57,6 +88,7 @@ try{
     await route.fulfill({json:{scope:{role_id:id,project_id:'test'},revision:id,memories:[{id:1,text:`仅属于${id}`,source:'user'}],relations:[]}});
   });
   await page.route('**/api/manage/roles/*/usage',route=>route.fulfill({json:{groups:[]}}));
+  await openRoster();
   await page.getByRole('button',{name:'管理角色与记忆',exact:true}).click();
   await page.locator('dialog select').selectOption('b');
   await page.locator('dialog').getByText('仅属于b',{exact:true}).waitFor();
@@ -77,12 +109,16 @@ try{
   await page.locator('dialog').getByRole('button',{name:'关闭',exact:true}).click();
   await page.locator('#gnav [data-go="board"]').click();
   await page.locator('#sumika-workbench-frame').waitFor({timeout:120000});
-  const frame=page.frames().find(f=>f.url().includes(':5175'));
+  const frame=await waitForNativeFrame(page, 'http://127.0.0.1:8765');
   await frame.locator('[data-sumika-enhancement]').waitFor({timeout:20000});
   checks.push('native enhancement slot');
   // Exercise persistence without changing the user's final setting.
   const enhancement=frame.locator('[data-sumika-enhancement]');
-  if(await enhancement.getAttribute('aria-disabled')!=='true')throw new Error('planned optimization is active');
+  // 断言的是**实际的不可用状态**，而不是某个具体属性名。
+  // 组件用原生 `disabled` 表达不可用（client.js 的 PromptEnhancement），
+  // 按 ARIA 规范，原生 disabled 元素不该再加 aria-disabled；只认 aria-disabled
+  // 会让一个本来就不可用的按钮被误判成「已激活」。
+  if(!await enhancement.isDisabled())throw new Error('planned optimization is active');
   if(!await enhancement.evaluate(e=>!!e.closest('[data-slot="conversation.input.right"]')))throw new Error('optimization outside toolbar');
   checks.push('optimization toolbar reserved, unavailable');
   const editor=frame.locator('[contenteditable="true"]').first();

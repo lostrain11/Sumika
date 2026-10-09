@@ -3,6 +3,7 @@
 Two independent deterministic loopback providers; no cloud calls or credentials.
 """
 import json
+import argparse
 from pathlib import Path
 import subprocess
 import sys
@@ -31,6 +32,9 @@ def run(adapter, model, session, request, recipe):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runtime', type=Path, default=ROOT/'runtime/dsh')
+    args = parser.parse_args()
     base = ROOT/'.sumika-next'/('p4-'+uuid.uuid4().hex)
     base.mkdir(); home = base/'home'; work = base/'work'; other = base/'unregistered'
     home.mkdir(); work.mkdir(); other.mkdir()
@@ -45,8 +49,8 @@ def main():
             {'id': 'session-telemetry-otel', 'disabled': True}]
         patch = home/'cordis.patch.yml'
         patch.write_text(json.dumps(patches), encoding='utf-8')
-        install(work, home, ROOT/'runtime/dsh')
-        adapter = Dsh(ROOT, home)
+        install(work, home, args.runtime)
+        adapter = Dsh(ROOT, home, runtime=args.runtime)
         try:
             adapter.start()
             session = 'p4-first'
@@ -95,7 +99,7 @@ def main():
             patches = json.loads(patch.read_text(encoding='utf-8'))
             next(p for p in patches if p.get('id') == 'llm-deepseek')['config']['baseURL'] = second.url
             patch.write_text(json.dumps(patches), encoding='utf-8')
-            adapter = Dsh(ROOT, home); adapter.start()
+            adapter = Dsh(ROOT, home, runtime=args.runtime); adapter.start()
             new_session = 'p4-second'
             adapter._rpc('session/create', {'sessionId': new_session, 'cwd': str(work)})
             evidence['resume'] = run(adapter, second, new_session, 'Continue the project from its records.', [
@@ -129,13 +133,13 @@ def main():
             plugin['config']['enabled'] = False
             patch.write_text(json.dumps(patches), encoding='utf-8')
             count = len(handle(work, {'action': 'query', 'query': {'limit': 100}})['records'])
-            adapter = Dsh(ROOT, home); adapter.start()
+            adapter = Dsh(ROOT, home, runtime=args.runtime); adapter.start()
             adapter._rpc('session/create', {'sessionId': 'p4-disabled', 'cwd': str(work)})
             second.requests.clear()
             run(adapter, second, 'p4-disabled', 'Plugin disabled.', [])
             wire = second.requests[0]
             assert 'SUMIKA_CONTINUITY' not in json.dumps(wire)
-            assert not any(t['function']['name'].startswith('continuity_') for t in wire.get('tools', []))
+            assert not any(t.get('function', t)['name'].startswith('continuity_') for t in wire.get('tools', []))
             assert len(handle(work, {'action': 'query', 'query': {'limit': 100}})['records']) == count
             report['checks']['disabled_no_capture_tools_injection_data_preserved'] = True
             report['complete'] = True

@@ -7,7 +7,13 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ($DataDirectory) { $env:SUMIKA_DATA_DIR = [IO.Path]::GetFullPath($DataDirectory) }
 $userDir = if ($env:SUMIKA_DATA_DIR) { $env:SUMIKA_DATA_DIR } else { Join-Path $env:LOCALAPPDATA 'Sumika' }
-if (Test-Path -LiteralPath (Join-Path $root 'runtime\python')) { $env:SUMIKA_DATA_DIR = $userDir }
+$locationFile = Join-Path $env:LOCALAPPDATA 'Sumika-location.json'
+if (-not $env:SUMIKA_DATA_DIR -and (Test-Path -LiteralPath $locationFile)) {
+    $location = Get-Content -LiteralPath $locationFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not ($location.directory -is [string]) -or -not [IO.Path]::IsPathRooted($location.directory)) { throw '个人数据位置配置无效；未修改原数据。' }
+    $userDir = [IO.Path]::GetFullPath($location.directory)
+}
+if ((Test-Path -LiteralPath (Join-Path $root 'runtime\python')) -or (Test-Path -LiteralPath $locationFile)) { $env:SUMIKA_DATA_DIR = $userDir }
 $settings = Join-Path $userDir 'role-model-settings.json'
 $envFile = Join-Path $userDir 'env.ps1'
 
@@ -23,7 +29,7 @@ if (Test-Path -LiteralPath $bundledPython) {
 function Get-BridgeStatus {
     Push-Location $root
     try {
-        & $python -B -m ui.bridge_probe --root $root --settings $settings --port $Port
+        & $python -B (Join-Path $root 'tools/run_module.py') ui.bridge_probe --root $root --settings $settings --port $Port
         return $LASTEXITCODE
     } finally { Pop-Location }
 }

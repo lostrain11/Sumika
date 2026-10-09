@@ -5,9 +5,10 @@
 //   node tools/verify_workbench_screen.mjs [bridge] [evidence.json] [shot.png]
 import { createRequire } from 'node:module';
 import { writeFile } from 'node:fs/promises';
+import { isNativeOrigin } from './lib/native-frame.mjs';
 
 const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/',
+  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
 );
 const { chromium } = require('playwright');
 
@@ -33,7 +34,7 @@ page.on('console', (message) => {
   }
 });
 page.on('request', (request) => {
-  if (request.url().includes(':5175')) frameRequests.push(request.url().split('?')[0]);
+  if (isNativeOrigin(request.url(), bridge)) frameRequests.push(request.url().split('?')[0]);
 });
 page.on('response', (response) => {
   if (response.status() >= 400) badResponses.push({ status: response.status(), url: response.url().split('?')[0] });
@@ -53,22 +54,56 @@ const state = await page.evaluate(() => {
     frameHeight: box ? Math.round(box.height) : 0,
     mockWrapPresent: !!document.querySelector('#screen-board .wb-wrap'),
     navVisible: !!document.querySelector('#gnav button[data-go="board"]'),
-    deskpetVisible: (() => {
+    // 计划 §Phase 2-4 的决定：工作台屏**恢复**桌宠显示（冲突时默认收起为圆钮）。
+    // 因此要测的不是「有没有」，而是「有没有保持收起、有没有挡住工作台」。
+    deskpet: (() => {
       const node = document.querySelector('#deskpet');
       if (!node) return null;
-      return getComputedStyle(node).display !== 'none';
+      const box = node.getBoundingClientRect();
+      const fb = frame?.getBoundingClientRect();
+      const overlap = fb && fb.width && fb.height
+        ? Math.max(0, Math.min(box.right, fb.right) - Math.max(box.left, fb.left))
+          * Math.max(0, Math.min(box.bottom, fb.bottom) - Math.max(box.top, fb.top))
+          / (fb.width * fb.height) * 100
+        : 0;
+      return {
+        display: getComputedStyle(node).display,
+        collapsed: node.classList.contains('mini'),
+        bubbleVisible: getComputedStyle(node.querySelector('[data-dp-bubble]') || node).display !== 'none',
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+        overlapPct: Math.round(overlap * 100) / 100,
+      };
     })(),
   };
 });
 
 if (!state.screenVisible) failures.push('workbench screen is not the active screen');
 if (!state.framePresent) failures.push('the workbench screen does not frame the DSH front end');
-if (state.frameSrc && !/:5175\/?$/.test(state.frameSrc)) {
-  failures.push(`frame source is not the managed instance: ${state.frameSrc.split('?')[0]}`);
+// 受管实例的端口由调用方决定（port 默认 0 即动态分配），所以只断言
+// 「frame 指向一个非外壳的 127.0.0.1 服务」，不写死 :5175。
+if (!state.framePresent) failures.push('the workbench screen frames nothing');
+else if (!state.frameSrc) failures.push('the workbench frame has no source');
+else if (!isNativeOrigin(state.frameSrc, bridge)) {
+  failures.push(`frame source is not the managed instance: ${state.frameSrc}`);
 }
 if (state.frameHeight < 400) failures.push(`frame is only ${state.frameHeight}px tall`);
 if (state.mockWrapPresent) failures.push('the design mock board markup is still in the workbench screen');
-if (state.deskpetVisible === true) failures.push('the sample deskpet overlay is visible over the real workbench');
+// 桌宠按计划在工作台屏恢复显示，但必须保持「收起为圆钮」且不遮挡工作台；
+// 原来断言「不可见」是改造前的旧口径，已按新决策改为断言「存在 + 收起 + 不挡」。
+if (state.deskpet === null) failures.push('the deskpet is missing on the workbench screen');
+else if (state.deskpet.display === 'none') failures.push('the deskpet is hidden on the workbench screen');
+else {
+  if (!state.deskpet.collapsed) {
+    failures.push('the deskpet is expanded over the workbench instead of staying a round button');
+  }
+  if (state.deskpet.bubbleVisible) {
+    failures.push('the deskpet conversation bubble is open over the workbench');
+  }
+  if (state.deskpet.overlapPct > 1) {
+    failures.push(`the deskpet occludes ${state.deskpet.overlapPct}% of the workbench`);
+  }
+}
 if (frameRequests.length === 0) failures.push('the page never requested the managed instance');
 if (pageErrors.length) failures.push(`client errors: ${pageErrors.join(' | ')}`);
 // A missing favicon is the browser asking for something the page never

@@ -19,7 +19,10 @@ class MicrophonePermissionTests(unittest.TestCase):
                 with patch('extensions.desktop.perception.capture_audio') as capture:
                     with self.assertRaises(PermissionError):execute(store,command)
                     capture.assert_not_called()
-                manager=Management(SimpleNamespace(capability_database=database,workbench=SimpleNamespace(root=Path(folder)),stop_speech=Mock()))
+                from extensions.models.settings import example, save
+                settings = Path(folder)/'settings.json'
+                save(example(Path(folder)/'role', Path(folder)/'memory.db'), settings)
+                manager=Management(SimpleNamespace(settings_path=settings,capability_database=database,workbench=SimpleNamespace(root=Path(folder)),stop_speech=Mock()))
                 with patch('ui.management.service_capabilities',return_value=[]):
                     state=manager.modules()
                     payload={'id':'microphone','enabled':True,'expected_revision':state['revision']}

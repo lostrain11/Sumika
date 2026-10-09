@@ -1,4 +1,4 @@
-param(
+﻿param(
     [int]$Port = 8765,
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string]$DataDirectory
@@ -6,7 +6,13 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($DataDirectory) { $env:SUMIKA_DATA_DIR = [IO.Path]::GetFullPath($DataDirectory) }
 $userDir = if ($env:SUMIKA_DATA_DIR) { $env:SUMIKA_DATA_DIR } else { Join-Path $env:LOCALAPPDATA 'Sumika' }
-if (Test-Path -LiteralPath (Join-Path $Root 'runtime\python')) { $env:SUMIKA_DATA_DIR = $userDir }
+$locationFile = Join-Path $env:LOCALAPPDATA 'Sumika-location.json'
+if (-not $env:SUMIKA_DATA_DIR -and (Test-Path -LiteralPath $locationFile)) {
+    $location = Get-Content -LiteralPath $locationFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not ($location.directory -is [string]) -or -not [IO.Path]::IsPathRooted($location.directory)) { throw '个人数据位置配置无效；未修改原数据。' }
+    $userDir = [IO.Path]::GetFullPath($location.directory)
+}
+if ((Test-Path -LiteralPath (Join-Path $Root 'runtime\python')) -or (Test-Path -LiteralPath $locationFile)) { $env:SUMIKA_DATA_DIR = $userDir }
 $settings = Join-Path $userDir 'role-model-settings.json'
 # The bridge creates disabled defaults on first launch; role setup is optional.
 # Optional capability registry; an absent file simply yields an empty list.
@@ -22,7 +28,7 @@ if (Test-Path -LiteralPath $bundledPython) {
     $python = Join-Path $bundledPython 'python.exe'
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Bundled Python runtime is incomplete' }
 } else { $python = (Get-Command python -ErrorAction Stop).Source }
-$process = Start-Process -FilePath $python -ArgumentList '-B', '-m', 'ui.server', '--port', $Port, '--settings', ('"' + $settings + '"'), '--capabilities', ('"' + $capabilities + '"'), '--schedules', ('"' + $schedules + '"') `
+$process = Start-Process -FilePath $python -ArgumentList '-B', ('"' + (Join-Path $Root 'tools/run_module.py') + '"'), 'ui.server', '--port', $Port, '--settings', ('"' + $settings + '"'), '--capabilities', ('"' + $capabilities + '"'), '--schedules', ('"' + $schedules + '"') `
     -WindowStyle Hidden -WorkingDirectory $Root -PassThru `
     -RedirectStandardOutput (Join-Path $logDirectory 'sumika-ui-bridge.out.log') `
     -RedirectStandardError (Join-Path $logDirectory 'sumika-ui-bridge.err.log')

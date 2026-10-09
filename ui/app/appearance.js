@@ -34,9 +34,12 @@ export async function bindBackground(card) {
   const row=[...card.querySelectorAll('.set-row')].find(r=>r.textContent.trim().startsWith('背景'));
   if(!row)return;
   row.replaceChildren();
-  const label=document.createElement('div');label.textContent='背景';
-  const note=document.createElement('small');
-  note.textContent='图片仅保存在当前浏览器；保留角色与陈设，清除浏览器数据会恢复默认。';label.append(note);
+  /* 说明文本不常驻在选项下方：统一进悬停提示（.sumika-field-help / .sumika-tooltip）。
+     触发器的补全交给 tooltip.js 的 hydrateHelp()，这里只放 data-help 占位。 */
+  const label=document.createElement('div');label.className='lbl';label.textContent='背景';
+  const help=document.createElement('span');help.className='sumika-field-help';
+  help.dataset.help='图片仅保存在当前浏览器；保留角色与陈设，清除浏览器数据会恢复默认。';
+  label.append(help);
   const status=document.createElement('small');status.setAttribute('role','status');
   const picker=document.createElement('input');picker.type='file';picker.accept='image/png,image/jpeg,image/webp';picker.hidden=true;
   picker.setAttribute('aria-label','选择本地背景图片');
@@ -63,6 +66,8 @@ export async function bindBackground(card) {
     finally{busy(false);}
   };
   row.append(label,choose,reset,picker,status);
+  /* 动态插入后补全提示触发器（tooltip.js 的 MutationObserver 亦可覆盖，显式调用更稳） */
+  window.sumikaHydrateHelp?.(row);
   try{const blob=await storage('read');render(blob);status.textContent=blob?'当前使用本地背景':'当前使用部室午后';}
   catch(error){status.textContent=`无法读取本地背景：${error.message}`;}
 }

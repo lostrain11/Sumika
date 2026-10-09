@@ -1,11 +1,14 @@
-/* Adapt the D prototype's fixed review canvas to the real client viewport. */
-html[data-theme='dark'] {
-  color-scheme:dark;
-  --bg:#191d1d;--paper:#222727;--paper-2:#292f2e;--ink:#e7e9df;--muted:#acb7b0;--line:#47524d;
-  --rose:#e299af;--rose-deep:#e7aec0;--rose-soft:#403039;
-  --green:#a0cbb1;--green-soft:#2e4137;--mizu:#a0c8e2;--mizu-soft:#283c49;
-  --amber:#dfbf88;--amber-soft:#423b2c;--danger:#eea0a5;--shadow:0 4px 14px #0003;
-}
+/* ============================================================================
+   视口适配层
+   ----------------------------------------------------------------------------
+   颜色令牌已统一到 tokens.css（唯一来源）；本文件只负责：
+   1) 把原型的固定评审画布改造成真实客户端视口（flex 纵向 + 高度自适应）
+   2) 真实系统滚动条（原型全局隐藏了滚动条）
+   3) 由 management.js / bind.js 注入的动态区块的兜底与响应式
+   ========================================================================== */
+html[data-theme='dark'] { color-scheme: dark; }
+
+/* 早前主题补丁：原属旧的暗色硬编码，现令牌已能覆盖，保留为显式兜底 */
 html[data-theme='dark'] .add-tile,
 html[data-theme='dark'] .cam-chip,
 html[data-theme='dark'] .d-caption { background:var(--paper);color:var(--ink); }
@@ -16,14 +19,17 @@ html[data-theme='dark'] .act-demos,
 html[data-theme='dark'] .cam-modes button { background:var(--paper);color:var(--ink);border-color:var(--line); }
 html[data-theme='dark'] .cam-modes button.active { background:var(--mizu-soft);color:var(--mizu); }
 html[data-theme='dark'] .act-demos button.active { background:var(--rose-soft);color:var(--rose); }
-.sumika-network-notice { position:fixed; top:68px; left:50%; transform:translateX(-50%); z-index:1000; max-width:calc(100vw - 32px); padding:10px 16px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); box-shadow:0 3px 14px #0001; font-size:12px; }
 html, body { width: 100%; height: 100%; overflow: hidden; }
 body { display: flex; flex-direction: column; }
 .topbar { flex: 0 0 64px; min-width: 0; }
 .screen { flex: 1 1 auto; min-height: 0; height: auto; }
 .room-wrap, .cap-wrap, .set-wrap { min-width: 0; min-height: 0; }
 .room-wrap > *, .cap-wrap > *, .set-wrap > * { min-width: 0; min-height: 0; }
-.cap-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+/* .cap-grid 的列定义归 shelf.css 单独所有（repeat(auto-fill, minmax(var(--grid-min),1fr))）。
+   这里曾用 auto-fit/minmax(170px,1fr) 再定义一次，因 layout.css 后加载而覆盖 shelf.css：
+   auto-fit 会折叠空轨道，于是「3 张卡的组」每张被拉到 506px，而「8 张卡的组」只有 182px，
+   同页出现两种卡宽——正是用户指出的「卡片大小不统一」。同一件事只能有一个来源，
+   所以此处不再重复定义，响应式最小宽度由 --grid-min 令牌统一控制。 */
 .cap-card .top { flex-wrap: wrap; }
 .cap-card p, .kv b, .set-row small { overflow-wrap: anywhere; }
 .cap-side, .set-side, .set-nav { overflow-y: auto; }
@@ -40,7 +46,7 @@ body { display: flex; flex-direction: column; }
 .chat pre { max-width: 100%; overflow-x: auto; }
 /* Restore discoverable scrollbars; the prototype globally suppressed them. */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-thumb { background: #d8cfba; border-radius: 9px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
 button:focus-visible, [role='switch']:focus-visible, a:focus-visible {
   outline: 2px solid var(--green); outline-offset: 2px;
 }
@@ -60,7 +66,7 @@ button:focus-visible, [role='switch']:focus-visible, a:focus-visible {
 .sumika-record button { margin:5px; }
 .cap-card.selected { border-color:var(--rose); box-shadow:0 0 0 1px var(--rose-soft); }
 html[data-density='compact'] .set-row { padding-top:7px; padding-bottom:7px; }
-html[data-density='compact'] .cap-card { min-height:145px; padding:10px; }
+html[data-density='compact'] .cap-card { min-height:var(--card-h-dense); padding:10px; }
 html[data-density='compact'] .roster .member { padding:6px 8px; }
 @media (max-width: 1250px) {
   .topbar { gap: 12px; padding: 0 16px; }
@@ -87,7 +93,7 @@ html[data-density='compact'] .roster .member { padding:6px 8px; }
 }
 
 /* Narrow windows keep navigation readable, with status on a separate row. */
-.topbar .brand, .gnav button, .top-right .back-btn { white-space: nowrap; flex-shrink: 0; }
+.topbar .brand, .gnav button { white-space: nowrap; flex-shrink: 0; }
 @media (max-width: 680px) {
   .topbar { height: auto; min-height: 64px; flex-wrap: wrap; padding: 10px 12px; gap: 8px 16px; }
   .topbar .brand .jp { font-size: 20px; }
@@ -104,15 +110,10 @@ html[data-density='compact'] .roster .member { padding:6px 8px; }
 .room-history-controls small { flex-basis:100%; color:var(--muted); font-size:11px; }
 
 /* Capability configuration reuses the design detail panels. */
+/* ---- 能力页设置块：结构规则（视觉规则见 css/settings.css 同名区块） ---- */
+/* 旧版曾要求“说明文本常驻在选项下方”，现已统一为悬停提示，故不再为 small 做排版兜底 */
 .sumika-capability-settings .set-row { display:flex; flex-wrap:wrap; gap:8px; padding:12px 0; position:relative; }
 .sumika-capability-settings .set-row > span:first-child { flex:1; }
 .sumika-capability-settings .sumika-field:not([type="checkbox"]) { flex-basis:100%; width:100%; min-width:0; box-sizing:border-box; }
 .sumika-capability-settings h3 { margin:12px 0; }
-.sumika-field-help { position:relative; display:inline-flex; flex:none; align-items:center; }
-.sumika-help-trigger { border:1px solid var(--line); border-radius:50%; width:22px; height:22px; background:var(--paper); color:var(--muted); cursor:help; font-size:12px; }
-.sumika-tooltip { display:none; position:absolute; z-index:50; right:0; top:calc(100% + 7px); width:260px; max-width:70vw; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); box-shadow:var(--shadow); font-size:12px; line-height:1.7; font-weight:normal; }
-.set-row:hover .sumika-tooltip,.set-row:focus-within .sumika-tooltip,.sumika-field-help.open .sumika-tooltip { display:block; }
-.sumika-help-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-
-.sumika-capability-settings .sumika-field:not([type="checkbox"]) { order:2; }
 .sumika-capability-settings > .mini-btn { margin:6px 6px 0 0; }

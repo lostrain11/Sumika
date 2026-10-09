@@ -19,9 +19,9 @@ def execute(store, request):
     if capability=='voice' and provider=='windows-sapi' and operation=='synthesize':
         from extensions.roles.voice import synthesize
         return synthesize(**args,**settings)
-    if capability=='asr' and provider=='vosk' and operation=='transcribe':
+    if capability=='asr' and provider in ('vosk', 'sherpa-onnx-sensevoice') and operation=='transcribe':
         from extensions.roles.voice import transcribe
-        return transcribe(**args,**settings)
+        return transcribe(**args,**settings,provider=provider)
     if capability=='camera' and provider=='opencv' and operation=='capture':
         from extensions.desktop.perception import capture_camera
         return capture_camera(**args)

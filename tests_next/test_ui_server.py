@@ -25,6 +25,551 @@ def _role_dir(root):
 
 
 class UIServerTests(unittest.TestCase):
+    def test_oneshot_configuration_accepts_sensevoice_and_checks_rate(self):
+        from extensions.capabilities import CapabilityStore
+        bridge = self.server.sumika_bridge
+        store = CapabilityStore(bridge.capability_database)
+        try:
+            store.configure('microphone','sounddevice', options={'user_authorized':True})
+            store.configure('asr','sherpa-onnx-sensevoice')
+        finally:
+            store.close()
+        settings = load_settings(self.settings_path)
+        settings['voice'].update(enabled=True, input_device=7, sample_rate=16000,
+                                 asr_model=str(self.settings_path.parent))
+        with patch('ui.server.load_settings', return_value=settings), \
+             patch('extensions.desktop.audio_devices.env_python', return_value='python.exe'):
+            config = bridge.speech_configuration('ui-role')
+            self.assertEqual(config['asr']['provider'], 'sherpa-onnx-sensevoice')
+            settings['voice']['sample_rate'] = 22050
+            with self.assertRaisesRegex(ValueError, '16kHz'):
+                bridge.speech_configuration('ui-role')
+
+    def test_pet_endpoint_uses_actual_bridge_port_and_no_custom_arguments(self):
+        bridge=self.server.sumika_bridge
+        with patch.object(bridge._pet_host,'start',return_value={'status':'running','alive':True}) as start:
+            _, result=self.request('/api/companion/pet',method='POST',body={'action':'start'})
+            self.assertTrue(result['alive'])
+            start.assert_called_once_with(self.server.server_port)
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/companion/pet',method='POST',body={'action':'start','url':'https://example.com'})
+            self.assertEqual(start.call_count,1)
+
+    def test_pet_status_never_starts_and_shutdown_fences_launch(self):
+        bridge=self.server.sumika_bridge
+        with patch.object(bridge._pet_host,'start') as start:
+            _, result=self.request('/api/companion/pet',method='POST',body={'action':'status'})
+            self.assertFalse(result['alive'])
+            bridge._shutdown_requested.set()
+            try:
+                with self.assertRaises(RuntimeError): bridge.companion_pet({'action':'start'})
+            finally: bridge._shutdown_requested.clear()
+            start.assert_not_called()
+
+    def test_text_question_rejects_changed_capture_without_model_call(self):
+        bridge=self.server.sumika_bridge
+        with patch.object(bridge._companion,'ask') as ask:
+            with self.assertRaisesRegex(ValueError,'stopped or changed'):
+                bridge.companion_ask('why',expected_target='window:123:pid:42')
+            ask.assert_not_called()
+
+    def test_text_question_binds_target_and_keeps_voice_owner(self):
+        bridge=self.server.sumika_bridge
+        bridge.companion_observe({'source':'window-visual','target':'window:123:pid:42',
+                                  'valid':True,'text':'lesson'})
+        with patch.object(bridge._perception,'status',return_value={'alive':True,'target':{'handle':123,'process_id':42}}), \
+             patch.object(bridge._microphone,'stop') as stop, \
+             patch.object(bridge._companion,'ask',return_value={'text':'answer'}) as ask:
+            bridge.companion_ask('why',expected_target='window:123:pid:42')
+            stop.assert_not_called()
+            self.assertEqual(ask.call_args.kwargs['binding'].observation.target,'window:123:pid:42')
+    def test_voice_status_does_not_hold_event_lock_while_reading_capture_state(self):
+        bridge = self.server.sumika_bridge
+        failures = []
+        def capture_status():
+            finished = threading.Event()
+            def callback():
+                bridge._companion_microphone_event({'event':'delta','text':'parallel'})
+                finished.set()
+            thread = threading.Thread(target=callback)
+            thread.start()
+            if not finished.wait(1):
+                failures.append('capture status blocked voice callback')
+            thread.join(1)
+            return {'status':'running','alive':True}
+        with patch.object(bridge._perception,'status',side_effect=capture_status), \
+             patch.object(bridge._application_audio,'status',return_value={'status':'running','alive':True}):
+            result=bridge.companion_microphone({'action':'status'})
+        self.assertEqual(failures, [])
+        self.assertTrue(result['capture']['alive'])
+        self.assertTrue(result['application_audio']['alive'])
+        self.assertEqual(result['events'][-1]['text'],'parallel')
+
+    def test_microphone_requires_both_consents_before_launch(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge._microphone, 'start') as launch:
+            for payload in ({'action':'start'}, {'action':'start','microphone_consent':True},
+                            {'action':'start','playback_consent':True}):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/microphone', method='POST', body=payload)
+            launch.assert_not_called()
+
+    def test_microphone_events_are_bounded_and_cursor_filtered(self):
+        bridge = self.server.sumika_bridge
+        for index in range(100):
+            bridge._companion_microphone_event({'event':'delta','text':str(index)})
+        _, state = self.request('/api/companion/microphone', method='POST',
+                                body={'action':'status','after':98})
+        self.assertEqual(state['cursor'], 100)
+        self.assertEqual([event['text'] for event in state['events']], ['98','99'])
+        self.assertEqual(len(bridge._voice_events), 64)
+
+    def test_visual_and_audio_updates_reach_microphone_as_fused_context(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge._microphone, 'status', return_value={'alive':True}), \
+             patch.object(bridge._microphone, 'observe') as observe:
+            self.request('/api/companion/observe', method='POST', body={
+                'source':'window-visual','target':'lesson','valid':True,'text':'diagram'})
+            self.assertIn('+00:00', observe.call_args.args[0]['observed_at'])
+            bridge._companion_audio_observe({'observed_at':'2099-01-01T00:00:00+00:00',
+                'source':'application-audio-transcript','target':'lesson', 'valid':True,
+                'text':'narration', 'metadata':{}})
+            self.assertIn('narration', observe.call_args.args[0]['text'])
+            bridge._companion_audio_clear()
+            self.assertEqual(observe.call_args.args[0]['text'], 'diagram')
+
+    def test_microphone_start_revoked_during_settings_check_never_spawns(self):
+        from extensions.capabilities import CapabilityStore
+        bridge = self.server.sumika_bridge
+        store = CapabilityStore(bridge.capability_database)
+        try:
+            for kind, provider in (('microphone','sounddevice'),('asr','vosk'),('voice','windows-sapi')):
+                store.configure(kind, provider, options={'user_authorized':True})
+        finally: store.close()
+        bridge.companion_observe({'source':'web','target':'lesson','valid':True,'text':'lesson'})
+        settings = load_settings(self.settings_path)
+        settings['voice'].update(enabled=True, input_device=7, asr_model=str(self.settings_path.parent))
+        entered, release = threading.Event(), threading.Event()
+        failures = []
+        def blocked(path): entered.set(); release.wait(3); return settings
+        def start():
+            try: bridge.companion_microphone({'action':'start','microphone_consent':True,'playback_consent':True})
+            except Exception as error: failures.append(error)
+        with patch('ui.server.load_settings', side_effect=blocked), \
+             patch('extensions.companion.microphone_process.subprocess.Popen') as spawn:
+            worker = threading.Thread(target=start)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                bridge.companion_revoke()
+            finally:
+                release.set()
+                worker.join(3)
+            spawn.assert_not_called()
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(len(failures), 1)
+            self.assertIn('revoked', str(failures[0]))
+
+    def test_target_switch_during_microphone_preflight_prevents_old_target_spawn(self):
+        from extensions.capabilities import CapabilityStore
+        bridge = self.server.sumika_bridge
+        store = CapabilityStore(bridge.capability_database)
+        try:
+            for kind, provider in (('microphone','sounddevice'),('asr','vosk'),('voice','windows-sapi')):
+                store.configure(kind, provider, options={'user_authorized':True})
+        finally: store.close()
+        bridge.companion_observe({'source':'web','target':'lesson','valid':True,'text':'lesson'})
+        settings = load_settings(self.settings_path)
+        settings['voice'].update(enabled=True, input_device=7, asr_model=str(self.settings_path.parent))
+        entered, release = threading.Event(), threading.Event()
+        failures = []
+        def blocked(path): entered.set(); release.wait(3); return settings
+        def start():
+            try: bridge.companion_microphone({'action':'start','microphone_consent':True,'playback_consent':True})
+            except Exception as error: failures.append(error)
+        with patch('ui.server.load_settings', side_effect=blocked), \
+             patch('extensions.companion.microphone_process.subprocess.Popen') as spawn:
+            worker = threading.Thread(target=start)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                bridge.companion_observe({'source':'web','target':'other','valid':True,'text':'other lesson'})
+            finally:
+                release.set()
+                worker.join(3)
+            spawn.assert_not_called()
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(len(failures), 1)
+            self.assertIn('revoked', str(failures[0]))
+            self.assertEqual(bridge._companion.latest.target, 'other')
+
+    def test_audio_start_revoked_while_bridge_checks_settings_never_spawns(self):
+        from extensions.capabilities import CapabilityStore
+        bridge = self.server.sumika_bridge
+        store = CapabilityStore(bridge.capability_database)
+        try: store.configure('asr', 'vosk')
+        finally: store.close()
+        self.request('/api/companion/observe', method='POST', body={
+            'source':'window-visual','target':'window:123:pid:456','valid':True,'text':'lesson'})
+        settings = load_settings(self.settings_path)
+        settings['voice']['enabled'] = True
+        settings['voice']['asr_model'] = str(self.settings_path.parent)
+        entered, release = threading.Event(), threading.Event()
+        errors = []
+        def blocked(path): entered.set(); release.wait(3); return settings
+        def start():
+            try: bridge.companion_audio({'action':'start','consent':True,
+                                        'process_id':456,'process_creation':'7'})
+            except Exception as error: errors.append(error)
+        with patch('ui.server.load_settings', side_effect=blocked), \
+             patch('extensions.companion.application_audio_process.subprocess.Popen') as spawn:
+            thread = threading.Thread(target=start)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                bridge.companion_revoke()
+            finally:
+                release.set()
+                thread.join(3)
+            self.assertFalse(thread.is_alive())
+            spawn.assert_not_called()
+            self.assertEqual(len(errors), 1)
+            self.assertIn('revoked', str(errors[0]))
+            self.assertIsNone(bridge._companion.latest)
+
+    def test_expired_audio_allows_new_visual_even_with_older_source_timestamp(self):
+        bridge = self.server.sumika_bridge
+        self.request('/api/companion/observe', method='POST', body={
+            'observed_at':'2026-01-01T00:00:00+00:00','source':'window-visual',
+            'target':'window:123:pid:456','valid':True,'text':'diagram'})
+        bridge._companion_audio_observe({'observed_at':'2026-01-01T00:00:02+00:00',
+            'source':'application-audio-transcript','target':'window:123:pid:456',
+            'valid':True,'text':'tutorial narration','metadata':{}})
+        bridge._fusion.clock = lambda: float('inf')
+        _, result = self.request('/api/companion/observe', method='POST', body={
+            'observed_at':'2026-01-01T00:00:01+00:00','source':'window-visual',
+            'target':'window:123:pid:456','valid':True,'text':'next diagram'})
+        self.assertEqual(result['status'], 'updated')
+        self.assertEqual(bridge._companion.latest.text, 'next diagram')
+        self.assertEqual(bridge._companion.latest.metadata['visual_observed_at'],
+                         '2026-01-01T00:00:01+00:00')
+
+    def test_application_audio_fuses_visual_context_and_stop_removes_audio(self):
+        bridge = self.server.sumika_bridge
+        self.request('/api/companion/observe', method='POST', body={
+            'source':'window-visual','target':'window:123:pid:456','valid':True,
+            'text':'diagram','image':{'media_type':'image/jpeg','data_base64':'fixture'}})
+        bridge._companion_audio_observe({'observed_at':'2099-01-01T00:00:00+00:00',
+            'source':'application-audio-transcript','target':'window:123:pid:456',
+            'valid':True,'text':'tutorial narration','metadata':{'capture_offset_seconds':2}})
+        self.assertEqual(bridge._companion.latest.source, 'window-visual')
+        self.assertIn('diagram', bridge._companion.latest.text)
+        self.assertIn('tutorial narration', bridge._companion.latest.text)
+        self.assertIsNotNone(bridge._companion.latest.image)
+        self.request('/api/companion/audio', method='POST', body={'action':'stop'})
+        self.assertEqual(bridge._companion.latest.text, 'diagram')
+
+    def test_application_audio_pause_uses_resumable_owner_state(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge._application_audio, 'pause', return_value={
+                'status':'paused','alive':False,'target':None} ) as pause:
+            _, result = self.request('/api/companion/audio', method='POST',
+                                     body={'action':'pause'})
+        pause.assert_called_once_with()
+        self.assertEqual(result['status'], 'paused')
+
+    def test_media_state_pauses_owned_application_audio_and_clears_fusion(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge._application_audio, 'status', side_effect=[
+                {'alive': True, 'target': 'video:1'},
+                {'alive': False, 'target': None}]), \
+             patch.object(bridge._application_audio, 'pause') as pause, \
+             patch.object(bridge, '_companion_audio_clear') as clear:
+            result = bridge.companion_media_state({'target':'video:1','state':'paused'})
+        pause.assert_called_once_with()
+        clear.assert_called_once_with()
+        self.assertEqual(result['action'], 'paused_audio')
+
+    def test_media_state_rejects_foreign_audio_target(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge._application_audio, 'status', return_value={
+                'alive': True, 'target': 'video:old'}):
+            with self.assertRaisesRegex(ValueError, 'does not own'):
+                bridge.companion_media_state({'target':'video:new','state':'seeking'})
+
+    def test_visual_observation_media_state_routes_through_shared_boundary(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge, 'companion_media_state', wraps=bridge.companion_media_state) as media:
+            self.request('/api/companion/observe', method='POST', body={
+                'source':'window-visual','target':'video:1','valid':True,
+                'text':'paused frame','metadata':{'paused':True}})
+        media.assert_called_once_with({'target':'video:1','state':'paused'})
+
+    def test_application_audio_consent_and_target_checked_before_worker_launch(self):
+        bridge = self.server.sumika_bridge
+        with patch.object(bridge._application_audio, 'start') as launch:
+            for payload in ({'action':'start'},
+                            {'action':'start','consent':True,'process_id':456}):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/audio', method='POST', body=payload)
+            launch.assert_not_called()
+
+    def test_media_change_stops_audio_even_when_window_is_unchanged(self):
+        bridge = self.server.sumika_bridge
+        payload = {'source': 'window-visual', 'target': 'window:123:pid:456',
+                   'valid': True, 'text': 'new lesson',
+                   'metadata': {'media_identity': {'video': 'current'}}}
+        for identity, expected in (({'video': 'current'}, False), ({'video': 'old'}, True)):
+            with self.subTest(identity=identity), \
+                 patch.object(bridge._application_audio, 'status', return_value={
+                     'target': payload['target'], 'media_identity': identity}), \
+                 patch.object(bridge._application_audio, 'stop') as stop:
+                bridge.companion_observe(payload)
+                self.assertEqual(stop.called, expected)
+
+    def test_capture_withdrawal_does_not_wait_for_active_answer(self):
+        entered, release = threading.Event(), threading.Event()
+        result, errors = [], []
+        bridge = self.server.sumika_bridge
+        def answer(*args, **kwargs):
+            with bridge._chat_lock:
+                entered.set()
+                if not release.wait(5): raise RuntimeError('model fixture timed out')
+                return {'text': 'old answer'}
+        bridge._companion._role_chat = answer
+        self.request('/api/companion/observe', method='POST', body={
+            'source':'web', 'target':'lesson', 'valid':True, 'text':'lesson'})
+        def ask():
+            try: result.append(self.request('/api/companion/ask', method='POST', body={'question':'explain'})[1])
+            except Exception as error: errors.append(str(error))
+        worker = threading.Thread(target=ask)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            _, state = self.request('/api/companion/perception', method='POST', body={'action':'status'})
+            self.assertFalse(state['alive'])
+            _, audio = self.request('/api/companion/audio', method='POST', body={'action':'status'})
+            _, microphone = self.request('/api/companion/microphone', method='POST', body={'action':'stop'})
+            self.assertFalse(microphone['alive'])
+            self.assertEqual(audio['status'], 'stopped')
+            _, audio = self.request('/api/companion/audio', method='POST', body={'action':'stop'})
+            self.assertEqual(audio['status'], 'stopped')
+            _, state = self.request('/api/companion/revoke', method='POST', body={})
+            self.assertEqual(state['status'], 'revoked')
+            self.assertFalse(release.is_set())
+        finally:
+            release.set(); worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(result[0]['status'], 'stale_response')
+        self.assertNotIn('text', result[0])
+
+    def test_perception_lifecycle_requires_consent_and_explicit_resume_state(self):
+        with patch('extensions.companion.perception_process.subprocess.Popen') as launch:
+            for payload in ({'action':'start','handle':123,'process_id':456},
+                            {'action':'start','consent':True,'handle':'123','process_id':456},
+                            {'action':'resume'}, {'action':'unknown'}):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/perception', method='POST', body=payload)
+            launch.assert_not_called()
+            _, state = self.request('/api/companion/perception', method='POST', body={'action':'status'})
+            self.assertEqual(state['status'], 'stopped')
+            self.assertFalse(state['alive'])
+
+    def test_perception_pdf_binding_validates_before_releasing_audio(self):
+        bridge = self.server.sumika_bridge
+        expected = str((Path(self._tmp.name) / 'lesson.pdf').resolve())
+        with patch('extensions.desktop.windows_capture._identity'), \
+             patch.object(bridge._application_audio, 'stop') as audio_stop, \
+             patch.object(bridge._microphone, 'stop') as microphone_stop, \
+             patch.object(bridge._perception, 'start', return_value={'status':'starting'}) as start:
+            for invalid in ('relative.pdf', 123, expected.replace('.pdf', '.txt')):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/perception', method='POST', body={
+                        'action':'start', 'handle':123, 'process_id':456,
+                        'consent':True, 'expected_document':invalid})
+            audio_stop.assert_not_called()
+            microphone_stop.assert_not_called()
+            start.assert_not_called()
+            self.request('/api/companion/perception', method='POST', body={
+                'action':'start', 'handle':123, 'process_id':456,
+                'consent':True, 'expected_document':expected})
+            start.assert_called_once_with(handle=123, process_id=456,
+                approved=True, expected_document=expected)
+            audio_stop.assert_called_once()
+            microphone_stop.assert_called_once()
+
+    def test_visual_capture_requires_consent_and_binds_image_observation(self):
+        with patch('ui.server.subprocess.run') as run, patch('ui.server.Path.is_file', return_value=True):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/companion/capture', method='POST', body={'handle':123,'process_id':456})
+            run.assert_not_called()
+            run.return_value.returncode = 0
+            run.return_value.stdout = json.dumps({'source':'window-visual','target':'window:123:pid:456',
+                'valid':True,'image':{'media_type':'image/jpeg','data_base64':'fixture'}})
+            _, observed = self.request('/api/companion/capture', method='POST', body={
+                'consent':True,'handle':123,'process_id':456})
+            self.assertTrue(observed['valid'])
+            self.assertIn('extensions.companion.windows_visual', run.call_args.args[0])
+
+    def test_visual_capture_failure_discards_previous_observation(self):
+        self.request('/api/companion/observe', method='POST', body={
+            'source':'web','target':'old','valid':True,'text':'old context'})
+        with patch('ui.server.subprocess.run') as run, patch('ui.server.Path.is_file', return_value=True):
+            run.return_value.returncode = 1
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/companion/capture', method='POST', body={
+                    'consent':True,'handle':123,'process_id':456})
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/companion/ask', method='POST', body={'question':'Explain'})
+    def test_browser_video_failure_clears_old_context(self):
+        self.request('/api/companion/observe', method='POST', body={
+            'source': 'video-subtitle', 'target': 'old-video', 'valid': True, 'text': 'old lesson'})
+        with patch('extensions.companion.browser_video.collect_browser_video', side_effect=RuntimeError('no video')):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/companion/browser-video', method='POST', body={
+                    'consent': True, 'site': 'lesson.test'})
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/companion/ask', method='POST', body={'question': 'Explain'})
+
+    def test_browser_video_requires_consent_and_binds_invalid_cue(self):
+        from extensions.companion import ObservationBundle
+        with patch('extensions.companion.browser_video.collect_browser_video') as collect:
+            for payload in ({}, {'site': 'lesson.test'}, {'consent': True}):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/browser-video', method='POST', body=payload)
+            collect.assert_not_called()
+            collect.return_value = ObservationBundle.now(source='video-subtitle', target='browser:study:tab:7',
+                valid=False, text='', media_time_seconds=12)
+            _, observed = self.request('/api/companion/browser-video', method='POST', body={
+                'consent': True, 'site': 'lesson.test'})
+            self.assertFalse(observed['valid'])
+            _, answer = self.request('/api/companion/ask', method='POST', body={'question': 'Explain'})
+            self.assertEqual(answer['status'], 'insufficient_context')
+
+    def test_browser_video_paused_state_fences_owned_audio(self):
+        from extensions.companion import ObservationBundle
+        bridge = self.server.sumika_bridge
+        with patch('extensions.companion.browser_video.collect_browser_video') as collect, \
+             patch.object(bridge, 'companion_media_state', wraps=bridge.companion_media_state) as media:
+            collect.return_value = ObservationBundle.now(source='video-subtitle',
+                target='browser:study:tab:7', valid=True, text='paused lesson',
+                metadata={'paused':True, 'ended':False, 'seeking':False})
+            self.request('/api/companion/browser-video', method='POST', body={
+                'consent':True, 'site':'lesson.test'})
+        media.assert_called_once_with({'target':'browser:study:tab:7','state':'paused'})
+
+    def test_companion_collection_requires_consent_and_exact_window(self):
+        with patch('ui.server.subprocess.run') as run:
+            for payload in ({}, {'consent': True, 'handle': '123', 'process_id': 456},
+                            {'consent': True, 'handle': 123, 'process_id': 456, 'kind': 'screen'}):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/collect', method='POST', body=payload)
+            run.assert_not_called()
+
+    def test_pdf_collection_requires_explicit_file_page_and_clears_failed_context(self):
+        pdf = self.settings_path.parent/'lesson.pdf'
+        pdf.write_bytes(b'fixture placeholder')
+        with patch('ui.server.subprocess.run') as run:
+            for payload in ({'kind':'pdf','pdf_path':str(pdf),'page':1},
+                            {'kind':'pdf','consent':True,'pdf_path':'lesson.pdf','page':1},
+                            {'kind':'pdf','consent':True,'pdf_path':str(pdf),'page':True}):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.request('/api/companion/collect', method='POST', body=payload)
+            run.assert_not_called()
+            run.return_value.returncode = 0
+            run.return_value.stdout = json.dumps({'source':'pdf-page','target':'pdf:'+str(pdf),
+                'valid':True,'text':'current page','metadata':{'page':2}})
+            _, result = self.request('/api/companion/collect', method='POST', body={
+                'kind':'pdf','consent':True,'pdf_path':str(pdf),'page':2})
+            self.assertTrue(result['valid'])
+            command = run.call_args.args[0]
+            self.assertIn('--page', command)
+            self.assertTrue(any('pdf_learning.py' in item for item in command))
+            run.return_value.returncode = 1
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/companion/collect', method='POST', body={
+                    'kind':'pdf','consent':True,'pdf_path':str(pdf),'page':3})
+            self.assertIsNone(self.server.sumika_bridge._companion.latest)
+
+    def test_companion_collection_uses_isolated_collector_and_selection(self):
+        with patch('ui.server.subprocess.run') as run, patch('ui.server.Path.is_file', return_value=True):
+            run.return_value.returncode = 0
+            run.return_value.stdout = json.dumps({'source': 'ebook-selection', 'target': 'window:123:pid:456',
+                'valid': True, 'text': '选中内容', 'metadata': {'selected': True}})
+            _, result = self.request('/api/companion/collect', method='POST', body={
+                'consent': True, 'handle': 123, 'process_id': 456, 'kind': 'ebook', 'selected': True})
+            command = run.call_args.args[0]
+            self.assertIn('extensions.companion.windows_text', command)
+            self.assertIn('--selected', command)
+            self.assertEqual(result['target'], 'window:123:pid:456')
+
+    def test_pdf_explicit_missing_runtime_clears_context_without_office_fallback(self):
+        import os
+        pdf = self.settings_path.parent/'lesson.pdf'
+        pdf.write_bytes(b'fixture placeholder')
+        self.request('/api/companion/observe', method='POST', body={
+            'source':'pdf-page','target':'old','valid':True,'text':'old page'})
+        with patch.dict(os.environ, {'SUMIKA_DESKTOP_PYTHON':str(pdf.parent/'missing.exe')}), \
+                patch('ui.server.subprocess.run') as run:
+            with self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/companion/collect', method='POST', body={
+                    'kind':'pdf','consent':True,'pdf_path':str(pdf),'page':1})
+            run.assert_not_called()
+        self.assertIsNone(self.server.sumika_bridge._companion.latest)
+
+    def test_companion_observation_is_ephemeral_and_never_a_memory_source(self):
+        settings = load_settings(self.settings_path)
+        settings['enabled'] = True
+        settings['memory'].update(auto_extract=True, model_proposals=True)
+        save_settings(settings, self.settings_path)
+        with patch('extensions.roles.chat.CloudProvider') as provider, \
+                patch('extensions.roles.chat.propose_facts', side_effect=AssertionError('screen is not user fact')), \
+                patch('extensions.memory.model_proposer.instruction', side_effect=AssertionError('no memory proposals')):
+            provider.return_value.generate.return_value = {'text': '第三页在讲导数。', 'usage_status': 'unknown'}
+            self.request('/api/companion/observe', method='POST', body={
+                'source': 'ebook-page', 'target': 'reader', 'valid': True,
+                'text': '我喜欢茶。', 'metadata': {'page': 3}})
+            _, result = self.request('/api/companion/ask', method='POST', body={'question': '这段是什么？'})
+            self.assertEqual(result['memory_proposals'], 0)
+            self.assertEqual(result['auto_extracted'], [])
+            prompt = provider.return_value.generate.call_args.kwargs['messages'][-1]['content']
+            self.assertIn('"page": 3', prompt)
+            self.assertIn('我喜欢茶', prompt)
+        db = sqlite3.connect(self.settings_path.parent/'role-conversations.sqlite3')
+        try:
+            self.assertNotIn('我喜欢茶', json.dumps(list(db.iterdump()), ensure_ascii=False))
+        finally:
+            db.close()
+
+    def test_video_subtitle_observation_keeps_time_and_source(self):
+        _, observed = self.request('/api/companion/video', method='POST', body={
+            'consent': True, 'target': 'player:lesson', 'subtitles': '导数表示变化率。',
+            'media_time_seconds': 42.5, 'title': '微积分教程'})
+        self.assertEqual(observed['source'], 'video-subtitle')
+        self.assertEqual(observed['target'], 'player:lesson')
+        _, answer = self.request('/api/companion/ask', method='POST', body={'question': '这句话的时间？'})
+        self.assertEqual(answer['observation_source'], 'video-subtitle')
+
+    def test_video_webvtt_observation_selects_current_cue(self):
+        _, observed = self.request('/api/companion/video', method='POST', body={
+            'consent': True, 'target': 'player:vtt', 'media_time_seconds': 11,
+            'webvtt': 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n旧字幕\n\n00:00:10.000 --> 00:00:12.000\n当前字幕'})
+        self.assertEqual(observed['source'], 'video-subtitle')
+
+    def test_video_seek_outside_subtitles_invalidates_old_context(self):
+        vtt='WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nCurrent lesson'
+        self.request('/api/companion/video',method='POST',body={
+            'consent':True,'target':'player:vtt','media_time_seconds':2,'webvtt':vtt})
+        _,observed=self.request('/api/companion/video',method='POST',body={
+            'consent':True,'target':'player:vtt','media_time_seconds':10,'webvtt':vtt})
+        self.assertFalse(observed['valid'])
+        self.assertEqual(self.server.sumika_bridge._companion.latest.text,'')
+        with patch.object(self.server.sumika_bridge._companion,'_role_chat') as reply:
+            _,answer=self.request('/api/companion/ask',method='POST',body={'question':'Explain current frame'})
+        self.assertEqual(answer['status'],'insufficient_context')
+        reply.assert_not_called()
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         root = Path(self._tmp.name)
@@ -86,7 +631,9 @@ class UIServerTests(unittest.TestCase):
         paths = ['/api/memory/reset', '/api/memory/forget', '/api/roles/remove',
                  '/api/roles/import', '/api/roles/select', '/api/roles/attach',
                  '/api/workbench/start', '/api/workbench/stop', '/api/workbench/session',
-                 '/api/role/chat', '/api/schedule/toggle', '/api/capabilities/toggle']
+                 '/api/role/chat', '/api/schedule/toggle', '/api/capabilities/toggle',
+                 '/api/companion/collect', '/api/companion/observe', '/api/companion/ask',
+                 '/api/companion/revoke', '/api/companion/video', '/api/companion/browser-video', '/api/companion/capture', '/api/companion/perception', '/api/companion/ask-stream']
         for path in paths:
             with self.subTest(path=path):
                 req = urllib.request.Request(f'http://127.0.0.1:{self.port}{path}', data=b'{}',

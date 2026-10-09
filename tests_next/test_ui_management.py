@@ -131,6 +131,35 @@ class ManagementTests(unittest.TestCase):
             self.assertFalse(restored['modules'][0]['enabled'])
             self.assertEqual(restored['removed'],[])
 
+    def test_sensevoice_can_be_selected_without_overwriting_existing_configuration(self):
+        from extensions.capabilities import CapabilityStore
+        self.bridge.capability_database = self.root/'capabilities.sqlite3'
+        self.bridge.workbench = SimpleNamespace(root=self.root.resolve())
+        model = self.root/'sensevoice'
+        model.mkdir()
+        (model/'tokens.txt').touch()
+        (model/'model.int8.onnx').touch()
+        settings = load(self.bridge.settings_path)
+        settings['voice']['asr_model'] = str(model.resolve())
+        save(settings, self.bridge.settings_path)
+        store = CapabilityStore(self.bridge.capability_database)
+        store.configure('asr', 'vosk', enabled=False, options={'model':'retained-vosk'})
+        store.close()
+        with patch('ui.readiness._voice_resolve', side_effect=lambda root, names: (list(names), 'fixture')):
+            Bridge.capability_bootstrap(self.bridge)
+            initial = self.manager.modules()
+            old = next(row for row in initial['modules'] if row['id']=='asr')
+            self.assertEqual(old['provider'], 'vosk')
+            self.assertFalse(old['enabled'])
+            self.assertEqual(old['options']['model'], 'retained-vosk')
+            result = self.manager.modules('configure', {'expected_revision':initial['revision'],
+                'id':'asr', 'provider':'sherpa-onnx-sensevoice'})
+            chosen = next(row for row in result['modules'] if row['id']=='asr')
+            self.assertEqual(chosen['provider'], 'sherpa-onnx-sensevoice')
+            self.assertEqual(chosen['options']['model'], str(model.resolve()))
+            self.assertFalse(chosen['enabled'])
+            self.bridge.stop_speech.assert_called_once()
+
     def test_browser_auth_is_explicit_and_never_reports_login(self):
         with self.assertRaises(ValueError):
             self.manager.browsers('authorize',{'site':'chat.deepseek.com','profile':'test','read':True})

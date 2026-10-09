@@ -10,6 +10,7 @@ import os
 import platform
 import shutil
 from pathlib import Path
+from extensions.desktop.runtime import capability_python
 
 
 def _module(name):
@@ -57,6 +58,39 @@ def _resolve(root, packages, envs):
     return [], ""
 
 
+def _voice_resolve(root, packages):
+    """Inspect the interpreter used by voice workers, without importing native code.
+
+    Once a runtime is selected, bridge packages and other environments cannot
+    satisfy its requirements. Presence is a preflight, not a native-load test.
+    """
+    interpreter = capability_python('voice', root=root)
+    if interpreter is None:
+        if any(key in os.environ for key in ('SUMIKA_VOICE_PYTHON', 'SUMIKA_DESKTOP_PYTHON')):
+            return [], '指定语音运行时不可用'
+        return _resolve(root, packages, ('voice-env', 'desktop-env'))
+    executable = Path(interpreter)
+    base = executable.parent.parent if executable.parent.name.casefold() in ('scripts', 'bin') else executable.parent
+    sites = [base/'Lib/site-packages', *sorted(base.glob('lib/python*/site-packages'))]
+    found = [name for name in packages if any(
+        (site/name).is_dir() or (site/(name+'.py')).is_file() for site in sites)]
+    return found, f'语音运行时 {executable}'
+
+
+def _sensevoice_model(root, home, configured=None):
+    if configured:
+        path = Path(configured).expanduser()
+        candidates = [path if path.is_absolute() else root/path]
+    else:
+        candidates = []
+        for base in (home/'.sumika-next/voice-models', root/'.sumika-next/voice-models'):
+            if base.is_dir():
+                candidates.extend(sorted(base.iterdir()))
+    return next((path.resolve() for path in candidates if path.is_dir()
+                 and (path/'tokens.txt').is_file()
+                 and any((path/name).is_file() for name in ('model.int8.onnx', 'model.onnx'))), None)
+
+
 def _rapidocr_json():
     """Umi-OCR's RapidOCR-json executable, if one is configured or installed."""
     explicit = os.environ.get("SUMIKA_RAPIDOCR_JSON") or \
@@ -66,7 +100,7 @@ def _rapidocr_json():
     return shutil.which("RapidOCR-json")
 
 
-def probes(root=None, *, home=None):
+def probes(root=None, *, home=None, asr_model=None):
     root = Path(root).resolve() if root else Path(__file__).resolve().parents[1]
     home = Path(home) if home else Path.home()
     rows = []
@@ -74,6 +108,11 @@ def probes(root=None, *, home=None):
     def add(identifier, label, ready, detail, *, extra=None):
         rows.append({"id": identifier, "label": label, "ready": bool(ready),
                      "detail": detail, **(extra or {})})
+
+    pet = root/'SumikaPet.exe'
+    pet_ready = platform.system() == 'Windows' and pet.is_file() and not pet.is_symlink()
+    add('pet', '桌宠模式', pet_ready,
+        '独立桌面窗口' if pet_ready else '未找到包内桌宠宿主 SumikaPet.exe')
 
     python_ocr, ocr_source = _resolve(root, ("rapidocr", "rapidocr_onnxruntime", "pytesseract"),
                                       ("ocr-env", "desktop-env", "office-env"))
@@ -84,14 +123,22 @@ def probes(root=None, *, home=None):
         else (f"Umi-OCR RapidOCR：{umi}" if umi
               else ("tesseract 可执行文件可用" if binary_ocr else "未安装 Tesseract 或 RapidOCR，识别不可用")))
 
-    voice_modules, voice_source = _resolve(root, ("vosk", "sounddevice"),
-                                          ("voice-env", "desktop-env"))
+    sense_model = _sensevoice_model(root, home, asr_model)
+    voice_packages = ('sherpa_onnx', 'numpy', 'sounddevice') if sense_model else ('vosk', 'sounddevice')
+    voice_modules, voice_source = _voice_resolve(root, voice_packages)
     voice_models = [path for path in (home / ".sumika-next" / "voice-models",
                                       root / ".sumika-next" / "voice-models")
                    if path.is_dir() and any(child.is_dir() for child in path.iterdir())]
-    add("voice", "语音", len(voice_modules) == 2 and bool(voice_models),
-        (f"{voice_source}：{', '.join(voice_modules)}；模型 {voice_models[0].name}" if voice_modules and voice_models
-         else f"模块 {', '.join(voice_modules) or '无'}；模型目录 {voice_models[0] if voice_models else '未找到或为空'}"))
+    if asr_model and not sense_model:
+        selected = voice_model(root, home=home, configured=asr_model)
+        voice_models = [selected] if selected else []
+    if sense_model:
+        add('voice', '语音', len(voice_modules) == len(voice_packages),
+            f'{voice_source}；SenseVoice 模型 {sense_model}；依赖文件：{", ".join(voice_modules) or "无"}（加载待运行验证）')
+    else:
+        add("voice", "语音", len(voice_modules) == 2 and bool(voice_models),
+            (f"{voice_source}：{', '.join(voice_modules)}；模型 {voice_models[0].name}" if voice_modules and voice_models
+             else f"模块 {', '.join(voice_modules) or '无'}；模型目录 {voice_models[0] if voice_models else '未找到或为空'}"))
 
     browser_skill = root / "runtime" / "browserskill" / "bsk.exe"
     add("browser", "网页咨询（内含浏览器）", browser_skill.is_file(),
@@ -122,15 +169,21 @@ def probes(root=None, *, home=None):
     return rows
 
 
-def voice_model(root=None, *, home=None):
+def voice_model(root=None, *, home=None, configured=None):
     """First usable Vosk model directory, or None."""
     root = Path(root).resolve() if root else Path(__file__).resolve().parents[1]
     home = Path(home) if home else Path.home()
+    if configured:
+        path = Path(configured).expanduser()
+        path = path if path.is_absolute() else root/path
+        if path.is_dir() and any(path.iterdir()) and not (path/'tokens.txt').is_file():
+            return path.resolve()
+        return None
     for base in (home / ".sumika-next" / "voice-models", root / ".sumika-next" / "voice-models"):
         if not base.is_dir():
             continue
         for child in sorted(base.iterdir()):
-            if child.is_dir() and any(child.iterdir()):
+            if child.is_dir() and any(child.iterdir()) and not (child/'tokens.txt').is_file():
                 return child
     return None
 
@@ -153,7 +206,7 @@ def soffice_path():
     return None
 
 
-def service_capabilities(root=None, *, home=None):
+def service_capabilities(root=None, *, home=None, asr_model=None):
     """Capability-registry entries this machine can actually serve.
 
     `extensions/desktop/service.py` resolves every device and desktop operation
@@ -185,12 +238,18 @@ def service_capabilities(root=None, *, home=None):
 
     # SAPI synthesis lives behind pywin32/comtypes, which ship in the extension
     # environments rather than the bridge interpreter.
-    win32, _ = _resolve(root, ("win32com", "pywin32"), ("voice-env", "desktop-env"))
+    win32, _ = _voice_resolve(root, ("win32com", "pywin32"))
     if platform.system() == "Windows" and win32:
         entries.append({"id": "voice", "provider": "windows-sapi", "enabled": True, "options": {}})
 
-    vosk, _ = _resolve(root, ("vosk",), ("voice-env", "desktop-env"))
-    model = voice_model(root, home=home)
+    sensevoice, _ = _voice_resolve(root, ('sherpa_onnx', 'numpy'))
+    sense_model = _sensevoice_model(root, home, asr_model)
+    if len(sensevoice) == 2 and sense_model is not None:
+        entries.append({'id': 'asr', 'provider': 'sherpa-onnx-sensevoice', 'enabled': True,
+                        'options': {'model': str(sense_model)}})
+
+    vosk, _ = _voice_resolve(root, ("vosk",))
+    model = voice_model(root, home=home, configured=asr_model) if not sense_model else voice_model(root, home=home)
     if vosk and model is not None:
         entries.append({"id": "asr", "provider": "vosk", "enabled": True,
                         "options": {"model": str(model)}})
@@ -199,7 +258,7 @@ def service_capabilities(root=None, *, home=None):
     if camera:
         entries.append({"id": "camera", "provider": "opencv", "enabled": True, "options": {}})
 
-    microphone, _ = _resolve(root, ("sounddevice",), ("desktop-env",))
+    microphone, _ = _voice_resolve(root, ("sounddevice",))
     if microphone:
         entries.append({"id": "microphone", "provider": "sounddevice", "enabled": True, "options": {}})
 

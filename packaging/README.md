@@ -1,7 +1,13 @@
 # Sumika Windows launcher and release gate
 
-Latest current-source internal candidate: `product-candidate-20260920-k`, 26,229 files.
-Current-host archive/install/EXE acceptance passed:
+Current capability baseline: `E:/SumikaBuild/product-candidate-20261008-r`, 42,169 files;
+packaged desktop/voice import and Silero load evidence:
+`E:/SumikaBuild/candidate-r-capability-report.json`, including process audio helper probe.
+Native rejection evidence: `E:/SumikaBuild/candidate-r-process-audio-boundaries.json`.
+Later source changes require a rebuild.
+This is an internal candidate, not full companion or installer acceptance.
+
+Historical K current-host archive/install/EXE acceptance passed:
 `.sumika-next/package/packaged-install-93f1d18bdb564c58b44810cd20bfd718/report.json`.
 ZIP SHA-256: `570d185ce03007a1e22cf1938fc09d1f23abf159a65b0f1a7566196cbd926ad5`.
 The archive has its corrected installer and internal-use README beside it.
@@ -10,6 +16,24 @@ K was not independently run in that guest. `candidate-k-delta.json` confirms K's
 business/UI/runtime/launcher bytes are unchanged; changes are verification tools
 and dependency notices only. No daily installation/data was replaced. Native
 redistribution findings and explicitly deferred voice hardware remain open.
+
+## Process Audio Helper
+
+Build the fixed NAudio.Wasapi 3.1.0 self-contained helper with:
+
+```powershell
+dotnet publish extensions/desktop/native/ProcessAudio/ProcessAudio.csproj -c Release -p:RestoreLockedMode=true --artifacts-path E:/SumikaBuild/process-audio-artifacts -o E:/SumikaBuild/process-audio-helper
+```
+
+Pass `--process-audio-helper <SumikaProcessAudio.exe>` to the existing staging
+builder. It includes `runtime/process-audio/SumikaProcessAudio.exe` and the NAudio
+MIT notice. `SUMIKA_PROCESS_AUDIO_HELPER` can explicitly override the bundled
+path; an invalid override fails without fallback.
+
+Use `tools.verify_capability_package --require-process-audio` for relocated OS
+capability detection. `tools.verify_process_audio_boundaries` additionally checks
+START and process-identity rejection without opening an audio recorder. Neither
+check proves actual audio capture, process isolation or transcription quality.
 
 ## Dependency notice inventory
 
@@ -64,6 +88,7 @@ Existing archives and failed staging remain preserved for inspection.
 Reuse `Sumika.Launcher.csproj` and `Program.cs` for the single-file Windows
 launcher; reuse `tools/start_sumika.ps1` and `tools/start_ui_bridge.ps1` for
 startup. The launcher is not a complete bundled Python/Node distribution.
+An optional `SumikaPet.exe` can be included with `build_portable_staging.py --pet-host`; it is the self-contained WPF/WebView2 host that opens the existing loopback UI with `?pet=1`.
 The current internal candidate bundles Python/Node and uses explicit personal
 data isolation and instance identity checks. Optional audio/OCR/office runtimes
 remain separate; clean-machine acceptance is still outstanding.
@@ -546,3 +571,19 @@ This completes collection of these four declared toolchain archives, not proof o
 the historical build container, the target-specific standard-library link graph,
 or all corresponding-source and relinking obligations. See the current
 `toolchain_bundle_checkpoint` in the native component review for artifact/hash.
+
+
+### Internal installer L: personal data UX
+
+Reference research distribution: `tools/build_portable_staging.py` copies the
+single source registry `docs/project/reference-projects.json` into
+`extensions/desktop/reference-projects.json` as a hashed product asset.
+`tools/check_reference_projects.py` resolves its own product root, independent
+of the working directory. Its default SQLite path is the existing personal-data
+directory; `--database` remains available for isolated checks. `--pending`
+reads queued comparison evidence without network or model requests. This does
+not enable runtime scheduling or model analysis.
+
+`packaging/Sumika.iss` omits the personal-data wizard page. The launcher resolves LOCALAPPDATA/Sumika-location.json (or the default Sumika folder); explicit DataDirectory overrides remain available. Settings owns migration/restore through `tools/manage_personal_data.py`, reusing verified offline snapshots. Sources and backups are retained. Interactive uninstall defaults to keep; deletion needs a checkbox and a second confirmation, and the helper only removes known Sumika files while rejecting live writers and links. Silent uninstall always keeps data.
+
+L2 installer: E:/SumikaBuild/wizard-l2/Sumika-Setup-2026.09.20-l.exe. Actual host install verified 26,233 payload hashes; installed EXE lifecycle, isolated migration and storage UI passed. Uninstall dialog default/cancel verified; real deletion not executed. No new clean-guest claim. See docs/project/setup-and-personal-data.md and installer_data_ux_checkpoint. Windows PowerShell launch scripts containing Chinese must retain UTF-8 BOM; first L candidate failed before this was corrected in L2.

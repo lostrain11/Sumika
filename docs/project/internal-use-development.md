@@ -1,10 +1,11 @@
 # 安装后用 Sumika 开发 Sumika
 
-当前内部包 K 是 `Sumika-internal.zip` 和 `install_sumika.ps1` 的组合，安装后运行
-`Sumika.exe`。它不是带安装向导的单文件安装 EXE。Python、Node 和固定 DSH
+当前推荐使用 L 版单文件中文安装向导，具体文件位置和数据接续见
+`setup-and-personal-data.md`。安装默认沿用现有个人数据，迁移和恢复在设置中进行，
+卸载默认保留数据。Python、Node 和固定 DSH
 运行时已包含，不需要 WSL；模型权重、个人角色和密钥不在包内。
 
-## 本机安装
+## 旧 K 版压缩包安装（保留的回退方式）
 
 包目录：`D:/Code/Sumika/.sumika-next/package/packaged-install-93f1d18bdb564c58b44810cd20bfd718`。
 在该目录打开 PowerShell，目标目录须尚不存在：

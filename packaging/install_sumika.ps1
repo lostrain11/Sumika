@@ -60,12 +60,16 @@ try {
             ($parts | Where-Object { $_ -eq '..' -or $_ -eq '.' -or $_ -eq '' -or $_ -match '[. ]$|[<>"|?*\x00-\x1f\x7f]' -or $_ -match '^(?i:con|prn|aux|nul|conin\$|conout\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]) *(?:\.|$)' })) {
             throw 'Unsafe archive path'
         }
-        if ($parts[0] -notin @('Sumika.exe','package-manifest.json','tools','ui','extensions','sumika_next','runtime','licenses')) {
+        if ($parts[0] -notin @('Sumika.exe','SumikaPet.exe','package-manifest.json','tools','ui','extensions','sumika_next','runtime','licenses')) {
             throw 'Archive contains a non-release root'
         }
         if ($parts | Where-Object {
             $_ -in @('.sumika-next','.sumika-continuity','.git','__pycache__','.pytest_cache','.env','env.ps1') -or
-            $_ -like '.env.*' -or $_ -like '*.update-*' -or $_ -match '\.(sqlite3|db|log|pyc|pem|key)$'
+            $_ -like '.env.*' -or $_ -like '*.update-*' -or
+            ($_ -match '\.(sqlite3|db|log|pyc|pem|key)$' -and
+             -not ($name -cin @('runtime/python/Lib/site-packages/certifi/cacert.pem',
+                               'runtime/desktop/Lib/site-packages/certifi/cacert.pem',
+                               'runtime/voice/Lib/site-packages/certifi/cacert.pem') -and $_ -ceq 'cacert.pem'))
         }) { throw 'Archive contains runtime data or credentials' }
         if ((($entry.ExternalAttributes -shr 16) -band 61440) -eq 40960) { throw 'Archive links are not supported' }
         if (-not $names.Add($name.TrimEnd('/'))) { throw 'Duplicate archive path' }

@@ -16,7 +16,18 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_DIRS = {'node_modules', '__pycache__', '.git', '.pytest_cache'}
-SOURCE_SUFFIXES = {'.py', '.js', '.mjs', '.json', '.css', '.html', '.md', '.png', '.vrm', '.lock', '.ps1'}
+RUNTIME_SKIP_DIRS = {'__pycache__', '.git', '.pytest_cache'}
+SOURCE_SUFFIXES = {'.py', '.js', '.mjs', '.json', '.css', '.html', '.md', '.png', '.svg', '.txt', '.vrm', '.lock', '.ps1'}
+
+
+def reference_registry_asset(root):
+    source = root/'docs/project/reference-projects.json'
+    if source.is_symlink() or source.is_junction() or not source.is_file():
+        raise ValueError('reference registry must be a physical file')
+    data = json.loads(source.read_text(encoding='utf8'))
+    if data.get('schema_version') != 1 or not isinstance(data.get('projects'), list) or not data['projects']:
+        raise ValueError('invalid reference registry')
+    return source, Path('extensions/desktop/reference-projects.json')
 
 
 def browser_runtime_files(root):
@@ -54,17 +65,36 @@ def physical_files(root, *, product=False):
     if root.is_symlink() or root.is_junction():
         raise ValueError('linked source root')
     for directory, dirs, files in os.walk(root, followlinks=False):
-        if product:
-            dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
+        dirs[:] = [name for name in dirs if name not in (SKIP_DIRS if product else RUNTIME_SKIP_DIRS)]
         for name in dirs + files:
             p = Path(directory)/name
             if p.is_symlink() or p.is_junction():
                 raise ValueError('linked source: ' + str(p))
         for name in files:
             p = Path(directory)/name
+            if p.suffix.casefold() == '.pyc':
+                continue
             if product and (p.suffix not in SOURCE_SUFFIXES or '.test.' in name):
                 continue
             yield p, p.relative_to(root)
+
+
+def executable_asset(path):
+    """Reject scripts renamed to EXE before creating a candidate directory."""
+    path = path.resolve(strict=True)
+    if path.suffix.lower() != '.exe' or not path.is_file() or path.is_symlink() or path.is_junction():
+        raise ValueError('physical Windows executable required: ' + str(path))
+    with path.open('rb') as source:
+        header = source.read(64)
+        if len(header) != 64 or header[:2] != b'MZ':
+            raise ValueError('Windows executable DOS header missing: ' + str(path))
+        offset = int.from_bytes(header[60:64], 'little')
+        if offset < 64 or offset > path.stat().st_size - 4:
+            raise ValueError('invalid Windows executable PE offset: ' + str(path))
+        source.seek(offset)
+        if source.read(4) != b'PE\x00\x00':
+            raise ValueError('Windows executable PE header missing: ' + str(path))
+    return path
 
 
 def main():
@@ -73,12 +103,31 @@ def main():
     parser.add_argument('--dsh-runtime', type=Path, required=True)
     parser.add_argument('--host-runtimes', type=Path, required=True)
     parser.add_argument('--launcher', type=Path, required=True)
+    parser.add_argument('--pet-host', type=Path, help='Optional self-contained desktop pet host')
+    parser.add_argument('--process-audio-helper', type=Path,
+                        help='Optional self-contained process loopback helper executable')
+    parser.add_argument('--desktop-runtime', type=Path,
+                        help='Optional physical standalone capability Python directory')
+    parser.add_argument('--voice-runtime', type=Path,
+                        help='Optional physical standalone continuous voice Python directory')
     args = parser.parse_args()
     destination = args.destination.absolute()
     if destination.exists():
         raise ValueError('destination must be new')
     verify_reviewed_assets(ROOT)
-    selected = [(args.launcher.resolve(strict=True), Path('Sumika.exe'))]
+    for relative in ('ui/app/tokens.css', 'ui/app/icons.js', 'ui/vendor/icons/hard-drive.svg',
+                     'ui/vendor/icons/info.svg', 'tools/run_module.py'):
+        if not (ROOT / relative).is_file():
+            raise ValueError('required current UI/startup resource missing: ' + relative)
+    selected = [(executable_asset(args.launcher), Path('Sumika.exe'))]
+    selected.append(reference_registry_asset(ROOT))
+    if args.pet_host:
+        selected.append((executable_asset(args.pet_host), Path('SumikaPet.exe')))
+    if args.process_audio_helper:
+        selected.append((executable_asset(args.process_audio_helper),
+                         Path('runtime/process-audio/SumikaProcessAudio.exe')))
+        selected.append((ROOT/'extensions/desktop/native/ProcessAudio/LICENSE-NAudio.txt',
+                         Path('licenses/NAudio-MIT.txt')))
     selected.extend((p, Path('licenses')/rel) for p, rel in physical_files(ROOT/'packaging/notices'))
     for name in ('ui', 'extensions', 'sumika_next', 'tools'):
         selected.extend((p, Path(name)/rel) for p, rel in physical_files(ROOT/name, product=True))
@@ -86,6 +135,12 @@ def main():
     for name in ('python', 'node'):
         selected.extend((p, Path('runtime')/name/rel)
                         for p, rel in physical_files(args.host_runtimes.resolve(strict=True)/'runtime'/name))
+    for name, directory in (('desktop', args.desktop_runtime), ('voice', args.voice_runtime)):
+        if directory is not None:
+            runtime = directory.resolve(strict=True)
+            if not (runtime/'python.exe').is_file() or (runtime/'pyvenv.cfg').exists():
+                raise ValueError('capability runtime must be standalone Python, not a development venv')
+            selected.extend((p, Path('runtime')/name/rel) for p, rel in physical_files(runtime))
     browser = ROOT/'runtime/browserskill'
     if browser.is_dir():
         selected.extend((p, Path('runtime/browserskill')/rel) for p, rel in browser_runtime_files(browser))

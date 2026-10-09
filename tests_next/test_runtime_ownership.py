@@ -11,6 +11,19 @@ from sumika_next.runtime_ownership import ProfileLease, process_identity
 
 @unittest.skipUnless(os.name=='nt','Windows lifecycle')
 class OwnershipTests(unittest.TestCase):
+    def test_release_write_failure_closes_lock_and_keeps_unknown_record(self):
+        with tempfile.TemporaryDirectory(dir=Path('.sumika-next')) as tmp:
+            lease = ProfileLease(tmp).acquire()
+            record = lease.record.read_bytes()
+            with patch.object(lease, '_write', side_effect=PermissionError('denied')):
+                with self.assertRaises(PermissionError):
+                    lease.release()
+            self.assertIsNone(lease.file)
+            self.assertEqual(lease.record.read_bytes(), record)
+            # The stale starting record continues to reject another writer.
+            with self.assertRaisesRegex(ValueError, 'incomplete'):
+                ProfileLease(tmp).acquire()
+
     def test_live_owner_and_second_writer_are_blocked(self):
         with tempfile.TemporaryDirectory(dir=Path(".sumika-next")) as tmp:
             lease=ProfileLease(tmp).acquire()

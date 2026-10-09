@@ -23,7 +23,9 @@ class VoiceSession:
     def _move(self, state):
         self.state=state;self.updated=time.time();return self.snapshot()
     def start_listening(self):
-        if self.state not in (VoiceState.IDLE,VoiceState.PLAYING):raise RuntimeError('voice session is busy')
+        # An interruption ends the prior turn, but a running companion must be
+        # able to start the next turn without rebuilding its whole session.
+        if self.state not in (VoiceState.IDLE,VoiceState.PLAYING,VoiceState.CANCELLED):raise RuntimeError('voice session is busy')
         self.turn_id+=1;self.transcript_text=self.response_text='';return self._move(VoiceState.LISTENING)
     def audio_ready(self):
         if self.state!=VoiceState.LISTENING:raise RuntimeError('audio is not being captured')

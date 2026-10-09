@@ -151,13 +151,20 @@ def worker(config):
         microphone = store.resolve('microphone')
         asr = store.resolve('asr')
         if (microphone['provider'] != 'sounddevice' or microphone['options'].get('user_authorized') is not True
-                or asr['provider'] != 'vosk'):
+                or asr['provider'] not in ('vosk', 'sherpa-onnx-sensevoice')):
             raise PermissionError('speech permissions/provider unavailable')
+        if microphone != config.get('microphone') or asr != config.get('asr'):
+            raise PermissionError('speech permissions changed before capture')
+        if asr['provider'] == 'sherpa-onnx-sensevoice' and config['sample_rate'] != 16000:
+            raise ValueError('SenseVoice speech input requires 16kHz')
         capture_audio(config['output'], seconds=5, device=config['device'],
                       sample_rate=config['sample_rate'], approved=True)
         if store.resolve('microphone') != microphone or store.resolve('asr') != asr:
             raise PermissionError('speech permissions changed')
-        return transcribe(config['output'], model=config['model'])
+        result = transcribe(config['output'], model=config['model'], provider=asr['provider'])
+        if store.resolve('microphone') != microphone or store.resolve('asr') != asr:
+            raise PermissionError('speech permissions changed during recognition')
+        return result
     finally:
         store.close()
 

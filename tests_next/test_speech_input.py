@@ -185,5 +185,69 @@ class SpeechInputTests(unittest.TestCase):
         service.close()
 
 
+class SpeechWorkerTests(unittest.TestCase):
+    def setUp(self):
+        from extensions.capabilities import CapabilityStore
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        self.database = root/'capabilities.db'
+        self.store = CapabilityStore(self.database)
+        self.addCleanup(self.store.close)
+        self.store.configure('microphone', 'sounddevice', options={'user_authorized':True})
+        self.store.configure('asr', 'sherpa-onnx-sensevoice')
+        self.config = dict(capabilities=str(self.database), output=str(root/'capture.wav'),
+                           device=7, sample_rate=16000, model=str(root),
+                           microphone=self.store.resolve('microphone'), asr=self.store.resolve('asr'))
+
+    def run_worker(self, capture=None, decode=None):
+        from extensions.roles.speech_input import worker
+        with patch('extensions.desktop.perception.capture_audio', side_effect=capture) as record, \
+             patch('extensions.roles.voice.transcribe', side_effect=decode,
+                   return_value={'text':'课程'}) as transcribe:
+            result = worker(self.config)
+        return result, record, transcribe
+
+    def test_selected_sensevoice_is_forwarded_without_real_microphone(self):
+        result, record, decode = self.run_worker()
+        self.assertEqual(result, {'text':'课程'})
+        record.assert_called_once_with(self.config['output'], seconds=5, device=7,
+                                       sample_rate=16000, approved=True)
+        self.assertEqual(decode.call_args.kwargs['provider'], 'sherpa-onnx-sensevoice')
+
+    def test_changed_snapshot_refuses_before_capture(self):
+        from extensions.roles.speech_input import worker
+        self.store.configure('asr', 'vosk')
+        with patch('extensions.desktop.perception.capture_audio') as record:
+            with self.assertRaisesRegex(PermissionError, 'before capture'):
+                worker(self.config)
+            record.assert_not_called()
+
+    def test_sensevoice_bad_rate_refuses_before_capture(self):
+        from extensions.roles.speech_input import worker
+        self.config['sample_rate'] = 22050
+        with patch('extensions.desktop.perception.capture_audio') as record:
+            with self.assertRaisesRegex(ValueError, '16kHz'):
+                worker(self.config)
+            record.assert_not_called()
+
+    def test_revocation_during_capture_never_decodes(self):
+        from extensions.roles.speech_input import worker
+        def revoke(*args, **kwargs):
+            self.store.configure('asr', 'sherpa-onnx-sensevoice', enabled=False)
+        with patch('extensions.desktop.perception.capture_audio', side_effect=revoke), \
+             patch('extensions.roles.voice.transcribe') as decode:
+            with self.assertRaises(PermissionError):
+                worker(self.config)
+            decode.assert_not_called()
+
+    def test_selection_change_during_decode_discards_transcript(self):
+        def change(*args, **kwargs):
+            self.store.configure('asr', 'vosk')
+            return {'text':'过期'}
+        with self.assertRaisesRegex(PermissionError, 'during recognition'):
+            self.run_worker(decode=change)
+
+
 if __name__ == '__main__':
     unittest.main()

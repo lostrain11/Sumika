@@ -1,5 +1,6 @@
 """Small, explicit Ollama adapter for role-only local inference."""
 import json, urllib.request, urllib.error
+from .cancellation import model_response
 
 class OllamaError(RuntimeError): pass
 
@@ -13,7 +14,7 @@ class OllamaProvider:
         data=None if payload is None else json.dumps(payload,ensure_ascii=False).encode()
         req=urllib.request.Request(self.endpoint+path,data=data,headers={'Content-Type':'application/json'} if data else {})
         try:
-            with urllib.request.urlopen(req,timeout=self.timeout) as r: return json.loads(r.read().decode('utf8'))
+            with model_response(req,timeout=self.timeout) as r: return json.loads(r.read().decode('utf8'))
         except (OSError,ValueError) as exc: raise OllamaError('Ollama outcome unknown') from exc
     def health(self):
         try: self._request('/api/tags'); return {'status':'ready','endpoint':self.endpoint}

@@ -1,0 +1,73 @@
+/* ============================================================================
+   屏 3：能力（卡片架 + 详情）
+   卡片尺寸统一：同组等高，栅格 auto-fill，窄窗自动换行不挤压。
+   ========================================================================== */
+
+.cap-wrap{height:100%;display:grid;grid-template-columns:minmax(0,1fr) var(--panel-w)}
+.cap-main{overflow-y:auto;padding:22px 28px 36px;background:var(--bg)}
+.cap-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:4px;gap:12px}
+.cap-head h1{font:600 20px Georgia,"SimSun",serif}
+.cap-head h1 em{font-style:normal;color:var(--rose)}
+.cap-head p{font-size:10.5px;color:var(--muted);margin-top:5px}
+.cap-note{font-size:10px;color:var(--green);background:var(--green-soft);border:1px solid var(--green-line);border-radius:var(--radius-pill);padding:5px 13px;white-space:nowrap}
+.cap-group{margin-top:20px}
+.cap-group>h2{font-size:11px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:11px}
+.cap-group>h2::after{content:"";flex:1;height:1px;background:var(--line)}
+.cap-group>h2 b{color:var(--rose);font-weight:600;letter-spacing:1px}
+
+/* 统一栅格：替换原先写死的 5 列。
+   grid-auto-rows:1fr 让每一行等高——否则 CSS 网格按行独立定高，
+   文本较长的卡片所在行会比其它行高（实测 1440/1160 宽下 199px vs 168px），
+   视觉上就是「卡片大小不统一」。 */
+.cap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--grid-min),1fr));grid-auto-rows:1fr;gap:var(--gap)}
+.cap-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:var(--card-pad);display:flex;flex-direction:column;gap:7px;min-height:var(--card-h);transition:.15s}
+.cap-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--rose-line)}
+.cap-card .top{display:flex;align-items:center;gap:9px}
+.cap-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none;color:var(--ink)}
+.cap-ic svg{width:17px;height:17px}
+.cap-card h4{font-size:12.5px}
+.cap-card .st{margin-left:auto}
+.st{font-size:8.5px;border-radius:var(--radius-pill);padding:2px 8px;white-space:nowrap}
+.st.on{color:var(--green);background:var(--green-soft);border:1px solid var(--green-line)}
+.st.basic{color:var(--mizu);background:var(--mizu-soft);border:1px solid var(--mizu-line)}
+.st.rsv{color:var(--amber);background:var(--amber-soft);border:1px dashed var(--amber-line)}
+.cap-card p{font-size:10.5px;color:var(--muted);line-height:1.65;flex:1}
+.cap-card .foot{display:flex;align-items:center;gap:8px;border-top:1px dashed var(--line);padding-top:9px}
+.cap-card .foot .src{font-size:9px;color:var(--muted-2)}
+
+/* 开关 */
+.sw2{width:32px;height:19px;border-radius:var(--radius-pill);background:var(--switch-track);position:relative;margin-left:auto;flex:none;cursor:pointer}
+.sw2::after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:var(--switch-knob);box-shadow:0 1px 3px rgba(0,0,0,.18);transition:left .18s}
+.sw2.on{background:var(--green)}
+.sw2.on::after{left:16px}
+.sw2[aria-disabled="true"]{opacity:.5;cursor:not-allowed}
+
+/* 预留卡：统一 .is-reserved（替代原 .reserved 的独立写法） */
+.cap-card.is-reserved{background:repeating-linear-gradient(-45deg,var(--paper),var(--paper) 10px,var(--paper-2) 10px,var(--paper-2) 20px);border-style:dashed;border-color:var(--reserved-dash)}
+.cap-card.is-reserved h4,.cap-card.is-reserved p{color:var(--muted-3)}
+.cap-card.is-reserved .cap-ic{background:var(--disabled-bg)!important;color:var(--muted-2)}
+
+.add-tile{border:1.5px dashed var(--rose-line);border-radius:var(--radius);min-height:var(--card-h);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:var(--rose);background:var(--rose-soft)}
+.add-tile b{font-size:24px;font-weight:400;line-height:1}
+.add-tile span{font-size:10.5px}
+
+/* 右侧详情栏 */
+.cap-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
+.panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:12px 14px}
+.panel h3{font-size:9.5px;color:var(--muted);letter-spacing:2px;margin-bottom:9px;display:flex;justify-content:space-between;gap:8px}
+.panel h3 b{font-weight:400;color:var(--muted-2)}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:11px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.kv:last-child{border-bottom:0}
+.kv span{color:var(--muted);flex:none}
+.kv b{font-weight:500;text-align:right;min-width:0;overflow-wrap:anywhere}
+.kv b.ok{color:var(--green)}
+.hero-d{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:15px;text-align:center}
+.hero-d .cap-ic{margin:0 auto 7px;width:40px;height:40px;border-radius:11px}
+.hero-d .cap-ic svg{width:20px;height:20px}
+.hero-d h4{font-size:14px}
+.hero-d p{font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6}
+.st-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.st-grid div{border:1px solid var(--line);border-radius:10px;background:var(--paper-2);text-align:center;padding:8px 3px}
+.st-grid b{display:block;font-size:15px;color:var(--rose-deep)}
+.st-grid span{font-size:9px;color:var(--muted)}
+.note-p{font-size:10px;color:var(--muted);line-height:1.8}

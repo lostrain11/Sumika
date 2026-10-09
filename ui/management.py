@@ -295,7 +295,8 @@ class Management:
             def state():
                 rows = store.list()
                 removed = sorted(store.removed())
-                candidates = service_capabilities(self.bridge.workbench.root)
+                candidates = service_capabilities(self.bridge.workbench.root,
+                    asr_model=load(self.bridge.settings_path)['voice']['asr_model'])
                 return {'modules': rows, 'removed': removed, 'candidates': candidates,
                         'revision': revision([rows,removed])}
             current = state()
@@ -412,6 +413,22 @@ class Management:
     def dispatch(self, method, path, payload=None):
         parts = [unquote(p) for p in urlparse(path).path.split('/') if p]
         with self.lock:
+            if parts == ['api','manage','personal-data'] and method == 'GET':
+                return {'directory': str(self.bridge.settings_path.parent.resolve()),
+                        'note': '迁移会保留旧目录和备份，不移动外部模型库；完成后重启生效。'}
+            if parts == ['api','manage','personal-data','open'] and method == 'POST':
+                import os
+                os.startfile(str(self.bridge.settings_path.parent.resolve()))
+                return {'opened': True}
+            if parts == ['api','manage','personal-data','migrate'] and method == 'POST':
+                if payload.get('confirmed') is not True:
+                    raise ValueError('请先确认迁移并退出当前客户端')
+                from tools.manage_personal_data import prepare
+                port = getattr(self.bridge, 'listen_port', None)
+                if not port:
+                    raise ValueError('无法确定当前客户端监听端口')
+                return prepare(self.bridge.settings_path.parent, payload.get('destination'), port,
+                               payload.get('snapshot') or None)
             if method == 'GET' and parts == ['api','manage','session']:
                 return {'csrf': self.csrf}
             if parts == ['api','manage','role-relocation'] and method=='GET':

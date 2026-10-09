@@ -64,6 +64,16 @@ class RulesProposerTests(unittest.TestCase):
 
 
 class AutoExtractionWiringTests(unittest.TestCase):
+    def test_reference_chat_disables_both_memory_writers(self):
+        with tempfile.TemporaryDirectory() as d:
+            settings = _settings(Path(d))
+            settings['memory'].update(auto_extract=True, model_proposals=True)
+            with patch('extensions.roles.chat.propose_facts', side_effect=AssertionError('reference is not a fact')), \
+                    patch('extensions.memory.model_proposer.instruction', side_effect=AssertionError('no proposals')):
+                result = self._reply(settings, '我喜欢茶。', memory_writes=False)
+            self.assertEqual(result['auto_extracted'], [])
+            self.assertEqual(result['memory_proposals'], 0)
+
     def _reply(self, settings, message, **kwargs):
         chat = RoleChat(settings)
         fake = {"text": "好的。", "provider": "openai-compatible", "model": settings["model"],

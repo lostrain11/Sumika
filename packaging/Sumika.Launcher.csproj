@@ -12,4 +12,7 @@
     <AssemblyName>Sumika</AssemblyName>
     <RootNamespace>SumikaLauncher</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="PetHost*.cs" />
+  </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 """DSH rc.2 release acceptance with a local model fixture, never a paid model."""
 import json
+import argparse
 from pathlib import Path
 import sys
 import uuid
@@ -16,19 +17,41 @@ from verify_dsh_recovery import snapshot, prompt, finish
 
 def verify_terminal_lifecycle(adapter, model, work, base):
     evidence = {}
+    version = json.loads((adapter.runtime/'release.json').read_text(encoding='utf8'))['version']
+    background_timeout = version.startswith('0.2.')
     for session, command, timeout, expected in [
         ('p2-exit', 'exit 7', 5000, '[exit code: 7]'),
         ('p2-timeout', "Start-Sleep -Seconds 3; 'late' | Set-Content timeout-late.txt", 300, '[exit code: 1]'),
     ]:
         model.responses = 0
         model.recipe = [('pwsh', {'command': command, 'description': 'Verify native terminal failure reporting', 'timeoutMs': timeout})]
+        if background_timeout and session == 'p2-timeout':
+            model.recipe.append(('$job_output', {'wait': True, 'timeout_ms': 10000}))
         adapter._rpc('session/create', {'sessionId': session, 'cwd': str(work)})
         stream = adapter.stream('session/follow', {'address': {'kind': 'session', 'sessionId': session}}, timeout=30)
         next(stream)
         prompt(adapter, session, session)
         events = finish(stream)
         evidence[session] = events
-        assert expected in json.dumps(events), (session, events)
+        if background_timeout and session == 'p2-timeout':
+            assert 'moved to background job' in json.dumps(events), events
+            assert (work/'timeout-late.txt').exists(), 'background command did not finish'
+        else:
+            assert expected in json.dumps(events), (session, events)
+    if background_timeout:
+        model.responses = 0
+        model.recipe = [
+            ('pwsh', {'command': "Start-Sleep -Seconds 6; 'late' | Set-Content job-kill-late.txt",
+                      'description': 'Verify explicit background cancellation', 'run_in_background': True}),
+            ('$job_kill', {'reason': 'acceptance fixture stop'}),
+            ('$job_output', {'wait': True, 'timeout_ms': 10000})]
+        session = 'p2-job-kill'
+        adapter._rpc('session/create', {'sessionId': session, 'cwd': str(work)})
+        stream = adapter.stream('session/follow', {'address': {'kind': 'session', 'sessionId': session}}, timeout=30)
+        next(stream); prompt(adapter, session, session)
+        evidence[session] = finish(stream)
+        time.sleep(7)
+        assert not (work/'job-kill-late.txt').exists(), 'killed background command continued'
     model.responses = 0
     model.recipe = [('pwsh', {
         'command': "$ErrorActionPreference='Stop'; 'started' | Set-Content started.txt; Start-Sleep -Seconds 6; 'late' | Set-Content cancel-late.txt",
@@ -43,7 +66,8 @@ def verify_terminal_lifecycle(adapter, model, work, base):
     assert adapter._rpc('session/cancel', {'sessionId': session}) == {'accepted': True}
     time.sleep(7)
     assert not (work/'cancel-late.txt').exists(), 'cancelled command continued'
-    assert not (work/'timeout-late.txt').exists(), 'timed out command continued'
+    if not background_timeout:
+        assert not (work/'timeout-late.txt').exists(), 'timed out command continued'
     state = snapshot(adapter, session)
     evidence[session] = adapter._rpc('session/page', {'address': {'kind': 'session', 'sessionId': session}, 'throughSeq': state['cursor']})
     (base/'terminal-lifecycle.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
@@ -51,12 +75,27 @@ def verify_terminal_lifecycle(adapter, model, work, base):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runtime', type=Path, default=ROOT/'runtime/dsh')
+    parser.add_argument('--repair-fixture-acl', action='store_true',
+                        help='Run the bundled DSH ACL repair only on this generated workspace')
+    args = parser.parse_args()
     with ModelFixture() as model:
         base = ROOT / '.sumika-next' / ('p2-' + uuid.uuid4().hex)
         base.mkdir()
         home = base/'home'
         work = base/'work'
         home.mkdir(); work.mkdir()
+        if args.repair_fixture_acl:
+            scripts = list({p.resolve() for p in (args.runtime/'node_modules/.pnpm').glob(
+                '*/node_modules/@deepseek-ai/dsh-sandbox-windows-acl/assets/diagnose-windows-sandbox-acl/scripts/diagnose-windows-sandbox-acl.ps1')})
+            if len(scripts) != 1:
+                raise RuntimeError('expected one bundled ACL diagnosis script')
+            repair = subprocess.run(['pwsh', '-NoProfile', '-File', str(scripts[0].resolve()),
+                '-Path', str(work), '-AllowRoot', str(work), '-Out', str(base/'acl-recovery')],
+                capture_output=True, text=True, encoding='utf8')
+            (base/'acl-repair-output.txt').write_text(repair.stdout+repair.stderr, encoding='utf8')
+            repair.check_returncode()
         subprocess.run(['git','init','-q',str(work)], check=True)
         skill = work/'.agents/skills/p2-local/SKILL.md'
         skill.parent.mkdir(parents=True)
@@ -81,7 +120,7 @@ def main():
             {'insert':[{'id':'p2-mcp','name':'@deepseek-ai/dsh-mcp-client','config':{'transport':'stdio','serverName':'p2','command':sys.executable,'args':['-u',str(ROOT/'tests_next/p2_mcp_server.py')],'failOnStartupError':True}}]},
         ]
         (home/'cordis.patch.yml').write_text(json.dumps(patches), encoding='utf-8')
-        adapter = Dsh(ROOT, home)
+        adapter = Dsh(ROOT, home, runtime=args.runtime)
         report = {'complete': False, 'checks': {}}
         try:
             adapter.start()
@@ -98,9 +137,10 @@ def main():
             frames.close()
             (base/'events.json').write_text(json.dumps(collected,ensure_ascii=False,indent=2), encoding='utf-8')
             assert (work/'value.txt').read_text().strip()=='42'
-            results = [f['event']['data']['message']['content'] for f in collected if f.get('event',{}).get('type')=='tool/result']
-            assert len(results) == 10, 'expected all native tools to execute'
-            assert all(not block.get('isError') for blocks in results for block in blocks), results
+            messages = [f['event']['data']['message'] for f in collected if f.get('event',{}).get('type')=='tool/result']
+            assert len(messages) == 10, 'expected all native tools to execute'
+            assert all(not message.get('isError') for message in messages), messages
+            results = [message['content'] for message in messages]
             assert 'P2_SKILL_MARKER' in json.dumps(results), 'skill missing'
             assert 'P2_MCP_CHALLENGE' in json.dumps(results), 'MCP missing'
             assert 'P2_CHILD_DONE' in json.dumps(results), 'subagent missing'

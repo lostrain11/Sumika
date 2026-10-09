@@ -1,0 +1,92 @@
+/* ============================================================================
+   屏 4：设置（分区导航 | 表单卡片 | 信息栏）
+   说明文字一律走悬停提示（.sumika-help-trigger / .sumika-tooltip），
+   不在选项下方常驻解释文本。
+   ========================================================================== */
+
+.set-wrap{height:100%;display:grid;grid-template-columns:var(--side-w) minmax(0,1fr) var(--panel-w)}
+.set-nav{border-right:1px solid var(--line);background:var(--paper-2);padding:18px 12px;display:flex;flex-direction:column;gap:4px}
+.set-nav h3{font-size:10px;color:var(--muted);letter-spacing:2px;margin:0 8px 10px;display:flex;justify-content:space-between;gap:8px}
+.set-nav h3 b{font-weight:400;color:var(--muted-2)}
+.set-nav button{width:100%;text-align:left;padding:9px 12px;border-radius:10px;font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.set-nav button svg{width:15px;height:15px;flex:none}
+.set-nav button:hover{background:var(--hover-surface);color:var(--ink)}
+.set-nav button.active{background:var(--rose-soft);color:var(--rose-deep);font-weight:600;box-shadow:inset 3px 0 0 var(--rose)}
+.set-nav-foot{margin-top:auto;border:1px dashed var(--disabled-line);border-radius:10px;padding:9px 11px;font-size:9.5px;color:var(--muted);line-height:1.7}
+.set-main{overflow-y:auto;padding:22px 28px 36px;background:var(--bg)}
+.set-group{margin-top:22px}
+.set-group>h2{font-size:11px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:12px;margin-bottom:11px}
+.set-group>h2::after{content:"";flex:1;height:1px;background:var(--line)}
+.set-group>h2 b{color:var(--rose);font-weight:600;letter-spacing:1px}
+.set-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:5px 17px}
+.set-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+.set-row:last-child{border-bottom:0}
+/* 标签 + 悬停说明触发器同行；说明文本不再常驻 */
+.set-row .lbl{display:flex;align-items:center;gap:7px;min-width:0}
+.set-row .val{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--muted)}
+.set-row .val b{color:var(--ink);font-weight:500}
+.set-row .val b.ok{color:var(--green)}
+.seg{display:flex;gap:6px;margin-left:auto}
+.seg button{font-size:11px;border:1px solid var(--line);border-radius:var(--radius-pill);padding:5px 13px;color:var(--muted);background:var(--paper)}
+.seg button.active{color:var(--rose-deep);border-color:var(--rose-line);background:var(--rose-soft);font-weight:600}
+.seg button:disabled{opacity:.55;cursor:default;border-style:dashed}
+.mini-btn{font-size:11px;border:1px solid var(--line);border-radius:var(--radius);padding:5px 13px;color:var(--ink);background:var(--paper)}
+.mini-btn:hover{border-color:var(--rose-line);color:var(--rose-deep)}
+.mini-btn.danger{color:var(--danger);border-color:var(--danger-line)}
+.mini-btn:disabled{opacity:.5;cursor:not-allowed}
+/* 预留标签：统一写法 */
+.rsv-tag{font-size:8.5px;color:var(--amber);border:1px dashed var(--amber-line);border-radius:var(--radius-pill);padding:1px 7px;white-space:nowrap}
+
+.set-side{border-left:1px solid var(--line);background:var(--paper-2);padding:18px 15px;overflow-y:auto;display:flex;flex-direction:column;gap:13px}
+
+/* ---- 悬停/聚焦说明提示（全站唯一机制） ----
+   定位说明：触发器很窄（18px），若用 right:0 则 270px 气泡会向左溢出屏幕，
+   故默认改为「左对齐 + 稍微左移」，让气泡从触发器左缘起向右展开；
+   靠右的行加 .flip-right 翻到左侧，由 tooltip.js 在展开时按实际位置自动判定。
+   气泡宽度受视口约束，窄窗不会横向溢出。 */
+.sumika-field-help{position:relative;display:inline-flex;flex:none;align-items:center}
+.sumika-help-trigger{
+  border:1px solid var(--line);border-radius:50%;width:18px;height:18px;flex:0 0 18px;
+  background:var(--paper);color:var(--muted);cursor:help;font-size:11px;line-height:1;
+  display:grid;place-items:center;
+}
+.sumika-help-trigger:hover{border-color:var(--rose-line);color:var(--rose-deep)}
+.sumika-tooltip{
+  display:none;position:absolute;z-index:60;left:-8px;top:calc(100% + 7px);
+  width:270px;max-width:min(270px,calc(100vw - 24px));
+  padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);
+  box-shadow:var(--shadow-pop);font-size:12px;line-height:1.7;font-weight:normal;text-align:left;
+  white-space:normal;overflow-wrap:anywhere;
+}
+/* 触发器靠近右边界时翻到左侧展开 */
+.sumika-tooltip.flip-left{left:auto;right:-8px}
+.sumika-field-help.open .sumika-tooltip,
+.sumika-field-help:hover .sumika-tooltip,
+.sumika-field-help:focus-within .sumika-tooltip{display:block}
+.sumika-help-trigger:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+
+/* 向后兼容：旧样式表以 .set-row:hover 整行触发提示；现改为触发器自身触发并保留该写法 */
+.set-row:hover .sumika-tooltip,
+.set-row:focus-within .sumika-tooltip{display:block}
+
+/* 能力页设置块（management.js 注入）沿用同一套提示机制 */
+.sumika-capability-settings .set-row{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;position:relative}
+.sumika-capability-settings .set-row>span:first-child{flex:1}
+.sumika-capability-settings .sumika-field:not([type="checkbox"]){flex-basis:100%;width:100%;min-width:0;box-sizing:border-box;order:2}
+.sumika-capability-settings h3{margin:12px 0}
+.companion-commands{display:flex;gap:8px;margin:8px 0}
+.companion-commands .mini-btn{width:36px;height:36px;padding:0;display:grid;place-items:center}
+.companion-transcript{max-height:180px;overflow-y:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.6}
+.companion-transcript [data-who="me"]{color:var(--muted)}
+.companion-session select{min-width:0;max-width:190px;flex:1}
+.companion-session .set-row{align-items:center}
+.sumika-capability-settings>.mini-btn{margin:6px 6px 0 0}
+
+/* 设置页窄屏 */
+@media (max-width:1024px){
+  .set-wrap{grid-template-columns:minmax(0,1fr);overflow-y:auto}
+  .set-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:10px}
+  .set-nav h3,.set-nav-foot{display:none}
+  .set-nav button{width:auto;white-space:nowrap}
+  .set-side{border-left:0;border-top:1px solid var(--line)}
+}

@@ -1,5 +1,5 @@
 import {createRequire} from 'node:module';
-const {chromium}=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/')('playwright');
+const {chromium}=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/')('playwright');
 const b=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});const p=await b.newPage();let rows=Array.from({length:8},(_,i)=>({id:'fixture'+i,who:i%2?'role':'me',text:'历史消息'+i,at:'2026-01-01T12:00:00Z'})),clears=0;
 try{
 await p.route('**/api/role/chat/history?*',r=>{const q=new URL(r.request().url()).searchParams;const end=q.has('before')?Number(q.get('before')):rows.length;const start=Math.max(0,end-3);return r.fulfill({json:{messages:rows.slice(start,end),before:start,has_more:start>0,supports_clear:true}});});

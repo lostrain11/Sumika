@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 
 REQUIRED = ('Sumika.exe', 'tools/start_sumika.ps1', 'tools/start_ui_bridge.ps1',
             'ui/server.py', 'sumika_next/cli.py', 'runtime/dsh/release.json')
-ALLOWED_ROOTS = frozenset(('Sumika.exe', 'package-manifest.json', 'tools', 'ui',
+ALLOWED_ROOTS = frozenset(('Sumika.exe', 'SumikaPet.exe', 'package-manifest.json', 'tools', 'ui',
                          'extensions', 'sumika_next', 'runtime', 'licenses'))
 FORBIDDEN_PARTS = frozenset(('.sumika-next', '.sumika-continuity', '.git',
                              '__pycache__', '.pytest_cache', '.env', 'env.ps1'))
@@ -34,7 +34,10 @@ def safe_path(value):
         raise ValueError('unexpected release root')
     for part in parts:
         low = part.casefold()
-        if low in FORBIDDEN_PARTS or low.startswith('.env.') or '.update-' in low or low.endswith(('.sqlite3', '.db', '.log', '.pyc', '.pem', '.key')):
+        public_ca = value in {f'runtime/{runtime}/Lib/site-packages/certifi/cacert.pem'
+                              for runtime in ('python', 'desktop', 'voice')} and part == 'cacert.pem'
+        if (low in FORBIDDEN_PARTS or low.startswith('.env.') or '.update-' in low
+                or (low.endswith(('.sqlite3', '.db', '.log', '.pyc', '.pem', '.key')) and not public_ca)):
             raise ValueError('runtime data or credential file in release')
     return value
 

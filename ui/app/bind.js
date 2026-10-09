@@ -6,6 +6,7 @@ import {bridgeFetch as fetch} from './bridge-client.js';
 import {hasExplicitTaskIntent} from './task-intent.js';
 import {bindSpeechInput, cancelSpeechInput} from './speech-input.js';
 import {bindSpeechPlayback, cancelSpeechPlayback} from './speech-playback.js';
+import {hydrateIconsAsync} from './icons.js';
 
 const COLORS = [
   ['#c24e6e', '#f9e8ed'],
@@ -19,7 +20,7 @@ const COLORS = [
 const style = document.createElement('style');
 style.textContent = `
 .sumika-dsh-frame { width: 100%; height: calc(100vh - 200px); min-height: 520px;
-  border: 1px solid var(--line, #e2dccd); border-radius: 9px; background: #fff; margin: 10px 0; }
+  border: 1px solid var(--line); border-radius: 9px; background: var(--paper); margin: 10px 0; }
 #screen-board { overflow: hidden; }
 #sumika-workbench-frame { position: absolute; inset: 0; }
 /* The shell must never be taller than the viewport: the design's
@@ -30,13 +31,14 @@ html, body { height: 100%; overflow: hidden; }
 body { display: flex; flex-direction: column; }
 .topbar { flex: 0 0 auto; }
 .screen { flex: 1 1 auto; min-height: 0; height: auto; }
-/* The design's floating deskpet still carries sample dialogue; it must not sit
-   on top of the real workbench. */
-body.on-board #deskpet { display: none; }
+/* 桌宠跨页常驻：活动室（陪伴页）隐藏，其余各页——含工作台——都显示。
+   早期实现把工作台也隐藏了，用户已明确要求工作台同样显示，故移除该规则。
+   工作台上的桌宠默认收起为圆形小窗，避免遮挡 DSH 界面。 */
+body.on-board #deskpet { right: 14px; bottom: 14px; }
 .wb-task { display: flex; align-items: center; gap: 8px; padding: 3px 6px;
-  font-size: 12px; color: var(--muted, #7d8a86); }
+  font-size: 12px; color: var(--muted); }
 .wb-task em { margin-left: auto; font-style: normal; opacity: .7; }
-.roster .member em { display: block; font-size: 11px; font-style: normal; opacity: .65; }
+.roster-list .member em, .roster .member em { display: block; font-size: 11px; font-style: normal; opacity: .65; }
 `;
 document.head.appendChild(style);
 
@@ -94,7 +96,9 @@ async function refreshHeader() {
 }
 
 function bindRoster(payload) {
-  const roster = document.querySelector('.roster');
+  /* 版C 起名册改为「下部收起条 + 上浮面板」，卡片容器是 .roster-list；
+     读写一律以面板容器为锚点，向后兼容旧的 .roster 单栏结构。 */
+  const roster = document.querySelector('.roster-list') || document.querySelector('.roster');
   if (!roster) return;
   const all = payload.roles || [];
   // A roster entry is a whole character: its name, its card and its model.
@@ -102,7 +106,8 @@ function bindRoster(payload) {
   const unfinished = all.filter(role => role.complete !== true);
   const activeId = payload.active?.id;
   roster.querySelectorAll('.member').forEach(node => node.remove());
-  const anchor = roster.querySelector('h3');
+  /* 插入锚点：新版由 .roster-list 自身承载（无 h3），旧版插在 h3 之后 */
+  const anchor = roster.matches('.roster-list') ? null : roster.querySelector('h3');
   let previous = anchor;
   roles.forEach((role, index) => {
     const [color, soft] = COLORS[index % COLORS.length];
@@ -129,7 +134,7 @@ function bindRoster(payload) {
       roster.dataset.selecting = '1';
       try {
         await api('/api/roles/select', { method: 'POST', body: JSON.stringify({ id: role.id }) });
-        document.querySelectorAll('.roster .member').forEach(node => node.classList.remove('active'));
+        document.querySelectorAll('.roster-list .member, .roster .member').forEach(node => node.classList.remove('active'));
         button.classList.add('active');
         window.sumikaSyncRolePresentation?.({name: role.name, sub, color, soft});
         setText('#roomOwner', `${role.name}的房间`);
@@ -201,7 +206,7 @@ function bindRoster(payload) {
         field.placeholder = 'D:\\路径\\model.vrm';
         field.setAttribute('data-attach-path', role.id);
         field.style.cssText = 'flex:1;min-width:0;font-size:9.5px;padding:2px 4px;'
-          + 'border:1px solid var(--line);border-radius:5px;background:#fff';
+          + 'border:1px solid var(--line);border-radius:5px;background:var(--paper)';
         const button = document.createElement('button');
         button.className = 'mini-btn';
         button.style.cssText = 'font-size:9.5px;padding:2px 8px;white-space:nowrap';
@@ -285,8 +290,8 @@ function roomMessageNode({ who, text, at, isError, task_intent, id, state }) {
   bubble.className = 'bub';
   bubble.textContent = text;
   if (isError) {
-    bubble.style.color = '#b04a4a';
-    bubble.style.borderColor = '#e0b3b3';
+    bubble.style.color = 'var(--danger)';
+    bubble.style.borderColor = 'var(--danger-line)';
   }
   node.append(label, bubble);
   if (!mine && !isError && typeof text === 'string' && text.trim()) {
@@ -491,13 +496,13 @@ function roleImportForm() {
     + 'padding:9px;border:1px dashed var(--line);border-radius:9px;background:var(--paper)';
   wrapper.innerHTML = `
     <label style="font-size:10px;color:var(--muted)">角色 id（字母/数字/-）</label>
-    <input data-import="id" placeholder="例如 ando-subaru" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
+    <input data-import="id" placeholder="例如 ando-subaru" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper)">
     <label style="font-size:10px;color:var(--muted)">角色卡（Tavern V2/V3 JSON）</label>
     <input data-import="card" type="file" accept=".json,application/json" style="font-size:10px">
     <label style="font-size:10px;color:var(--muted)">显示名（留空就用角色卡里的名字）</label>
-    <input data-import="name" placeholder="角色卡自带的名字" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
+    <input data-import="name" placeholder="角色卡自带的名字" style="font-size:11px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper)">
     <label style="font-size:10px;color:var(--muted)">3D 模型路径（可选，本机 .vrm）</label>
-    <input data-import="model" placeholder="D:\\路径\\model.vrm" style="font-size:10px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff">
+    <input data-import="model" placeholder="D:\\路径\\model.vrm" style="font-size:10px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--paper)">
     <div style="display:flex;gap:6px;align-items:center">
       <button data-import="submit" class="mini-btn" style="font-size:11px;white-space:nowrap">导入</button>
       <button data-import="cancel" class="mini-btn" style="font-size:11px;white-space:nowrap">取消</button>
@@ -507,7 +512,8 @@ function roleImportForm() {
 }
 
 async function bindRoleImport(rolesPayload) {
-  const roster = document.querySelector('.roster');
+  /* 版C：导入入口移到名册面板的 .roster-head 内，容器同样以 roaster 面板为准 */
+  const roster = document.querySelector('.roster-head') || document.querySelector('.roster');
   if (!roster) return;
   const footer = roster.querySelector('.roster-foot');
   const trigger = footer?.querySelector('.import-btn');
@@ -588,8 +594,8 @@ function bindTree(tree) {
   const body = document.createElement('div');
   body.className = 'wb-proj-body';
   phases.forEach(phase => {
-    const dot = phase.status === 'complete' ? '#6f9c7a'
-      : (phase.status === 'planned' ? '#cbbfa6' : 'var(--rose)');
+    const dot = phase.status === 'complete' ? 'var(--growth)'
+      : (phase.status === 'planned' ? 'var(--muted-2)' : 'var(--rose)');
     const row = document.createElement('div');
     row.className = 'wb-task';
     row.innerHTML = `<i class="dot" style="background:${dot}"></i>`
@@ -693,12 +699,22 @@ async function bindWorkbench() {
 // switch here — it must not look controllable.
 
 const NATIVE_CARDS = [
-  { icon: '⌨', title: '终端执行', text: '受管终端命令、测试与构建，高危操作进入待确认。' },
-  { icon: '✎', title: '文件编辑', text: '代码搜索、阅读与补丁写入，写入前创建检查点。' },
-  { icon: '⧉', title: '子代理', text: '独立任务与代码审查交由原生子 Agent，可并行。' },
-  { icon: '❖', title: 'Skills', text: '领域技能包，安装前经安全审查。' },
-  { icon: '⬡', title: 'MCP 连接', text: '第三方工具服务器，按来源与作用域显式授权。' },
+  { icon: 'cap-terminal', title: '终端执行', text: '受管终端命令、测试与构建，高危操作进入待确认。' },
+  { icon: 'cap-edit', title: '文件编辑', text: '代码搜索、阅读与补丁写入，写入前创建检查点。' },
+  { icon: 'cap-subagent', title: '子代理', text: '独立任务与代码审查交由原生子 Agent，可并行。' },
+  { icon: 'cap-skills', title: 'Skills', text: '领域技能包，安装前经安全审查。' },
+  { icon: 'cap-mcp', title: 'MCP 连接', text: '第三方工具服务器，按来源与作用域显式授权。' },
 ];
+
+/** 注册表 id → 语义图标名；未登记的扩展回落到通用模块图标。 */
+const CAPABILITY_ICONS = {
+  ocr: 'cap-ocr',
+  desktop: 'cap-desktop',
+  camera: 'cap-camera',
+  'office-render': 'cap-office',
+  speech: 'cap-speech',
+  memory: 'cap-memory',
+};
 
 /** Design's `.sw2` switch, wired to a real toggle. */
 function switchElement(enabled, onToggle) {
@@ -727,6 +743,10 @@ function statusPill(text, variant) {
   return node;
 }
 
+/**
+ * 能力卡图标：用 <i data-icon="语义名"> 占位，由 icons.js 替换成 Lucide SVG。
+ * 卡片是运行期新建的，所以创建后必须 hydrateIconsAsync 才会出图（见 render()）。
+ */
 function capabilityCard({ icon, title, status, statusClass, text, source, enabled, onToggle,
                           capabilityId }) {
   const card = document.createElement('div');
@@ -738,7 +758,10 @@ function capabilityCard({ icon, title, status, statusClass, text, source, enable
   const glyph = document.createElement('div');
   glyph.className = 'cap-ic';
   glyph.style.background = 'var(--green-soft)';
-  glyph.textContent = icon;
+  const mark = document.createElement('i');
+  mark.dataset.icon = icon || 'cap-module';
+  mark.dataset.iconSize = '17';
+  glyph.append(mark);
   const heading = document.createElement('h4');
   heading.textContent = title;
   top.append(glyph, heading);
@@ -761,10 +784,15 @@ async function capabilityState() {
   const raw=registry.modules||[];
   const modules=raw.filter(m=>!['voice','asr','microphone','memory','memory-semantic'].includes(m.id));
   const speech=raw.filter(m=>['voice','asr'].includes(m.id));
+  // 「语音交互」把 voice / asr / microphone 合成一张卡：三个注册表条目 → 一个开关。
+  // 合并后注册表条目数会大于用户能数到的卡片数，健康度面板必须按「合并后」口径统计。
   modules.push({id:'speech',label:'语音交互',purpose:'语音识别、朗读与输入设备；麦克风需单独授权。',
     enabled:speech.some(m=>m.enabled),provider:'本地语音模块',detailOnly:true});
+  // 长期记忆不在 /api/modules 注册表里：它由 settings 的 memory.enabled 决定，属于配置项。
   modules.push({id:'memory',label:'长期记忆',purpose:'管理记忆检索、自动提取与待确认提议。',
     enabled:settings.data.memory.enabled!==false,provider:settings.data.role.memory_provider,detailOnly:true});
+  // 注册表口径 = 页面实际开关的集合（合并项已重建、拆分项已归并），所以健康度面板
+  // 直接用 modules 统计：这正是用户能数到的那份清单，不再拿原始条数去比。
   return { modules, readiness:(readiness.capabilities||[]).filter(m=>!['voice','asr','microphone','memory','memory-semantic'].includes(m.id)) };
 }
 
@@ -778,7 +806,7 @@ async function toggleCapability(id, enabled) {
 function setNote(node, text, ok) {
   if (!node) return;
   node.textContent = text;
-  node.style.color = ok ? '' : 'var(--danger, #b04a4a)';
+  node.style.color = ok ? '' : 'var(--danger)';
 }
 
 /** Fill one `.kv` row in an info panel, keeping the panel's own markup. */
@@ -879,7 +907,7 @@ async function bindCapabilityScreens() {
       }
       modules.forEach(item => {
         registryGrid.appendChild(capabilityCard({
-          icon: '◈',
+          icon: CAPABILITY_ICONS[item.id] || 'cap-module',
           title: item.label || item.id,
           status: item.enabled ? '已启用' : '已停用',
           statusClass: item.enabled ? 'on' : 'rsv',
@@ -901,7 +929,7 @@ async function bindCapabilityScreens() {
       readyGrid.className = 'cap-grid';
       readyOnly.forEach(item => {
         readyGrid.appendChild(capabilityCard({
-          icon: item.ready ? '✓' : '—',
+          icon: item.ready ? 'state-ok' : 'state-none',
           title: item.label || item.id,
           status: item.ready ? '就绪' : '不可用',
           statusClass: item.ready ? 'basic' : 'rsv',
@@ -973,9 +1001,15 @@ async function bindCapabilityScreens() {
       shelf.querySelectorAll('.cap-group').forEach(el=>el.remove());
       for(const {section,grid} of businessGroups.values())if(grid.children.length)shelf.append(section);
 
+      // 卡片是运行期新建的，data-icon 占位要在这里补拉并替换成 Lucide SVG。
+      // 不 await：图标属于装饰，拿不到也不该挡住卡片的交互绑定。
+      hydrateIconsAsync(shelf).catch(() => {});
+
       const side = document.querySelector('.cap-side');
       const panels = side ? side.querySelectorAll('.panel:not([data-extra-action])') : [];
       if (panels[1]) {
+        // 计数必须与页面实际列出的开关同源：modules 是用户能数到的卡片集合，
+        // 直接用它统计才不会被注册表里被合并/拆分的条目带偏。
         const enabledCount = modules.filter(item => item.enabled).length;
         const unavailable = readiness.filter(item => !item.ready).length;
         const cells = panels[1].querySelectorAll('.st-grid > div');
@@ -1172,7 +1206,7 @@ void api('/api/roles').then(async roles => {
   bindRoster(roles);
   await bindRoleImport(roles);
   await bindRoomChat(roles.active?.id || null);
-}).catch(error => showRegionError('.roster', error));
+}).catch(error => showRegionError('.roster-head, .roster', error));
 window.sumikaSettingsReady = Promise.allSettled([
   bindCapabilityScreens().catch(error => showRegionError('.cap-main', error)),
   api('/api/tree').catch(() => ({})).then(bindSettingsFacts)
@@ -1181,5 +1215,5 @@ window.sumikaSettingsReady = Promise.allSettled([
 ]);
 window.addEventListener('sumika-modules-changed', () => void bindCapabilityScreens());
 window.addEventListener('sumika-role-resources-changed', () => {
-  void api('/api/roles').then(bindRoster).catch(error=>showRegionError('.roster',error));
+  void api('/api/roles').then(bindRoster).catch(error=>showRegionError('.roster-head, .roster',error));
 });

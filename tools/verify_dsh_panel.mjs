@@ -5,13 +5,10 @@
 //
 // Usage:
 //   node tools/verify_dsh_panel.mjs [bridge] [evidence.json] [shot.png]
-import { createRequire } from 'node:module';
+import { loadPlaywright } from './lib/playwright.mjs';
 import { writeFile } from 'node:fs/promises';
 
-const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/',
-);
-const { chromium } = require('playwright');
+const { chromium } = loadPlaywright();
 
 const bridge = process.argv[2] || 'http://127.0.0.1:8765';
 const evidencePath = process.argv[3] || null;

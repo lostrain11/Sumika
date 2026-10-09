@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { writeFile } from 'node:fs/promises';
 
 const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/',
+  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
 );
 const { chromium } = require('playwright');
 

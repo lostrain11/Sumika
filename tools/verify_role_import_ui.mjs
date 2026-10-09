@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 
 const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/',
+  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
 );
 const { chromium } = require('playwright');
 
@@ -54,6 +54,14 @@ page.on('console', (message) => {
 await page.goto(`${bridge}/#room`, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(4000);
 
+// 版C 的名册默认收起：收起时 `.roster-panel` 为 `display:none`，其中的导入入口
+// 尺寸为 0，点不到。展开路径是「点击常驻标题条」（见 index.html 的 rosterDock），
+// 所以先像用户一样展开，再操作面板内的入口。
+const rosterDock = page.locator('#rosterDock');
+if (!await rosterDock.evaluate(el => el.classList.contains('open'))) {
+  await page.locator('#rosterBar').click();
+  await rosterDock.locator('.roster-panel').waitFor({state: 'visible'});
+}
 const trigger = page.locator('#screen-room .roster-foot .import-btn');
 if (await trigger.count() === 0) failures.push('the roster has no import entry');
 await trigger.click();
@@ -81,18 +89,22 @@ const cardOnlyStatus = await importRole({ id: cardOnlyId, withModel: false });
 if (!/已导入/.test(cardOnlyStatus)) failures.push(`card-only import failed: ${cardOnlyStatus}`);
 
 await page.waitForTimeout(1500);
-const roster = await page.evaluate(() => ({
-  names: Array.from(document.querySelectorAll('#screen-room .roster .member'))
+// 版C 把名册改为底部收起条：成员容器由 .roster 变为 .roster-list。
+// 两种都写，与 bind.js 的兼容写法一致，避免结构再调整时这里静默失效。
+const MEMBER_SEL = '#screen-room .roster-list .member, #screen-room .roster .member';
+const UNFINISHED_SEL = '#screen-room .roster-list .sumika-unfinished, #screen-room .roster .sumika-unfinished';
+const roster = await page.evaluate((sel) => ({
+  names: Array.from(document.querySelectorAll(sel))
     .map(node => ({
       name: node.querySelector('.nm')?.textContent || node.innerText.split('\n')[0],
       status: node.querySelector('.st')?.textContent || '',
       active: node.classList.contains('active'),
     })),
-}));
+}), MEMBER_SEL);
 const complete = roster.names.find(item => item.name.includes('导入流程测试角色')
   && item.status.includes('用户导入'));
 if (!complete) failures.push(`the complete role is not in the roster: ${JSON.stringify(roster.names)}`);
-const unfinishedNote = await page.locator('#screen-room .roster .sumika-unfinished').innerText()
+const unfinishedNote = await page.locator(UNFINISHED_SEL).first().innerText()
   .catch(() => '');
 const listed = await (await fetch(`${bridge}/api/roles`)).json();
 const cardOnly = (listed.roles || []).find(item => item.id === cardOnlyId);
@@ -109,26 +121,36 @@ else {
     failures.push(`the roster does not say what the unfinished role lacks: ${unfinishedNote}`);
   }
   // Completing it in place must move it into the roster.
-  const field = page.locator(`[data-attach-path='${cardOnlyId}']`);
-  if (await field.count() === 0) {
+  // 名册会随事件重渲染，所以「填路径」与「点补挂」之间节点可能被换掉——那样按钮
+  // 读到的是空值，会走「先填路径」分支而**不发请求**，看起来就像附加失败。
+  // 因此每一轮都重新定位节点、填值、点击，并把按钮自己的提示读出来作为失败原因，
+  // 而不是只报一句「没完成」让人去猜。
+  const attachSel = `[data-attach-path='${cardOnlyId}']`;
+  if (await page.locator(attachSel).count() === 0) {
     failures.push('an unfinished user role offers no way to attach its model');
   } else {
-    await field.fill(modelPath);
-    await page.locator(`${'#screen-room .roster'} .sumika-unfinished button`).first().click();
-    let attached = null;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      attached = (await (await fetch(`${bridge}/api/roles`)).json()).roles
-        .find(item => item.id === cardOnlyId);
+    let attached = null, buttonNote = '';
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await page.locator(attachSel).fill(modelPath);
+      const fix = page.locator(attachSel).locator('xpath=..');
+      await fix.getByRole('button').click();
+      for (let wait = 0; wait < 12; wait += 1) {
+        attached = (await (await fetch(`${bridge}/api/roles`)).json()).roles
+          .find(item => item.id === cardOnlyId);
+        if (attached?.complete === true) break;
+        await page.waitForTimeout(400);
+      }
       if (attached?.complete === true) break;
-      await page.waitForTimeout(500);
+      buttonNote = await fix.getByRole('button').innerText().catch(() => '');
     }
     if (attached?.complete !== true) {
-      failures.push(`attaching the model did not complete the role: ${JSON.stringify(attached)}`);
+      failures.push(`attaching the model did not complete the role: ${JSON.stringify(attached)}`
+        + (buttonNote ? ` (the button said: ${buttonNote})` : ''));
     } else {
       await page.waitForTimeout(1200);
-      const afterAttach = await page.evaluate(() => Array.from(
-        document.querySelectorAll('#screen-room .roster .member'))
-        .map(node => node.querySelector('.nm')?.textContent || ''));
+      const afterAttach = await page.evaluate((sel) => Array.from(
+        document.querySelectorAll(sel))
+        .map(node => node.querySelector('.nm')?.textContent || ''), MEMBER_SEL);
       if (!afterAttach.some(name => name.includes('导入流程测试角色'))) {
         failures.push(`the completed role is still not in the roster: ${JSON.stringify(afterAttach)}`);
       }
@@ -148,12 +170,15 @@ else {
 if (shotPath) await page.screenshot({ path: shotPath, fullPage: false });
 
 // Undo: the test role exists only for this run.
+// 桥接的所有写接口都要 X-Sumika-CSRF；漏了它只会拿到 403，
+// 于是「清理没做掉」会被误读成被测功能的缺陷，还会把测试角色留在用户档案里。
 let removalBody = '';
 let removalStatus = 0;
+const session = await (await fetch(`${bridge}/api/manage/session`)).json();
 for (const id of [completeId, cardOnlyId]) {
   const removal = await fetch(`${bridge}/api/roles/remove`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Sumika-CSRF': session.csrf },
     body: JSON.stringify({ id }),
   });
   removalStatus = removal.status;

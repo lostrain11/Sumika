@@ -1,0 +1,161 @@
+/* ============================================================================
+   Sumika 设计令牌（单一颜色来源）
+   ----------------------------------------------------------------------------
+   规则：
+   1. 所有主题相关颜色只在这里定义；页面 CSS 与 JS 一律引用 var(--token)。
+   2. 角色立绘/VRM/房间陈设的材质色不属于主题色，保留字面值并在使用处注释。
+   3. 暗色主题通过 html[data-theme='dark'] 覆盖同一组变量，组件无需写补丁。
+   ========================================================================== */
+
+:root{
+  /* ---- 基础面 ---- */
+  --bg:#f5f3ea;
+  --paper:#fffdf8;
+  --paper-2:#faf8f0;
+  --ink:#2f3a34;
+  --muted:#6e7a72;
+  --line:#ddd9c8;
+
+  /* ---- 强调色 ---- */
+  --rose:#b4496a;          /* 玫红主强调 */
+  --rose-deep:#9c3a56;
+  --rose-soft:#f9e8ed;
+  --rose-line:#e6c3cf;     /* 玫红描边（hover/激活边框） */
+  --green:#567f6c;         /* 墨绿辅助 */
+  --green-soft:#e8f1ea;
+  --green-line:#cfe0d4;
+  --mizu:#7aa8c7;          /* 水色点缀 */
+  --mizu-soft:#e9f1f7;
+  --mizu-line:#cfdfea;
+  --amber:#9a7038;
+  --amber-soft:#f7efdd;
+  --amber-soft-2:#f4ecdc;
+  --amber-line:#d9c49a;
+  --danger:#a6404d;
+  --danger-line:#e0b3b3;
+
+  /* ---- 角色强调色（JS 可切换，默认跟随玫红） ---- */
+  --chara:#b4496a;
+  --chara-soft:#f9e8ed;
+
+  /* ---- 弱化 / 禁用 / 预留 ---- */
+  --muted-2:#b3ab8f;       /* 更弱的说明文字 */
+  --muted-3:#a39e8b;       /* 预留项文字 */
+  --disabled-bg:#f0ecdd;
+  --disabled-line:#d8d2ba;
+  --reserved-dash:#d8cfb4;
+  --plain:#fff;            /* 纯白前景（深底上的图标/滑块） */
+
+  /* ---- 控件语义 ---- */
+  --switch-track:#d8d4c2;
+  --switch-knob:#fff;
+  --hover-surface:#f1eee0;
+  --hover-surface-2:#f5f1e4;
+  --ok-dot:#58a86b;
+  --live-dot:#d06a6a;
+  --live-ring:rgba(208,106,106,.18);
+  --growth:#4c9464;
+  --growth-soft:#eef4ef;
+  --surface-veil:rgba(255,253,248,.92);
+  --surface-veil-2:rgba(255,253,248,.94);
+  --warn-ink:#c8a172;
+
+  /* ---- 形状与阴影 ---- */
+  --radius:9px;
+  --radius-sm:7px;
+  --radius-lg:12px;
+  --radius-pill:99px;
+  --gap:12px;
+  --card-pad:13px;
+  --shadow:0 4px 14px rgba(80,75,50,.06);
+  --shadow-pop:0 10px 24px rgba(120,100,60,.16);
+  --shadow-pop-2:0 8px 20px rgba(120,100,60,.18);
+  --focus-ring:var(--green);
+
+  /* ---- 布局尺度（三栏页面共用） ---- */
+  --side-w:220px;
+  --panel-w:320px;
+  --topbar-h:64px;
+  --grid-min:200px;
+  /* 卡片统一尺寸：能力卡与预留卡共用一个高度下限，保证同一页内所有卡片等大。
+     实测 200px 时 8 个宽度下卡片高度差为 0，且无内容被裁（见 ui-redesign-execution.md）。
+     紧凑密度用更矮的一档，仍保持「同页所有卡片等大」。 */
+  --card-h:200px;
+  --card-h-dense:145px;
+
+  /* ---- 房间/舞台（保留原有暖色调） ---- */
+  --room-wall-top:#f4e7d2;
+  --room-wall-mid:#f7eddc;
+  --room-wall-low:#f3e6ce;
+  --room-wall-base:#efdfc4;
+  --room-wall-bottom:#e9d8bb;
+  --room-floor-1:#d2ac7f;
+  --room-floor-2:#c39a6a;
+  --room-floor-3:#ba8f5e;
+  --room-trim:rgba(255,252,244,.92);
+  --room-seam:rgba(140,104,66,.13);
+  --room-shadow:rgba(120,86,48,.16);
+  --room-glow:rgba(255,246,228,.22);
+  --room-sun:rgba(255,240,208,.66);
+  --room-sun-2:rgba(255,232,196,.34);
+  --room-window-a:#a9d0e2;
+  --room-window-b:#d9ecf0;
+  --room-window-c:#f6ecd0;
+  --room-window-d:#f0dcb6;
+  --room-frame:#fffaf0;
+  --room-frame-shadow:rgba(140,105,60,.2);
+}
+
+/* ============================ 暗色主题 ==================================== */
+html[data-theme='dark']{
+  --bg:#191d1d;
+  --paper:#222727;
+  --paper-2:#292f2e;
+  --ink:#e7e9df;
+  --muted:#acb7b0;
+  --line:#47524d;
+
+  --rose:#e299af;
+  --rose-deep:#e7aec0;
+  --rose-soft:#403039;
+  --rose-line:#5d4451;
+  --green:#a0cbb1;
+  --green-soft:#2e4137;
+  --green-line:#3f5348;
+  --mizu:#a0c8e2;
+  --mizu-soft:#283c49;
+  --mizu-line:#3a5464;
+  --amber:#dfbf88;
+  --amber-soft:#423b2c;
+  --amber-soft-2:#3a3527;
+  --amber-line:#5c5138;
+  --danger:#eea0a5;
+  --danger-line:#5b3b3f;
+
+  --chara:#e299af;
+  --chara-soft:#403039;
+
+  --muted-2:#8d968f;
+  --muted-3:#8d968f;
+  --disabled-bg:#2b3130;
+  --disabled-line:#414b46;
+  --reserved-dash:#4b5347;
+  --plain:#fff;
+
+  --switch-track:#4b5652;
+  --switch-knob:#e7e9df;
+  --hover-surface:#2c3331;
+  --hover-surface-2:#313836;
+  --ok-dot:#6dba85;
+  --live-dot:#d98a8a;
+  --live-ring:rgba(217,138,138,.20);
+  --growth:#8fc7a3;
+  --growth-soft:#2b3a31;
+  --surface-veil:rgba(34,39,39,.92);
+  --surface-veil-2:rgba(34,39,39,.94);
+  --warn-ink:#d8b077;
+
+  --shadow:0 4px 14px #0003;
+  --shadow-pop:0 10px 24px #0005;
+  --shadow-pop-2:0 8px 20px #0005;
+}

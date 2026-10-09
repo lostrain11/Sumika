@@ -9,6 +9,7 @@ import os
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
+from .cancellation import model_response, model_events
 
 
 class CloudError(RuntimeError):
@@ -84,7 +85,7 @@ class CloudProvider:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(self.endpoint + path, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with model_response(request, timeout=self.timeout) as response:
                 return json.loads(response.read().decode("utf8"))
         except urllib.error.HTTPError as error:
             kind = _STATUS_KINDS.get(error.code, "http_error")
@@ -107,7 +108,7 @@ class CloudProvider:
                 "models": [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]}
 
     def generate(self, *, model, messages, max_tokens=1024, temperature=0.7, images=None,
-                 max_images=8, max_image_bytes=20_000_000):
+                 max_images=8, max_image_bytes=20_000_000, on_delta=None):
         if not isinstance(model, str) or not model.strip():
             raise ValueError("model required")
         if not isinstance(messages, list) or not messages:
@@ -125,7 +126,8 @@ class CloudProvider:
                                          "content": [{"type": "text", "text": last["content"]}] + parts}]
         payload = {"model": model, "messages": messages, "stream": False,
                    "temperature": temperature, "max_tokens": max_tokens}
-        value = self._request("/chat/completions", payload=payload)
+        value = (self._stream(payload, on_delta) if on_delta is not None else
+                 self._request("/chat/completions", payload=payload))
         choices = value.get("choices") if isinstance(value, dict) else None
         if not isinstance(choices, list) or not choices:
             raise CloudError("bad_response", "provider returned no choices")
@@ -143,3 +145,52 @@ class CloudProvider:
                 "finish_reason": choice.get("finish_reason"), "usage_status": status,
                 "usage": {key: usage.get(key) for key in
                           ("prompt_tokens", "completion_tokens", "total_tokens") if key in usage}}
+
+    def _stream(self, payload, on_delta):
+        if not callable(on_delta):
+            raise ValueError('delta callback required')
+        payload = dict(payload, stream=True, stream_options={'include_usage': True})
+        request = urllib.request.Request(self.endpoint+'/chat/completions',
+            data=json.dumps(payload, ensure_ascii=False).encode('utf8'),
+            headers={'Authorization': 'Bearer '+self._key(), 'Content-Type':'application/json'})
+        fragments, final = [], {'model': payload['model'], 'usage': {}}
+        finished = False
+        characters = 0
+        def event(data):
+            nonlocal finished, characters
+            if data == '[DONE]':
+                finished = True
+                return False
+            value = json.loads(data)
+            if not isinstance(value, dict) or 'error' in value:
+                raise CloudError('bad_response', 'invalid stream event')
+            if isinstance(value.get('usage'), dict): final['usage'] = value['usage']
+            if isinstance(value.get('model'), str): final['model'] = value['model']
+            choices = value.get('choices')
+            if choices:
+                choice = choices[0]
+                text = (choice.get('delta') or {}).get('content')
+                if text is not None and not isinstance(text, str):
+                    raise CloudError('bad_response', 'invalid stream text')
+                if text:
+                    characters += len(text)
+                    if characters > 256_000:
+                        raise CloudError('response_limit', 'stream text exceeds response budget')
+                    fragments.append(text)
+                    on_delta(text)
+                if choice.get('finish_reason') is not None:
+                    final['finish_reason'] = choice['finish_reason']
+            return True
+        try:
+            model_events(request, timeout=self.timeout, on_event=event)
+        except urllib.error.HTTPError as error:
+            raise CloudError(_STATUS_KINDS.get(error.code, 'http_error'),
+                             f'provider returned HTTP {error.code}', retryable=error.code>=500) from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            raise CloudError('unavailable', 'stream outcome unknown', retryable=True) from error
+        except ValueError as error:
+            raise CloudError('bad_response', 'invalid stream JSON') from error
+        if not finished:
+            raise CloudError('incomplete_stream', 'stream ended without completion; no retry applied')
+        return {'model': final['model'], 'usage': final['usage'], 'choices': [
+            {'message': {'content': ''.join(fragments)}, 'finish_reason': final.get('finish_reason')}]}

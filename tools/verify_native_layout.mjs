@@ -1,7 +1,7 @@
 import {createRequire} from 'node:module';
 import {writeFile} from 'node:fs/promises';
 import path from 'node:path';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
+const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
 const {chromium}=require('playwright');
 let input='';for await(const chunk of process.stdin)input+=chunk;
 const config=JSON.parse(input);

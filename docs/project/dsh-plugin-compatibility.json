@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "runtime": "0.2.0-rc.2",
+  "checked": "2026-10-08",
+  "source": "npm registry package metadata and isolated runtime lockfile",
+  "conclusion": "Plugins can replace selected infrastructure when their peer range matches exactly, but installation is not capability acceptance. Keep Sumika's Harness-neutral modules and use plugins at the DSH boundary.",
+  "candidates": [
+    {"package":"@deepseek-ai/dsh-session-query","decision":"direct_candidate","replace":"history/search readers in Sumika DSH adapter","reason":"0.2.0-rc.2 peer set matches; exposes readSession and live-preferred history","conditions":["adapt continuity history bridge","verify persistence profile and pagination"]},
+    {"package":"@deepseek-ai/dsh-schedule","decision":"native_reminders_only_research_requires_gate","replace":"DSH-specific reminder delivery, not deterministic research trigger","reason":"Installed 0.2.0-rc.2 peer set matches; native reminder delivery resumes original Session Agent and durably flushes inbox. Ungated weekly research reminder cannot guarantee zero model calls when unchanged.","conditions":["enable optional experimental-schedule bundle in isolated web profile and validate service; headless standalone is unsupported","deterministic research runner must filter changes before any Agent wakeup","verify Sumika SQLite semantics; do not add duplicate UI entry"],"source_files":["@deepseek-ai/dsh-schedule/README.zh.md","@deepseek-ai/dsh-schedule/lib/index.js:1508","@deepseek-ai/dsh-schedule/lib/types/index.d.ts"]},
+    {"package":"@deepseek-ai/dsh-subagent","decision":"direct_candidate","replace":"native subagent compatibility glue","reason":"0.2.0-rc.2 peer set matches tools, approval, query, persistence and preset registry","conditions":["re-run child-agent and cancellation acceptance","Sumika role workers remain independent"]},
+    {"package":"@deepseek-ai/dsh-mcp-client","decision":"direct_candidate","replace":"MCP transport wiring","reason":"0.2.0-rc.2 peer set matches MCP resources, subprocess, tools and system prompt","conditions":["reuse native approval and subprocess policies","test install/start/stop and configuration preservation"]},
+    {"package":"@deepseek-ai/dsh-goal","decision":"evaluate_then_adopt","replace":"goal/plan integration","reason":"0.2.0-rc.2 peer set matches agent/session projection","conditions":["compare against existing plan lifecycle and UI","avoid a second plan entry"]},
+    {"package":"@deepseek-ai/dsh-plugin-manager","decision":"use_for_management","replace":"plugin installation/version checks","reason":"registry and local package peer checks; exact-version compatibility exemptions","conditions":["do not bypass incompatible plugin","HMR requires explicit enable and restart otherwise"]},
+    {"package":"@deepseek-ai/dsh-client-ui-chat|plan|trajectory|approval","decision":"ui_review_required","replace":"native UI surfaces only where slot-compatible","reason":"all 0.2.0-rc.2 metadata matches Cordis but Sumika skin uses slots/props","conditions":["four-screen visual acceptance","single-entry check and native feature retention"]}
+  ],
+  "not_direct_replacements": [
+    "Pipecat/LiveKit voice pipeline: external provider/runtime, not DSH plugins",
+    "NEKO/AIRI/Page Assist/screenpipe: reference or adapter, not native DSH plugin",
+    "0.2.1-alpha.1 packages: observation only; no alpha dependency in this delivery"
+  ],
+  "verification": [
+    "native plugin-manager synthetic lifecycle passed: .sumika-next/plugin-lifecycle-e2794f79cc5c4fa99b5b2bee844f133a/report.json; install/toggle/restart/remove, incompatible rejection and byte-exact failed-install restoration; unrelated YAML config preserved; no exemption or daily change",
+    "candidate P4 passed: .sumika-next/p4-d85fc198f47a42f98ea2d308a76ffb97/report.json",
+    "candidate role plugin lifecycle passed; old runtime role regression passed",
+    "candidate Plan/reconnect/restart/cancel passed: .sumika-next/p2-recovery-2bd317c879704bcc82676a1207e91506/report.json",
+    "candidate full P2 release gate passed with explicitly repaired synthetic workspace ACL; daily profile ACL not changed or verified",
+    "0.2 terminal timeout moves commands to background jobs; job_output/job_kill and active cancellation passed",
+    "community market discovery stored in reference-projects.json.market_observation; metadata only, no runtime acceptance",
+    "isolated pnpm install --ignore-scripts completed for @deepseek-ai/dsh 0.2.0-rc.2",
+    "tools/probe_dsh_next.py --runtime .sumika-next/dsh-upgrade/0.2.0-rc.2 passed",
+    "no plugin was automatically installed into the daily profile"
+  ]
+}

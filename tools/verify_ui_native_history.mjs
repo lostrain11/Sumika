@@ -1,7 +1,8 @@
 // Read existing history only: never send, retry, approve or replay a task.
 import {createRequire} from 'node:module';
 import {mkdir,writeFile} from 'node:fs/promises';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
+import {waitForNativeFrame} from './lib/native-frame.mjs';
+const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
 const {chromium}=require('playwright');
 const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
 const page=await browser.newPage({viewport:{width:1280,height:720}});
@@ -11,7 +12,7 @@ await mkdir(directory,{recursive:true});
 try {
   await page.goto('http://127.0.0.1:8765/#board');
   await page.locator('#sumika-workbench-frame').waitFor({timeout:120000});
-  const frame=page.frames().find(f=>f.url().includes(':5175'));
+  const frame=await waitForNativeFrame(page, 'http://127.0.0.1:8765');
   await frame.getByText('创建并删除临时测试文件',{exact:true}).click({timeout:30000});
   for(const [width,height] of [[1280,720],[1024,576]]) {
     // 1024x576 is the effective CSS viewport of 1280x720 at 125%.

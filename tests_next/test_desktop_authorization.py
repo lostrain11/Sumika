@@ -3,7 +3,8 @@ from extensions.desktop.control.uia import WindowsController
 
 class DesktopAuthTests(unittest.TestCase):
     def test_api_requires_snapshot_when_supplied_and_returns_hash(self):
-        source=open('extensions/desktop/control/uia.py',encoding='utf8').read()
+        with open('extensions/desktop/control/uia.py',encoding='utf8') as handle:
+            source=handle.read()
         self.assertIn('expected_snapshot_hash',source)
         self.assertIn('verification_hash',source)
     def test_missing_approval_stops_before_target_lookup(self):

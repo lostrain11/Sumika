@@ -1,6 +1,6 @@
 import {createRequire} from 'node:module';
 import {writeFile} from 'node:fs/promises';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/6f12e0ef1c6e5061/bin/node_modules/');
+const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
 const {chromium}=require('playwright');
 const cases=[
   ['昴，你吃了没',false],['Sumika 项目最近怎么样？',false],
@@ -14,9 +14,23 @@ const cases=[
   ['把工作区改成项目',true],['帮我把设置页面改成深色',true],
   ['请生成一份项目测试报告',true],['我吃过了。帮我排查登录失败的问题。',true],
 ];
+// 24 fixture messages: the 20 cases above, then 4 rows whose metadata must not
+// produce a task entry (missing, low confidence, discussion, invented evidence).
+// Every row needs an id: the paging cursor is the id of the oldest message in a
+// page, so an id-less tail would make the bridge's `before` cursor undefined and
+// silently truncate the history at the first page.
+const fixture=[
+  ...cases.map(([text],i)=>({id:`fixture-${i}`,who:'me',text,at:'2026-09-12T10:00:00',task_intent:{kind:'task',confidence:'high',evidence:text}})),
+  ...[null,{kind:'task',confidence:'low',evidence:cases[13][0]},
+    {kind:'discussion',confidence:'high',evidence:cases[13][0]},
+    {kind:'task',confidence:'high',evidence:'模型编造的请求'}].map((task_intent,i)=>({
+      id:`fixture-${cases.length+i}`,who:'me',text:cases[13][0],at:'2026-09-12T10:00:00',task_intent,
+    })),
+];
 const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
 const page=await browser.newPage({viewport:{width:1280,height:720}});
 const checks=[],errors=[];let modelRequests=0;
+const diag={history:[]};
 try{
   let persistedDraft=null;
   await page.route('**/api/manage/task-draft',route=>{
@@ -28,14 +42,58 @@ try{
     return route.fulfill({json:{draft:persistedDraft}});
   });
   await page.route('**/api/role/chat',route=>{modelRequests++;return route.abort();});
-  await page.route('**/api/role/chat/history?*',route=>route.fulfill({json:{messages:[
-    ...cases.map(([text],i)=>({id:`fixture-${i}`,who:'me',text,at:'2026-09-12T10:00:00',task_intent:{kind:'task',confidence:'high',evidence:text}})),
-    ...[null,{kind:'task',confidence:'low',evidence:cases[13][0]},
-      {kind:'discussion',confidence:'high',evidence:cases[13][0]},
-      {kind:'task',confidence:'high',evidence:'模型编造的请求'}].map(task_intent=>({who:'me',text:cases[13][0],task_intent})),
-  ]}}));
+  // The room renders three messages per page and pulls older ones through the
+  // 加载更早 control, so the mock must honour limit/before/has_more. A single
+  // unpaged list would leave only its tail on screen and every nth() below
+  // would address a row that was never rendered.
+  await page.route('**/api/role/chat/history?*',route=>{
+    const url=new URL(route.request().url());
+    const limit=Number(url.searchParams.get('limit')||3);
+    const before=url.searchParams.get('before');
+    let end=fixture.length;
+    if(before){
+      const index=fixture.findIndex(item=>item.id===before);
+      end=index<0?0:index;
+    }
+    const start=Math.max(0,end-limit);
+    const messages=fixture.slice(start,end);
+    diag.history.push({query:url.search,start,end,has_more:start>0});
+    return route.fulfill({json:{
+      messages,before:messages.length?messages[0].id:null,has_more:start>0,
+    }});
+  });
   await page.goto('http://127.0.0.1:8765/#room');
   await page.locator('#screen-room .chat-msgs .cm').first().waitFor({timeout:30000});
+  // Page until every fixture row is on screen; the more button hides when the
+  // bridge reports no further pages.
+  const rows=()=>page.locator('#screen-room .chat-msgs .cm');
+  const more=page.locator('[data-room-older]');
+  // The control is created by bindRoomChat and its visibility is only settled by
+  // the first history load, either of which can land after the first row paints.
+  // Poll for it instead of assuming a fixed delay.
+  await more.waitFor({state:'attached',timeout:20000});
+  for(let wait=0;wait<150;wait+=1){
+    if(!await more.isHidden())break;
+    await page.waitForTimeout(100);
+  }
+  for(let guard=0;guard<40;guard+=1){
+    if(await more.isHidden())break;
+    const before=await rows().count();
+    await more.click();
+    for(let wait=0;wait<60;wait+=1){
+      if(await rows().count()>before)break;
+      await page.waitForTimeout(100);
+    }
+  }
+  const loaded=await rows().count();
+  if(loaded!==fixture.length){
+    const state=await page.evaluate(()=>{
+      const b=document.querySelector('[data-room-older]');
+      return {hidden:b?b.hidden:null,exists:!!b,parent:b?b.parentElement.className:null};
+    });
+    throw new Error(`history paging loaded ${loaded} of ${fixture.length} fixture rows; diag=${JSON.stringify({...diag,state})}`);
+  }
+  checks.push(`paged history loads all ${fixture.length} fixture rows`);
   const results=await page.evaluate(async cases=>{
     const {hasExplicitTaskIntent}=await import('/app/task-intent.js');
     return cases.map(([text])=>hasExplicitTaskIntent(text));
@@ -43,17 +101,17 @@ try{
   for(let i=0;i<cases.length;i++){
     const [text,expected]=cases[i];
     if(results[i]!==expected)throw new Error(`intent mismatch: ${text}`);
-    const row=page.locator('#screen-room .chat-msgs .cm').nth(i);
+    const row=rows().nth(i);
     if(await row.getByRole('button',{name:'转到工作台…',exact:true}).count()!==Number(expected))throw new Error(`render mismatch: ${text}`);
   }
   checks.push(`${cases.length} task/discussion/negation/quote cases and rendered buttons`);
   for(let i=cases.length;i<cases.length+4;i++){
-    if(await page.locator('#screen-room .chat-msgs .cm').nth(i).getByRole('button').count())throw new Error('unreliable metadata displayed task entry');
+    if(await rows().nth(i).getByRole('button').count())throw new Error('unreliable metadata displayed task entry');
   }
   checks.push('missing, low confidence, discussion and invented evidence suppress task entry');
   if(!page.url().endsWith('#room'))throw new Error('automatically navigated');
   await page.evaluate(()=>window.addEventListener('sumika:prepare-task',e=>window.__taskEvidence=e.detail));
-  const task=page.locator('#screen-room .chat-msgs .cm').nth(13);
+  const task=rows().nth(13);
   await task.getByRole('button',{name:'转到工作台…',exact:true}).click();
   await page.waitForURL('**/#board');
   const detail=await page.evaluate(()=>window.__taskEvidence);

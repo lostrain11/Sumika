@@ -47,4 +47,17 @@
 清理后 `python -B -m sumika_next.cli check` 和 `python -B -m sumika_next.cli handoff` 均成功。未执行真实模型调用或 UI 验收。当前产品阶段仍为 P4-UI，下一步继续 UI 设计。
 
 ## 20260914-070900
-Moved three research HTML artifacts to $dest; recoverable, not deleted.
+Moved three research HTML artifacts to the private recovery directory recorded above; recoverable, not deleted.
+
+## 20261007
+
+本轮整理保留源码、测试、验收证据、当前 UI 统一化记录和可复用工具。以下旧迭代产物已移出项目根目录，
+恢复副本和清单位于 `D:\Backups\Sumika\project-cleanup-20261007\`：
+
+- `.workbuddy/`：本地 Agent 记忆与旧轮日志；
+- `build/`、`sumika_next.egg-info/`：可再生构建产物；
+- `tools/probe_baseline_400.mjs`、`probe_icons.mjs`、`probe_management_module.py`、
+  `probe_profile_lease.py`、`probe_roster_hover.mjs`：一次性排查脚本，未被产品代码依赖。
+
+本轮没有删除 Git 跟踪的源码或阶段证据，没有触碰 `.sumika-next/`、`.sumika-continuity/`、个人数据或安装包。
+整理后以 `python -B -m sumika_next.cli check` 复核连续性记录。

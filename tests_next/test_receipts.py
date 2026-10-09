@@ -334,6 +334,10 @@ class ReceiptHandoffTests(unittest.TestCase):
             link.symlink_to(self.root / "missing-target", target_is_directory=True)
         except (OSError, NotImplementedError):
             self.skipTest("cannot create symlinks in this environment")
+        if not link.is_symlink():
+            # Some sandboxes accept the call but silently drop the link, which
+            # would leave nothing dangling to test against.
+            self.skipTest("symlink creation was a no-op in this environment")
         with self.assertRaises(ReceiptError):
             read_receipts(self.root)
 
