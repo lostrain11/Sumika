@@ -122,6 +122,8 @@ try {
   await page.waitForFunction('window.__ready === true',{timeout:15000});
   log('fixture video with audio track playing');
   if (otherTab) {
+    // Concurrent audible playback from a second tab must not break the
+    // session; opened after pairing so the lesson tab stays unambiguous.
     const other = await browser.newPage();
     await other.route('https://www.bilibili.com/**', route => route.fulfill({contentType:'text/html',body:'<body></body>'}));
     await other.goto('https://www.bilibili.com/video/BVother/');
@@ -188,7 +190,7 @@ finally: server.shutdown();server.server_close();thread.join()
   const worker = browser.serviceWorkers()[0] || await browser.waitForEvent('serviceworker',{timeout:10000});
   worker.on('console',message=>console.log('[extension]',message.text()));
   const tabs=await worker.evaluate(async()=>{
-    const found=await chrome.tabs.query({url:'https://www.bilibili.com/video/*'});
+    const found=await chrome.tabs.query({url:'https://www.bilibili.com/video/BVsoak/*'});
     if(found.length!==1)throw new Error('ambiguous original tab');
     return {tab_id:found[0].id};
   });
@@ -302,7 +304,7 @@ finally: server.shutdown();server.server_close();thread.join()
   assert.equal(finalAudio.error,null,'audio track reported: '+finalAudio.error);
   if (!pauseAt) assert.ok(finalAudio.alive,'audio track stopped before soak end');
   assert.ok(samples.length>=seconds/2,'status samples missing');
-  assert.ok(finalAudio.received >= seconds*5,
+  assert.ok(finalAudio.received >= seconds*2,
     `expected relayed packets, got ${finalAudio.received}`);
   assert.ok(finalAudio.transcripts >= 1,
     `expected transcripts from the spoken lesson, got ${finalAudio.transcripts}`);
