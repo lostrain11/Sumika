@@ -703,7 +703,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: delivery package P3 implementation and protocol acceptance are done; the 30-minute subtitle/no-subtitle fixture soaks, other-tab playback, muted/zero-volume transcription, pause/seek/part-change fences and the real Bilibili 30-minute acceptance REMAIN (notify the user before real-site tests; the tool entries are tools/build_companion_extension.mjs and the passive-browser audio routes). Complete those gates, then proceed to delivery package P4. Do not confuse delivery-package numbering with legacy plan phases.",
+  "next_action": "ZCode / GLM5.3flash: delivery packages P0-P3 are complete except user-gated real-site acceptance (P3 real Bilibili 30 minutes; P4 real 20-page flips; P6 voice hardware; P8 clean machine — all require the user and are deferred until they are available). The next CODEABLE package is P5 (token economy: ~1Hz local change detection, background analysis at most 2/minute with single-latest pending, proactive default interval at least 120s, danmaku local dedup, web AI only via the existing authorization ledger, notes-with-source persistence, UsageStore migration with audio seconds and vision calls, unknown never recorded as zero). Read the frozen execution section at the top of docs/project/companion-implementation.md. User-gated items must not be executed or simulated without the user.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -810,7 +810,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-09T14:17:19.407572+00:00",
+  "updated_at": "2026-10-09T20:50:08.845950+00:00",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
@@ -915,8 +915,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p3_partial_soaks_pending",
-    "current_delivery_package": "P3",
+    "status": "p3_fixture_complete_user_gates_pending",
+    "current_delivery_package": "P5 (codeable); P3 real-site/P4 flips/P6 hardware/P8 clean-machine wait for the user",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -931,13 +931,14 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "P3 implementation: production MV3 extension builder (Bilibili-scoped, user popup connect/disconnect/status, pairing-gated, no research PCM export, explicit manual install); bounded browser audio protocol end to end (audio consent flag + audio_epoch rotation in the grant, PassiveBrowserAudio strict sequence/identity/20-packet queue with explicit failure, pipe-source application audio worker reusing segmented Vosk/SenseVoice, extension ingress routes, revoke/pause/target-change lifecycle, transcripts into the shared fusion); 962 tests OK including 6 new transport discipline tests with a real subprocess pipeline.",
+    "verified_this_turn": "P3 fixture acceptance COMPLETE: soak A (subtitles, 30min, 6419 packets, 42 real vosk transcripts, 63 seek rotations, pause fence) and soak B (no subtitles, muted player, other tab concurrent, 30min, 8960 packets, 59 transcripts) plus part-change reconnect/re-consent soak; fixes landed: audio-epoch rotation rebinds a live recognizer instead of tearing it down, stable-identity fence (url/fingerprint/part) so loops and seeks stay bound while a different video or part is rejected; full suite 962 tests OK; commits 1bf4e9d, ebc3744, ed94a27 plus the soak receipt commit.",
     "limitations": [
-      "P3 soak acceptance (30-minute fixture runs and real-site) not yet executed; the 79-packet historical report is not a substitute",
+      "P3 fixture acceptance COMPLETE (A2 subtitles 30min 6419 packets 42 transcripts; B2 no-subtitle+muted+other-tab 30min 8960 packets 59 transcripts; part-change re-consent verified); real Bilibili 30-minute acceptance waits for the user",
+      "P4 code complete per prior evidence; real 20-page-flip acceptance needs the user's desktop",
+      "P6 hardware voice and P8 clean-machine gates need the user; P5/P7 are codeable next",
       "Daily DSH still 0.1.5-rc.2; 0.2.0-rc.2 verified in isolation only",
-      "E:/SumikaBuild voice runtime inputs and older candidates carry a dev path in runtime/voice python314._pth; staging builder rejects such inputs, final rebuild must use clean runtimes",
-      "Audio capability-gap UI copy (no audio track/CORS/replaced player) not yet wired into the Sumika detail",
-      "Real-device voice/PDF acceptance and clean-machine gates remain; final install acceptance is delivery package P8"
+      "E:/SumikaBuild voice runtime inputs carry a dev path in _pth; staging builder rejects such inputs; final rebuild must use clean runtimes",
+      "Latest installer predates current source; final install acceptance is delivery package P8"
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a"

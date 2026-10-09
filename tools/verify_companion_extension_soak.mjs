@@ -277,7 +277,7 @@ finally: server.shutdown();server.server_close();thread.join()
       report.checks.part_change_reconnect=true;
       log('switching part (?p=2): reconnect and re-consent required');
       await page.goto('https://www.bilibili.com/video/BVsoak/?p=2');
-      await page.evaluate(pageScript, wav);
+      await page.evaluate(pageScript, pageOptions);
       await page.waitForFunction('window.__ready === true',{timeout:15000});
       await manage({action:'stop'});
       const offer2=await worker.evaluate(configuration=>offerConnection(configuration),
