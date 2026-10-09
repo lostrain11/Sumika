@@ -703,7 +703,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: delivery packages P0-P3 are complete except user-gated real-site acceptance (P3 real Bilibili 30 minutes; P4 real 20-page flips; P6 voice hardware; P8 clean machine — all require the user and are deferred until they are available). The next CODEABLE package is P5 (token economy: ~1Hz local change detection, background analysis at most 2/minute with single-latest pending, proactive default interval at least 120s, danmaku local dedup, web AI only via the existing authorization ledger, notes-with-source persistence, UsageStore migration with audio seconds and vision calls, unknown never recorded as zero). Read the frozen execution section at the top of docs/project/companion-implementation.md. User-gated items must not be executed or simulated without the user.",
+  "next_action": "ZCode / GLM5.3flash: delivery packages P0-P5 are complete (P3 fixture soaks green; P5 usage honesty, provenance notes API, background budget and danmaku dedup/summary all landed with 975 tests OK). Remaining: P3 real-site, P4 real page flips, P6 hardware and P8 clean machine all wait for the user; P7 (plugin compatibility, reference research lifecycle, four-screen UI regression) is the next codeable package. Read the frozen execution section at the top of docs/project/companion-implementation.md. User-gated items must not be executed without the user; the notes UI entry and danmaku auto-trigger policy need design confirmation first.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -810,7 +810,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-09T20:50:08.845950+00:00",
+  "updated_at": "2026-10-09T21:25:12.335762+00:00",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
@@ -915,8 +915,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p3_fixture_complete_user_gates_pending",
-    "current_delivery_package": "P5 (codeable); P3 real-site/P4 flips/P6 hardware/P8 clean-machine wait for the user",
+    "status": "p5_done_p7_next_user_gates_pending",
+    "current_delivery_package": "P7 (codeable); P3 real-site/P4 flips/P6 hardware/P8 clean machine wait for the user",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -931,14 +931,14 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "P3 fixture acceptance COMPLETE: soak A (subtitles, 30min, 6419 packets, 42 real vosk transcripts, 63 seek rotations, pause fence) and soak B (no subtitles, muted player, other tab concurrent, 30min, 8960 packets, 59 transcripts) plus part-change reconnect/re-consent soak; fixes landed: audio-epoch rotation rebinds a live recognizer instead of tearing it down, stable-identity fence (url/fingerprint/part) so loops and seeks stay bound while a different video or part is rejected; full suite 962 tests OK; commits 1bf4e9d, ebc3744, ed94a27 plus the soak receipt commit.",
+    "verified_this_turn": "P5 executed: UsageStore additive migration with audio_seconds and vision_calls columns and honest totals (unknown stays None, never zero, plus unknown_status_rows); chat records vision calls per image-bearing ask; browser tab audio records measured seconds on stop; provenance notes store plus authenticated /api/companion/notes route with source auto-filled from the current observation (no page-supplied provenance, separate from memory, no UI entry pending design); background model budget capped at two per minute across proactive and danmaku summaries; danmaku local-rule dedup buffer with bounded danmaku_new events and a failure-isolated summary hook; 975 tests OK.",
     "limitations": [
-      "P3 fixture acceptance COMPLETE (A2 subtitles 30min 6419 packets 42 transcripts; B2 no-subtitle+muted+other-tab 30min 8960 packets 59 transcripts; part-change re-consent verified); real Bilibili 30-minute acceptance waits for the user",
-      "P4 code complete per prior evidence; real 20-page-flip acceptance needs the user's desktop",
-      "P6 hardware voice and P8 clean-machine gates need the user; P5/P7 are codeable next",
+      "P3 fixture soaks green (A: 6419 packets/42 transcripts; B muted+other-tab: 8960/59; part-change re-consent verified); real Bilibili 30-minute acceptance waits for the user",
+      "P4 code complete; real 20-page-flip acceptance needs the user's desktop",
+      "Notes UI entry and danmaku summary auto-trigger policy are design-confirmed items, not yet built",
+      "Mic-side audio seconds have no measurement event (unknown, never zero); vision calls recorded per ask with images",
       "Daily DSH still 0.1.5-rc.2; 0.2.0-rc.2 verified in isolation only",
-      "E:/SumikaBuild voice runtime inputs carry a dev path in _pth; staging builder rejects such inputs; final rebuild must use clean runtimes",
-      "Latest installer predates current source; final install acceptance is delivery package P8"
+      "P6 hardware voice and P8 clean-machine/install gates need the user"
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a"

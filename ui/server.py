@@ -123,12 +123,61 @@ class Bridge:
             self._companion_clear)
         from extensions.companion.passive_browser_audio import PassiveBrowserAudio
         self._browser_audio = PassiveBrowserAudio(root=UI_ROOT.parent,
-            on_observation=self._companion_audio_observe, on_clear=self._companion_audio_clear)
+            on_observation=self._companion_audio_observe, on_clear=self._companion_audio_clear,
+            on_usage=self._record_study_audio_usage)
+        from extensions.companion.study_extras import StudyNotes
+        # Explicit user notes with provenance; a separate store that the
+        # memory engine never reads and screen content never fills alone.
+        self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
         self._closing = False
         self.speech = SpeechInput(self.settings_path.parent/'speech-input', self.speech_configuration)
         self.playback = SpeechPlayback(self.settings_path.parent/'speech-output', self.playback_configuration)
+
+    def companion_notes(self, payload):
+        """Save/list explicit study notes; provenance comes from the current
+        learning observation, never from page-supplied values."""
+        if not isinstance(payload, dict):
+            raise ValueError('notes action required')
+        action = payload.get('action')
+        if action == 'recent':
+            return {'notes': self._study_notes.recent(
+                limit=payload.get('limit', 20))}
+        if action != 'save':
+            raise ValueError('invalid notes action')
+        observation = self._companion.latest
+        if observation is None:
+            raise ValueError('no learning observation to source the note from')
+        source = {'observation_at': observation.observed_at.isoformat(),
+                  'observation_source': observation.source,
+                  'observation_target': observation.target,
+                  'media_time_seconds': observation.media_time_seconds}
+        for key in ('page', 'part', 'url'):
+            value = observation.metadata.get(key)
+            if value is not None:
+                source[key] = value
+        return self._study_notes.save(payload.get('text'), target=observation.target,
+                                      source=source)
+
+    def _record_study_audio_usage(self, audio_seconds):
+        """Measured tab-audio seconds into the same usage store as chat rows."""
+        import sqlite3
+        from extensions.models.usage import UsageStore
+        try:
+            settings = load_settings(self.settings_path)
+            if not settings['usage']['enabled']:
+                return
+            connection = sqlite3.connect(settings['role']['database'])
+            try:
+                UsageStore(connection).record(
+                    scope=settings['role']['project_id'], session='study-browser-audio',
+                    provider='browser-tab', model='n/a', status='reported',
+                    audio_seconds=audio_seconds)
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error, KeyError, ValueError):
+            pass  # Usage bookkeeping must never break the audio session.
 
     def playback_configuration(self, role_id):
         from extensions.desktop.audio_devices import env_python
@@ -1670,6 +1719,11 @@ def _handler(bridge):
                     payload = self._browser_audio_payload if hasattr(self, '_browser_audio_payload') else self._body()
                     return self._json(200, bridge.companion_browser_audio(payload))
                 except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/notes':
+                try:
+                    return self._json(200, bridge.companion_notes(self._body()))
+                except (ValueError, RuntimeError, TypeError, OSError, sqlite3.Error) as error:
                     return self._json(400, {'error': str(error)})
             if route == '/api/companion/media-state':
                 try:

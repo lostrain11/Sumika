@@ -16,7 +16,7 @@ class ModelExtensionTests(unittest.TestCase):
   db=sqlite3.connect(':memory:'); r=DeviceRegistry(db); x=r.register('old','http://127.0.0.1:9','ollama',['role-chat'])
   self.assertTrue(x['token']); self.assertEqual(r.list()[0]['id'],'old'); self.assertEqual(r.health('old')['status'],'unknown')
  def test_usage_status_and_totals(self):
-  db=sqlite3.connect(':memory:'); u=UsageStore(db); u.record(scope='p',session='s',provider='ollama',model='m',prompt_tokens=2,completion_tokens=3,total_tokens=5,status='reported'); self.assertEqual(u.totals('p'),{'prompt_tokens':2,'completion_tokens':3,'total_tokens':5})
+  db=sqlite3.connect(':memory:'); u=UsageStore(db); u.record(scope='p',session='s',provider='ollama',model='m',prompt_tokens=2,completion_tokens=3,total_tokens=5,status='reported'); totals=u.totals('p');self.assertEqual((totals['prompt_tokens'],totals['completion_tokens'],totals['total_tokens']),(2,3,5));self.assertIsNone(totals['audio_seconds']);self.assertIsNone(totals['vision_calls']);self.assertEqual((totals['unknown_status_rows'],totals['rows']),(0,1))
   with self.assertRaises(ValueError):u.record(scope='p',session='s',provider='x',model='m',status='bad')
  def test_prompt_enhancement_keeps_original(self):
   x=enhance('修复登录测试',strategy='coding'); self.assertEqual(x['original'],'修复登录测试'); self.assertNotEqual(x['enhanced'],x['original']); self.assertFalse(enhance('x',enabled=False)['changed'])

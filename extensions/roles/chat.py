@@ -168,7 +168,8 @@ class RoleChat:
                 totals = {key: (totals.get(key) or 0) + (retry_totals.get(key) or 0)
                           for key in set(totals) | set(retry_totals)}
             usage_status = result.get("usage_status") or ("reported" if totals else "unknown")
-            self._record_usage(session_id, result, totals, usage_status)
+            self._record_usage(session_id, result, totals, usage_status,
+                               vision_calls=len(images) if images else None)
             extracted = (self._auto_extract(session, message, source_message_id or ('message-'+uuid.uuid4().hex))
                          if memory_writes else [])
             history.extend([{"role": "user", "content": message},
@@ -258,7 +259,7 @@ class RoleChat:
             written.append({"text": item["text"], "fact_key": item.get("fact_key")})
         return written
 
-    def _record_usage(self, session_id, result, totals, usage_status):
+    def _record_usage(self, session_id, result, totals, usage_status, vision_calls=None):
         if not self.settings["usage"]["enabled"]:
             return
         database = self.settings["role"]["database"]
@@ -271,7 +272,8 @@ class RoleChat:
                 prompt_tokens=totals.get("prompt_tokens"),
                 completion_tokens=totals.get("completion_tokens"),
                 total_tokens=totals.get("total_tokens"),
-                status=usage_status)
+                status=usage_status,
+                vision_calls=vision_calls)
         finally:
             connection.close()
 

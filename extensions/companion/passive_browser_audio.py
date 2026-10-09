@@ -22,9 +22,13 @@ QUEUE_LIMIT = 20
 
 
 class PassiveBrowserAudio:
-    def __init__(self, *, root, on_observation, on_clear):
+    def __init__(self, *, root, on_observation, on_clear, on_usage=None):
         self.root = Path(root)
         self.on_observation, self.on_clear = on_observation, on_clear
+        # Measured relay seconds (100ms per packet) reported once on stop;
+        # unknown sessions record nothing instead of zero seconds.
+        self.on_usage = on_usage
+        self._audio_seconds = 0.0
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._lifecycle = threading.RLock()
@@ -46,6 +50,7 @@ class PassiveBrowserAudio:
                     'audio_epoch': self._audio_epoch,
                     'media_identity': snapshot_media_identity(self._identity),
                     'queued': len(self._queue), 'received': self._received,
+                    'audio_seconds': round(self._audio_seconds, 1),
                     'transcripts': self._transcripts,
                     'alive': self._process is not None and self._process.poll() is None}
 
@@ -168,6 +173,7 @@ class PassiveBrowserAudio:
             self._queue.append(pcm)
             self._next_sequence += 1
             self._received += 1
+            self._audio_seconds += 0.1
             self._condition.notify_all()
             return {'status': 'accepted', 'queued': len(self._queue),
                     'sequence': payload['sequence']}
@@ -191,6 +197,15 @@ class PassiveBrowserAudio:
             return {'status': 'rotated', 'audio_epoch': audio_epoch}
 
     def stop(self):
+        with self._lock:
+            measured = self._audio_seconds if self._received else 0.0
+        if measured and self.on_usage is not None:
+            try:
+                self.on_usage(round(measured, 1))
+            except Exception:
+                pass
+        with self._lock:
+            self._audio_seconds = 0.0
         diagnostic = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
         if diagnostic:
             import traceback

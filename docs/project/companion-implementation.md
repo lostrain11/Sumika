@@ -311,6 +311,21 @@ python -X utf8 -B tools/build_setup.py <candidate> --compiler <ISCC.exe> --outpu
 - [ ] 同一候选安装/重装/升级/自定义目录/卸载保留数据/干净机/paired rollback；产物SHA与报告一致。
 - [ ] 项目记录、check和handoff更新；所有未验证能力明确保留，不虚称完成。
 
+### P5 回执（2026-10-10，ZCode / GLM5.3flash 执行）
+
+**执行内容**：交付包 P5（节省 token、异步辅助、笔记与用量）可编码项完成；既有能力（1Hz 变化检测、无变化零调用、主动讨论 ≥120 秒间隔、问句抢占、网页 AI 授权账本）此前已存在并有测试，本包补齐缺口并落测试。
+
+1. **UsageStore 兼容迁移与诚实汇总**：`extensions/models/usage.py` 增量迁移出 `audio_seconds`（REAL）与 `vision_calls`（INTEGER）列，旧行保持 NULL；`totals()` 的音频秒数与视觉调用在无实测行时返回 **None（未知）而非 0**，并新增 `unknown_status_rows`/`rows`；`record()` 校验新字段（非负、有限、整数）。chat 记录路径带上 `vision_calls=len(images)`（无图不记 0）。
+2. **音频秒数计量**：`PassiveBrowserAudio` 按包累计实测秒数（100ms/包），`status()` 暴露，`stop()` 时经 `on_usage` 回调把实测秒数记入与 chat 同库同 scope 的用量行（session=`study-browser-audio`，status=reported）；记账失败只吞掉，不影响音频会话。麦克风侧秒数目前无事件可测，保持 NULL（未知不记零）。
+3. **带来源笔记**：新增 `extensions/companion/study_extras.py` `StudyNotes`（独立 sqlite `study-notes.sqlite3`，**记忆引擎不读、屏幕内容不自动写入**）；Bridge 新增认证路由 `/api/companion/notes`（save/recent）：save 的 provenance（观察时间/来源/目标/媒体时间/页码/分P/url）**由当前学习观察自动填充，不接受页面提供值**；路径模式按操作即开即连，不占个人数据目录句柄。**UI 入口未加**——按 AGENTS.md 规则，设计稿没有的元素须先问，笔记按钮待设计确认后另做。
+4. **后台分析预算**：协调器新增 `BackgroundBudget`（默认 ≤2 次/分钟，校验 1–60），主动讨论派发与弹幕摘要共用；用户提问不占预算。主动发言默认间隔 ≥120 秒既有约束保持。
+5. **弹幕本地去重与摘要钩子**：协调器持 `DanmakuBuffer`（本地规则窗口去重、有界），`publish_observation` 将快照弹幕去重后以 `danmaku_new` 事件外发（有界 20 条），弹幕不触发视觉/模型调用（既有围栏保持）；新增 `summarize_danmaku`（预算门控、守护线程、失败仅发 `danmaku_summary_error` 事件——测试证明摘要失败后问答照常）。摘要Callable未接自动触发：触发策略（章节结束/暂停）属 P5 后续与 UI 确认项。
+6. **验证**：新增 `tests_next/test_study_extras.py` 8 项（迁移、未知汇总、字段校验、笔记来源/边界/记忆隔离、弹幕去重窗口/有界）+ 协调器 5 项（预算上限/校验/派发咨询/摘要失败不阻塞/预算跳过）+ `test_model_extensions` 汇总断言更新；全套 **975 tests OK（18 skips）**。
+
+**验收对照**：无变化零模型调用 ✓（既有 tracker 测试）；弹幕变化不造成视觉风暴 ✓（围栏+去重缓冲不触发调用）；问句抢占 ✓（既有 user_started 取消）；摘要失败不阻塞 ✓（新测试）；异步迟到不写当前会话 ✓（既有代际测试）；旧 usage 数据可读 ✓（迁移测试）；未知正确显示 ✓（None 非 0）；笔记来源准确 ✓（来源由观察自动填充并测试）；不写长期角色记忆 ✓（独立库+隔离测试）。
+
+**限制与未做**：弹幕/摘要的自动触发策略（章节结束/暂停/明显变化时点）与笔记的 UI 入口未实现——均涉设计确认，另行提交；麦克风侧音频秒数无测量事件（保持未知）；网页 AI 授权账本为既有已验收边界（本包无改动）。
+
 ---
 
 ## 历史执行证据（以下不是当前任务清单）

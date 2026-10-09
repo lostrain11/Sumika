@@ -13,6 +13,7 @@ import time
 
 from extensions.models.cancellation import CancellationToken
 from .contracts import ObservationBundle, PerceptionService
+from .study_extras import DanmakuBuffer
 from .observation_scheduler import ObservationScheduler
 from .qa import CompanionQuestionService
 
@@ -54,6 +55,31 @@ class _VoiceRequest:
         self.phase = 'model'
 
 
+class BackgroundBudget:
+    """Cap background model starts (proactive discussions, summaries).
+
+    The frozen delivery plan bounds background analysis at two starts per
+    minute; user questions never draw from this budget.
+    """
+
+    def __init__(self, *, max_per_minute=2, clock=time.monotonic):
+        if type(max_per_minute) is not int or not 1 <= max_per_minute <= 60:
+            raise ValueError('background budget must be 1-60 per minute')
+        self.max_per_minute = max_per_minute
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._starts = []
+
+    def allow(self):
+        now = self._clock()
+        with self._lock:
+            self._starts = [stamp for stamp in self._starts if now - stamp < 60]
+            if len(self._starts) >= self.max_per_minute:
+                return False
+            self._starts.append(now)
+            return True
+
+
 class StudySessionCoordinator:
     def __init__(self, *, chat, current, on_event=None,
                  include_images=None, proactive_interval=120.0,
@@ -90,6 +116,12 @@ class StudySessionCoordinator:
         self._scheduler_target = None
         self._proactive_thread = None
         self._failed = None
+        # Frozen delivery plan P5: background model analysis at most twice a
+        # minute; user questions never consume this budget.
+        self._background_budget = BackgroundBudget(max_per_minute=2)
+        # Local-rule danmaku dedup: scrolling comments collapse per window and
+        # never trigger model calls on their own.
+        self.danmaku = DanmakuBuffer()
 
     # -- events ------------------------------------------------------------
     def _emit(self, name, detail):
@@ -113,6 +145,12 @@ class StudySessionCoordinator:
         if not isinstance(bundle, ObservationBundle):
             raise TypeError('observation must be ObservationBundle')
         self._ensure_scheduler(bundle)
+        danmaku = bundle.metadata.get('danmaku')
+        if isinstance(danmaku, list) and danmaku:
+            fresh = self.danmaku.observe(danmaku)
+            if fresh:
+                self._emit('danmaku_new', {'texts': fresh[:20],
+                                           'window_total': len(self.danmaku.snapshot_texts())})
         return self._service.update(bundle)
 
     def _ensure_scheduler(self, bundle):
@@ -258,6 +296,8 @@ class StudySessionCoordinator:
         with self._lock:
             if self._failed is not None or not self._proactive_enabled:
                 return
+            if not self._background_budget.allow():
+                return
             thread = self._proactive_thread
             if thread is not None and thread.is_alive():
                 return
@@ -289,6 +329,33 @@ class StudySessionCoordinator:
                 speaker(text)
             except Exception as error:
                 self._emit('proactive_error', {'error': type(error).__name__})
+
+    def summarize_danmaku(self, *, summarize):
+        """Budget-gated asynchronous danmaku summary; never blocks the loop.
+
+        ``summarize(content, source)`` is the auxiliary/local summary callable
+        (default off). Runs on a daemon thread, consumes the current deduped
+        buffer, and only emits an event; any failure drops the summary while
+        the question loop continues untouched.
+        """
+        if not callable(summarize):
+            raise ValueError('summary callable required')
+        with self._lock:
+            if self._failed is not None or not self._background_budget.allow():
+                return {'status': 'skipped', 'reason': 'background budget or failure state'}
+            texts = self.danmaku.snapshot_texts()
+            if not texts:
+                return {'status': 'empty'}
+        def run():
+            try:
+                result = summarize(chr(10).join(texts), source='danmaku')
+                text = result.get('text') if isinstance(result, dict) else None
+                if isinstance(text, str) and text.strip():
+                    self._emit('danmaku_summary', {'text': text[:2000]})
+            except Exception as error:
+                self._emit('danmaku_summary_error', {'error': type(error).__name__})
+        threading.Thread(target=run, name='sumika-danmaku-summary', daemon=True).start()
+        return {'status': 'started', 'entries': len(texts)}
 
     # -- failure -------------------------------------------------------------
     def fail(self, reason):

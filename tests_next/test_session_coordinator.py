@@ -179,5 +179,80 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(len(self.chat_calls), calls + 1)
 
 
+class DanmakuSummaryTests(unittest.TestCase):
+    def test_summary_failure_never_blocks_question_loop(self):
+        coordinator = CoordinatorTests('test_text_question_answers_without_microphone')
+        coordinator.setUp()
+        coordinator.coordinator.publish_observation(bundle())
+        coordinator.coordinator.danmaku.observe(['弹幕一'])
+        def broken(content, *, source):
+            raise RuntimeError('local model missing')
+        result = coordinator.coordinator.summarize_danmaku(summarize=broken)
+        self.assertEqual(result['status'], 'started')
+        import time as time_module
+        deadline = time_module.monotonic() + 2
+        events = lambda: [e for e in coordinator.events if e['event'] == 'danmaku_summary_error']
+        while not events() and time_module.monotonic() < deadline:
+            time_module.sleep(0.02)
+        self.assertEqual(len(events()), 1)
+        # The question loop still answers normally after the summary failure.
+        result = coordinator.coordinator.ask_text('问题')
+        self.assertEqual(result['text'], '部分回答')
+
+    def test_summary_honors_background_budget_and_empty_buffer(self):
+        coordinator = CoordinatorTests('test_text_question_answers_without_microphone')
+        coordinator.setUp()
+        empty = coordinator.coordinator.summarize_danmaku(summarize=lambda c, **k: {'text': 'x'})
+        self.assertEqual(empty['status'], 'empty')
+        coordinator.coordinator.danmaku.observe(['弹幕'])
+        for _ in range(2):
+            coordinator.coordinator._background_budget.allow()
+        skipped = coordinator.coordinator.summarize_danmaku(summarize=lambda c, **k: {'text': 'x'})
+        self.assertEqual(skipped['status'], 'skipped')
+        with self.assertRaises(ValueError):
+            coordinator.coordinator.summarize_danmaku(summarize='not callable')
+
+
+class BackgroundBudgetTests(unittest.TestCase):
+    def test_budget_caps_background_starts_per_minute(self):
+        from extensions.companion.session_coordinator import BackgroundBudget
+        now = [1000.0]
+        budget = BackgroundBudget(max_per_minute=2, clock=lambda: now[0])
+        self.assertTrue(budget.allow())
+        self.assertTrue(budget.allow())
+        self.assertFalse(budget.allow())
+        now[0] += 61
+        self.assertTrue(budget.allow())
+
+    def test_budget_bounds_are_validated(self):
+        from extensions.companion.session_coordinator import BackgroundBudget
+        for bad in (0, 61, '2', 2.5):
+            with self.assertRaises(ValueError):
+                BackgroundBudget(max_per_minute=bad)
+
+    def test_proactive_dispatch_consults_budget(self):
+        from extensions.companion.session_coordinator import StudySessionCoordinator
+        chat_calls = []
+        events = []
+        coordinator = StudySessionCoordinator(chat=lambda prompt, **kwargs: (
+            chat_calls.append(prompt), {'text': '点'})[-1],
+            current=lambda: None,
+            on_event=lambda name, detail: events.append({'event': name, **detail}),
+            include_images=lambda: False, scheduler_thread=False)
+        scheduler = coordinator._scheduler
+        coordinator.publish_observation(bundle())
+        coordinator._background_budget.allow()  # consume the whole minute
+        coordinator._background_budget.allow()
+        coordinator._background_budget.allow()
+        before = len(chat_calls)
+        scheduler.notify_user_activity(0)
+        scheduler.tick()
+        import time as time_module
+        deadline = time_module.monotonic() + 1
+        while len(chat_calls) == before and time_module.monotonic() < deadline:
+            time_module.sleep(0.02)
+        self.assertEqual(len(chat_calls), before)
+
+
 if __name__ == '__main__':
     unittest.main()
