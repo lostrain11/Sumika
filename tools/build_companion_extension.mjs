@@ -29,6 +29,7 @@ const createAudio=${audio};
 let epoch=0;
 let audioCapture=null;
 let audioBusy=false;
+let currentAudioEpoch=null;
 const send=message=>chrome.runtime.sendMessage(message).catch(()=>{});
 
 // ---- video observation polling (subtitles, clean frames, playback state) ----
@@ -37,8 +38,14 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   if(message?.type==='stop') {epoch++;respond({stopped:true});return;}
   if(message?.type==='start-audio') {
     if(message.consent!==true || typeof message.audio_epoch!=='string') {respond({started:false});return;}
+    // Idempotent per epoch: the connect flow and the host re-kick must not
+    // restart a live capture (a fresh capture would restart its sequence).
+    if(audioCapture && audioCapture.status().state==='recording' && currentAudioEpoch===message.audio_epoch) {
+      respond({started:true,already:true});return;
+    }
     (async()=>{
       await audioCapture?.stop();
+      currentAudioEpoch=message.audio_epoch;
       let restartTimer=null;
       audioCapture=createAudio({consent:true,origin:location.origin,
         readSnapshot:collect,workletUrl:chrome.runtime.getURL('player-pcm-worklet.js'),
@@ -52,19 +59,21 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
             .catch(()=>{done();audioCapture?.stop();});
         }});
       await audioCapture.start();
+      console.log('[sumika-audio] capture started, epoch', currentAudioEpoch);
       const watch=async()=>{
         // Seek, rate or pause stops capture; the worker rotates the audio
         // epoch and asks this script to restart within the same video.
         const status=audioCapture.status();
-        if(status.state==='unavailable') {
-          send({type:'audio-stopped',reason:status.reason});
+        if(status.state!=='recording') {
+          console.log('[sumika-audio] capture state', status.state, status.reason||'');
+          send({type:'audio-stopped',reason:status.reason||status.state});
           return;
         }
         setTimeout(watch,500);
       };
       watch();
       return {started:true};
-    })().then(respond,error=>respond({started:false,error:error.message}));
+    })().then(respond,error=>{console.log('[sumika-audio] start failed:',error.message);respond({started:false,error:error.message});});
     return true;
   }
   if(message?.type==='stop-audio') {
@@ -121,8 +130,11 @@ async function post(path, payload, extra) {
   if(token)headers.Authorization='Bearer '+token;
   const response=await fetch(baseOrigin()+path,{method:'POST',headers,
     body:JSON.stringify(payload),signal:AbortSignal.timeout(5000),...extra});
-  const result=response.ok ? await response.json() : null;
-  if(!response.ok)throw new Error('bridge rejected '+path+':'+response.status+(result?.error?':'+result.error:''));
+  const result=await response.json().catch(()=>null);
+  if(!response.ok){
+    console.log('[sumika] post '+path+' -> '+response.status+' '+JSON.stringify(result));
+    throw new Error('bridge rejected '+path+':'+response.status+(result?.error?':'+result.error:''));
+  }
   return result;
 }
 async function offerConnection(configuration) {
@@ -132,7 +144,8 @@ async function offerConnection(configuration) {
   if(!['https://www.bilibili.com','https://bilibili.com'].includes(url.origin) || !/^\\/video\\/[A-Za-z0-9]+\\/?$/.test(url.pathname))
     throw new Error('current Bilibili video tab required');
   const part=url.searchParams.get('p');
-  const canonical=url.origin+url.pathname+(part && /^[1-9][0-9]{0,5}$/.test(part)?'?p='+part:'');
+  // Match the collector's canonical form: ?p= only survives when part > 1.
+  const canonical=url.origin+url.pathname+(part && +part>1?'?p='+part:'');
   await cancelRequestedConnection();
   const response=await fetch(base+'/api/companion/passive-browser/request',{
     method:'POST',headers:{'Content-Type':'application/json'},
@@ -178,8 +191,11 @@ async function startConnection(configuration) {
   if(url.origin!==grant.origin || !url.pathname.startsWith('/video/'))throw new Error('selected video tab changed');
   if(grant.approved_url) {
     const part=url.searchParams.get('p');
-    const current=url.origin+url.pathname+(part && /^[1-9][0-9]{0,5}$/.test(part)?'?p='+part:'');
-    if(current!==grant.approved_url)throw new Error('approved video changed; reconnect required');
+    const current=url.origin+url.pathname+(part && +part>1?'?p='+part:'');
+    if(current!==grant.approved_url){
+      console.log('[sumika] approved_url mismatch:',JSON.stringify(current),'vs',JSON.stringify(grant.approved_url));
+      throw new Error('approved video changed; reconnect required');
+    }
   }
   const owner=connection={base:base.origin,grant,sequence:0,audio_sequence:0,accepted:0,busy:false,audioBusy:false};
   try {
@@ -233,16 +249,22 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
           sample_rate:16000,channels:1,format:'pcm_s16le',
           sample_offset:message.sample_offset,pcm_base64:message.pcm_base64});
         respond({accepted:result?.status==='accepted'});
-      } catch {respond({accepted:false});}
+      } catch {
+        // A transport failure stops the audio track only; the approved video
+        // connection stays alive for frames, subtitles and heartbeats.
+        respond({accepted:false});
+      }
       finally {owner.audioBusy=false;}
     })();
     return true;
   }
   if(message?.type==='audio-stopped') {
     if(!ownedSender(message,sender,owner)) {respond({});return;}
+    console.log('[sumika] audio stopped:',message.reason);
+    // Only player changes (seek/rate/pause) rotate the epoch under the
+    // standing consent; transport rejections wait for the host recognizer.
+    if(message.reason!=='player_changed') {respond({restarted:false});return;}
     (async()=>{
-      // Same video: seek/rate/pause rotate the epoch and restart capture
-      // under the standing consent. New videos require a new connection.
       const epoch=await post('/api/companion/passive-browser/audio-epoch',{});
       owner.grant.audio_epoch=epoch.audio_epoch;
       await chrome.tabs.sendMessage(owner.grant.tab_id,
@@ -264,9 +286,9 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       const accepted=result?.status!=='rejected';
       lastStatus=accepted?'running':'rejected';
       if(accepted)owner.accepted++;
-      else connection=null;
+      else {connection=null;console.log('[sumika] video push rejected:',JSON.stringify(result));}
       respond({accepted});
-    } catch {if(connection===owner){connection=null;lastStatus='network_failed';}respond({accepted:false});}
+    } catch(error) {if(connection===owner){connection=null;lastStatus='network_failed';console.log('[sumika] video push failed:',error.message);}respond({accepted:false});}
     finally {owner.busy=false;}
   })();
   return true;
@@ -279,6 +301,13 @@ chrome.tabs.onUpdated.addListener((tab,change)=>{
   if(requestedConnection?.tab_id===tab && change.url)cancelRequestedConnection().catch(()=>{});
   else if(connection?.grant.tab_id===tab && change.url)stopConnection();
 });
+// If the host recognizer starts after the connection, re-kick capture with
+// the current epoch; transport rejections above keep this bounded and quiet.
+setInterval(()=>{
+  if(connection?.grant?.audio)
+    chrome.tabs.sendMessage(connection.grant.tab_id,
+      {type:'start-audio',consent:true,audio_epoch:connection.grant.audio_epoch}).catch(()=>{});
+},5000);
 `);
   await writeFile(join(directory,'popup.html'),`<!DOCTYPE html>
 <html lang="zh-CN">

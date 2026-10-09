@@ -12,6 +12,11 @@ from .application_audio import (
 from .audio_providers import SenseVoicePcmProvider, VoskPcmProvider
 from extensions.capabilities import CapabilityStore
 
+_module_probe = os.environ.get("SUMIKA_BROWSER_AUDIO_CHILD_LOG")
+if _module_probe:
+    with open(_module_probe, "a", encoding="utf8") as _out:
+        _out.write(f"[import] worker={__file__} pid={os.getpid()}" + "\n")
+
 
 def snapshot_media_identity(value):
     if value is None:
@@ -136,28 +141,47 @@ def run_pipe(input_stream, track, stop, emit, config):
     Each line is one bounded base64 packet; any gap, malformed packet or EOF
     stops the whole track instead of silently dropping tutorial speech.
     """
+    diagnostic = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
+    def note(message):
+        if diagnostic:
+            with open(diagnostic, 'a', encoding='utf8') as out:
+                out.write(f'[run_pipe] {message}\n')
+        else:
+            # The stderr redirect lands in the same diagnostic file.
+            print(f'[run_pipe] {message}', file=sys.stderr, flush=True)
+    note(f'start interpreter={sys.executable} worker={__file__} env_log={bool(diagnostic)}')
     track.start()
     require_asr(config)
     emit({'status': 'running', 'target': config['target']})
-    while not stop.is_set():
-        line = input_stream.readline(8001)
-        if not line:
-            stop.set()
-            break
-        if len(line) > 8000 or not line.endswith('\n'):
-            raise ValueError('bounded browser audio packet required')
-        packet = json.loads(line)
-        action = packet.get('action')
-        if action == 'stop':
-            stop.set()
-            break
-        if action is not None:
-            raise ValueError('unknown browser audio control')
-        pcm = b64decode(packet.get('pcm', ''), validate=True)
-        if len(pcm) > 64000 or len(pcm) % 2:
-            raise ValueError('bounded 16kHz mono PCM required')
-        track.capture.feed(pcm)
-    return 0
+    try:
+        while not stop.is_set():
+            line = input_stream.readline(8001)
+            if not line:
+                note('stdin eof')
+                stop.set()
+                break
+            if len(line) > 8000 or not line.endswith('\n'):
+                note(f'oversized line {len(line)}')
+                raise ValueError('bounded browser audio packet required')
+            packet = json.loads(line)
+            action = packet.get('action')
+            if action == 'stop':
+                note('stop action')
+                stop.set()
+                break
+            if action is not None:
+                note(f'unknown action {action}')
+                raise ValueError('unknown browser audio control')
+            pcm = b64decode(packet.get('pcm', ''), validate=True)
+            if len(pcm) > 64000 or len(pcm) % 2:
+                note(f'bad packet size {len(pcm)}')
+                raise ValueError('bounded 16kHz mono PCM required')
+            track.capture.feed(pcm)
+        note('clean exit')
+        return 0
+    except Exception as error:
+        note(f'exception {type(error).__name__}: {error}')
+        raise
 
 
 if __name__ == '__main__':

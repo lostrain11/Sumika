@@ -37,13 +37,16 @@ class PassiveBrowserAudio:
         self._next_sequence = None
         self._queue = deque()
         self._consented = False
+        self._received = 0
+        self._transcripts = 0
 
     def status(self):
         with self._lock:
             return {'status': self._state, 'error': self._error, 'target': self._target,
                     'audio_epoch': self._audio_epoch,
                     'media_identity': snapshot_media_identity(self._identity),
-                    'queued': len(self._queue),
+                    'queued': len(self._queue), 'received': self._received,
+                    'transcripts': self._transcripts,
                     'alive': self._process is not None and self._process.poll() is None}
 
     def start(self, *, target, identity, model, capabilities=None, asr=None,
@@ -77,9 +80,13 @@ class PassiveBrowserAudio:
                 self._next_sequence = 0
                 self._queue.clear()
                 self._consented = True
+                self._received = 0
+                self._transcripts = 0
+            child_log = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
+            child_stderr = open(child_log, 'w', encoding='utf8') if child_log else subprocess.DEVNULL
             process = subprocess.Popen([interpreter, '-X', 'utf8', '-B', '-m',
                 'extensions.companion.application_audio_worker'], cwd=self.root,
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=child_stderr,
                 text=True, encoding='utf8',
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             self._process = process
@@ -139,8 +146,16 @@ class PassiveBrowserAudio:
             if payload['sequence'] != self._next_sequence:
                 raise PermissionError('browser audio sequence gap; restart required')
             identity = snapshot_media_identity(payload['media_identity'])
-            if identity != self._identity:
+            # Fence on the stable video identity (url, fingerprint, part).
+            # Looping/seeking the same video evolves the full identity while
+            # staying the same lesson; a different video or part is rejected
+            # and requires a fresh connection and consent.
+            def stable(value):
+                return {key: value.get(key) for key in ('url', 'source_fingerprint', 'part')
+                        if key in value}
+            if stable(identity) != stable(self._identity):
                 raise PermissionError('browser audio media identity changed')
+            self._identity = identity
             try:
                 pcm = b64decode(payload['pcm_base64'], validate=True)
             except Exception as error:
@@ -152,11 +167,35 @@ class PassiveBrowserAudio:
                 raise RuntimeError('browser audio queue overflow; track stopped')
             self._queue.append(pcm)
             self._next_sequence += 1
+            self._received += 1
             self._condition.notify_all()
             return {'status': 'accepted', 'queued': len(self._queue),
                     'sequence': payload['sequence']}
 
+    def rotate_epoch(self, audio_epoch):
+        """Rebind the live session to a rotated audio epoch.
+
+        Seek/rate/pause rotate the epoch under standing consent; the
+        recognizer stays alive and the content restarts its sequence at zero,
+        so only the bridge's expectations reset here.
+        """
+        if not isinstance(audio_epoch, str) or not audio_epoch.strip() or len(audio_epoch) > 64:
+            raise ValueError('bounded audio epoch required')
+        with self._lock:
+            if self._state not in ('running', 'starting'):
+                return {'status': 'rejected', 'reason': 'browser audio session is not active'}
+            self._audio_epoch = audio_epoch
+            self._next_sequence = 0
+            self._queue.clear()
+            self._condition.notify_all()
+            return {'status': 'rotated', 'audio_epoch': audio_epoch}
+
     def stop(self):
+        diagnostic = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
+        if diagnostic:
+            import traceback
+            with open(diagnostic, 'a', encoding='utf8') as out:
+                out.write('[stop] called from:\n' + ''.join(traceback.format_stack()[-6:-1]))
         with self._condition:
             self._epoch += 1
             self._state = 'stopping'
@@ -199,6 +238,15 @@ class PassiveBrowserAudio:
             if self._state == 'stopped':
                 return
             self._error = message
+            process = self._process
+        if process is not None:
+            try:
+                code = process.wait(timeout=5)
+                with self._condition:
+                    self._error = f'{message} (child exit={code})'
+            except subprocess.TimeoutExpired:
+                with self._condition:
+                    self._error = f'{message} (child still alive)'
         self.stop()
 
     def _read(self, process, epoch):
@@ -214,6 +262,7 @@ class PassiveBrowserAudio:
                     if epoch != self._epoch:
                         return
                     if packet.get('observation') is not None:
+                        self._transcripts += 1
                         self.on_observation(packet['observation'])
                         continue
                     if packet.get('status') == 'running':
@@ -224,7 +273,7 @@ class PassiveBrowserAudio:
                         self._error = str(packet.get('reason') or packet['error'])[:128]
                         raise RuntimeError('browser audio worker reported failure')
         except Exception as error:
-            self._fail(type(error).__name__ if self._error is None else self._error)
+            self._fail(f'{type(error).__name__}: {error}' if self._error is None else self._error)
 
     def _write(self, process, epoch):
         try:
@@ -242,4 +291,4 @@ class PassiveBrowserAudio:
                 process.stdin.write(json.dumps({'pcm': b64encode(pcm).decode('ascii')}) + '\n')
                 process.stdin.flush()
         except Exception as error:
-            self._fail(type(error).__name__)
+            self._fail(f'{type(error).__name__}: {error}')

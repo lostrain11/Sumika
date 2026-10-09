@@ -1419,8 +1419,9 @@ def _handler(bridge):
                     if route.endswith('/audio-epoch'):
                         grant = bridge._passive_browser.rotate_audio_epoch(
                             token, self.headers.get('Origin'))
-                        # Old packets are fenced; the recognizer restarts clean.
-                        bridge._browser_audio.stop()
+                        # Old packets are fenced; a live recognizer rebinds to
+                        # the new epoch instead of being torn down.
+                        bridge._browser_audio.rotate_epoch(grant['audio_epoch'])
                         return self._json(200, grant)
                     if route.endswith('/audio'):
                         grant = bridge._passive_browser.audio_grant()
@@ -1482,6 +1483,16 @@ def _handler(bridge):
                     self._audio_payload = payload
                     if payload.get('action') in ('pause', 'stop', 'status'):
                         return self._json(200, bridge.companion_audio(payload))
+                except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/browser-audio':
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict):
+                        raise ValueError('browser audio action required')
+                    self._browser_audio_payload = payload
+                    if payload.get('action') in ('stop', 'status'):
+                        return self._json(200, bridge.companion_browser_audio(payload))
                 except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
                     return self._json(400, {'error': str(error)})
             if route == '/api/companion/media-state':
@@ -1652,6 +1663,12 @@ def _handler(bridge):
                 try:
                     payload = self._audio_payload if hasattr(self, '_audio_payload') else self._body()
                     return self._json(200, bridge.companion_audio(payload))
+                except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
+                    return self._json(400, {'error': str(error)})
+            if route == '/api/companion/browser-audio':
+                try:
+                    payload = self._browser_audio_payload if hasattr(self, '_browser_audio_payload') else self._body()
+                    return self._json(200, bridge.companion_browser_audio(payload))
                 except (ValueError, PermissionError, RuntimeError, TypeError, OSError, subprocess.SubprocessError) as error:
                     return self._json(400, {'error': str(error)})
             if route == '/api/companion/media-state':
