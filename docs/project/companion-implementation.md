@@ -6,6 +6,20 @@
 
 归档回执（2026-10-09）：完整稿及 ZCode 启动说明已写入本文件；handoff/progress/plan 已补同一入口与 P0 下一步，保留历史 P6；浏览器 UI 方案已从待确认更正为已确认。`python -X utf8 -B -m sumika_next.cli check`、`handoff`、`git -c core.safecrlf=false diff --check` 均通过；另核对 P0～P8、协议/失败/回退及三份指针存在。本轮没有产品改动、设备测试、提交、推送或新打包。
 
+### P0 回执（2026-10-09，ZCode / GLM5.3flash 执行）
+
+**执行内容**：交付包 P0（阶段快照、提交上传与记录整理）已执行；执行前先完整通读 AGENTS.md、approved-plan.md、requirements.json 全部 123 条、本冻结稿全文及三份主记录结构。
+
+1. **现场核对（P0-1）**：分支 `codex/sumika-next-dsh`，起点 HEAD `73e4de7`，远端 `https://github.com/lostrain11/Sumika.git`；92 个 tracked 改动（+10,356/−1,042）、249 个 untracked 文件（约 18,935 行），与第 2 节审计快照一致。逐项排查：无二进制/安装包/模型权重/运行缓存；凭据模式扫描仅命中 5 个测试文件内的假数据（`sk-abcdef1234567890`、`sk-fixturecredential`，用于断言凭据不泄漏）；`extensions/desktop/native/` 仅源码+锁定文件+NAudio 许可证；`ui/vendor/icons/` 带 LICENSE。`.sumika-next/`、`.sumika-continuity/`、`runtime/dsh/node_modules` 均被忽略，未 stage。
+2. **快照提交（P0-2）**：显式 stage 全部已核对文件（341 个），提交 `a20548a` `feat: checkpoint companion learning and DSH upgrade work`。此提交是后续精简前的完整 JSON 记录快照。
+3. **需求补录与勘误（P0-3）**：requirements.json 补录 R-122（"B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。"，逐字，出处 progress.json `learning_scenarios_priority_checkpoint.user_direction`）和 R-123（"用户明确先只做好B站和PDF，微信读书暂缓……"，执行者记录的方向转述，kind=`user_direction_record`，出处 handoff.json `learning_scope_latest.direction`），均按现有 schema 计算 sha256，check 通过。四处过时结论已加日期勘误：screen-companion-plan.md（NEKO 屏幕感知实为 `N.E.K.O@c8bf3505` main_logic 内建，依据 reference-projects.json `source_reviews.neko`）；screen-companion-plan.md 当前状态与 game-translation-plan.md（矩形截图不适合叠层隔离，实际为 WGC+`WDA_EXCLUDEFROMCAPTURE`）；voice-acceptance.md（连续语音代码已接线 vs 硬件验收仍缺）；README.md（L2 安装器落后当前源码、最终安装归 P8，阶段状态 P4-UI/P5/P6 进行中，恢复入口补冻结稿）。
+4. **记录精简（P0-4）**：三份主记录各移除 241–243 个历史 `*_checkpoint` 顶层键（净 −13,316 行），全文保留在 `git show a20548a:docs/project/<file>.json`，逐轮叙述见本文件历史执行证据章节；各文件新增 `checkpoint_archive` 指针键。保留被引用的 `learning_scenarios_priority_checkpoint`（R-122 出处）与 `installer_data_ux_checkpoint`（setup-and-personal-data.md:73 引用）；未删除任何物理文件（无"确定失效且无引用"者）。
+5. **校验与推送（P0-5）**：`python -X utf8 -B -m sumika_next.cli check`、`handoff` 在精简后复跑通过；`git -c core.safecrlf=false diff --check` 通过。docs 整理提交后推送现有分支，不 force、不动 master 与旧 Release；以 `git ls-remote origin codex/sumika-next-dsh` 核对远端 SHA 与本地 HEAD 一致（结果见下方推送记录）。
+
+**验收对照**：提交清单可复核（本回执+两次提交）；无秘密/二进制/个人数据入库；远端与预期 commit 一致；三份主记录 `execution_handoff` 指向本稿、`next_action` 指向 P1，未验证能力仍由第 2 节与各包验收条款约束。
+
+**限制与未做**：全套单测未在本包重跑（最新已知基线 945 tests/18 skips/1 error，WinError5 归 P1 调查）；未打包、未设备测试；推送若失败将按第 5 节记录本地 commit 与原因，不绕过拒绝。
+
 ### 1. 接手启动与完成边界
 
 可将下面整段作为 ZCode 的首条任务：

@@ -55,3 +55,5 @@
 - `grab_window(rect, output)`：只写一个新文件，拒绝覆盖；实际抓取依赖桌面扩展环境。
 
 自动化测试 `tests_next/test_capture.py` 覆盖唯一匹配、不可见窗口、歧义、非法句柄、小于最小尺寸、叠层重叠告警、黑屏/低对比度拒绝、拒绝覆盖。仍未完成：与 OCR/跟踪串成完整循环、叠层绘制窗口、翻译 provider 实装与真实游戏验收。
+
+> **2026-10-09 勘误（窗口采集与叠层排除）**：上节 2026-09-15 的“叠层排除核心已实现”只对 `extensions/desktop/capture.py` 的**矩形截图方案**成立。2026-10-08 陪学资产判定认定**矩形截图不适合叠层隔离**（重叠叠层仍会入图、独占全屏抓取不可靠）；陪学链路实际采集已改为 Windows Graphics Capture + 窗口 `WDA_EXCLUDEFROMCAPTURE` 排除标记，证据见 `docs/project/companion-implementation.md` 2026-10-08 “桌宠采集排除与遮挡实测”（`.sumika-next/wgc-4cc31d10ff3c4d25ad3c1b60151d5ee8/report.json`）。若 F-002 未来重启，通用路线的“捕获窗口帧”应复用 WGC 适配与显示亲和标记，而不是回到矩形截图方案；本计划状态仍为 deferred，不因该勘误变更。

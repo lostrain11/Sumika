@@ -41,6 +41,8 @@
 - **音频是独立管线**：有专门的音频处理文档，涵盖 WAV 合并、Viseme 口型同步、双轨播放，`ai_singer` 插件用云端 API + 流式输出。
 - 官网插件快速开始页未出现屏幕采集/视觉相关关键词，说明**屏幕感知不是它的内建能力描述**，更像由具体插件自行实现。
 
+> **2026-10-09 勘误**：上一条“屏幕感知不是内建能力”的结论**已过时**。它只基于 2026-09-12 的官网插件文档与 `HMUG12/Project_Neko-plugin_skill` 插件 SDK 仓库；2026-10-08 对主仓库 `Project-N-E-K-O/N.E.K.O` 固定提交 `c8bf3505`（Apache-2.0）的源码核验确认 `main_logic/proactive_delivery.py`、`proactive_chat/decisions.py`、`utils/screen_comment_guard.py` 存在，即**主程序内建主动屏幕吐槽/屏幕理解链路**（播放门控、提示合并、TTL、历史防重复）。实际版本与依据见 `docs/project/reference-projects.json` 的 `source_reviews.neko`。本节其余插件生态描述仍指插件 SDK 仓库，不受影响。
+
 对 Sumika 的含义：N.E.K.O 把感知与设备控制交给插件，扩展容易但边界由各插件自负；Sumika 采用“共享采集核心 + 显式 provider + 失败关闭”，并且明确不读游戏内存。两者可以互相借鉴：插件化值得学，边界策略保留 Sumika 的。
 
 ### 其他核对到的同名项目
@@ -136,3 +138,5 @@ AIRI（`moeru-ai/airi`）的屏幕感知实现、Amica 的对话触发频率与�
 ## 当前状态
 
 采集、叠层排除、无效帧判定、文本跟踪、去重、过期丢弃已实现并有自动化测试；陪伴吐槽所需的“事件触发 + 低频多模态采样 + 评论冷却”尚未实现，属于后续阶段。
+
+> **2026-10-09 勘误（叠层排除机制）**：上文“叠层排除已实现”指 2026-09-15 `extensions/desktop/capture.py` 的矩形截图方案（只抓目标窗口矩形，叠层作为独立顶层窗口天然不入图）。2026-10-08 资产判定认定**矩形截图不适合叠层隔离**，实际采集已改为 Windows Graphics Capture + 桌宠窗口 `WDA_EXCLUDEFROMCAPTURE` 标记（采集器按标记显式拒绝桌宠自身，证据见 `docs/project/companion-implementation.md` 2026-10-08 “桌宠采集排除与遮挡实测”）。`capture.py` 的旧矩形方案仅保留为单次采集回退，不再作为叠层隔离依据。

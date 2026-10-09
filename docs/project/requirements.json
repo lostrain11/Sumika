@@ -1279,6 +1279,26 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "120727fd93d36d62712813865e5b3cfd9461831736a0ce2784edca284fca5df3"
+    },
+    {
+      "id": "R-122",
+      "sequence": 122,
+      "original": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
+      "source": "visible-conversation: user message; preserved at docs/project/progress.json learning_scenarios_priority_checkpoint.user_direction",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "0eb5bfae84967be465b92959090f2cf9d02110cda5d4f94f7a7d745263ee3ca6"
+    },
+    {
+      "id": "R-123",
+      "sequence": 123,
+      "original": "用户明确先只做好B站和PDF，微信读书暂缓；总体批准计划仍未完成。",
+      "source": "docs/project/handoff.json learning_scope_latest.direction (executor-recorded user direction, paraphrase not verbatim chat text)",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_direction_record",
+      "sha256": "432eb08a30a44707b93627e69e32672c800d7a7e54294010a9978da128518e90"
     }
   ]
 }

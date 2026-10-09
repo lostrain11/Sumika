@@ -100,3 +100,11 @@ Legacy capability toggle now cancels active audio like management writes. Unknow
 证据 `.sumika-next/playback-live-ec8a6319a287479eb705cd8993b95244/report.json`：5 项检查通过，首段 WAV 为 22050 Hz、16-bit 单声道、74713 帧；Windows 同步播放返回成功。第二段生成后显式取消，约 4 ms 回收实际进程及作业，无迟到完成。当前默认输出为 VoiceMeeter 虚拟设备；是否听到仍待用户反馈，不能据 API 成功宣称物理扬声器或音频缓冲清空已验收。真实麦克风、连续语音和回声处理仍未验收。
 
 用户随后明确要求延缓此项验证：听感反馈及真实麦克风/音频硬件验收暂缓，保留已有程序级证据，不继续播放或采集。
+
+
+## 2026-10-09 勘误：连续语音接线状态
+
+本文早前多处“音频播放与连续语音仍未接通”“真实麦克风、连续语音和回声处理仍未验收”的结论按记录时点仍然成立，但**连续语音的代码链路现状已变化**，避免旧结论被当作当前事实：
+
+- 已接线（源码层，2026-10-08/09）：连续麦克风 worker（`extensions/companion/microphone_worker.py` + `microphone_process.py`，Pipecat VAD + Vosk/SenseVoice 显式选择）、分段 SAPI 播放、`/api/companion/microphone` start/status/pause/stop HTTP 端点、语音交互详情的「文字／连续语音」模式切换，均已在当前源码实现并有夹具回归（见 `docs/project/companion-implementation.md` 2026-10-08 “连续麦克风 Bridge 接线”及后续条目）。
+- 仍未验收：真实麦克风/扬声器硬件、barge-in 打断延迟、教程音轨隔离、30 turn 连续对话与 P95 延迟目标——这些属于冻结执行稿 P6 的门槛，不得因“代码已接线”记为完成。
