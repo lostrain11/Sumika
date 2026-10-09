@@ -30,6 +30,17 @@ def reference_registry_asset(root):
     return source, Path('extensions/desktop/reference-projects.json')
 
 
+def reject_runtime_dev_paths(runtime):
+    """A packaged capability runtime must be relocatable: _pth entries stay
+    inside the runtime. An absolute development checkout line would silently
+    bind the shipped interpreter to the build machine."""
+    for path in sorted(runtime.glob('*._pth')):
+        for number, line in enumerate(path.read_text(encoding='utf8').splitlines(), start=1):
+            entry = line.strip()
+            if entry and (Path(entry).drive or Path(entry).root):
+                raise ValueError(f'{path.name}:{number} must not bind machine paths: {entry}')
+
+
 def browser_runtime_files(root):
     """Executable plus explicit notices only; never ship updater scratch files."""
     if root.is_symlink() or root.is_junction():
@@ -140,6 +151,7 @@ def main():
             runtime = directory.resolve(strict=True)
             if not (runtime/'python.exe').is_file() or (runtime/'pyvenv.cfg').exists():
                 raise ValueError('capability runtime must be standalone Python, not a development venv')
+            reject_runtime_dev_paths(runtime)
             selected.extend((p, Path('runtime')/name/rel) for p, rel in physical_files(runtime))
     browser = ROOT/'runtime/browserskill'
     if browser.is_dir():

@@ -2,6 +2,7 @@
 import json
 import argparse
 from pathlib import Path
+import shutil
 import sys
 import uuid
 import time
@@ -87,11 +88,14 @@ def main():
         work = base/'work'
         home.mkdir(); work.mkdir()
         if args.repair_fixture_acl:
+            shell = shutil.which('pwsh') or shutil.which('powershell')
+            if not shell:
+                raise RuntimeError('no PowerShell found for the bundled ACL repair')
             scripts = list({p.resolve() for p in (args.runtime/'node_modules/.pnpm').glob(
                 '*/node_modules/@deepseek-ai/dsh-sandbox-windows-acl/assets/diagnose-windows-sandbox-acl/scripts/diagnose-windows-sandbox-acl.ps1')})
             if len(scripts) != 1:
                 raise RuntimeError('expected one bundled ACL diagnosis script')
-            repair = subprocess.run(['pwsh', '-NoProfile', '-File', str(scripts[0].resolve()),
+            repair = subprocess.run([shell, '-NoProfile', '-File', str(scripts[0].resolve()),
                 '-Path', str(work), '-AllowRoot', str(work), '-Out', str(base/'acl-recovery')],
                 capture_output=True, text=True, encoding='utf8')
             (base/'acl-repair-output.txt').write_text(repair.stdout+repair.stderr, encoding='utf8')

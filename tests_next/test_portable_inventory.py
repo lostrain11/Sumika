@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from tools.verify_portable_staging import REQUIRED, verify, safe_path
-from tools.build_portable_staging import browser_runtime_files, verify_reviewed_assets, physical_files, reference_registry_asset, executable_asset
+from tools.build_portable_staging import browser_runtime_files, verify_reviewed_assets, physical_files, reference_registry_asset, executable_asset, reject_runtime_dev_paths
 
 
 class PortableInventoryTests(unittest.TestCase):
@@ -36,6 +36,20 @@ class PortableInventoryTests(unittest.TestCase):
                                         'Lib/site-packages/engine.pyd', 'private.key'})
             with self.assertRaises(ValueError):
                 safe_path('runtime/desktop/private.key')
+
+    def test_capability_runtime_pth_must_not_bind_machine_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            clean = root/'clean'
+            clean.mkdir()
+            (clean/'python314._pth').write_text('Lib\nDLLs\nLib\\site-packages\n..\\..\n', encoding='utf8')
+            reject_runtime_dev_paths(clean)
+            for name, line in (('dev-checkout', 'D:/Code/Sumika'), ('machine-share', '\\\\host\\share')):
+                dirty = root/name.replace('\\', '_')
+                dirty.mkdir()
+                (dirty/'python314._pth').write_text('Lib\n'+line+'\n', encoding='utf8')
+                with self.assertRaisesRegex(ValueError, 'must not bind machine paths'):
+                    reject_runtime_dev_paths(dirty)
 
     def test_reference_registry_relocates_as_exact_product_asset(self):
         with tempfile.TemporaryDirectory() as folder:

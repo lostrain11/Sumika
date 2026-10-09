@@ -113,6 +113,65 @@ def migrate_fixture(base, old, new):
         print(json.dumps(report),flush=True)
 
 
+def migration_failure_fixture(base, old, new):
+    """An interrupted profile migration must fail closed; recovery uses the
+    verified old pair and the old runtime never opens the migrated profile."""
+    from tests_next.p2_fixture import ModelFixture
+    from tools.verify_dsh_recovery import snapshot, prompt, finish
+    old_profile, new_profile = base/'old-home', base/'new-home'
+    old_profile.mkdir(); work = base/'work'; work.mkdir()
+    session = 'upgrade-failure-fixture'
+    report = {'passed':False, 'daily_profile_changed':False, 'paid_model_calls':0,
+              'scope':'Populated old profile -> interrupted copy -> fail-closed new runtime -> verified old-pair recovery'}
+    adapter = None
+    try:
+        with ModelFixture() as model:
+            (old_profile/'.env').write_text('DEEPSEEK_API_KEY=p2-local-fixture-not-a-secret\n',encoding='utf8')
+            adapter = Dsh(ROOT,old_profile,runtime=old)
+            adapter.start()
+            adapter._rpc('session/create',{'sessionId':session,'cwd':str(work)})
+            follow = adapter.stream('session/follow',{'address':{'kind':'session','sessionId':session}},timeout=30)
+            next(follow)
+            prompt(adapter,session,'MIGRATION_FAILURE_MARKER')
+            finish(follow)
+            page = adapter._rpc('session/page',{'address':{'kind':'session','sessionId':session},'throughSeq':snapshot(adapter,session)['cursor']})
+            assert 'MIGRATION_FAILURE_MARKER' in json.dumps(page), 'old history marker missing'
+            adapter.close(); adapter = None
+            old_files = profile_hashes(old_profile)
+            shutil.copytree(old_profile,new_profile,ignore=shutil.ignore_patterns('node_modules'))
+            store = next(new_profile.glob('sessions/**/'+session+'/session.v3.jsonl.zstd'))
+            raw = store.read_bytes()
+            store.write_bytes(raw[:len(raw)//2])
+            adapter = Dsh(ROOT,new_profile,runtime=new)
+            adapter.start()
+            try:
+                broken = adapter._rpc('session/page',{'address':{'kind':'session','sessionId':session},'throughSeq':10**9})
+                assert 'MIGRATION_FAILURE_MARKER' not in json.dumps(broken), 'corrupt migration served old history'
+            except Exception as error:
+                report['migration_failure_detected'] = {'type':type(error).__name__,'reason':str(error)[:120]}
+            finally:
+                adapter.close(); adapter = None
+            assert profile_hashes(old_profile) == old_files, 'failed migration touched the rollback source'
+            adapter = Dsh(ROOT,old_profile,runtime=old)
+            adapter.start()
+            restored = adapter._rpc('session/page',{'address':{'kind':'session','sessionId':session},'throughSeq':snapshot(adapter,session)['cursor']})
+            assert restored['records'] == page['records'], 'old-pair recovery history differs'
+            adapter.close(); adapter = None
+            report.update(passed=True, fail_closed=True, old_pair_history_identical=True,
+                old_runtime_never_opened_new_profile=True, old_profile_bytes_preserved=True,
+                history_records=len(page['records']),
+                old_version=json.loads((old/'release.json').read_text())['version'],
+                new_version=json.loads((new/'release.json').read_text())['version'])
+    except Exception as error:
+        report['failure'] = {'type':type(error).__name__, 'reason':str(error)[:200]}
+        raise
+    finally:
+        if adapter is not None:
+            adapter.close()
+        (base/'report.json').write_text(json.dumps(report,indent=2),encoding='utf8')
+        print(json.dumps(report),flush=True)
+
+
 def run_pair(label, runtime, profile, work):
     adapter = Dsh(ROOT, profile, runtime=runtime)
     adapter.start(port=0)
@@ -132,6 +191,7 @@ def main():
     parser.add_argument('--output',type=Path)
     parser.add_argument('--new-runtime',type=Path)
     parser.add_argument('--migrate-fixture',action='store_true')
+    parser.add_argument('--migration-failure-fixture',action='store_true')
     args = parser.parse_args()
     base = args.output or ROOT / '.sumika-next' / ('runtime-upgrade-' + uuid.uuid4().hex)
     base = base.resolve()
@@ -140,6 +200,8 @@ def main():
     new = args.new_runtime or next(iter(sorted((ROOT / '.sumika-next/package').glob('dsh-runtime-hoisted-*'))))
     if args.migrate_fixture:
         return migrate_fixture(base,old,new)
+    if args.migration_failure_fixture:
+        return migration_failure_fixture(base,old,new)
     work = base / 'work'; work.mkdir()
     old_profile = base / 'profiles' / '0.1.5-rc.2'
     new_profile = base / 'profiles' / '0.2.0-rc.2'

@@ -20,6 +20,21 @@
 
 **限制与未做**：全套单测未在本包重跑（最新已知基线 945 tests/18 skips/1 error，WinError5 归 P1 调查）；未打包、未设备测试；推送若失败将按第 5 节记录本地 commit 与原因，不绕过拒绝。
 
+### P1 回执（2026-10-09，ZCode / GLM5.3flash 执行）
+
+**执行内容**：交付包 P1（可恢复基线与 DSH/依赖固定）四项全部完成；日用 DSH 仍为 `0.1.5-rc.2`，`0.2.0-rc.2` 保持隔离验证，未切日用。
+
+1. **WinError5 根因与修复（P1-1）**：证据探针（`.sumika-next` 临时目录）证明读者句柄持有 `role-restore-state.json` 时 `os.replace` 报 **winerror=5**（0.3ms 内），句柄关闭后同操作成功——与冻结稿记录的失败签名一致，属 Windows 瞬时共享冲突，与本项目 2026-10-09 已修复的 settings.save / BrowserSkill 原子写同类。按同一既定策略修复 `tools/backup_personal_data.py` `write_state`（同一 replace 最多 5 次、WinError 5/32/33、不回退覆盖、清理临时文件），补两条焦点回归（短暂冲突被吸收、持续冲突保留 pending journal 且无 .tmp 残留）。全套复跑 **948 tests OK、0 error、18 skips**（此前 945 tests/1 error）。
+2. **DSH 0.2.0-rc.2 固定与隔离验收（P1-2）**：隔离安装 `.sumika-next/dsh-upgrade/0.2.0-rc.2` 的 release.json 四项哈希逐一核对通过（来源可追踪：npm 包 `@deepseek-ai/dsh@0.2.0-rc.2` + pnpm-lock + 摘要）。在该运行时上隔离验收全部通过，证据目录均新建：成对升级回退+已填充 profile 迁移（`.sumika-next/p1-rollback-20261009-143956`，18 条历史保留、旧 profile 字节不变、无模型重放、无关配置保留）、插件生命周期（`plugin-lifecycle-6c321900…`，安装/启停/卸载/不兼容拒绝/失败恢复、无关配置保留）、连续性（`p4-007b8c4d…`，skill 工具/plan 历史/压缩换模型换会话交接/回填幂等/disabled 保留数据）、角色插件（`role-plugin-b56132b3…`，版本检查/自动注入/记忆/重启召回）、P2 全门槛（`p2-c725f4c3…`，文件/终端/技能/子Agent/MCP/终端退出-超时-取消）。
+   - **验收工具修复**：`tools/verify_dsh_p2.py` 的 ACL 修复子进程原硬编码 `pwsh`（PowerShell 7，本机不存在）导致门槛无法启动；改为 shell 解析（优先 pwsh、回退 powershell 5.1）。DSH 原生终端本身不受影响（修复后全门槛通过），未安装任何系统软件。
+3. **语音依赖固定（P1-3）**：`sherpa-onnx==1.13.8`、`sherpa-onnx-core==1.13.8` 已固定于 `extensions/companion/requirements.lock`，`companion-voice` extra 同步。SenseVoice 模型本地副本与固定 revision `2365bae`（HF csukuangfj/sherpa-onnx-sense-voice-…-2024-07-17）下载回执**逐字节一致**（5 文件 SHA256 复算全对）。许可核验并记入 `reference-projects.json local_tool_upgrade`：框架 Apache-2.0；权重遵循 **FunASR Model License v1.1**（归属+条款自动终止；无明确商业禁令但含 "reference and learning" 措辞，已标注）；权重保持外置、用户自备，产品代码无 E 盘等机器路径硬编码。
+   - **打包缺陷发现与守卫**：检查发现 `E:/SumikaBuild` 语音输入运行时及已构建候选（AL、audio-clock-2）的 `runtime/voice/python314._pth` 含开发目录 `D:/Code/Sumika`（桌面运行时干净）——违反本包"_pth 不得带开发目录"要求。已在 `tools/build_portable_staging.py` 增加接收时守卫 `reject_runtime_dev_paths`（`_pth` 出现盘符/根路径即拒绝，报文件与行号），单测固化；实测污染的语音运行时被拒、干净桌面运行时通过。**P8 集中重建必须用净化后的运行时输入**，旧候选该缺陷不得继承。
+4. **profile 迁移失败成对恢复（P1-4）**：`verify_runtime_upgrade_rollback.py` 新增 `--migration-failure-fixture`：真实旧运行时建立 19 条历史 → 复制 profile 后截断会话存储模拟中断迁移 → 新运行时对损坏会话**失败关闭**（`gateway/bad-request`，不伪造历史）→ 旧运行时+旧 profile 成对恢复、历史逐条一致、旧 profile 字节不变；报告明确 `old_runtime_never_opened_new_profile`（恢复路径从不把新 profile 交给旧运行时）。证据 `.sumika-next/p1-migration-failure-*/report.json`。
+
+**验收对照**：备份迁移链与运行时升级/回退通过（含失败路径）；来源可追踪（release.json 哈希 + 模型回执）；配置保留（插件无关配置、cordis sentinel）；锁定依赖可离线重建（pnpm 锁 + requirements.lock 固定 + 构建器可复现，守卫防开发路径回潜）。
+
+**限制与未做**：全套 948 tests OK 但未重打包（P8 统一重建）；SenseVoice 权重许可的 "reference and learning" 措辞模糊点已标注、未获得法律结论；`0.2.1-alpha.1` 仍仅观察；语音/模型/设备真实链路验收归 P3/P6。
+
 ### 1. 接手启动与完成边界
 
 可将下面整段作为 ZCode 的首条任务：

@@ -188,6 +188,61 @@ class PersonalSnapshotTests(unittest.TestCase):
         self.assertEqual([p.read_bytes() for p in archives], [previous])
         self.assertEqual((first/'role-restore-state.json').read_bytes(), previous)
 
+    def test_journal_replace_rides_out_brief_reader_conflict(self):
+        import threading
+        import time
+        from extensions.models.settings import example, save
+        role = self.source/'roles/person'
+        role.mkdir(parents=True)
+        (role/'card.json').write_text('{}')
+        save(example(role, self.source/'memory.sqlite3'), self.source/'role-model-settings.json')
+        backup(self.source, self.root/'backup')
+        first = self.root/'first'
+        restore(self.root/'backup', first)
+        rebind_role_paths(first, self.source)
+        previous = (first/'role-restore-state.json').read_bytes()
+        backup(first, self.root/'second-backup')
+        second = self.root/'second'
+        restore(self.root/'second-backup', second)
+        # A reader (antivirus/indexer class) briefly holds the inherited journal;
+        # the bounded same-replace retry must absorb it without a fallback write.
+        journal = second/'role-restore-state.json'
+        handle = journal.open('rb')
+        threading.Thread(target=lambda: (time.sleep(.05), handle.close())).start()
+        rebind_role_paths(second, first)
+        state = json.loads(journal.read_text(encoding='utf8'))
+        self.assertEqual(state['status'], 'complete')
+        self.assertEqual(state['destination'], str(second))
+        self.assertFalse((second/'role-restore-state.tmp').exists())
+        archives = list((second/'role-restore-history').glob('*.json'))
+        self.assertEqual([p.read_bytes() for p in archives], [previous])
+
+    def test_permanent_journal_conflict_preserves_pending_state(self):
+        import threading
+        import time
+        from extensions.models.settings import example, save
+        role = self.source/'roles/person'
+        role.mkdir(parents=True)
+        (role/'card.json').write_text('{}')
+        save(example(role, self.source/'memory.sqlite3'), self.source/'role-model-settings.json')
+        backup(self.source, self.root/'backup')
+        first = self.root/'first'
+        restore(self.root/'backup', first)
+        with patch('extensions.models.settings.save', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                rebind_role_paths(first, self.source)
+        journal = first/'role-restore-state.json'
+        before = journal.read_bytes()
+        handle = journal.open('rb')
+        threading.Thread(target=lambda: (time.sleep(2), handle.close()), daemon=True).start()
+        try:
+            with self.assertRaises(OSError):
+                rebind_role_paths(first, self.source)
+        finally:
+            handle.close()
+        self.assertFalse((first/'role-restore-state.tmp').exists())
+        self.assertEqual(journal.read_bytes(), before)
+
     def test_copied_pending_restore_cannot_be_rebased(self):
         from extensions.models.settings import example, save
         role = self.source/'roles/person'

@@ -710,14 +710,28 @@
         "site": "E:/SumikaBuild/local-asr-site-20261008",
         "limits": [
           "Product worker/factory/Bridge wired, but real first decode stalled and queue overflowed; no default switch",
-          "Model license original-weight terms still require validation",
-          "Candidate runtime is checkout-bound development runtime, not final package"
+          "Candidate runtime is checkout-bound development runtime, not final package",
+          "Weights license is FunASR Model License v1.1 with an unresolved \"reference and learning\" phrasing; internal use accepted, public redistribution of weights stays out of scope"
         ],
         "evidence": "E:/SumikaBuild/local-tools-review-20261008/sensevoice-report.json; E:/SumikaBuild/bilibili-asr-compare-20261008-a/audio/report.json",
         "product_evidence": [
           "E:/SumikaBuild/voice-runtime-sensevoice-20261008-a-report.json",
           "E:/SumikaBuild/bilibili-product-sensevoice-20261008-d/audio/report.json"
-        ]
+        ],
+        "model_license_verification": {
+          "checked": "2026-10-09",
+          "framework_license": "sherpa-onnx Apache-2.0 (root LICENSE, already recorded)",
+          "weights_license": "FunASR Model License Agreement v1.1 (Alibaba Group); pinned-revision LICENSE file states \"Ref to https://github.com/modelscope/FunASR?tab=readme-ov-file#license\"",
+          "terms_summary": "Free to use/copy/modify/share with attribution and preserved model names; conduct clause; automatic termination on violation; no explicit commercial ban but the agreement also describes the software as \"for reference and learning purposes only\" — flagged, not resolved.",
+          "distribution_boundary": "Weights stay external and user-supplied; Sumika does not redistribute them. Product default model path is configurable and must not be hardcoded.",
+          "integrity": {
+            "source": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+            "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+            "receipt": "E:/Models/Speech/sumika/sensevoice-int8-20240717/download-receipt.json",
+            "verified": "2026-10-09 recomputation of model.int8.onnx (c71f0ce0…), tokens.txt (f449eb28…), LICENSE (221c6df1…), README.md (763991a0…), test_wavs/zh.wav (b77f1794…) all match the pinned-revision receipt",
+            "result": "pass"
+          }
+        }
       },
       {
         "id": "sherpa-onnx-paraformer",

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -153,11 +154,26 @@ def rebind_role_paths(destination, original_root):
 
         def write_state(state):
             temporary = journal.with_suffix('.tmp')
-            with temporary.open('w', encoding='utf8') as out:
-                json.dump(state, out, ensure_ascii=False, indent=2)
-                out.flush()
-                os.fsync(out.fileno())
-            os.replace(temporary, journal)
+            try:
+                with temporary.open('w', encoding='utf8') as out:
+                    json.dump(state, out, ensure_ascii=False, indent=2)
+                    out.flush()
+                    os.fsync(out.fileno())
+                # Windows can briefly deny the replacement while another reader
+                # (antivirus, indexer, concurrent inspection) holds the journal.
+                # Retry only the same replace; never fall back to a truncate or
+                # copy that could destroy the last valid recovery journal.
+                for attempt in range(5):
+                    try:
+                        os.replace(temporary, journal)
+                        break
+                    except OSError as error:
+                        if getattr(error, 'winerror', None) not in (5, 32, 33) or attempt == 4:
+                            raise
+                        time.sleep(.02 * (attempt + 1))
+            finally:
+                if temporary.exists():
+                    temporary.unlink()
 
         def relocated(value):
             path = Path(value)

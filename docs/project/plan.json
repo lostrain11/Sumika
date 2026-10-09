@@ -703,7 +703,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: delivery package P0 is done (snapshot commit a20548a, docs freeze commit, branch pushed and remote SHA verified). Read the frozen execution section at the top of docs/project/companion-implementation.md and execute delivery package P1 (WinError5 backup investigation, DSH 0.2.0-rc.2 pinning, voice runtime locks, paired profile rollback). Do not confuse delivery-package P1 with legacy plan phase P1.",
+  "next_action": "ZCode / GLM5.3flash: delivery packages P0 and P1 are done (P1 receipt in the frozen section; full suite 948 tests OK; isolated 0.2.0-rc.2 gates all pass; daily runtime unchanged). Read the frozen execution section at the top of docs/project/companion-implementation.md and execute delivery package P2 (extract the single session coordinator out of the mic worker, wire text/voice/capture/model cancel to one owner, update the UI design coverage first, keep DSH native entries). Do not confuse delivery-package P2 with legacy plan phase P2.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -810,7 +810,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-09T06:22:42.096350+00:00",
+  "updated_at": "2026-10-09T07:09:53.308349+00:00",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
@@ -915,8 +915,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p0_done_p1_next",
-    "current_delivery_package": "P1",
+    "status": "p1_done_p2_next",
+    "current_delivery_package": "P2",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -931,12 +931,13 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "P0 executed: audited working tree (92 tracked + 249 untracked, no secrets/binaries/personal data), snapshot commit a20548a (341 files), requirements R-122/R-123 backfilled with provenance, four outdated doc conclusions corrected with dated errata, 241-243 historical checkpoint keys trimmed per record into checkpoint_archive pointers (-13,316 lines, full text at a20548a), check/handoff/diff --check pass, branch pushed and remote SHA verified.",
+    "verified_this_turn": "P1 executed: WinError5 root-caused (transient reader conflict, probe evidence) and fixed with the established bounded same-replace policy (948 tests OK, 0 errors, was 945 with 1 error); DSH 0.2.0-rc.2 hash traceability plus isolated rollback/migration, plugin lifecycle, continuity, role and full P2 gate all pass; voice pins locked (sherpa-onnx 1.13.8, SenseVoice revision 2365bae checksums verified, FunASR Model License recorded, weights external); staging builder now rejects dev-path _pth inputs; migration-failure fixture proves fail-closed behavior and paired old-profile recovery.",
     "limitations": [
-      "WinError5 backup failure not yet diagnosed (P1 first task); 945 tests / 18 skips / 1 error is the latest known baseline",
-      "Daily DSH still 0.1.5-rc.2; 0.2.0-rc.2 verified in isolation only",
+      "Daily DSH still 0.1.5-rc.2; 0.2.0-rc.2 verified in isolation only; 0.2.1-alpha.1 observed only",
+      "E:/SumikaBuild voice runtime inputs and older candidates carry a dev path in runtime/voice python314._pth; staging builder now rejects such inputs, final rebuild must use clean runtimes",
+      "SenseVoice weights FunASR Model License 'reference and learning' phrasing flagged, not legally resolved; weights stay external",
       "Latest installer predates current source; final install acceptance is delivery package P8",
-      "Product integration, real-service/device acceptance and clean-machine gates remain pending"
+      "Real-device voice/browser/PDF acceptance gated on user notification"
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a"
