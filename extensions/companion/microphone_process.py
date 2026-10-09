@@ -131,6 +131,22 @@ class MicrophoneProcess:
             if not acknowledged or epoch != self._epoch:
                 raise RuntimeError('study voice control did not complete')
 
+    def post(self, packet):
+        """Queue one ordered, fire-and-forget host action for the worker.
+
+        Answer stream and discussion deliveries must never wait on an
+        acknowledgement: model latency would stall the control queue.
+        """
+        if not isinstance(packet, dict) or packet.get('action') not in (
+                'answer_delta', 'answer_done', 'answer_error',
+                'answer_invalidated', 'discuss'):
+            raise ValueError('unsupported study voice host action')
+        with self._condition:
+            if self._state != 'listening':
+                raise RuntimeError('study voice control was revoked')
+            self._controls.append(self._encode(packet))
+            self._condition.notify_all()
+
     @contextmanager
     def text_question(self):
         with self._text_lock:
@@ -193,7 +209,8 @@ class MicrophoneProcess:
                 if not isinstance(packet, dict) or packet.get('event') not in (
                     'listening','delta','user_started','proactive_started','transcribed','empty_transcript',
                     'playback_started','playback_ended','segment_started','segment_ended',
-                    'interrupted','text_interrupted','error','control_ack'):
+                    'interrupted','text_interrupted','error','control_ack',
+                    'answer_request','answer_cancel','discuss_started','discuss_rejected'):
                     raise ValueError('invalid study voice event')
                 with self._lock:
                     if epoch != self._epoch:

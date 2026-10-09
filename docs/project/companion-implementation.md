@@ -35,6 +35,19 @@
 
 **限制与未做**：全套 948 tests OK 但未重打包（P8 统一重建）；SenseVoice 权重许可的 "reference and learning" 措辞模糊点已标注、未获得法律结论；`0.2.1-alpha.1` 仍仅观察；语音/模型/设备真实链路验收归 P3/P6。
 
+### P2 回执（2026-10-09，ZCode / GLM5.3flash 执行）
+
+**执行内容**：交付包 P2（共享会话协调器与已有 UI 接线）完成；唯一会话 owner 从 mic worker 抽出，固定在 Bridge 的中立协调器。
+
+1. **唯一协调器（P2-1）**：新增 `extensions/companion/session_coordinator.py`（`StudySessionCoordinator` + `FusionPerception`）：持有唯一 `CompanionQuestionService`（history/bindings/generation）、`ObservationScheduler`（文字模式主动讨论，无需开麦）、语音请求登记（request/turn/binding/phase）与失败状态。麦克风 worker 重写为纯 VAD/ASR/分段 TTS：移除其内部 service/scheduler/RoleChat/模型调用，`PipeQuestionService` 以同一 VoiceQuestionProvider/SegmentedPlayback 语义经管道向宿主取答（answer_request/answer_delta/answer_done/answer_error/answer_cancel/answer_invalidated/discuss），文字/语音读同一 history（session 'companion'）。`MicrophoneProcess` 新增 `post()`（无 ack 有序 host 动作）与新事件白名单；Bridge（`ui/server.py`）`self._companion` 即协调器 service，旧 mic API/文字问答端点原样转发同一 owner。迟到响应不播放（turn 绑定一次一清、上下文失效即 answer_invalidated 停朗读）、不重复派发（协调器单飞行守卫）。
+2. **失败纪律**：协调器 `fail()` 停止新增派发、取消全部进行中请求、清空绑定并经 `coordinator_failed` 事件显示；`reset()` 仅由显式会话开始调用，重启不重放未知调用。
+3. **设计覆盖先行（P2-2）**：`ui-design-coverage.md` 增补四通道独立状态/许可、目标选择扩展（PDF 窗口或已连接 B站 tab）、浏览器 popup 已确认标记与文字主动讨论条目；未新建任何主页面/面板/入口。`companion-session.js` 同一陪学详情内新增画面、朗读独立状态行（+麦克风主状态、应用声音行共四通道），`proactive_text` 进入记录流，文字模式主动讨论开放，`coordinator_failed` 显示为会话错误。`tools/verify_companion_session_ui.mjs` 42 项通过（输出 E:/SumikaBuild/companion-session-ui）。
+4. **验证（P2-3）**：新增 `tests_next/test_session_coordinator.py` 8 项（不开麦文字问答、语音/文字同一历史、迟到 turn 拒绝、上下文失效取消在途请求、失败停止派发与 reset、主动讨论到 speaker/事件、间隔与禁用）；`test_microphone_worker.py` 重写为宿主取答协议（真实 Pipecat：host 讨论→分段 TTS→busy 拒绝第二个讨论；转写→宿主→流式增量→朗读），隔离 voice 环境 11 项通过。基解释器全套 **956 tests OK（18 skips）**；voice 环境聚焦子集（worker/pipecat/voice_answer/segmented/sapi/scheduler/coordinator/process）**71 项 OK**。`ObservationScheduler` 新增 `resume()`（宿主驱动 tick 模式，`start()` 线程模式保留）。
+
+**验收对照**：文字与语音读同一会话 ✓（同 session id + 单 service）；迟到响应不播放 ✓（binding 单清 + answer_invalidated + 代际检查）；不重复派发 ✓（单飞行守卫 + pending 替换）；UI 对照设计稿、DSH 原生功能保留 ✓（覆盖表已更新、无新入口）；协调器失败停止新增派发/取消进行中/显示错误、重启不重放 ✓（fail/reset + 测试覆盖）。
+
+**限制与未做**：真实浏览器/B站 tab 目标选择与 popup 属 P3；文字模式主动讨论的真实模型触发、四通道状态的真实设备联测归后续包；voice 环境的**全量** discover 因环境既有限制（tzdata 缺失的 schedule 错误 + discover 导入模式下 pkgutil patch 解析）不作为门槛，历史上一贯只跑聚焦子集；本包未重打包（P8 统一重建）。
+
 ### 1. 接手启动与完成边界
 
 可将下面整段作为 ZCode 的首条任务：

@@ -3,6 +3,7 @@ import importlib.util
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,125 +14,171 @@ from extensions.companion.microphone_worker import require_configuration, run_se
 
 class MicrophoneWorkerTests(unittest.IsolatedAsyncioTestCase):
     @unittest.skipUnless(importlib.util.find_spec('pipecat'), 'isolated voice environment required')
-    async def test_proactive_start_failure_reports_nonfatal_event_and_releases_session(self):
-        from extensions.companion.observation_scheduler import ObservationScheduler
-        now = [0.0]
-        failed = threading.Event()
-        events, stopped = [], []
-        class Input:
-            def readline(self, size):
-                failed.wait(5)
-                return ''
-        class Player:
-            def close(self): stopped.append('player')
-        class Turn:
-            busy = False
-            def start_discussion(self, prompt):
-                raise RuntimeError('private screen and provider details')
-            async def cleanup(self): pass
-        def scheduler(*args, **kwargs):
-            kwargs['settled_seconds'] = 0
-            return ObservationScheduler(*args, clock=lambda:now[0], **kwargs)
-        def emit(packet):
-            events.append(packet)
-            if packet.get('stage') == 'proactive_start': failed.set()
-        async def microphone(worker, *, stop_event, on_started, **kwargs):
-            on_started()
-            now[0] = 121
-            await stop_event.wait()
-            stopped.append('microphone')
-        with patch('extensions.companion.microphone_worker.ObservationScheduler', side_effect=scheduler), \
-             patch('extensions.companion.pipecat_voice.build_sapi_study_worker', return_value=(object(), Turn())), \
-             patch('extensions.companion.pipecat_voice.run_microphone', side_effect=microphone), \
-             patch('extensions.companion.sapi_playback.DirectSapiPlayback', return_value=Player()):
-            await asyncio.wait_for(run_session(self.config, Input(), emit), 6)
-        self.assertTrue(failed.is_set())
-        errors = [event for event in events if event.get('stage') == 'proactive_start']
-        self.assertEqual(errors, [{'event':'error', 'reason':'RuntimeError',
-                                   'stage':'proactive_start', 'fatal':False}])
-        self.assertEqual(stopped, ['microphone', 'player'])
-
-    @unittest.skipUnless(importlib.util.find_spec('pipecat'), 'isolated voice environment required')
-    async def test_session_scheduler_discussion_and_pipe_revoke_stop_actual_pipeline(self):
-        from extensions.companion.pipecat_voice import build_study_voice_worker
-        from extensions.companion.observation_scheduler import ObservationScheduler
+    async def test_host_discussion_speaks_and_busy_discussion_is_rejected(self):
         from pipecat.workers.runner import WorkerRunner
-        now = [0.0]
         playing = threading.Event()
-        stopped, events, services = [], [], []
-        acknowledged = [threading.Event(), threading.Event()]
+        spoken = []
+        stopped, events = [], []
+        host_lines = []
+        host_lock = threading.Lock()
+        answered = threading.Event()
         class Input:
-            index = 0
+            phase = [0]
             def readline(self, size):
-                if not playing.wait(6):
-                    return ''
-                self.index += 1
-                if self.index == 1:
-                    return json.dumps({'action':'text_begin','request':1})+'\n'
-                if not acknowledged[min(self.index-2, 1)].wait(6):
-                    return ''
-                if self.index == 2:
-                    return json.dumps({'action':'text_end','request':2})+'\n'
-                return json.dumps({'action':'revoke'})+'\n'
+                # Host answer/discuss actions must be served as soon as they
+                # appear; the spoken reply itself gates later expectations.
+                deadline = time.monotonic() + 8
+                while True:
+                    with host_lock:
+                        if host_lines:
+                            return host_lines.pop(0)
+                    if self.phase[0] == 0:
+                        self.phase[0] = 1
+                        return json.dumps({'action':'discuss', 'request':5,
+                                           'text':'提出一个学习点'})+'\n'
+                    if time.monotonic() > deadline:
+                        return ''
+                    time.sleep(0.05)
+        def host(action):
+            with host_lock:
+                host_lines.append(json.dumps(action)+'\n')
         def emit(value):
             events.append(value)
-            if value['event'] == 'control_ack':
-                acknowledged[value['request']-1].set()
+            if value['event'] == 'answer_request':
+                self.assertFalse(value['record_history'])
+                host({'action':'answer_delta', 'request':value['request'], 'text':'learning '})
+                host({'action':'answer_delta', 'request':value['request'], 'text':'point.'})
+                host({'action':'answer_done', 'request':value['request'], 'text':'learning point.'})
+                answered.set()
         class Player:
             def close(self): stopped.append('owner')
         class ASR:
             async def __call__(self, *args, **kwargs):
-                raise AssertionError('proactive session must not use ASR')
-        class Chat:
-            def __init__(self, settings): pass
-            def reply(self, prompt, on_delta, **kwargs):
-                self_test.assertFalse(kwargs['memory_writes'])
-                on_delta('learning point.')
-                return {'text':'learning point.'}
-        self_test = self
+                raise AssertionError('discussion must not use ASR')
         async def play(text):
+            spoken.append(text)
             playing.set()
             try: await asyncio.Event().wait()
             finally: stopped.append('segment')
         async def stop(): stopped.append('stop')
-        def factory(**kwargs):
-            services.append(kwargs['question_service'])
-            return build_study_voice_worker(model_path='fixture',
-                question_service=kwargs['question_service'], approved=True,
-                play_segment=play, stop_playback=stop, on_event=kwargs['on_event'],
-                on_delta=kwargs['on_delta'], observation_scheduler=kwargs['observation_scheduler'])
         async def microphone(worker, *, stop_event, on_started, **kwargs):
             runner = WorkerRunner(handle_sigint=False)
             await runner.add_workers(worker)
             running = asyncio.create_task(runner.run())
             try:
                 on_started()
-                await asyncio.sleep(.1)
-                now[0] = 121
-                await asyncio.sleep(1.1)
-                now[0] = 125
-                await stop_event.wait()
+                # While the discussion is speaking, a second discuss is rejected.
+                playing.wait(3)
+                host({'action':'discuss', 'request':99, 'text':'another point'})
+                await asyncio.sleep(.4)
+                stop_event.set()
             finally:
                 await worker.cancel()
                 await running
                 stopped.append('microphone')
-        with patch('extensions.companion.microphone_worker.ObservationScheduler',
-                   side_effect=lambda *args, **kwargs: ObservationScheduler(*args, clock=lambda:now[0], **kwargs)), \
-             patch('extensions.companion.pipecat_voice.build_sapi_study_worker', side_effect=factory), \
+        def factory(**kwargs):
+            from extensions.companion.pipecat_voice import build_study_voice_worker
+            return build_study_voice_worker(model_path=kwargs['model_path'],
+                question_service=kwargs['question_service'], approved=kwargs['approved'],
+                asr_provider=kwargs['asr_provider'],
+                play_segment=play, stop_playback=stop, on_event=kwargs['on_event'],
+                on_delta=kwargs['on_delta'])
+        with patch('extensions.companion.pipecat_voice.build_sapi_study_worker', side_effect=factory), \
              patch('extensions.companion.pipecat_voice.run_microphone', side_effect=microphone), \
              patch('extensions.companion.audio_providers.VoskPcmProvider', return_value=ASR()), \
-             patch('extensions.companion.sapi_playback.DirectSapiPlayback', return_value=Player()), \
-             patch('extensions.roles.chat.RoleChat', Chat):
-            await asyncio.wait_for(run_session(self.config, Input(), emit), 8)
-        self.assertTrue(playing.is_set())
+             patch('extensions.companion.sapi_playback.DirectSapiPlayback', return_value=Player()):
+            await asyncio.wait_for(run_session(self.config, Input(), emit), 10)
+        self.assertEqual(''.join(spoken), 'learning point.')
         self.assertIn('proactive_started', [event['event'] for event in events])
         self.assertIn('playback_started', [event['event'] for event in events])
-        self.assertIn('segment', stopped)
-        self.assertEqual([event['request'] for event in events if event['event']=='control_ack'], [1,2])
-        self.assertEqual(sum(event['event']=='listening' for event in events), 1)
-        self.assertEqual(stopped[-2:], ['microphone','owner'])
-        self.assertEqual(services[0]._histories, {})
-        self.assertEqual(services[0]._active_requests, set())
+        self.assertIn('discuss_rejected', [event['event'] for event in events])
+        self.assertEqual(stopped[-2:], ['microphone', 'owner'])
+
+    @unittest.skipUnless(importlib.util.find_spec('pipecat'), 'isolated voice environment required')
+    async def test_user_question_flows_through_host_and_revoke_stops_pipeline(self):
+        from extensions.companion.pipecat_voice import build_study_voice_worker
+        from pipecat.frames.frames import InputAudioRawFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame
+        from pipecat.processors.frame_processor import FrameDirection
+        spoken, stopped, events = [], [], []
+        host_lines, host_lock = [], threading.Lock()
+        requested = threading.Event()
+        turn_box = [None]
+        class Input:
+            def readline(self, size):
+                requested.wait(6)
+                with host_lock:
+                    if host_lines:
+                        return host_lines.pop(0)
+                threading.Event().wait(0.2)
+                return ''
+        def host(action):
+            with host_lock:
+                host_lines.append(json.dumps(action)+'\n')
+        def emit(value):
+            events.append(value)
+            if value['event'] == 'answer_request':
+                self.assertTrue(value['record_history'])
+                self.assertEqual(value['text'], 'what is on screen')
+                host({'action':'answer_delta', 'request':value['request'], 'text':'a diagram '})
+                host({'action':'answer_delta', 'request':value['request'], 'text':'of a cell.'})
+                host({'action':'answer_done', 'request':value['request'], 'text':'a diagram of a cell.'})
+                requested.set()
+        class Player:
+            def close(self): stopped.append('owner')
+        class FakeASR:
+            async def __call__(self, audio, *, sample_rate):
+                return 'what is on screen'
+        async def play(text):
+            spoken.append(text)
+            try: await asyncio.Event().wait()
+            finally: stopped.append('segment')
+        async def stop(): stopped.append('stop')
+        def factory(**kwargs):
+            from extensions.companion.pipecat_voice import build_study_voice_worker
+            worker, turn = build_study_voice_worker(model_path=kwargs['model_path'],
+                question_service=kwargs['question_service'], approved=kwargs['approved'],
+                asr_provider=kwargs['asr_provider'],
+                play_segment=play, stop_playback=stop, on_event=kwargs['on_event'],
+                on_delta=kwargs['on_delta'])
+            turn_box[0] = turn
+            return worker, turn
+        async def microphone(worker, *, stop_event, on_started, **kwargs):
+            from pipecat.workers.runner import WorkerRunner
+            runner = WorkerRunner(handle_sigint=False)
+            await runner.add_workers(worker)
+            running = asyncio.create_task(runner.run())
+            try:
+                on_started()
+                silence = bytes(3200)
+                await worker.queue_frame(InputAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1))
+                await worker.queue_frame(VADUserStartedSpeakingFrame())
+                speech = bytes([0]*1580 + [7, 0]*10 + [0]*1580)
+                for _ in range(12):
+                    await worker.queue_frame(InputAudioRawFrame(audio=speech, sample_rate=16000, num_channels=1))
+                await worker.queue_frame(VADUserStoppedSpeakingFrame())
+                for _ in range(12):
+                    await worker.queue_frame(InputAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1))
+                    if spoken:
+                        break
+                    await asyncio.sleep(.05)
+                for _ in range(200):
+                    if spoken:
+                        break
+                    await asyncio.sleep(.05)
+            finally:
+                await worker.cancel()
+                await running
+                stopped.append('microphone')
+                stop_event.set()
+        with patch('extensions.companion.pipecat_voice.build_sapi_study_worker', side_effect=factory), \
+             patch('extensions.companion.pipecat_voice.run_microphone', side_effect=microphone), \
+             patch('extensions.companion.audio_providers.VoskPcmProvider', return_value=FakeASR()), \
+             patch('extensions.companion.sapi_playback.DirectSapiPlayback', return_value=Player()):
+            await asyncio.wait_for(run_session(self.config, Input(), emit), 12)
+        self.assertEqual(''.join(spoken), 'a diagram of a cell.')
+        self.assertIn('transcribed', [event['event'] for event in events])
+        self.assertIn('playback_started', [event['event'] for event in events])
+        self.assertEqual(stopped[-2:], ['microphone', 'owner'])
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()

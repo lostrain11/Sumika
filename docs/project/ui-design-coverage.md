@@ -307,3 +307,11 @@
 ### 2026-10-09 Browser connector design proposal (pending approval)
 
 Existing asset: prototype-d capability cards and companion-session learning-window selector, already covered above at the companion-detail rows. Proposed adaptation: the same selector becomes learning-target selection (PDF windows or explicitly connected Bilibili tabs). New element absent from prototype: extension popup with Connect current Bilibili tab / Disconnect. Final frame/subtitle consent stays in the existing Sumika start confirmation. No new main page, capability card, navigation or automatic user-tab borrowing. Proposal submitted for user design confirmation under AGENTS.md; no product UI implementation or browser installation yet. Capture range and unsupported tab audio must be explicit before release.
+
+### 2026-10-09 交付包 P2 会话协调器与覆盖更新（方案已由用户确认，冻结稿 P2-2）
+
+- **状态更新**：上一节的 Browser connector 提案已获用户确认（冻结稿归档回执：浏览器 UI 方案已从待确认更正为已确认）；popup 仅「连接本页 / 断开 / 状态」，在 P3 落地。
+- **学习目标选择扩展**（同一 select，无新入口）：可选对象从窗口扩为「窗口（含 PDF 阅读器）或已连接的 B站 tab」；连接状态与目标身份显示真实后端值。
+- **四通道独立状态/许可**（同一陪学详情内，不新增卡片）：画面（连续感知）、应用声音、麦克风、朗读各自显示后端真实状态与独立许可；开始确认分别列出；暂停/撤销/换目标的状态事件同步到该详情与桌宠宿主。
+- **文字模式主动讨论**：归属唯一会话协调器（Bridge 内），不再依赖开麦；覆盖表原 199 行「文字模式的主动讨论属于未完成项」由本项取代。已实现：协调器 `extensions/companion/session_coordinator.py` 为唯一会话 owner（单一 QuestionService/history/调度器/请求登记），文字提问与主动讨论不依赖开麦，`proactive_text` 事件进陪学详情记录流；证据：`tests_next/test_session_coordinator.py` 8 项（含不开麦文字问答、语音/文字同一历史、迟到 turn 丢弃、失败停止派发）+ `tests_next/test_microphone_worker.py` 11 项（隔离 voice 环境，host 讨论→TTS、真实 Pipecat 提问流）+ voice 环境语音子集 71 项、基解释器全套 956 项 OK、`tools/verify_companion_session_ui.mjs` 42 项。
+- **单一入口断言保持**：不新建主页面、项目面板、能力入口；`tools/verify_dsh_panel.mjs` 对 DSH 侧栏的断言继续生效。

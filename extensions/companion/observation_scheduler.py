@@ -183,6 +183,19 @@ class ObservationScheduler:
             self._thread.start()
             return {'status': 'running'}
 
+    def resume(self):
+        """Clear a previous stop without spawning the tick thread.
+
+        Hosts that drive ticks from their own loop (delivery package P2) use
+        this instead of ``start``; ``start`` remains the thread-based mode.
+        """
+        with self._lock:
+            if self.perception.state != 'running':
+                raise RuntimeError('perception must be running before the scheduler resumes')
+            self._stop.clear()
+            self._error = None
+        return {'status': 'ready'}
+
     def stop(self):
         with self._lock:
             self._stop.set()

@@ -63,8 +63,12 @@ export function mountCompanionSession(host) {
   applicationAudio.setAttribute('aria-label','采集应用声音'); audioRow.append(audioLabel,applicationAudio);
   const audioStatus=document.createElement('p'); audioStatus.className='sumika-form-note';
   audioStatus.setAttribute('role','status'); audioStatus.dataset.applicationAudioStatus='';
+  const captureStatus=document.createElement('p'); captureStatus.className='sumika-form-note';
+  captureStatus.setAttribute('role','status'); captureStatus.dataset.captureStatus='';
+  const playbackStatus=document.createElement('p'); playbackStatus.className='sumika-form-note';
+  playbackStatus.setAttribute('role','status'); playbackStatus.dataset.playbackStatus='';
   let selected = null, captureActive=false, audioActive=false, cursor = 0, timer, working = false, polling = false, epoch = 0, unknown = true, currentState = 'unknown';
-  let answer = null, activeTurn = null;
+  let answer = null, activeTurn = null, playbackSpeaking = false;
   const labels = {stopped:'已停止',starting:'正在启动',listening:'正在聆听',stopping:'正在停止',error:'服务异常'};
   const start = command('chara-voice','开始陪学', async () => {
     if (working || unknown || currentState !== 'stopped') return;
@@ -84,7 +88,7 @@ export function mountCompanionSession(host) {
     start.disabled = working || unknown || currentState !== 'stopped' || captureActive || audioActive || !selected;
     stop.disabled = working || (!unknown && currentState === 'stopped' && !captureActive && !audioActive);
     refresh.disabled = working;
-    discussion.disabled = working || unknown || captureActive || currentState !== 'stopped' || mode.value!=='voice';
+    discussion.disabled = working || unknown || captureActive || currentState !== 'stopped';
     mode.disabled=working || unknown || captureActive || audioActive || currentState!=='stopped';
     targets.disabled = working || captureActive || currentState !== 'stopped';
     scan.disabled = working || captureActive || currentState !== 'stopped';
@@ -98,16 +102,21 @@ export function mountCompanionSession(host) {
   }
   function render(state) {
     unknown = false; currentState = state.status;
-    if (state.capture) captureActive=state.capture.alive;
+    if (state.capture) {
+      captureActive=state.capture.alive;
+      const captureLabels={stopped:'已停止',starting:'正在启动',running:'正在采集',paused:'已暂停',stopping:'正在停止',error:'异常'};
+      captureStatus.textContent=`画面：${captureLabels[state.capture.status] || '状态未知'}${state.capture.error ? ` · ${state.capture.error}` : ''}`;
+    } else {captureStatus.textContent='画面：状态未知';}
     if(state.application_audio) {
       audioActive=state.application_audio.alive;
       const audioLabels={stopped:'已停止',paused:'已暂停',starting:'正在启动',running:'正在采集',stopping:'正在停止',error:'异常'};
       audioStatus.textContent=`应用声音：${audioLabels[state.application_audio.status] || '状态未知'}${state.application_audio.error ? ` · ${state.application_audio.error}` : ''}`;
     } else {audioStatus.textContent='应用声音：状态未知';}
     status.textContent = `${state.status==='stopped' && captureActive ? '正在观察 · 文字交流' : labels[state.status] || '状态未知'}${state.target ? ` · ${state.target}` : ''}`;
+    let speaking = playbackSpeaking;
     for (const event of state.events || []) {
       if (event.sequence <= cursor) continue;
-      if (event.event === 'user_started' || event.event === 'proactive_started') {
+      if (event.event === 'user_started' || event.event === 'proactive_started' || event.event === 'discuss_started') {
         if (answer) answer.remove();
         answer = null; activeTurn = event.turn ?? null;
       }
@@ -118,13 +127,18 @@ export function mountCompanionSession(host) {
         answer ||= line('', 'her');
         answer.textContent = (answer.textContent + (event.text || '')).slice(-64000);
       }
-      if (event.event === 'playback_ended') answer = null;
+      if (event.event === 'proactive_text') line(`主动讨论：${event.text || ''}`, 'her');
+      if (event.event === 'playback_started') speaking = true;
+      if (event.event === 'playback_ended') { speaking = false; answer = null; }
       if (event.event === 'interrupted' || event.event === 'error') {
         if (answer) answer.remove();
         answer = null;
       }
       if (event.event === 'error') status.textContent = `回答失败：${event.reason || '未知原因'}`;
+      if (event.event === 'coordinator_failed') status.textContent = `陪学协调器已停止：${event.reason || '未知原因'}；请重新开始会话`;
     }
+    playbackSpeaking = speaking;
+    playbackStatus.textContent = `朗读：${speaking ? '正在朗读' : '空闲'}`;
     cursor = state.cursor ?? cursor;
     if (state.status === 'stopped') { transcript.replaceChildren(); answer = null; activeTurn = null; }
     controls();
@@ -198,7 +212,7 @@ export function mountCompanionSession(host) {
   });
   scan.addEventListener('click',loadTargets);
   mode.addEventListener('change',controls);
-  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,option,commands,transcript); host.append(section);
+  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,captureStatus,playbackStatus,option,commands,transcript); host.append(section);
   loadTargets();
   hydrateIconsAsync(section);
   controls(); poll();

@@ -99,7 +99,13 @@ class Bridge:
         self.management = Management(self)
         self.conversations = Conversations(self.settings_path.parent / 'role-conversations.sqlite3')
         self._chat_lock = threading.RLock()
-        self._companion = CompanionQuestionService(self._companion_chat)
+        from extensions.companion.session_coordinator import StudySessionCoordinator
+        self._coordinator = StudySessionCoordinator(
+            chat=self._companion_chat,
+            current=lambda: self._fusion_snapshot(),
+            include_images=lambda: load_settings(self.settings_path)['multimodal']['enabled'],
+            on_event=self._coordinator_event)
+        self._companion = self._coordinator.service
         self._context_lock = threading.RLock()
         self._fusion = ContextFusion()
         self._voice_events_lock = threading.Lock()
@@ -551,6 +557,80 @@ class Bridge:
         with self._voice_events_lock:
             self._voice_event_sequence += 1
             self._voice_events.append({'sequence':self._voice_event_sequence, **packet})
+        self._coordinator_route(packet)
+
+    def _fusion_snapshot(self):
+        with self._context_lock:
+            return self._fusion.current()
+
+    def _coordinator_event(self, name, detail):
+        """Coordinator/UI events share the bounded voice event stream."""
+        with self._voice_events_lock:
+            self._voice_event_sequence += 1
+            self._voice_events.append({'sequence':self._voice_event_sequence,
+                                       'event':name, **detail})
+
+    def _coordinator_route(self, packet):
+        """Forward voice worker states to the single session owner."""
+        from extensions.companion.session_coordinator import CoordinatorStopped
+        event = packet.get('event')
+        turn = packet.get('turn')
+        try:
+            if event == 'user_started':
+                self._coordinator.voice_user_started(turn)
+            elif event == 'answer_request':
+                threading.Thread(target=self._voice_answer, args=(packet,),
+                    daemon=True, name='sumika-voice-answer').start()
+            elif event == 'answer_cancel':
+                self._coordinator.voice_request_cancelled(packet.get('request'))
+            elif event in ('playback_started', 'proactive_started', 'discuss_started'):
+                self._coordinator.voice_event('playback_started', turn)
+            elif event in ('playback_ended', 'segment_ended', 'interrupted',
+                           'text_interrupted', 'error', 'empty_transcript'):
+                self._coordinator.voice_event(event, turn)
+                for request in self._coordinator.finish_turn_requests(turn):
+                    pass  # released; worker-side playback already stopped
+            elif event == 'discuss_rejected':
+                self._coordinator_event('proactive_error',
+                                        {'error': 'voice worker busy'})
+        except CoordinatorStopped:
+            pass
+
+    def _voice_answer(self, packet):
+        """Run a transcribed voice question on the single owner; stream to the worker."""
+        request, turn = packet.get('request'), packet.get('turn')
+        def delta(chunk):
+            self._microphone.post({'action':'answer_delta', 'request':request,
+                                   'text':chunk['text']})
+        try:
+            result = self._coordinator.voice_request(request=request, turn=turn,
+                text=packet.get('text', ''),
+                record_history=bool(packet.get('record_history', True)),
+                on_delta=delta)
+        except Exception as error:
+            self._coordinator.voice_request_finished(request)
+            try:
+                self._microphone.post({'action':'answer_error', 'request':request,
+                                       'reason':type(error).__name__})
+            except RuntimeError:
+                pass
+            return
+        text = result.get('text')
+        if not isinstance(text, str) or not text.strip():
+            self._coordinator.voice_request_finished(request)
+            try:
+                self._microphone.post({'action':'answer_error', 'request':request,
+                                       'reason':result.get('status', 'empty')})
+            except RuntimeError:
+                pass
+            return
+        try:
+            # Live deltas already reached the worker during generation; the
+            # worker reconciles the final text against them before playing.
+            self._microphone.post({'action':'answer_done', 'request':request, 'text':text})
+            self._coordinator.voice_request_delivered(request)
+        except RuntimeError:
+            self._coordinator.voice_request_finished(request)
 
     @staticmethod
     def _observation_payload(observation):
@@ -573,15 +653,28 @@ class Bridge:
         # a callback that is itself waiting for that lock.
         if collection_token is None or collection_token == self._companion.collection_token():
             self._microphone.stop()
+        self._coordinator.cancel_voice_requests()
+        self._stop_worker_playback()
         with self._context_lock:
             if collection_token is not None and collection_token != self._companion.collection_token():
                 return self._companion.revoke(collection_token=collection_token)
             self._fusion.clear()
+            self._coordinator.context_cleared()
             return self._companion.revoke(collection_token=collection_token)
+
+    def _stop_worker_playback(self):
+        """Context died; the worker's spoken answer must stop with it."""
+        if self._microphone.status()['alive']:
+            try:
+                self._microphone.post({'action':'answer_invalidated', 'request':0})
+            except RuntimeError:
+                pass
 
     def _companion_audio_clear(self):
         with self._context_lock:
             visual = self._fusion.clear_audio()
+            self._coordinator.cancel_voice_requests()
+            self._stop_worker_playback()
             self._companion.revoke()
             if visual is not None:
                 self._companion.update(visual)
@@ -681,6 +774,7 @@ class Bridge:
                         'events':[dict(event) for event in self._voice_events if event['sequence'] > after]}
         if action in ('stop', 'pause'):
             result = self._microphone.stop()
+            self._coordinator.detach_speaker()
             with self._voice_events_lock:
                 self._voice_events.clear()
             return result
@@ -718,9 +812,23 @@ class Bridge:
         # or player. These owners do not manage the companion microphone job.
         self.speech.cancel_active()
         self.playback.cancel_active()
+        proactive = payload.get('proactive', {'enabled':True,'interval_seconds':120})
+        self._coordinator.reset()
+        self._coordinator.set_proactive(enabled=bool(proactive['enabled']),
+                                        interval_seconds=proactive['interval_seconds'])
         with self._voice_events_lock:
             self._voice_events.clear()
-        return self._microphone.start(config, admission_token=admission_token)
+        result = self._microphone.start(config, admission_token=admission_token)
+        self._coordinator.attach_speaker(self._discuss_speaker())
+        return result
+
+    def _discuss_speaker(self):
+        """Hand generated discussion text to the open voice worker."""
+        sequence = [0]
+        def speak(text):
+            sequence[0] += 1
+            self._microphone.post({'action':'discuss', 'request':sequence[0], 'text':text})
+        return speak
 
     def companion_pet(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'action'}:
