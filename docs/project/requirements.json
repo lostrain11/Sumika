@@ -1299,6 +1299,16 @@
       "status": "active",
       "kind": "user_direction_record",
       "sha256": "432eb08a30a44707b93627e69e32672c800d7a7e54294010a9978da128518e90"
+    },
+    {
+      "id": "R-124",
+      "sequence": 124,
+      "original": "有一点需要明确，B站相关的应该在识别到是B站时才启用，其他的视频网站不用或者至少不能照搬B站设置",
+      "source": "visible-conversation: user message; locator=ZCode session 2026-10-09 P1 execution, site-scoping clarification",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "0edfa39e03f5fe08e38774b536e0ca6b9e08b319fed10f2fe988a24c599dc738"
     }
   ]
 }

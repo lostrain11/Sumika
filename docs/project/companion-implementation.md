@@ -153,6 +153,8 @@ D:/Tools/GitHubCLI/gh.exe
 
 #### P3：B站生产扩展与音轨融合
 
+> **用户澄清（2026-10-09，已录 R-124，对 P3 全部子项有约束力）**：B站相关行为必须在识别到当前站点是B站时才启用；其他视频网站不启用B站逻辑，至少不得照搬B站设置。现有实现已按此作用域：MV3 原型 content script 与 host_permissions 仅匹配 bilibili.com（`tools/build_passive_browser_prototype.mjs:11-16`），bridge 授权仅接受 bilibili origin（`extensions/companion/passive_browser.py:141`），音频采集脚本仅 bilibili origin（`browser_audio_capture.js:5`）；通用采集器 `browser_video_snapshot.js` 中B站特有部分（分P `?p=`、弹幕选择器）以 `bilibili` 主机名判定为条件分支，非B站站点走通用 video 元素路径且不带B站假设。P3 提取生产扩展时保持该门控并加验收断言：非B站 origin 的连接/授权/采集请求必须被显式拒绝，不得回退到B站配置。
+
 依赖：P2。范围：现有 passive browser 原型、采集 JS、音轨 endpoint/worker、融合与浏览器验收。
 
 1. 从原型提取固定 MV3 产品扩展；研究 PCM 导出接口不 ship。最小 origin/权限，原 tab 连接，不要求用户转移到 Agent Window。显式安装说明，不静默安装、不改浏览器政策。
