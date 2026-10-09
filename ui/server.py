@@ -121,6 +121,9 @@ class Bridge:
         self._passive_browser = PassiveBrowserConnection(
             self._companion_passive_publish,
             self._companion_clear)
+        from extensions.companion.passive_browser_audio import PassiveBrowserAudio
+        self._browser_audio = PassiveBrowserAudio(root=UI_ROOT.parent,
+            on_observation=self._companion_audio_observe, on_clear=self._companion_audio_clear)
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
         self._closing = False
@@ -519,6 +522,7 @@ class Bridge:
         passive = self._passive_browser.status()
         if passive.get('target') is not None and passive['target'] != bundle.target:
             self._passive_browser.stop()
+            self._browser_audio.stop()
         media_state = bundle.metadata.get('media_state')
         if media_state is None:
             if bundle.metadata.get('seeking') is True:
@@ -872,6 +876,7 @@ class Bridge:
 
     def companion_revoke(self):
         self._passive_browser.stop()
+        self._browser_audio.stop()
         self._application_audio.stop()
         self._microphone.stop()
         with self._voice_events_lock:
@@ -1071,8 +1076,47 @@ class Bridge:
             result = self._passive_browser.resume()
             return result
         if action in ('pause', 'stop', 'status'):
+            if action in ('pause', 'stop'):
+                self._browser_audio.stop()
             return getattr(self._passive_browser, action)()
         raise ValueError('invalid passive browser action')
+
+    def companion_browser_audio(self, payload):
+        """Approved browser tab audio into the isolated recognizer (Sumika side)."""
+        if not isinstance(payload, dict):
+            raise ValueError('browser audio action required')
+        action = payload.get('action')
+        if action == 'status':
+            return self._browser_audio.status()
+        if action == 'stop':
+            return self._browser_audio.stop()
+        if action != 'start':
+            raise ValueError('invalid browser audio action')
+        grant = self._passive_browser.audio_grant()
+        if grant is None:
+            raise PermissionError('browser audio consent requires an approved connection')
+        observation = self._companion.latest
+        if observation is None or not observation.valid:
+            raise ValueError('select valid visible content before starting browser audio')
+        voice = load_settings(self.settings_path)['voice']
+        if not voice['enabled'] or not voice.get('asr_model'):
+            raise PermissionError('enable recognition and configure its model')
+        model = Path(voice['asr_model'])
+        if not model.is_absolute():
+            model = self.workbench.root/model
+        if not self.capability_database:
+            raise PermissionError('ASR capability not configured')
+        store = CapabilityStore(self.capability_database)
+        try:
+            selected_asr = store.resolve('asr')
+            if selected_asr['provider'] not in ('vosk', 'sherpa-onnx-sensevoice'):
+                raise PermissionError('selected browser audio ASR provider is not connected')
+        finally:
+            store.close()
+        return self._browser_audio.start(target=observation.target,
+            identity=observation.metadata.get('media_identity'),
+            model=model, capabilities=self.capability_database, asr=selected_asr,
+            audio_epoch=grant['audio_epoch'])
 
     def stop_speech(self, *, closing=False):
         failures = []
@@ -1354,7 +1398,9 @@ def _handler(bridge):
             if route in ('/api/companion/passive-browser/push',
                          '/api/companion/passive-browser/request',
                          '/api/companion/passive-browser/receipt',
-                         '/api/companion/passive-browser/cancel'):
+                         '/api/companion/passive-browser/cancel',
+                         '/api/companion/passive-browser/audio',
+                         '/api/companion/passive-browser/audio-epoch'):
                 # Narrow extension ingress: never grants access to management
                 # or arbitrary observation APIs. No website CORS is enabled.
                 if self.headers.get('Host') != f'127.0.0.1:{self.server.server_port}':
@@ -1370,6 +1416,18 @@ def _handler(bridge):
                     if route.endswith('/receipt') or route.endswith('/cancel'):
                         return self._json(200, bridge._passive_browser.connection_receipt(
                             self.headers.get('Origin'), self._body(), cancel=route.endswith('/cancel')))
+                    if route.endswith('/audio-epoch'):
+                        grant = bridge._passive_browser.rotate_audio_epoch(
+                            token, self.headers.get('Origin'))
+                        # Old packets are fenced; the recognizer restarts clean.
+                        bridge._browser_audio.stop()
+                        return self._json(200, grant)
+                    if route.endswith('/audio'):
+                        grant = bridge._passive_browser.audio_grant()
+                        if grant is None:
+                            raise PermissionError('browser audio grant unavailable')
+                        return self._json(200, bridge._browser_audio.receive(
+                            token, self.headers.get('Origin'), self._body(), grant=grant))
                     return self._json(200, bridge._passive_browser.receive(token,
                         self.headers.get('Origin'), self._body()))
                 except PermissionError as error:

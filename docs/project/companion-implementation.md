@@ -48,6 +48,19 @@
 
 **限制与未做**：真实浏览器/B站 tab 目标选择与 popup 属 P3；文字模式主动讨论的真实模型触发、四通道状态的真实设备联测归后续包；voice 环境的**全量** discover 因环境既有限制（tzdata 缺失的 schedule 错误 + discover 导入模式下 pkgutil patch 解析）不作为门槛，历史上一贯只跑聚焦子集；本包未重打包（P8 统一重建）。
 
+### P3 回执（2026-10-09，ZCode / GLM5.3flash 执行，**部分完成**）
+
+**状态：实现与协议验收完成；30 分钟浸泡与真实站点验收未做，为剩余门槛（见文末）。**
+
+1. **产品 MV3 扩展（P3-1/3-2）**：新增 `tools/build_companion_extension.mjs`，从唯一源（`browser_video_snapshot.js`/`browser_audio_capture.js`/`browser_audio_worklet.js`）组装固定产品扩展：manifest 仅 bilibili.com/video 内容脚本 + 127.0.0.1 回环权限；popup 为用户已确认设计（**连接本页/断开/状态**，2 秒轮询真实状态）；service worker 只经配对请求→Sumika 内确认→grant 授权；**无研究 PCM 导出接口**；README 明确手动安装步骤（开发者模式加载解压目录），无静默安装、不改浏览器策略。按 R-124，扩展只在识别为 bilibili.com/video 时可连接，非B站站点的连接/授权/推送被显式拒绝。生成物 JS 语法全部通过。
+2. **有界音频协议生产端（P3-3）**：配对授权扩展 `audio` 独立勾选（缺省 false），grant 携带 `audio_epoch`（resume/seek/rate 场景轮换，旧转写失效）；新增 `PassiveBrowserAudio`（`extensions/companion/passive_browser_audio.py`）：严格 sequence（epoch 内连续，缺口显式失败）、20 包/2 秒有界队列（溢出停轨报错，不静默丢包）、media_identity 前后绑定、grant token/extension/tab/origin/audio 全绑定、PCM 仅内存与管道；`application_audio_worker.py` 新增 pipe 源模式（`PipePcmCapture` + `run_pipe`），复用既有 SegmentedApplicationAudioTrack/Vosk/SenseVoice 分段识别，在打包 voice 解释器内运行；Bridge 新增扩展专用路由 `/api/companion/passive-browser/audio`（推送）与 `/audio-epoch`（seek/rate/暂停后同视频重启），生命周期接入 revoke/pause/stop/目标变化；转写经既有 fusion 进入同一学习上下文。
+3. **验证**：新增 `tests_next/test_passive_browser_audio.py` 6 项（序列/epoch/身份/grant 绑定、队列溢出显式失败、真实子进程管道到转写）；`test_passive_browser` 57 项、`test_ui_server+passive` 79 项、全套 **962 tests OK（18 skips）**。扩展生成物与既有断言（B站作用域、无研究导出）由构建器结构保证。
+
+**未验收（剩余门槛，不得记为完成）**：
+- 30 分钟字幕/无字幕夹具浸泡、其他 tab 同时播放、目标静音与零音量转写、暂停无新增包、seek 不串旧资料、分P重新许可——夹具验收需连续运行 60 分钟以上，尚未执行；
+- 真实 B站 30 分钟验收（现有 79 包历史报告不可替代），执行前需通知用户；
+- 音频能力缺口的 UI 显式呈现（无音轨/CORS/播放器替换时）目前仅到扩展状态行，未接入 Sumika 详情文案。
+
 ### 1. 接手启动与完成边界
 
 可将下面整段作为 ZCode 的首条任务：

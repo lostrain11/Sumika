@@ -106,17 +106,23 @@ class PassiveBrowserConnection:
             return {'status':'approved', 'grant':self._configuration()}
 
     def approve_connection(self, payload, *, before_start):
-        if not isinstance(payload, dict) or set(payload) != {'action','request_id','consent','capture_frame'}:
+        if not isinstance(payload, dict) or set(payload) not in (
+                {'action','request_id','consent','capture_frame'},
+                {'action','request_id','consent','capture_frame','audio'}):
             raise ValueError('explicit connection approval required')
         if not isinstance(payload['request_id'], str):
             raise ValueError('connection request id required')
+        audio = payload.get('audio', False)
+        if type(audio) is not bool:
+            raise ValueError('browser audio consent must be boolean')
         with self._lock:
             self._prune_requests()
             request = self._requests.get(payload['request_id'])
             if request is None or request['state'] != 'pending':
                 raise PermissionError('pending connection request unavailable')
             selection = {key:request[key] for key in ('extension_id','tab_id','origin')}
-            selection.update(consent=payload['consent'], capture_frame=payload['capture_frame'])
+            selection.update(consent=payload['consent'], capture_frame=payload['capture_frame'],
+                             audio=audio)
             self.validate_selection(selection)
             before_start()  # Revoke old perception before issuing a new grant.
             if self.clock() >= request['expires']:
@@ -143,15 +149,19 @@ class PassiveBrowserConnection:
         capture = payload.get('capture_frame', True)
         if type(capture) is not bool:
             raise ValueError('capture_frame must be boolean')
-        return extension, tab, origin, capture
+        audio = payload.get('audio', False)
+        if type(audio) is not bool:
+            raise ValueError('browser audio consent must be boolean')
+        return extension, tab, origin, capture, audio
 
     def start(self, payload):
-        extension, tab, origin, capture = self.validate_selection(payload)
+        extension, tab, origin, capture, audio = self.validate_selection(payload)
         with self._lock:
             if self._grant is not None:
                 self.stop()
             self._grant = dict(token=secrets.token_urlsafe(32), extension_id=extension,
-                tab_id=tab, origin=origin, capture_frame=capture,
+                tab_id=tab, origin=origin, capture_frame=capture, audio=audio,
+                audio_epoch=secrets.token_hex(8) if audio else None,
                 target=f'browser-passive:{secrets.token_hex(16)}:tab:{tab}',
                 expires=self.clock()+1800, sequence=-1, observed_at=None, received=None, signature=None, paused=False)
             if self._watchdog_enabled:
@@ -159,6 +169,33 @@ class PassiveBrowserConnection:
                 threading.Thread(target=self._watch, args=(wake,),daemon=True,
                                  name='SumikaPassiveBrowserExpiry').start()
             return self._configuration()
+
+    def audio_grant(self):
+        """Authorization view for the bounded browser audio transport."""
+        with self._lock:
+            self._expire()
+            grant = self._grant
+            if grant is None or grant['paused'] or not grant['audio']:
+                return None
+            return {key: grant[key] for key in ('token', 'extension_id', 'tab_id',
+                                                'origin', 'audio', 'audio_epoch')}
+
+    def rotate_audio_epoch(self, token, extension_origin):
+        """Mint a fresh audio epoch after seek/rate/pause invalidated capture.
+
+        The user's connection consent stands; old transcripts stay fenced by
+        the epoch change, so the extension restarts capture with clean state.
+        """
+        with self._lock:
+            self._expire()
+            grant = self._grant
+            if (grant is None or grant['paused'] or not grant['audio']
+                    or not isinstance(token, str)
+                    or not hmac.compare_digest(token, grant['token'])
+                    or extension_origin != 'chrome-extension://' + grant['extension_id']):
+                raise PermissionError('browser audio grant unavailable')
+            grant['audio_epoch'] = secrets.token_hex(8)
+            return {'audio_epoch': grant['audio_epoch']}
 
     def _watch(self, wake):
         while not wake.wait(0.5):
@@ -170,7 +207,7 @@ class PassiveBrowserConnection:
     def _configuration(self):
         grant = self._grant
         return {key: grant[key] for key in ('token', 'extension_id', 'tab_id', 'origin',
-            'capture_frame', 'target')} | {'expires_in_seconds': max(0, grant['expires']-self.clock()),
+            'capture_frame', 'audio', 'audio_epoch', 'target')} | {'expires_in_seconds': max(0, grant['expires']-self.clock()),
                                          'approved_url':grant.get('approved_url')}
 
     def status(self):
@@ -202,10 +239,13 @@ class PassiveBrowserConnection:
             self._expire()
             if self._grant is None:
                 raise PermissionError('passive browser consent expired or revoked')
-            # Old queued packets remain invalid after resume.
+            # Old queued packets remain invalid after resume; a fresh token and
+            # audio epoch fence transcripts from before the pause.
             old_token = self._grant['token']
             self._grant.update(token=secrets.token_urlsafe(32), paused=False,
                                sequence=-1, observed_at=None, received=None, signature=None)
+            if self._grant['audio']:
+                self._grant['audio_epoch'] = secrets.token_hex(8)
             for request in self._requests.values():
                 if request['grant_token'] == old_token:
                     request['grant_token'] = self._grant['token']

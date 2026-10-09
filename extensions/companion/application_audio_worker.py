@@ -1,11 +1,15 @@
 """Isolated voice-runtime worker; only bounded transcripts cross the parent pipe."""
 from dataclasses import asdict
+from base64 import b64decode
 import json
 import sys
 import threading
 import os
 
-from .application_audio import ApplicationAudioTrack
+from .application_audio import (
+    ApplicationAudioTrack, PipePcmCapture, SegmentedApplicationAudioTrack,
+    SileroSpeechDetector)
+from .audio_providers import SenseVoicePcmProvider, VoskPcmProvider
 from extensions.capabilities import CapabilityStore
 
 
@@ -30,6 +34,27 @@ def require_asr(config):
             raise PermissionError('application ASR configuration changed')
     finally:
         store.close()
+
+
+def build_track(config, observation):
+    """Construct the recognizer for the configured source; no fallback."""
+    provider_name = config.get('asr', {}).get('provider', 'vosk')
+    model_path = config['model']
+    if config.get('source') == 'pipe':
+        capture = PipePcmCapture()
+        if provider_name == 'sherpa-onnx-sensevoice':
+            return SegmentedApplicationAudioTrack(capture, SenseVoicePcmProvider(model_path),
+                target=config['target'], on_transcript=observation,
+                speech_detector=SileroSpeechDetector())
+        return ApplicationAudioTrack(capture, VoskPcmProvider(model_path),
+            target=config['target'], on_transcript=observation)
+    track = ApplicationAudioTrack.configured(helper=config['helper'],
+        process_id=config['process_id'], creation_time=config['creation'],
+        model_path=model_path, target=config['target'], approved=True,
+        on_transcript=observation, provider=provider_name,
+        media_time_seconds=config.get('media_time_seconds'),
+        playback_rate=config.get('playback_rate', 1.0))
+    return track
 
 
 def run(input_stream, output_stream):
@@ -63,16 +88,13 @@ def run(input_stream, output_stream):
                 value['metadata']['media_identity'] = snapshot_media_identity(media_identity)
             value['observed_at'] = bundle.observed_at.isoformat()
             emit({'observation': value})
-        track = ApplicationAudioTrack.configured(helper=config['helper'],
-            process_id=config['process_id'], creation_time=config['creation'],
-            model_path=config['model'], target=config['target'], approved=True,
-            on_transcript=observation,
-            provider=config.get('asr', {}).get('provider', 'vosk'),
-            media_time_seconds=config.get('media_time_seconds'),
-            playback_rate=config.get('playback_rate', 1.0))
+        track = build_track(config, observation)
         # Load native dependencies before the blocking stdin owner watcher.
         if config.get('asr', {}).get('provider') == 'sherpa-onnx-sensevoice':
             track.prepare()
+        if config.get('source') == 'pipe':
+            run_pipe(input_stream, track, stop, emit, config)
+            return 0
         def owner_closed():
             # Any subsequent input or EOF revokes this worker's entire session.
             input_stream.read(1)
@@ -106,6 +128,36 @@ def run(input_stream, output_stream):
         if diagnostic is not None:
             faulthandler.cancel_dump_traceback_later()
             diagnostic.close()
+
+
+def run_pipe(input_stream, track, stop, emit, config):
+    """Feed relayed browser tab PCM into the recognizer until stop or EOF.
+
+    Each line is one bounded base64 packet; any gap, malformed packet or EOF
+    stops the whole track instead of silently dropping tutorial speech.
+    """
+    track.start()
+    require_asr(config)
+    emit({'status': 'running', 'target': config['target']})
+    while not stop.is_set():
+        line = input_stream.readline(8001)
+        if not line:
+            stop.set()
+            break
+        if len(line) > 8000 or not line.endswith('\n'):
+            raise ValueError('bounded browser audio packet required')
+        packet = json.loads(line)
+        action = packet.get('action')
+        if action == 'stop':
+            stop.set()
+            break
+        if action is not None:
+            raise ValueError('unknown browser audio control')
+        pcm = b64decode(packet.get('pcm', ''), validate=True)
+        if len(pcm) > 64000 or len(pcm) % 2:
+            raise ValueError('bounded 16kHz mono PCM required')
+        track.capture.feed(pcm)
+    return 0
 
 
 if __name__ == '__main__':

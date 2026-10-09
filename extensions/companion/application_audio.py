@@ -455,3 +455,53 @@ class SegmentedApplicationAudioTrack:
             if self._error:
                 return {**self.capture.status(), **progress, 'state': 'error', 'error': self._error}
         return {**self.capture.status(), **progress}
+
+
+class PipePcmCapture:
+    """PCM source adapter fed by the host over the worker pipe.
+
+    Used for opt-in browser tab audio: the extension captures the selected
+    media element and the bridge relays bounded packets. There is no native
+    process binding, so process identity stays absent and PCM offsets never
+    claim a player media clock.
+    """
+
+    process_id = None
+    creation_time = None
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._sink = None
+        self._state = 'stopped'
+        self._packets = 0
+
+    def start(self, sink, on_timing=None):
+        if not callable(sink):
+            raise ValueError('pcm sink required')
+        with self._lock:
+            if self._state != 'stopped':
+                raise RuntimeError('pipe capture already active')
+            self._sink = sink
+            self._state = 'recording'
+            self._packets = 0
+
+    def feed(self, pcm):
+        """Deliver one bounded PCM packet from the pipe reader thread."""
+        sink = None
+        with self._lock:
+            if self._state == 'recording':
+                sink = self._sink
+                self._packets += 1
+        if sink is not None:
+            sink(pcm)
+
+    def stop(self):
+        with self._lock:
+            self._sink = None
+            self._state = 'stopped'
+        return {'state': 'stopped'}
+
+    def status(self):
+        with self._lock:
+            return {'state': self._state, 'packets': self._packets,
+                    'process_isolation': False, 'source': 'browser-tab-pipe'}
