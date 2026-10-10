@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-10T06:15:58.390975+00:00",
+  "updated_at": "2026-10-10T06:32:46.136607+00:00",
   "current_goal": "实施已批准的整理、DSH 0.2.0-rc.2 升级和独立桌宠陪学；最高优先级为现有软件中的学习内容问答",
   "current_phase": "P6",
   "phase_status": "in_progress",
@@ -779,7 +779,7 @@
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
     "verified_this_turn": "P4 real page-flip acceptance COMPLETE with the user present: 20 verifier runs all passed, 21 counted real page inputs (>=20 required), text lifecycle with pause/resume/stop/rebind x18, scanned OCR with require-region viewport crop, chinese-math scan with honest formula OCR limitation and image binding, same-name alternate path rejected, zero paid model calls; local candidate-layout junction plus run_module bootstrap solved the packaged-runtime module resolution without touching product files.",
     "limitations": [
-      "P4 done (20 runs/21 flips) but selection, dual-window and zoom PDF scenarios not exercised in this round",
+      "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
       "Notes UI entry and danmaku summary auto-trigger policy need design confirmation",
       "Daily DSH 0.1.5-rc.2 has no plugin-manager surface; lifecycle acceptance binds to 0.2.0-rc.2",

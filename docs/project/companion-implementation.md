@@ -343,6 +343,8 @@ python -X utf8 -B tools/build_setup.py <candidate> --compiler <ISCC.exe> --outpu
 
 **运行环境更正**：感知子进程的打包 desktop 运行时 `_pth` 不含工作区，本地验收复刻候选布局（`product-root` junction：extensions/sumika_next/ui/tools/runtime-desktop）+ `tools/run_module.py` 引导解决 `-m` 解析；未修改任何产品文件或运行时输入（P8 打包守卫对 `_pth` 机器路径的拒绝仍然有效）。
 
+**真实书籍验收（用户提供的正版书）**：新增 `tools/verify_companion_realbook.py`（结构化不变量：页选择器页码递增、逐页内容指纹变化、绝对文档身份稳定、跳回反逆；**只记录页码与内容哈希、不落任何书籍正文**，报告留存本地 E 盘不入库）。对用户提供的《算法图解》PDF（197 页，真实中文排版）实测：22/22 次翻页全过、跳回第 20 页校验通过、身份稳定、零模型调用。过程中修复两处验收工具缺陷（json 导入缺失；感知子进程的打包运行时 `_pth` 无工作区——按候选布局 junction+run_module 引导后，junction 会让 `_pth` 相对路径按真实路径落到盘根，故最终采用真实目录复制布局，未改运行时输入文件）。
+
 **剩余子项（不阻塞本验收，如实列出）**：PDF 阅读器内的选区（selection）、双窗口、缩放三类场景未在本次 20 轮中执行（选区在此前的真实 Edge 选中回归中有孤立证据；缩放的视口裁剪机制已被 require-region 间接覆盖）。书籍内容零自动保存保持（笔记仅显式保存且带来源）。
 
 ---
