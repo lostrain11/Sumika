@@ -53,10 +53,13 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
           if(audioBusy)throw Error('audio consumer busy');
           audioBusy=true;
           const done=()=>{audioBusy=false;};
+          // Bind the verdict to the capture that sent this packet: a stale
+          // rejection arriving after a rotation must not stop the new one.
+          const mine=audioCapture;
           send({type:'audio-packet',sequence:packet.sequence,sample_offset:packet.sample_offset,
                 media_identity:packet.media_identity,pcm_base64:btoa(String.fromCharCode(...new Uint8Array(packet.pcm)))})
-            .then(result=>{done();if(result?.accepted===false)audioCapture?.stop();})
-            .catch(()=>{done();audioCapture?.stop();});
+            .then(result=>{done();if(result?.accepted===false)mine?.stop('host_rejected');})
+            .catch(()=>{done();mine?.stop('send_failed');});
         }});
       await audioCapture.start();
       console.log('[sumika-audio] capture started, epoch', currentAudioEpoch);
@@ -261,10 +264,15 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   if(message?.type==='audio-stopped') {
     if(!ownedSender(message,sender,owner)) {respond({});return;}
     console.log('[sumika] audio stopped:',message.reason);
-    // Only player changes (seek/rate/pause) rotate the epoch under the
-    // standing consent; transport rejections wait for the host recognizer.
-    if(message.reason!=='player_changed') {respond({restarted:false});return;}
+    // Any capture stop inside the still-approved video restarts under the
+    // standing consent: rotate the epoch so the strict per-epoch sequence
+    // starts clean, then re-kick. Bounded so a persistent failure ends
+    // stopped and visible instead of masking itself with rotation churn.
     (async()=>{
+      const now=Date.now();
+      owner.epochStarts=(owner.epochStarts||[]).filter(stamp=>now-stamp<60000);
+      if(owner.epochStarts.length>=30) return {restarted:false,throttled:true};
+      owner.epochStarts.push(now);
       const epoch=await post('/api/companion/passive-browser/audio-epoch',{});
       owner.grant.audio_epoch=epoch.audio_epoch;
       await chrome.tabs.sendMessage(owner.grant.tab_id,

@@ -761,8 +761,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "behavior_notes_done_expect_weak_ready_user_gates_remain",
-    "current_delivery_package": "P3 real-site / P6 hardware / P8 install still need the user; plus optional live all-image realbook run when the desktop is free",
+    "status": "p3_live_soak_done_p6_user_gate_next",
+    "current_delivery_package": "P6 continuous voice hardware (needs the user, 30 turns); then P8 final candidate rebuild/install",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -777,7 +777,7 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "2026-10-10 increment: reading-behavior feedback notes (tracker + behavior_note + coordinator gating/queue/cooldown) and --expect-weak all-image acceptance variant implemented and tested; dev suite 994 OK (19 skips), focused 32 OK, gate tests 5/5 under the packaged runtime; R-125 recorded verbatim, design explicitly deferred by the user. Remaining user gates unchanged: P3 real Bilibili 30 min, P6 continuous voice hardware, P8 final candidate rebuild/install; pending-desktop: live all-image PDF realbook run (announced before running).",
+    "verified_this_turn": "2026-10-10: P3 REAL Bilibili 30-minute soak PASSED (BV1QN4y1c7RQ, anonymous muted playback): 17914 packets / 1791.4 s audio, 123 real vosk transcripts, 6 seek epoch rotations, pause fence zero-packet, track alive at end; extension recovery defects fixed (stale-rejection race, rotate-on-any-stop bounded 30/min); fixture part-change soak and live smoke re-passed; full suite 994 OK (19 skips), one known flaky WinError5 at roles.py:137 recorded for the packaging turn. Evidence E:/SumikaBuild/companion-soak-live-20261010/. Earlier this turn: all-image realbook weak-mode live acceptance passed 22/22.",
     "limitations": [
       "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
@@ -787,7 +787,7 @@
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a",
-    "next_action": "User picks the next gate (P3 / P6 / P8); say the word and name a free-desktop window for the all-image realbook weak-mode run."
+    "next_action": "P6 continuous voice hardware acceptance needs the USER (real microphone + speaker, 30 turns including interruption); user asked to be paused and notified for it. After P6: P8 final candidate rebuild + install/upgrade/rollback (needs user authorization; clean-machine leg needs a machine/VM). Open P3 leftover: audio-capability-gap UI wording."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。"
 }

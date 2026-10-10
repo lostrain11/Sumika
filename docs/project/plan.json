@@ -717,7 +717,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: 2026-10-10 increment done — reading-behavior feedback notes (flip_burst/long_dwell/revisit → model behavior note, queued retry, 60s cooldown, no interruption of live questions) and the --expect-weak all-image realbook gate are implemented and tested (dev suite 994 OK/19 skips, focused 32 OK, gate 5/5 under packaged runtime). REMAINING USER-GATED GATES: P3 real Bilibili 30-minute acceptance, P6 continuous voice hardware (30 turns), P8 final candidate rebuild + install/upgrade/rollback on a clean machine. Optional pending-desktop: live all-image PDF realbook run with --expect-weak (announce before running).",
+  "next_action": "ZCode / GLM5.3flash: P3 REAL Bilibili 30-minute soak PASSED 2026-10-10 (BV1QN4y1c7RQ anonymous muted: 17914 packets, 123 real transcripts, seek rotations clean, pause fence zero-packet; extension stale-rejection race and rotate-on-any-stop recovery fixed and bounded; full suite 994 OK/19 skips; evidence E:/SumikaBuild/companion-soak-live-20261010/). NEXT: P6 continuous voice hardware — USER-GATED (real microphone + speaker, 30 turns incl. interruption; user asked to be notified). Then P8 final candidate rebuild + install/upgrade/rollback/clean-machine. P3 leftover: audio-capability-gap UI wording. Same turn: all-image realbook weak-mode live acceptance passed 22/22 (E:/SumikaBuild/realbook-weak-20261010/).",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",

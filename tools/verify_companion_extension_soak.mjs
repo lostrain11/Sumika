@@ -1,15 +1,18 @@
 // Delivery package P3 soak acceptance: the production companion extension
 // against a real isolated Sumika bridge with relayed tab audio into the
-// packaged voice interpreter. Generated local lesson only; no real website.
+// packaged voice interpreter. Default is a generated local lesson; no real
+// website. --live-url swaps the fixture for a real public Bilibili video
+// (anonymous playback, player muted; real packets, transcripts and fences).
 // Usage:
 //   node tools/verify_companion_extension_soak.mjs <output-dir> [options]
 //   --seconds N            soak duration (default 1800)
-//   --subtitles on|off     TextTrack cues present (default on)
+//   --subtitles on|off     TextTrack cues present (default on; fixture only)
 //   --muted                video.muted=true (player volume zero still captures)
-//   --other-tab            second tab plays audible audio concurrently
+//   --other-tab            second tab plays audible audio concurrently (fixture only)
 //   --seek-every N         seek the video every N seconds (fence checks)
 //   --pause-at N           pause at N seconds, expect packets to stop
-//   --part-change N        switch ?p= part at N seconds (reconnect + re-consent)
+//   --part-change N        switch ?p= part at N seconds (reconnect + re-consent, fixture only)
+//   --live-url URL         real public Bilibili video instead of the fixture
 import assert from 'node:assert/strict';
 import {mkdir, writeFile, writeFile as write} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -33,10 +36,22 @@ const otherTab = args.includes('--other-tab');
 const seekEvery = Number(value('--seek-every') || 0);
 const pauseAt = Number(value('--pause-at') || 0);
 const partChange = Number(value('--part-change') || 0);
+const liveUrl = value('--live-url');
 const voskModel = value('--vosk-model') || 'E:/Models/Speech/sumika/vosk-model-small-cn-0.22';
 const voicePython = value('--voice-python');
-await mkdir(directory, {recursive:true});
-const report = {passed:false, scope:'Production MV3 extension in real headless Edge -> isolated Sumika bridge -> packaged voice interpreter (vosk). Generated local lesson; no real website, no external model.', options:{seconds,subtitles,muted,otherTab,seekEvery,pauseAt,partChange}, checks:{}, phases:[]};
+if (liveUrl && (otherTab || partChange)) {
+  console.error('--live-url keeps a single real tab: --other-tab/--part-change are fixture-only');
+  process.exit(2);
+}
+if (liveUrl && !/^https:\/\/www\.bilibili\.com\/video\/[A-Za-z0-9]+\/?(\?p=[1-9][0-9]{0,5})?$/.test(liveUrl)) {
+  console.error('--live-url must be a plain bilibili.com/video/<BV id> URL');
+  process.exit(2);
+}
+await mkdir(directory,{recursive:true});
+const report = {passed:false, scope: liveUrl
+    ? 'Production MV3 extension in real headless Edge against a real public Bilibili video (anonymous, player muted) -> isolated Sumika bridge -> packaged voice interpreter (vosk). No external model.'
+    : 'Production MV3 extension in real headless Edge -> isolated Sumika bridge -> packaged voice interpreter (vosk). Generated local lesson; no real website, no external model.',
+  options:{seconds,subtitles,muted,otherTab,seekEvery,pauseAt,partChange,liveUrl}, checks:{}, phases:[]};
 const extension = await buildCompanionExtension(join(directory,'extension'));
 const {chromium} = loadPlaywright();
 const browser = await chromium.launchPersistentContext(join(directory,'profile'),{
@@ -44,6 +59,59 @@ const browser = await chromium.launchPersistentContext(join(directory,'profile')
 let bridgeProcess;
 const log = message => {report.phases.push({at:new Date().toISOString(),message});console.log('[soak]',message);};
 try {
+  const page = await browser.newPage();
+  page.on('console',message=>{const text=message.text();if(text.includes('[sumika-audio]'))console.log('[content]',text);});
+  let pageScript = null;
+  let pageOptions = null;
+  if (liveUrl) {
+    // Real public video, anonymous playback: mute the element the moment it
+    // exists (before the player can produce sound), start playback, and
+    // require enough duration for the whole soak.
+    await page.goto(liveUrl,{waitUntil:'domcontentloaded',timeout:60000});
+    // Bilibili plays through MSE: video.duration is Infinity/NaN, so the
+    // duration comes from the page's own video metadata (finite seconds).
+    // Polled from Node: this Playwright resolves waitForFunction on async
+    // falsy returns, which would mask "not playing yet".
+    const liveProbe=async()=>{
+      const video=document.querySelector('video');
+      if(!video) return null;
+      video.muted=true;video.volume=0;
+      if(video.paused||video.ended){try{await video.play();}catch{}return null;}
+      if(!(video.currentTime>0)) return null;
+      let seekable=null;
+      try{seekable=Math.ceil(video.seekable.end(video.seekable.length-1));}catch{}
+      const duration=(window.__INITIAL_STATE__&&window.__INITIAL_STATE__.videoData &&
+        window.__INITIAL_STATE__.videoData.duration)||seekable;
+      const cues=document.querySelector('.bpx-player-cc,.video-subtitle')!==null||
+        Array.from(video.textTracks||[]).some(track=>track.cues&&track.cues.length>0);
+      return {duration,currentTime:video.currentTime,
+        title:(document.title||'').slice(0,160),cues};
+    };
+    let info=null;
+    for(let waited=0;waited<60000;waited+=1000){
+      const probe=await page.evaluate(liveProbe).catch(()=>null);
+      if(probe&&Number.isFinite(probe.duration)&&probe.duration>=seconds+60){info=probe;break;}
+      await page.waitForTimeout(1000);
+    }
+    assert.ok(info,
+      `real video unusable/too short for a ${seconds}s soak: duration=${info&&info.duration}`);
+    report.checks.live_video={...info,duration_seconds:Math.round(info.duration)};
+    report.checks.live_player_muted_volume_zero=true;
+    // A real viewer keeps the player alive; Bilibili auto-pauses an idle
+    // headless tab (~60 s). The watchdog resumes such pauses within a second
+    // except while the intentional pause fence holds the player.
+    await page.evaluate(()=>{
+      if(window.__sumikaSoakResume) return;
+      window.__sumikaSoakResume=true;
+      window.__sumikaSoakHoldPause=false;
+      setInterval(()=>{
+        if(window.__sumikaSoakHoldPause) return;
+        const video=document.querySelector('video');
+        if(video && video.paused && !video.ended) video.play().catch(()=>{});
+      },1000);
+    });
+    log('live video playing muted: '+info.title);
+  } else {
   // Speech fixture: SAPI synthesizes a looping Chinese lesson line so the
   // relayed tab audio produces real transcripts through vosk.
   const wavPath = join(directory,'lesson.wav');
@@ -60,7 +128,7 @@ try {
     `$s.Speak(${psQuote('第二个知识点，导数描述瞬时变化率。')});`+
     '$s.Dispose()');
   log('sapi lesson wav generated');
-  const pageScript = async options => {
+  pageScript = async options => {
     const SUBTITLES = options.subtitles;
     const MUTED = options.muted;
     const binary = Uint8Array.from(atob(options.wav), c=>c.charCodeAt(0));
@@ -108,19 +176,18 @@ try {
     await video.play();
     window.__ready = true;
   };
-  const page = await browser.newPage();
-  page.on('console',message=>{const text=message.text();if(text.includes('[sumika-audio]'))console.log('[content]',text);});
   await page.route('https://www.bilibili.com/**', route => route.fulfill({contentType:'text/html',body:'<body></body>'}));
   await page.goto('https://www.bilibili.com/video/BVsoak/?p=1');
   const wav = await (async()=>{
     const {readFile} = await import('node:fs/promises');
     return (await readFile(wavPath)).toString('base64');
   })();
-  const pageOptions = {wav, subtitles, muted};
+  pageOptions = {wav, subtitles, muted};
   await page.evaluate(pageScript, pageOptions)
     .then(null, error=>{throw new Error('fixture page failed: '+error.message);});
   await page.waitForFunction('window.__ready === true',{timeout:15000});
   log('fixture video with audio track playing');
+  }
   if (otherTab) {
     // Concurrent audible playback from a second tab must not break the
     // session; opened after pairing so the lesson tab stays unambiguous.
@@ -189,11 +256,12 @@ finally: server.shutdown();server.server_close();thread.join()
   };
   const worker = browser.serviceWorkers()[0] || await browser.waitForEvent('serviceworker',{timeout:10000});
   worker.on('console',message=>console.log('[extension]',message.text()));
-  const tabs=await worker.evaluate(async()=>{
-    const found=await chrome.tabs.query({url:'https://www.bilibili.com/video/BVsoak/*'});
+  const tabPattern=liveUrl?'https://www.bilibili.com/video/*':'https://www.bilibili.com/video/BVsoak/*';
+  const tabs=await worker.evaluate(async pattern=>{
+    const found=await chrome.tabs.query({url:pattern});
     if(found.length!==1)throw new Error('ambiguous original tab');
     return {tab_id:found[0].id};
-  });
+  }, tabPattern);
   const extensionId=new URL(worker.url()).hostname;
   const offer=await worker.evaluate(configuration=>offerConnection(configuration),
     {base,tab_id:tabs.tab_id});
@@ -224,6 +292,7 @@ finally: server.shutdown();server.server_close();thread.join()
   const samples=[];
   const started=Date.now();
   let paused=false;
+  let pauseFenceDone=false;
   let seekCount=0;
   let lastAudioPackets=0;
   let audioPacketsPlateau=0;
@@ -247,9 +316,10 @@ finally: server.shutdown();server.server_close();thread.join()
       log('audio track stopped early: '+JSON.stringify(audioStatus));
       break;
     }
-    if (pauseAt && elapsed>=pauseAt && !paused) {
-      paused=true;
-      await page.evaluate(()=>document.querySelector('video').pause());
+    if (pauseAt && elapsed>=pauseAt && !paused && !pauseFenceDone) {
+      paused=true;pauseFenceDone=true;
+      await page.evaluate(()=>{window.__sumikaSoakHoldPause=true;
+        document.querySelector('video').pause();});
       const before=audioStatus.queued;
       await new Promise(resolve=>setTimeout(resolve,3000));
       const after=await (await fetch(base+'/api/companion/browser-audio',{method:'POST',
@@ -259,7 +329,8 @@ finally: server.shutdown();server.server_close();thread.join()
       assert.ok(after.queued<=1,'paused player still queued packets: '+after.queued);
       report.checks.pause_stops_audio_packets=true;
       log('pause fence verified');
-      await page.evaluate(()=>document.querySelector('video').play());
+      await page.evaluate(()=>{window.__sumikaSoakHoldPause=false;
+        const video=document.querySelector('video');if(video)video.play().catch(()=>{});});
       paused=false;
     }
     if (seekEvery && elapsed % seekEvery === 0 && !paused) {
@@ -312,7 +383,8 @@ finally: server.shutdown();server.server_close();thread.join()
   report.checks.tab_audio_relayed_packets=finalAudio.received;
   report.checks.tab_audio_transcripts=finalAudio.transcripts;
   if (muted) report.checks.muted_player_audio_still_captured=true;
-  if (subtitles) report.checks.subtitle_cues_present_in_fixture=true;
+  if (liveUrl) report.checks.live_subtitle_cues_present=report.checks.live_video.cues;
+  else if (subtitles) report.checks.subtitle_cues_present_in_fixture=true;
   else report.checks.no_subtitle_fixture=true;
   report.passed=true;
 } finally {
