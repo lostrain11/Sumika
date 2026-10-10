@@ -25,6 +25,52 @@ from verify_companion_pdf import continuous_binding, owned_profile_window
 from extensions.companion.windows_learning import WindowsLearningCollector
 
 
+class PageTextIndex:
+    """Canonical per-page text from the PDF's own text layer (pypdf).
+
+    The rendered page number and print quality are irrelevant here: what is
+    verified is that the viewport really shows page N's content. Pages
+    without a usable text layer (scans, image covers) honestly downgrade to
+    the weak fingerprint-only check instead of pretending to verify.
+    """
+
+    def __init__(self, pdf_path):
+        from pypdf import PdfReader
+        self._reader = PdfReader(str(pdf_path))
+        self._cache = {}
+
+    @staticmethod
+    def _normalize(text):
+        return ''.join(str(text or '').split())
+
+    @staticmethod
+    def _grams(text, size=8):
+        return {text[i:i+size] for i in range(0, max(0, len(text) - size + 1))}
+
+    def page_text(self, page):
+        if page not in self._cache:
+            try:
+                self._cache[page] = self._normalize(
+                    self._reader.pages[page - 1].extract_text() or '')
+            except Exception:
+                self._cache[page] = ''
+        return self._cache[page]
+
+    def verify(self, page, visible_text):
+        """Return (mode, ratio): strong/weak/none plus the matched ratio."""
+        canonical = self.page_text(page)
+        visible = self._normalize(visible_text or '')
+        if len(canonical) < 32:
+            return ('none', 0.0)
+        if not visible:
+            return ('weak', 0.0)
+        page_grams = self._grams(canonical)
+        visible_grams = self._grams(visible)
+        matched = len(page_grams & visible_grams)
+        ratio = matched / max(1, len(page_grams))
+        return ('strong', round(ratio, 3))
+
+
 def fingerprint(bundle):
     text_hash = hashlib.sha256((bundle.text or '').encode('utf8')).hexdigest()[:16]
     image_hash = ''
@@ -43,6 +89,8 @@ def main():
     parser.add_argument('--flips', type=int, default=22)
     parser.add_argument('--allow-desktop-input', action='store_true',
                         help='Explicitly permit owned Edge focus and keyboard navigation')
+    parser.add_argument('--min-page-overlap', type=float, default=0.2,
+                        help='Minimum canonical-page n-gram overlap for the strong check')
     args = parser.parse_args()
     if not args.allow_desktop_input:
         parser.error('real-book acceptance drives a focused Edge window; pass --allow-desktop-input')
@@ -78,8 +126,8 @@ def main():
     first = collector(target)
     if not first.valid:
         raise RuntimeError('first capture invalid')
+    page_index = PageTextIndex(pdf)
     previous = fingerprint(first)
-    report['start'] = previous
     report['absolute_document_identity'] = (previous['document'] == str(pdf))
     if not report['absolute_document_identity']:
         raise RuntimeError('document identity not bound to the supplied file: ' + str(previous['document']))
@@ -120,9 +168,18 @@ def main():
         moved = (current['text_sha'] != previous['text_sha']
                  or current['image_sha'] != previous['image_sha'])
         identity_ok = current['document'] == str(pdf)
-        record = {'flip': index + 1, 'ok': bool(page_ok and moved and identity_ok),
+        # Cross-check the viewport against the PDF's own text layer for page N:
+        # proves the rendered content IS page N, independent of any printed
+        # page number or its print quality.
+        mode, ratio = ('none', 0.0)
+        if current['page']:
+            mode, ratio = page_index.verify(current['page'], bundle.text)
+        content_ok = (moved and identity_ok and page_ok
+                      and (mode != 'strong' or ratio >= args.min_page_overlap))
+        record = {'flip': index + 1, 'ok': bool(content_ok),
                   'page': current['page'], 'page_matches_selector': page_ok,
                   'content_changed': moved, 'identity_stable': identity_ok,
+                  'page_text_check': mode, 'page_text_overlap': ratio,
                   'text_sha': current['text_sha'], 'image_sha': current['image_sha']}
         report['flips'].append(record)
         if record['ok']:
@@ -144,15 +201,27 @@ def main():
                 break
             time.sleep(.3)
         back = fingerprint(bundle)
+        mode, ratio = ('none', 0.0)
+        if back['page']:
+            mode, ratio = page_index.verify(back['page'], bundle.text)
         report['jump_back'] = {'page': back['page'], 'page_matches': back['page'] == back_page,
                                'content_differs': back['text_sha'] != previous['text_sha'],
-                               'identity_stable': back['document'] == str(pdf)}
+                               'identity_stable': back['document'] == str(pdf),
+                               'page_text_check': mode, 'page_text_overlap': ratio}
         if back['page'] == back_page:
             current_page = back_page
 
-    report['passed'] = (flips_ok >= args.flips - 1
+    strong_verified = sum(1 for flip in report['flips']
+                          if flip.get('page_text_check') == 'strong'
+                          and flip.get('page_text_overlap', 0) >= args.min_page_overlap)
+    report['strong_page_verifications'] = strong_verified
+    # Real books contain image-only pages (covers, dedications, blanks) with
+    # no text layer: require a clear majority of strong page verifications
+    # while every flip must still pass the selector/identity/change checks.
+    report['passed'] = (flips_ok == args.flips
                         and report.get('jump_back', {}).get('page_matches', False)
-                        and report['absolute_document_identity'])
+                        and report['absolute_document_identity']
+                        and strong_verified * 2 >= args.flips)
     window.capture_as_image().save(args.output/'reader-screen.png')
     (args.output/'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf8')
     print(json.dumps({'passed': report['passed'], 'flips_ok': flips_ok,

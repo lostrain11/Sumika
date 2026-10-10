@@ -118,7 +118,7 @@
     "status": "baseline_verified",
     "evidence": "docs/project/phase-05-office-acceptance.md"
   },
-  "updated_at": "2026-10-10T06:32:46.136607+00:00",
+  "updated_at": "2026-10-10T06:47:11.308886+00:00",
   "active_scope": {
     "goal": "完成P5、P6和长期记忆所有不依赖UI的剩余任务",
     "status": "in_progress",
@@ -829,7 +829,7 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "P4 real page-flip acceptance COMPLETE with the user present: 20 verifier runs all passed, 21 counted real page inputs (>=20 required), text lifecycle with pause/resume/stop/rebind x18, scanned OCR with require-region viewport crop, chinese-math scan with honest formula OCR limitation and image binding, same-name alternate path rejected, zero paid model calls; local candidate-layout junction plus run_module bootstrap solved the packaged-runtime module resolution without touching product files.",
+    "verified_this_turn": "P4 real page-flip acceptance COMPLETE with the user present, plus a REAL BOOK: the user-supplied Grokking Algorithms PDF (197 pages) passed 22/22 tracked flips where each flip was cross-checked against the PDF own text layer via pypdf (19 strong page verifications with n-gram overlap 0.725-1.0; image-only title/dedication/blank pages honestly downgraded to fingerprint-only) plus a strong-verified jump-back to page 20; fixture phase: 20 runs all passed, 21 counted real page inputs (>=20 required), text lifecycle with pause/resume/stop/rebind x18, scanned OCR with require-region viewport crop, chinese-math scan with honest formula OCR limitation and image binding, same-name alternate path rejected, zero paid model calls; local candidate-layout junction plus run_module bootstrap solved the packaged-runtime module resolution without touching product files.",
     "limitations": [
       "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
