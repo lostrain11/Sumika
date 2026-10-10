@@ -254,5 +254,139 @@ class BackgroundBudgetTests(unittest.TestCase):
         self.assertEqual(len(chat_calls), before)
 
 
+class BehaviorNoteTests(unittest.TestCase):
+    """Sustained reading behaviors reach the model as behavior, not content."""
+
+    def setUp(self):
+        self.now = [1000.0]
+        self.chat_calls = []
+        self.events = []
+        lock = threading.Lock()
+        def chat(prompt, *, session_id, images=None, on_delta=None, **kwargs):
+            with lock:
+                self.chat_calls.append({'prompt': prompt, 'images': images})
+            return {'text': '你在找什么内容吗？'}
+        from extensions.companion.reading_behavior import ReadingBehaviorTracker
+        self.tracker = ReadingBehaviorTracker(clock=lambda: self.now[0])
+        self.coordinator = StudySessionCoordinator(chat=chat,
+            current=lambda: None, on_event=lambda name, detail:
+            self.events.append({'event': name, **detail}),
+            include_images=lambda: False, scheduler_thread=False,
+            behavior_tracker=self.tracker)
+        scheduler = ObservationScheduler(self.coordinator._perception,
+            on_observation=self.coordinator._observe,
+            on_proactive=self.coordinator._dispatch_proactive,
+            on_error=lambda error: None,
+            clock=lambda: self.now[0], sleeper=lambda seconds: None,
+            proactive_interval=86400.0, settled_seconds=0)
+        self.coordinator._scheduler = scheduler
+        self.scheduler = scheduler
+
+    def page_bundle(self, page):
+        observed = datetime(2026, 10, 10, 9, 0, 0, tzinfo=timezone.utc) +             timedelta(seconds=page)
+        return ObservationBundle(observed_at=observed, source='window-visual',
+            target='reader', valid=True, text='lesson body', image=None,
+            media_time_seconds=None, metadata={'page': page})
+
+    def flip_to(self, *pages):
+        for page in pages:
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(self.page_bundle(page))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+
+    def wait_for(self, predicate, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while not predicate() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return predicate()
+
+    def flush(self, page, seconds=2.0):
+        """Drive ticks in real time so a queued report retries and background
+        threads actually get scheduled; stops once a note lands."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(self.page_bundle(page))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+            time.sleep(0.02)
+            if self.behavior_prompts():
+                return True
+        return bool(self.behavior_prompts())
+
+    def behavior_prompts(self):
+        return [item for item in self.chat_calls if '[行为观察]' in item['prompt']]
+
+    def behavior_events(self):
+        return [item for item in self.events
+                if item['event'] == 'proactive_text' and item.get('kind') == 'behavior']
+
+    def test_fast_flipping_triggers_one_behavior_note(self):
+        self.coordinator.publish_observation(self.page_bundle(1))
+        self.scheduler.notify_user_activity(0)
+        self.scheduler.tick()  # the first tick only sets the baseline page
+        self.flip_to(2, 3, 4, 5, 6, 7)  # the burst reports on the 6th change
+        # Later ticks flush a report that was queued behind a busy background
+        # thread; the same episode itself stays silent.
+        self.assertTrue(self.flush(11))
+        prompt = self.behavior_prompts()[0]
+        # The note carries the behavior only: never the page body, no image.
+        self.assertNotIn('lesson body', prompt['prompt'])
+        self.assertIn('flip_burst', prompt['prompt'])
+        self.assertIsNone(prompt['images'])
+        events = self.behavior_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['behavior']['kind'], 'flip_burst')
+        self.assertEqual(events[0]['text'], '你在找什么内容吗？')
+        self.assertEqual(len(self.behavior_prompts()), 1)
+
+    def test_long_dwell_reaches_the_model(self):
+        self.coordinator.publish_observation(self.page_bundle(4))
+        self.scheduler.notify_user_activity(0)
+        self.scheduler.tick()  # baseline at the current page
+        self.now[0] += 180.0
+        self.scheduler.notify_user_activity(0)
+        self.scheduler.tick()
+        self.scheduler.notify_user_activity(0)
+        self.assertTrue(self.flush(4))
+        self.assertIn('long_dwell', self.behavior_prompts()[0]['prompt'])
+        self.assertEqual(self.behavior_events()[0]['behavior']['kind'], 'long_dwell')
+
+    def test_no_note_while_a_user_question_is_bound(self):
+        self.coordinator.publish_observation(self.page_bundle(1))
+        self.scheduler.notify_user_activity(0)
+        self.scheduler.tick()  # baseline at the current page
+        self.coordinator.voice_user_started('turn-1')
+        self.flip_to(2, 3, 4, 5, 6, 7)
+        self.assertFalse(self.flush(8, 1.0))
+        self.assertEqual(self.behavior_events(), [])
+
+    def test_proactive_disabled_gates_behavior_notes(self):
+        self.coordinator.set_proactive(enabled=False, interval_seconds=120)
+        self.coordinator.publish_observation(self.page_bundle(1))
+        self.scheduler.notify_user_activity(0)
+        self.scheduler.tick()  # baseline at the current page
+        self.flip_to(2, 3, 4, 5, 6, 7)
+        self.assertFalse(self.flush(8, 1.0))
+        self.assertEqual(self.behavior_events(), [])
+
+    def test_declined_note_stays_silent(self):
+        def declined(prompt, **kwargs):
+            self.chat_calls.append({'prompt': prompt, 'images': None})
+            return {'text': '暂不提示'}
+        self.coordinator.service._role_chat = declined
+        self.coordinator.publish_observation(self.page_bundle(1))
+        self.scheduler.notify_user_activity(0)
+        self.scheduler.tick()  # baseline at the current page
+        self.flip_to(2, 3, 4, 5, 6, 7)
+        self.assertTrue(self.flush(8))
+        self.assertEqual(self.behavior_events(), [])
+
+    def test_behavior_note_rejects_unknown_pattern(self):
+        with self.assertRaises(ValueError):
+            self.coordinator.service.behavior_note({'kind': 'mystery'})
+
+
 if __name__ == '__main__':
     unittest.main()

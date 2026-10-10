@@ -13,6 +13,7 @@ import time
 
 from extensions.models.cancellation import CancellationToken
 from .contracts import ObservationBundle, PerceptionService
+from .reading_behavior import ReadingBehaviorTracker
 from .study_extras import DanmakuBuffer
 from .observation_scheduler import ObservationScheduler
 from .qa import CompanionQuestionService
@@ -84,7 +85,8 @@ class StudySessionCoordinator:
     def __init__(self, *, chat, current, on_event=None,
                  include_images=None, proactive_interval=120.0,
                  proactive_enabled=True, pending_ttl=180.0,
-                 scheduler_thread=True):
+                 scheduler_thread=True, behavior_tracker=None,
+                 behavior_note_cooldown=60.0):
         """``chat`` is the shared RoleChat callable; ``current`` projects the
         latest fused observation; ``on_event`` receives coordinator/UI events.
         ``scheduler_thread=False`` serves deterministic tests that drive ticks.
@@ -95,13 +97,16 @@ class StudySessionCoordinator:
         self._include_images = include_images or (lambda: False)
         self._scheduler_thread = scheduler_thread
         self._service = CompanionQuestionService(chat, include_images=True)
+        self._behavior = behavior_tracker or ReadingBehaviorTracker()
+        if not isinstance(self._behavior, ReadingBehaviorTracker):
+            raise TypeError('behavior tracker required')
         # The published service bundle stays authoritative for scheduling; the
         # host projection is only a backstop for paths that bypass publish.
         self._perception = FusionPerception(
             lambda: (self._service.latest if self._service.latest is not None
                      else current()))
         self._scheduler = ObservationScheduler(self._perception,
-            on_observation=self._service.update,
+            on_observation=self._observe,
             on_proactive=self._dispatch_proactive,
             on_error=lambda error: self._emit('proactive_error', {'error': error['type'],
                                                                   'target': error.get('target')}),
@@ -119,6 +124,12 @@ class StudySessionCoordinator:
         # Frozen delivery plan P5: background model analysis at most twice a
         # minute; user questions never consume this budget.
         self._background_budget = BackgroundBudget(max_per_minute=2)
+        if (type(behavior_note_cooldown) not in (int, float)
+                or not 0 <= behavior_note_cooldown <= 3600):
+            raise ValueError('invalid behavior note cooldown')
+        self._behavior_note_cooldown = behavior_note_cooldown
+        self._behavior_note_at = None
+        self._queued_behavior_report = None
         # Local-rule danmaku dedup: scrolling comments collapse per window and
         # never trigger model calls on their own.
         self.danmaku = DanmakuBuffer()
@@ -140,6 +151,93 @@ class StudySessionCoordinator:
         with self._lock:
             return self._failed
 
+    def _observe(self, observation):
+        """Scheduler tick path: update the service, then feed page behavior."""
+        result = self._service.update(observation)
+        self._behavior_feed(observation)
+        return result
+
+    def _behavior_feed(self, observation):
+        page = observation.metadata.get('page')
+        if page is None:
+            context = observation.metadata.get('reader_context')
+            page = context.get('page') if isinstance(context, dict) else None
+        report = self._behavior.feed(
+            page if type(page) is int and page >= 1 else None,
+            valid=observation.valid)
+        if report is None:
+            # A report blocked by a busy background thread retries on later
+            # ticks instead of being lost; it stays relevant for a short
+            # window only.
+            with self._lock:
+                queued = self._queued_behavior_report
+                if queued is not None:
+                    if time.monotonic() - queued[0] <= 15.0:
+                        report = queued[1]
+                    else:
+                        self._queued_behavior_report = None
+        if report is not None:
+            self._maybe_behavior_note(report)
+
+    def _maybe_behavior_note(self, report):
+        """Dispatch one behavior note; shares the proactive thread and budget.
+
+        Gated like proactive discussion: off when proactive is disabled, and
+        never while a user question is bound or in flight — a spoken answer
+        must not be talked over by a comment about page flipping. A report
+        blocked by the busy thread or the budget is queued (latest wins) and
+        retried on later ticks; one dispatched note silences further notes
+        for the cooldown window.
+        """
+        with self._lock:
+            if self._failed is not None or not self._proactive_enabled:
+                return
+            if self._active or self._voice_bindings:
+                return
+            now = time.monotonic()
+            # One flurry of navigation is one comment: a second pattern
+            # detected inside the cooldown joins the same moment, not a new
+            # interruption.
+            if (self._behavior_note_at is not None
+                    and now - self._behavior_note_at < self._behavior_note_cooldown):
+                return
+            self._queued_behavior_report = (now, report)
+            thread = self._proactive_thread
+            if thread is not None and thread.is_alive():
+                return
+            if not self._background_budget.allow():
+                return
+            self._queued_behavior_report = None
+            self._behavior_note_at = now
+            self._proactive_thread = threading.Thread(
+                target=self._generate_behavior_note, args=(report,),
+                name='sumika-behavior-note', daemon=True)
+            self._proactive_thread.start()
+
+    def _generate_behavior_note(self, report):
+        try:
+            result = self._service.behavior_note(report)
+        except Exception as error:
+            self._emit('proactive_error', {'error': type(error).__name__})
+            return
+        if not isinstance(result, dict) or result.get('status') != 'behavior_note':
+            return
+        text = result.get('text')
+        if not isinstance(text, str) or not text.strip() or text.strip() == '暂不提示':
+            return
+        with self._lock:
+            if (self._failed is not None or self._scheduler_target is None
+                    or self._active or self._voice_bindings):
+                return
+            speaker = self._speaker
+        self._emit('proactive_text', {'text': text, 'kind': 'behavior',
+                                      'behavior': dict(report)})
+        if speaker is not None:
+            try:
+                speaker(text)
+            except Exception as error:
+                self._emit('proactive_error', {'error': type(error).__name__})
+
     def publish_observation(self, bundle):
         """Feed one fused observation to the single service and scheduler."""
         if not isinstance(bundle, ObservationBundle):
@@ -160,6 +258,11 @@ class StudySessionCoordinator:
             if self._scheduler_target == bundle.target and self._perception.state == 'running':
                 return
             self._scheduler_target = bundle.target
+            # A new target is a new reading session; old page patterns,
+            # reported episodes and a queued note must not leak across
+            # documents.
+            self._behavior.reset()
+            self._queued_behavior_report = None
         try:
             self._scheduler.stop()
         except Exception:
@@ -174,6 +277,8 @@ class StudySessionCoordinator:
         """The fused learning context ended; stop scheduling, keep the error none."""
         with self._lock:
             self._scheduler_target = None
+            self._queued_behavior_report = None
+        self._behavior.reset()
         try:
             self._scheduler.stop()
         except Exception:

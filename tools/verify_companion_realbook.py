@@ -6,6 +6,12 @@ own page selector increments, the visible content fingerprint changes on
 every flip, the absolute document identity stays bound, and jump-backs
 reverse all of it. Only page numbers and content hashes are recorded — no
 book text is persisted, and no model or memory writes occur.
+
+``--expect-weak`` declares an image-only or hand-drawn book whose pages have
+no usable text layer: the strong viewport-vs-text-layer cross-check is then
+honestly unavailable, and acceptance rests on the selector, identity and
+fingerprint evidence alone, recorded as ``content_verification:
+weak-declared``.
 """
 import argparse
 import base64
@@ -71,6 +77,24 @@ class PageTextIndex:
         return ('strong', round(ratio, 3))
 
 
+def evaluate_gate(report, *, flips_requested, expect_weak=False):
+    """Structural invariants always apply; only the text-layer check differs.
+
+    Default acceptance needs a clear majority of strong page verifications.
+    ``expect_weak`` honestly declares that the strong check is unavailable
+    (image-only or hand-drawn book) and accepts on selector, identity and
+    fingerprint evidence alone.
+    """
+    structural = (report.get('flips_ok') == flips_requested
+                  and report.get('jump_back', {}).get('page_matches', False)
+                  and report.get('absolute_document_identity', False))
+    report['content_verification'] = 'weak-declared' if expect_weak else 'strong-majority'
+    report['passed'] = bool(structural and
+                            (expect_weak or
+                             report.get('strong_page_verifications', 0) * 2 >= flips_requested))
+    return report['passed']
+
+
 def fingerprint(bundle):
     text_hash = hashlib.sha256((bundle.text or '').encode('utf8')).hexdigest()[:16]
     image_hash = ''
@@ -91,6 +115,9 @@ def main():
                         help='Explicitly permit owned Edge focus and keyboard navigation')
     parser.add_argument('--min-page-overlap', type=float, default=0.2,
                         help='Minimum canonical-page n-gram overlap for the strong check')
+    parser.add_argument('--expect-weak', action='store_true',
+                        help='Declare an image-only/hand-drawn book: accept on '
+                             'selector/identity/fingerprint evidence, no text-layer cross-check')
     args = parser.parse_args()
     if not args.allow_desktop_input:
         parser.error('real-book acceptance drives a focused Edge window; pass --allow-desktop-input')
@@ -216,16 +243,15 @@ def main():
                           and flip.get('page_text_overlap', 0) >= args.min_page_overlap)
     report['strong_page_verifications'] = strong_verified
     # Real books contain image-only pages (covers, dedications, blanks) with
-    # no text layer: require a clear majority of strong page verifications
-    # while every flip must still pass the selector/identity/change checks.
-    report['passed'] = (flips_ok == args.flips
-                        and report.get('jump_back', {}).get('page_matches', False)
-                        and report['absolute_document_identity']
-                        and strong_verified * 2 >= args.flips)
+    # no text layer; --expect-weak additionally declares a book whose pages
+    # never yield a text layer at all.
+    passed = evaluate_gate(report, flips_requested=args.flips,
+                           expect_weak=args.expect_weak)
     window.capture_as_image().save(args.output/'reader-screen.png')
     (args.output/'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf8')
-    print(json.dumps({'passed': report['passed'], 'flips_ok': flips_ok,
+    print(json.dumps({'passed': passed, 'flips_ok': flips_ok,
                       'flips_requested': args.flips,
+                      'content_verification': report['content_verification'],
                       'jump_back': report.get('jump_back'),
                       'identity': report['absolute_document_identity']}))
     try:

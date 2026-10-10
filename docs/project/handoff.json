@@ -761,8 +761,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p4_flips_done_p3_p6_p8_user_gates_remain",
-    "current_delivery_package": "P3 real-site / P6 hardware / P8 install — all require the user; pick order",
+    "status": "behavior_notes_done_expect_weak_ready_user_gates_remain",
+    "current_delivery_package": "P3 real-site / P6 hardware / P8 install still need the user; plus optional live all-image realbook run when the desktop is free",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -777,7 +777,7 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "P4 real page-flip acceptance COMPLETE with the user present, plus a REAL BOOK: the user-supplied Grokking Algorithms PDF (197 pages) passed 22/22 tracked flips where each flip was cross-checked against the PDF own text layer via pypdf (19 strong page verifications with n-gram overlap 0.725-1.0; image-only title/dedication/blank pages honestly downgraded to fingerprint-only) plus a strong-verified jump-back to page 20; fixture phase: 20 runs all passed, 21 counted real page inputs (>=20 required), text lifecycle with pause/resume/stop/rebind x18, scanned OCR with require-region viewport crop, chinese-math scan with honest formula OCR limitation and image binding, same-name alternate path rejected, zero paid model calls; local candidate-layout junction plus run_module bootstrap solved the packaged-runtime module resolution without touching product files.",
+    "verified_this_turn": "2026-10-10 increment: reading-behavior feedback notes (tracker + behavior_note + coordinator gating/queue/cooldown) and --expect-weak all-image acceptance variant implemented and tested; dev suite 994 OK (19 skips), focused 32 OK, gate tests 5/5 under the packaged runtime; R-125 recorded verbatim, design explicitly deferred by the user. Remaining user gates unchanged: P3 real Bilibili 30 min, P6 continuous voice hardware, P8 final candidate rebuild/install; pending-desktop: live all-image PDF realbook run (announced before running).",
     "limitations": [
       "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
@@ -786,7 +786,8 @@
       "E:/SumikaBuild desktop/voice runtime inputs must be rebuilt clean for P8 (staging builder rejects dev-path _pth)"
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
-    "p0_snapshot_commit": "a20548a"
+    "p0_snapshot_commit": "a20548a",
+    "next_action": "User picks the next gate (P3 / P6 / P8); say the word and name a free-desktop window for the all-image realbook weak-mode run."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。"
 }

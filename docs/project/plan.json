@@ -701,9 +701,23 @@
       ],
       "acceptance": "模型接入另行实施和验收；当前UI预留不等于功能可用",
       "evidence": []
+    },
+    {
+      "id": "F-004",
+      "name": "行为追踪/记录/分析（通用子记忆，R-125）",
+      "status": "deferred",
+      "design": null,
+      "scope": [
+        "R-125 用户原话为准：习惯（做什么操作、以往意味着什么，越用越懂用户）、进度（昨天学到哪儿/学了啥），不限于伴学模式",
+        "用户明确与长期记忆模块区分，作为子记忆；记录越久越懂用户",
+        "现有可复用资产：ReadingBehaviorTracker 事件（flip_burst/long_dwell/revisit）、UsageStore、StudyNotes 隔离纪律（只存元数据与哈希，不落正文）、observe/scheduler 管道",
+        "用户指示：简单写一下就行，后面要详细设计，由更强的模型规划；本轮只录入需求与简注，未做设计或实现"
+      ],
+      "acceptance": "待详细设计后另定；涉及查看/清除习惯的任何 UI 须先过设计稿对照与用户确认",
+      "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: P4 real page-flip acceptance is now COMPLETE (20 runs all passed, 21 counted real page inputs, scanned/chinese-math OCR, same-name rejection, continuous lifecycle x18, zero paid model calls; selection/dual-window/zoom sub-slices honestly listed as not exercised in this round). REMAINING USER-GATED GATES: P3 real Bilibili 30-minute acceptance (user watches a real video, run the soak verifier against the real site per the frozen doc), P6 voice hardware (30 continuous turns with microphone and speakers), P8 final candidate rebuild with clean runtime inputs plus install/upgrade/rollback/clean-machine acceptance. Ask the user which gate to run next and pause for their participation; do not simulate any of them.",
+  "next_action": "ZCode / GLM5.3flash: 2026-10-10 increment done — reading-behavior feedback notes (flip_burst/long_dwell/revisit → model behavior note, queued retry, 60s cooldown, no interruption of live questions) and the --expect-weak all-image realbook gate are implemented and tested (dev suite 994 OK/19 skips, focused 32 OK, gate 5/5 under packaged runtime). REMAINING USER-GATED GATES: P3 real Bilibili 30-minute acceptance, P6 continuous voice hardware (30 turns), P8 final candidate rebuild + install/upgrade/rollback on a clean machine. Optional pending-desktop: live all-image PDF realbook run with --expect-weak (announce before running).",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -810,7 +824,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-10T06:47:11.308886+00:00",
+  "updated_at": "2026-10-10",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",

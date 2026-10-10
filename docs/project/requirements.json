@@ -1309,6 +1309,16 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "0edfa39e03f5fe08e38774b536e0ca6b9e08b319fed10f2fe988a24c599dc738"
+    },
+    {
+      "id": "R-125",
+      "sequence": 125,
+      "original": "现在伴学是一个专门的模式是吗？（可以识别屏幕内容自动进入对应模式），感觉这个“行为本身反馈给大模型”可以在伴学模式中通用？例如久看/回看/快速翻页等，还可以记录下用户的一些习惯（做什么操作，以往做这种操作往往意味着什么。记录时间越久，越懂用户。不过这个不仅仅是伴学模式，别的也应该借鉴，用的越久越懂用户）、进度（昨天学到哪儿了，学了啥），这些是不是应该区分于长期记忆模块整体，作为子记忆？你有什么好建议？可以先不做，我让更聪明的模型规划下计划\n[同轮澄清] 简单写一下就行，行为追踪/记录/分析感觉是个通用的东西？后面要详细设计",
+      "source": "visible-conversation: user messages; locator=ZCode session 2026-10-10 behavior-feedback increment, mid-turn proposals",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "aa30a009ac9fa53692f8c2aa74b5f4f8216f28f780dc4bc26a75a4b1dc237a71"
     }
   ]
 }
