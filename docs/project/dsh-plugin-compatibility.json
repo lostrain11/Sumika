@@ -5,13 +5,82 @@
   "source": "npm registry package metadata and isolated runtime lockfile",
   "conclusion": "Plugins can replace selected infrastructure when their peer range matches exactly, but installation is not capability acceptance. Keep Sumika's Harness-neutral modules and use plugins at the DSH boundary.",
   "candidates": [
-    {"package":"@deepseek-ai/dsh-session-query","decision":"direct_candidate","replace":"history/search readers in Sumika DSH adapter","reason":"0.2.0-rc.2 peer set matches; exposes readSession and live-preferred history","conditions":["adapt continuity history bridge","verify persistence profile and pagination"]},
-    {"package":"@deepseek-ai/dsh-schedule","decision":"native_reminders_only_research_requires_gate","replace":"DSH-specific reminder delivery, not deterministic research trigger","reason":"Installed 0.2.0-rc.2 peer set matches; native reminder delivery resumes original Session Agent and durably flushes inbox. Ungated weekly research reminder cannot guarantee zero model calls when unchanged.","conditions":["enable optional experimental-schedule bundle in isolated web profile and validate service; headless standalone is unsupported","deterministic research runner must filter changes before any Agent wakeup","verify Sumika SQLite semantics; do not add duplicate UI entry"],"source_files":["@deepseek-ai/dsh-schedule/README.zh.md","@deepseek-ai/dsh-schedule/lib/index.js:1508","@deepseek-ai/dsh-schedule/lib/types/index.d.ts"]},
-    {"package":"@deepseek-ai/dsh-subagent","decision":"direct_candidate","replace":"native subagent compatibility glue","reason":"0.2.0-rc.2 peer set matches tools, approval, query, persistence and preset registry","conditions":["re-run child-agent and cancellation acceptance","Sumika role workers remain independent"]},
-    {"package":"@deepseek-ai/dsh-mcp-client","decision":"direct_candidate","replace":"MCP transport wiring","reason":"0.2.0-rc.2 peer set matches MCP resources, subprocess, tools and system prompt","conditions":["reuse native approval and subprocess policies","test install/start/stop and configuration preservation"]},
-    {"package":"@deepseek-ai/dsh-goal","decision":"evaluate_then_adopt","replace":"goal/plan integration","reason":"0.2.0-rc.2 peer set matches agent/session projection","conditions":["compare against existing plan lifecycle and UI","avoid a second plan entry"]},
-    {"package":"@deepseek-ai/dsh-plugin-manager","decision":"use_for_management","replace":"plugin installation/version checks","reason":"registry and local package peer checks; exact-version compatibility exemptions","conditions":["do not bypass incompatible plugin","HMR requires explicit enable and restart otherwise"]},
-    {"package":"@deepseek-ai/dsh-client-ui-chat|plan|trajectory|approval","decision":"ui_review_required","replace":"native UI surfaces only where slot-compatible","reason":"all 0.2.0-rc.2 metadata matches Cordis but Sumika skin uses slots/props","conditions":["four-screen visual acceptance","single-entry check and native feature retention"]}
+    {
+      "package": "@deepseek-ai/dsh-session-query",
+      "decision": "direct_candidate",
+      "replace": "history/search readers in Sumika DSH adapter",
+      "reason": "0.2.0-rc.2 peer set matches; exposes readSession and live-preferred history",
+      "conditions": [
+        "adapt continuity history bridge",
+        "verify persistence profile and pagination"
+      ]
+    },
+    {
+      "package": "@deepseek-ai/dsh-schedule",
+      "decision": "native_reminders_only_research_requires_gate",
+      "replace": "DSH-specific reminder delivery, not deterministic research trigger",
+      "reason": "Installed 0.2.0-rc.2 peer set matches; native reminder delivery resumes original Session Agent and durably flushes inbox. Ungated weekly research reminder cannot guarantee zero model calls when unchanged.",
+      "conditions": [
+        "enable optional experimental-schedule bundle in isolated web profile and validate service; headless standalone is unsupported",
+        "deterministic research runner must filter changes before any Agent wakeup",
+        "verify Sumika SQLite semantics; do not add duplicate UI entry"
+      ],
+      "source_files": [
+        "@deepseek-ai/dsh-schedule/README.zh.md",
+        "@deepseek-ai/dsh-schedule/lib/index.js:1508",
+        "@deepseek-ai/dsh-schedule/lib/types/index.d.ts"
+      ]
+    },
+    {
+      "package": "@deepseek-ai/dsh-subagent",
+      "decision": "direct_candidate",
+      "replace": "native subagent compatibility glue",
+      "reason": "0.2.0-rc.2 peer set matches tools, approval, query, persistence and preset registry",
+      "conditions": [
+        "re-run child-agent and cancellation acceptance",
+        "Sumika role workers remain independent"
+      ]
+    },
+    {
+      "package": "@deepseek-ai/dsh-mcp-client",
+      "decision": "direct_candidate",
+      "replace": "MCP transport wiring",
+      "reason": "0.2.0-rc.2 peer set matches MCP resources, subprocess, tools and system prompt",
+      "conditions": [
+        "reuse native approval and subprocess policies",
+        "test install/start/stop and configuration preservation"
+      ]
+    },
+    {
+      "package": "@deepseek-ai/dsh-goal",
+      "decision": "evaluate_then_adopt",
+      "replace": "goal/plan integration",
+      "reason": "0.2.0-rc.2 peer set matches agent/session projection",
+      "conditions": [
+        "compare against existing plan lifecycle and UI",
+        "avoid a second plan entry"
+      ]
+    },
+    {
+      "package": "@deepseek-ai/dsh-plugin-manager",
+      "decision": "use_for_management",
+      "replace": "plugin installation/version checks",
+      "reason": "registry and local package peer checks; exact-version compatibility exemptions",
+      "conditions": [
+        "do not bypass incompatible plugin",
+        "HMR requires explicit enable and restart otherwise"
+      ]
+    },
+    {
+      "package": "@deepseek-ai/dsh-client-ui-chat|plan|trajectory|approval",
+      "decision": "ui_review_required",
+      "replace": "native UI surfaces only where slot-compatible",
+      "reason": "all 0.2.0-rc.2 metadata matches Cordis but Sumika skin uses slots/props",
+      "conditions": [
+        "four-screen visual acceptance",
+        "single-entry check and native feature retention"
+      ]
+    }
   ],
   "not_direct_replacements": [
     "Pipecat/LiveKit voice pipeline: external provider/runtime, not DSH plugins",
@@ -29,5 +98,31 @@
     "isolated pnpm install --ignore-scripts completed for @deepseek-ai/dsh 0.2.0-rc.2",
     "tools/probe_dsh_next.py --runtime .sumika-next/dsh-upgrade/0.2.0-rc.2 passed",
     "no plugin was automatically installed into the daily profile"
-  ]
+  ],
+  "lifecycle_verification": {
+    "tool": "tools/verify_dsh_plugin_lifecycle.py",
+    "target_runtime": "0.2.0-rc.2 (the pinned candidate this registry targets)",
+    "runs": [
+      {
+        "date": "2026-10-09",
+        "artifact": ".sumika-next/plugin-lifecycle-6c32190044d7429db13674aec424aceb",
+        "result": "passed"
+      },
+      {
+        "date": "2026-10-10",
+        "artifact": ".sumika-next/plugin-lifecycle-aadda4639a7d44e1833ec3db8844e663",
+        "result": "passed"
+      }
+    ],
+    "verified_mechanics": [
+      "install",
+      "listBundles/listPlugins",
+      "enable/disable persisted across restart",
+      "uninstall restores manifest/lock/patch bytes",
+      "incompatible peer >=99.0.0 rejected",
+      "failed install leaves unrelated plugin config byte-identical",
+      "zero external model calls"
+    ],
+    "boundary": "Daily runtime 0.1.5-rc.2 has no /api/pluginManager surface (HTTP 404): the native plugin manager arrived in the 0.2.x line, so lifecycle acceptance binds to the 0.2.0-rc.2 target runtime only. Community third-party plugins remain 未验证 until each is installed and exercised; the verdicts below cover official @deepseek-ai candidates reviewed from npm metadata, lockfile peers and source files."
+  }
 }

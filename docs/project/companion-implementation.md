@@ -326,6 +326,17 @@ python -X utf8 -B tools/build_setup.py <candidate> --compiler <ISCC.exe> --outpu
 
 **限制与未做**：弹幕/摘要的自动触发策略（章节结束/暂停/明显变化时点）与笔记的 UI 入口未实现——均涉设计确认，另行提交；麦克风侧音频秒数无测量事件（保持未知）；网页 AI 授权账本为既有已验收边界（本包无改动）。
 
+### P7 回执（2026-10-10，ZCode / GLM5.3flash 执行）
+
+**执行内容**：交付包 P7（插件兼容、参考调研生命周期、四屏 UI 回归）三项完成。
+
+1. **插件生命周期实测（P7-1）**：`tools/verify_dsh_plugin_lifecycle.py` 对目标运行时 0.2.0-rc.2 通过两次（2026-10-09 `plugin-lifecycle-6c321900…`、2026-10-10 `plugin-lifecycle-aadda463…`）：安装、listBundles/listPlugins、启停跨重启保持、卸载恢复 manifest/lock/patch 字节、不兼容 peer ≥99.0.0 拒绝、失败安装不破坏无关插件配置、零外部模型调用。`docs/project/dsh-plugin-compatibility.json` 新增 `lifecycle_verification` 块：逐包定级维持（direct_candidate/native_reminders_only 等带条件），**社区第三方插件保持"未验证"**直到逐个实测；边界如实记录：日用 0.1.5-rc.2 无 `/api/pluginManager` 面（404，插件管理器为 0.2.x 新增），生命周期验收绑定 0.2.0-rc.2 目标运行时。
+2. **参考调研生命周期（P7-2/3/4）**：离线套件 `test_reference_monitor/runner/analysis` 36 项通过；唯一清单 `reference-projects.json` 核对为 **26 项**，覆盖 NEKO、AIRI、Open-LLM-VTuber、Pipecat、LiveKit、Gemini console、DeepTutor、Page Assist、Windrecorder、screenpipe、DSH、ZCode、Codex、CUA 及本地工具/弹幕/BrowserSkill 附加项，与冻结稿清单一致。真实只读监控周期实测（`.sumika-next/reference-p7-cycle/`，`--force --limit 5`，零模型）：周期选择最近周一 10:00 Asia/Shanghai（2026-10-05）✓；GitHub 403 限流按错误持久化（不伪成功）、1 小时冷却 ✓；analyses/reviews 零行 = 无变化零模型 ✓；限流终止当轮剩余项目、下轮补查 ✓（既有 36 项离线测试覆盖周期去重/月度发现≤3/每轮≤5/失败重试/启动合并补查）。"不自动安装升级产品"与"DSH 原生 schedule 仅作提醒、零模型轮询不走 Agent"为既有设计边界保持。
+3. **四屏 UI 回归（P7-5）**：对**当前日用运行时**（0.1.5-rc.2 + 当前 Sumika UI）实测：`verify_ui_matrix.mjs` 8 视口 × 2 缩放 × 2 主题 × 4 屏 = **128/128 通过**，主题恢复、调色板无失配、卡片尺寸统一、零页面错误（`E:/SumikaBuild/p7-ui-matrix.json`）；`verify_dsh_panel.mjs` 通过——DSH 侧栏真实存在且无 Sumika 面板行（唯一入口断言），零页面/控制台错误（`E:/SumikaBuild/p7-dsh-panel.json`）。覆盖表已补本轮记录，偏离/未做：无新增。
+4. **验证与清理**：`sumika_next.cli check`/`handoff` 通过；夹具桥与 DSH 工作台经验证 shutdown 后完全回收（DSH 子进程随关闭退出）。
+
+**限制与未做（等待用户或设计确认，不记为完成）**：兼容清单中"条件"级候选（如 dsh-schedule 需实验 bundle 隔离 profile 启用）未逐个启用实测；社区第三方插件未逐个安装；调研月度发现的真实 GitHub 候选质量未评估（限流下仅持久化元数据）；笔记 UI 入口与弹幕摘要自动触发策略待设计确认。
+
 ---
 
 ## 历史执行证据（以下不是当前任务清单）
