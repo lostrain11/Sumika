@@ -703,7 +703,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: delivery packages P0-P5 and P7 are complete (P7: plugin lifecycle verified twice on the 0.2.0-rc.2 target runtime with per-package verdicts in dsh-plugin-compatibility.json; reference lifecycle 36 offline tests plus a real read-only cycle proving Monday-10:00 period selection, rate-limit persistence and zero model calls; four-screen matrix 128/128 and DSH sidebar uniqueness assertion passed on the current daily runtime; 975 tests OK). ALL REMAINING GATES NEED THE USER: P3 real Bilibili 30-minute acceptance, P4 real 20-page flips, P6 voice hardware, P8 final candidate build/install/clean-machine. Pause and walk the user through them in order; do not simulate or execute them without the user present.",
+  "next_action": "ZCode / GLM5.3flash: P4 real page-flip acceptance is now COMPLETE (20 runs all passed, 21 counted real page inputs, scanned/chinese-math OCR, same-name rejection, continuous lifecycle x18, zero paid model calls; selection/dual-window/zoom sub-slices honestly listed as not exercised in this round). REMAINING USER-GATED GATES: P3 real Bilibili 30-minute acceptance (user watches a real video, run the soak verifier against the real site per the frozen doc), P6 voice hardware (30 continuous turns with microphone and speakers), P8 final candidate rebuild with clean runtime inputs plus install/upgrade/rollback/clean-machine acceptance. Ask the user which gate to run next and pause for their participation; do not simulate any of them.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -810,7 +810,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-10T05:57:50.348282+00:00",
+  "updated_at": "2026-10-10T06:15:58.390975+00:00",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
@@ -915,8 +915,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p7_done_all_remaining_gates_user",
-    "current_delivery_package": "P8 + user-gated real acceptances (P3 site / P4 flips / P6 hardware) — require the user",
+    "status": "p4_flips_done_p3_p6_p8_user_gates_remain",
+    "current_delivery_package": "P3 real-site / P6 hardware / P8 install — all require the user; pick order",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -931,13 +931,13 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "P7 executed: plugin lifecycle mechanics verified twice on the 0.2.0-rc.2 target runtime (install/toggle/uninstall/version rejection/config preservation/zero model) with the 0.1.5 boundary recorded; reference registry confirmed at 26 projects with the frozen coverage list, 36 offline lifecycle tests green, and a real read-only monitor cycle proving Monday-10:00 Asia/Shanghai period selection, 403 rate-limit persistence with cooldown and zero model calls; four-screen UI regression 128/128 plus DSH sidebar uniqueness assertion passed on the current daily runtime; coverage table updated.",
+    "verified_this_turn": "P4 real page-flip acceptance COMPLETE with the user present: 20 verifier runs all passed, 21 counted real page inputs (>=20 required), text lifecycle with pause/resume/stop/rebind x18, scanned OCR with require-region viewport crop, chinese-math scan with honest formula OCR limitation and image binding, same-name alternate path rejected, zero paid model calls; local candidate-layout junction plus run_module bootstrap solved the packaged-runtime module resolution without touching product files.",
     "limitations": [
-      "User-gated: P3 real Bilibili 30 minutes; P4 real 20-page flips; P6 voice hardware; P8 final candidate/install/clean machine",
-      "Compatibility 'conditional' candidates (dsh-schedule experimental bundle) and community third-party plugins not individually exercised; danmaku summary auto-trigger and notes UI entry need design confirmation",
-      "Reference monthly discovery stored metadata-only candidates under rate limits; quality evaluation pending",
-      "Daily DSH 0.1.5-rc.2 has no plugin-manager surface; lifecycle acceptance binds to the 0.2.0-rc.2 target runtime",
-      "E:/SumikaBuild voice runtime inputs carry a dev path in _pth; staging builder rejects such inputs; P8 rebuild must use clean runtimes"
+      "P4 done (20 runs/21 flips) but selection, dual-window and zoom PDF scenarios not exercised in this round",
+      "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
+      "Notes UI entry and danmaku summary auto-trigger policy need design confirmation",
+      "Daily DSH 0.1.5-rc.2 has no plugin-manager surface; lifecycle acceptance binds to 0.2.0-rc.2",
+      "E:/SumikaBuild desktop/voice runtime inputs must be rebuilt clean for P8 (staging builder rejects dev-path _pth)"
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a"

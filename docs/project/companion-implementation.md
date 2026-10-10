@@ -337,6 +337,14 @@ python -X utf8 -B tools/build_setup.py <candidate> --compiler <ISCC.exe> --outpu
 
 **限制与未做（等待用户或设计确认，不记为完成）**：兼容清单中"条件"级候选（如 dsh-schedule 需实验 bundle 隔离 profile 启用）未逐个启用实测；社区第三方插件未逐个安装；调研月度发现的真实 GitHub 候选质量未评估（限流下仅持久化元数据）；笔记 UI 入口与弹幕摘要自动触发策略待设计确认。
 
+### P4 回执更新（2026-10-10，真实翻页验收完成，用户在场）
+
+**验收达成**：`tools/verify_companion_pdf.py` 连续真实翻页验收在用户在场、专属 Edge 窗口自动键盘导航下执行——**20 轮全部通过、21 次计数真实翻页输入（≥20）**，覆盖：扫描版 OCR+视口裁剪（`--require-region`，1224×1071 裁剪校验）、中文数学扫描版（公式 OCR 精确匹配如实失败、公式图像绑定通过）、同名异路径拒绝与导航身份切换、连续生命周期 18 轮（暂停放行/恢复保文档/停止清绑定/异路径弃载荷）、绝对文档身份、页选择器真实页码、全程零付费模型调用。夹具：`E:/SumikaBuild/pdf-acceptance/`（ReportLab 生成三类 PDF）；证据 `E:/SumikaBuild/pdf-acceptance/run-*/report.json`（20 份）。
+
+**运行环境更正**：感知子进程的打包 desktop 运行时 `_pth` 不含工作区，本地验收复刻候选布局（`product-root` junction：extensions/sumika_next/ui/tools/runtime-desktop）+ `tools/run_module.py` 引导解决 `-m` 解析；未修改任何产品文件或运行时输入（P8 打包守卫对 `_pth` 机器路径的拒绝仍然有效）。
+
+**剩余子项（不阻塞本验收，如实列出）**：PDF 阅读器内的选区（selection）、双窗口、缩放三类场景未在本次 20 轮中执行（选区在此前的真实 Edge 选中回归中有孤立证据；缩放的视口裁剪机制已被 require-region 间接覆盖）。书籍内容零自动保存保持（笔记仅显式保存且带来源）。
+
 ---
 
 ## 历史执行证据（以下不是当前任务清单）
