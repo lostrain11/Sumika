@@ -5,6 +5,14 @@ from typing import Any, Mapping
 import threading
 
 
+# Envelope keys that describe the freshness of one verified projection.
+# They must never enter a content digest: fresh captures of unchanged
+# content would otherwise bump the revision and re-fire the model.
+FRESHNESS_METADATA_KEYS = frozenset({
+    'observation_id', 'verified_at', 'capture_frame_at',
+    'foreground', 'visibility', 'quality', 'permission_revision'})
+
+
 @dataclass(frozen=True)
 class ObservationBundle:
     """One bounded observation; content is data and never an authorization source."""

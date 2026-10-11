@@ -719,7 +719,7 @@
       "correction": "StudyNotes实际保存显式笔记正文，不是只存哈希；行为实现未开始。"
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: P00 scene verification complete and documentation committed (plan docs, acceptance-20261012.md, R-126~R-131, reconciled records, corrected coverage table). P01 is next: F-08/F-09 fixes with pre-written failing tests through the real Bridge entry (tests_next/test_p01_observation_wiring.py).",
+  "next_action": "P01 complete (F-08/F-09 fixed, 1003 tests OK). Next: P02 — proactive cancellation, text busy, message display (R2).",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",

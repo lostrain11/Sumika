@@ -282,8 +282,8 @@ class BehaviorNoteTests(unittest.TestCase):
         self.coordinator._scheduler = scheduler
         self.scheduler = scheduler
 
-    def page_bundle(self, page):
-        observed = datetime(2026, 10, 10, 9, 0, 0, tzinfo=timezone.utc) +             timedelta(seconds=page)
+    def page_bundle(self, page, *, tick=0):
+        observed = datetime(2026, 10, 10, 9, 0, 0, tzinfo=timezone.utc) +             timedelta(seconds=page + tick)
         return ObservationBundle(observed_at=observed, source='window-visual',
             target='reader', valid=True, text='lesson body', image=None,
             media_time_seconds=None, metadata={'page': page})
@@ -342,14 +342,28 @@ class BehaviorNoteTests(unittest.TestCase):
         self.assertEqual(len(self.behavior_prompts()), 1)
 
     def test_long_dwell_reaches_the_model(self):
+        # P01 freshness semantics: dwell time accumulates across fresh
+        # verifications, so the loop publishes a new observation per second.
         self.coordinator.publish_observation(self.page_bundle(4))
         self.scheduler.notify_user_activity(0)
         self.scheduler.tick()  # baseline at the current page
-        self.now[0] += 180.0
-        self.scheduler.notify_user_activity(0)
-        self.scheduler.tick()
-        self.scheduler.notify_user_activity(0)
-        self.assertTrue(self.flush(4))
+        for step in range(183):
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(self.page_bundle(4, tick=step))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+        # In production the 1 Hz tick retries a queued report once the burst
+        # of publishes stops contending with the proactive thread; drive the
+        # same flush here.
+        for step in range(6):
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(self.page_bundle(4, tick=1000 + step))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+            time.sleep(0.05)
+            if self.behavior_prompts():
+                break
+        self.assertTrue(self.wait_for(lambda: bool(self.behavior_prompts())))
         self.assertIn('long_dwell', self.behavior_prompts()[0]['prompt'])
         self.assertEqual(self.behavior_events()[0]['behavior']['kind'], 'long_dwell')
 

@@ -2,7 +2,7 @@
 import hashlib
 import json
 import re
-from .contracts import ObservationBundle
+from .contracts import FRESHNESS_METADATA_KEYS, ObservationBundle
 
 _SPACE = re.compile(r"\s+")
 
@@ -49,7 +49,8 @@ class ContentChangeTracker:
         content = {'text': observation.text, 'image': observation.image,
                    'valid': observation.valid,
                    'metadata': {key:value for key,value in observation.metadata.items()
-                                if key not in ('visual_observed_at', 'text_observed_at', 'danmaku')}}
+                                if key not in ('visual_observed_at', 'text_observed_at', 'danmaku')
+                                and key not in FRESHNESS_METADATA_KEYS}}
         digest = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         previous = self._latest.get(key)
         if previous and observation.observed_at < previous['at']:

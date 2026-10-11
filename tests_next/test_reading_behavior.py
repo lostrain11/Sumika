@@ -36,16 +36,37 @@ class ReadingBehaviorTests(unittest.TestCase):
         self.assertTrue(any(item and item['kind'] == 'flip_burst' for item in reports))
 
     def test_long_dwell_reports_once_per_page_stay(self):
-        self.feed(5)
-        self.now[0] += 180.0
-        report = self.tracker.feed(5)
-        self.assertEqual(report['kind'], 'long_dwell')
-        self.assertAlmostEqual(report['dwell_seconds'], 181.0, delta=0.5)
-        self.assertIsNone(self.tracker.feed(5))
+        # P01 freshness semantics: effective dwell time accumulates across
+        # fresh verifications at most the segment fence apart.
+        dwell_reports = []
+        for step in range(185):
+            self.now[0] += 1.0
+            report = self.tracker.feed(5, observation_id=f'obs-{step}')
+            if report:
+                dwell_reports.append(report)
+        self.assertEqual(len(dwell_reports), 1)
+        self.assertGreaterEqual(dwell_reports[0]['dwell_seconds'], 180.0)
+        # Re-projecting the same observation accumulates nothing further.
+        self.assertIsNone(self.tracker.feed(5, observation_id='obs-184'))
         # Leaving and resting on a new page arms the dwell report again.
         self.feed(6)
-        self.now[0] += 180.0
-        self.assertEqual(self.tracker.feed(6)['kind'], 'long_dwell')
+        for step in range(185):
+            self.now[0] += 1.0
+            report = self.tracker.feed(6, observation_id=f'obs-6-{step}')
+            if report:
+                break
+        self.assertEqual(report['kind'], 'long_dwell')
+
+    def test_verification_gap_longer_than_fence_ends_segment(self):
+        for step in range(100):
+            self.now[0] += 1.0
+            self.tracker.feed(5, observation_id=f'obs-a-{step}')
+        self.now[0] += 10.0  # capture stalls: the segment ends
+        for step in range(100):
+            self.now[0] += 1.0
+            self.tracker.feed(5, observation_id=f'obs-b-{step}')
+        # 100s + 100s across the gap never reaches the 180s threshold.
+        self.assertIsNone(self.tracker.feed(5, observation_id='obs-final'))
 
     def test_repeated_back_jumps_report_revisit(self):
         reports = self.feed(10, 12, 10, 12, 10)

@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import uuid
 import tempfile
 from collections import deque
 from dataclasses import replace
@@ -599,12 +600,17 @@ class Bridge:
         with self._context_lock:
             if collection_token is not None and collection_token != self._companion.collection_token():
                 return {'status': 'rejected', 'reason': 'collection was revoked or superseded'}
-            result = self._companion_publish(self._fusion.visual(bundle), collection_token=collection_token)
-            # Keep the isolated voice worker bound to the latest visual context;
-            # it rejects target changes and invalid observations fail closed.
-            if self._microphone.status()['alive']:
-                self._microphone.observe(self._observation_payload(self._fusion.current()))
-            return result
+            fused = self._fusion.visual(bundle)
+            mic_payload = (self._observation_payload(self._fusion.current())
+                           if self._microphone.status()['alive'] else None)
+        # R1: publishing may join the observation scheduler (target switch);
+        # that join must never happen while holding the Bridge context lock.
+        result = self._companion_publish(fused, collection_token=collection_token)
+        # Keep the isolated voice worker bound to the latest visual context;
+        # it rejects target changes and invalid observations fail closed.
+        if mic_payload is not None and self._microphone.status()['alive']:
+            self._microphone.observe(mic_payload)
+        return result
 
     def _companion_microphone_event(self, packet):
         with self._voice_events_lock:
@@ -694,12 +700,23 @@ class Bridge:
             'metadata':dict(observation.metadata)}
 
     def _companion_publish(self, bundle, *, collection_token=None):
+        # F-09 envelope: every publish through this entry is one fresh
+        # verified projection; the identity/freshness keys are excluded from
+        # every content digest (contracts.FRESHNESS_METADATA_KEYS).
+        envelope = {'observation_id': str(uuid.uuid4()),
+                    'verified_at': datetime.now(timezone.utc).isoformat()}
+        bundle = replace(bundle, metadata={**dict(bundle.metadata),
+                                           **{k: v for k, v in envelope.items()
+                                              if k not in bundle.metadata}})
         latest = self._companion.latest
         if latest is not None and bundle.observed_at < latest.observed_at:
             bundle = replace(bundle, observed_at=latest.observed_at,
                 metadata={**dict(bundle.metadata),
                           'visual_observed_at': bundle.metadata.get('visual_observed_at', bundle.observed_at.isoformat())})
-        return self._companion.update(bundle, collection_token=collection_token)
+        # F-08: the authoritative product entry goes through the session
+        # owner so the scheduler, behavior feed and danmaku run for real
+        # observations; direct service.update bypassed all of them.
+        return self._coordinator.publish_observation(bundle, collection_token=collection_token)
 
     def _companion_clear(self, *, collection_token=None):
         # Stop outside the context lock: joining pipe readers must not wait on
@@ -708,11 +725,13 @@ class Bridge:
             self._microphone.stop()
         self._coordinator.cancel_voice_requests()
         self._stop_worker_playback()
+        # R1: context_cleared joins the observation scheduler; never hold the
+        # Bridge context lock across that join.
+        self._coordinator.context_cleared()
         with self._context_lock:
             if collection_token is not None and collection_token != self._companion.collection_token():
                 return self._companion.revoke(collection_token=collection_token)
             self._fusion.clear()
-            self._coordinator.context_cleared()
             return self._companion.revoke(collection_token=collection_token)
 
     def _stop_worker_playback(self):

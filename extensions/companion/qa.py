@@ -8,7 +8,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from .contracts import ObservationBundle
+from .contracts import FRESHNESS_METADATA_KEYS, ObservationBundle
 from extensions.models.cancellation import CancellationToken, RequestCancelled
 
 
@@ -205,9 +205,11 @@ class CompanionQuestionService:
 
     @staticmethod
     def _content_metadata(observation):
-        # Refresh timestamps retain provenance but do not change learning content.
+        # Refresh timestamps and freshness envelope keys retain provenance
+        # but do not change learning content.
         return {key: value for key, value in observation.metadata.items()
-                if key not in ('visual_observed_at', 'text_observed_at', 'danmaku')}
+                if key not in ('visual_observed_at', 'text_observed_at', 'danmaku')
+                and key not in FRESHNESS_METADATA_KEYS}
 
     @staticmethod
     def _model_metadata(observation, reference_text):

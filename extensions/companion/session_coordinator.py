@@ -162,9 +162,17 @@ class StudySessionCoordinator:
         if page is None:
             context = observation.metadata.get('reader_context')
             page = context.get('page') if isinstance(context, dict) else None
+        # F-09: time accumulates per fresh verified observation only. The
+        # envelope's observation_id is authoritative; otherwise the capture
+        # identity is derived from the immutable observation coordinates, so
+        # re-projecting the latest bundle never accumulates dwell time.
+        observation_id = observation.metadata.get('observation_id')
+        if observation_id is None:
+            observation_id = (observation.observed_at.isoformat() + '|'
+                              + observation.source + '|' + observation.target)
         report = self._behavior.feed(
             page if type(page) is int and page >= 1 else None,
-            valid=observation.valid)
+            valid=observation.valid, observation_id=observation_id)
         if report is None:
             # A report blocked by a busy background thread retries on later
             # ticks instead of being lost; it stays relevant for a short
@@ -238,10 +246,18 @@ class StudySessionCoordinator:
             except Exception as error:
                 self._emit('proactive_error', {'error': type(error).__name__})
 
-    def publish_observation(self, bundle):
-        """Feed one fused observation to the single service and scheduler."""
+    def publish_observation(self, bundle, *, collection_token=None):
+        """Feed one fused observation to the single service and scheduler.
+
+        The service's acceptance decision gates every side effect: a
+        rejected or superseded observation must not start the scheduler,
+        switch targets or feed the danmaku buffer.
+        """
         if not isinstance(bundle, ObservationBundle):
             raise TypeError('observation must be ObservationBundle')
+        result = self._service.update(bundle, collection_token=collection_token)
+        if result.get('status') != 'updated':
+            return result
         self._ensure_scheduler(bundle)
         danmaku = bundle.metadata.get('danmaku')
         if isinstance(danmaku, list) and danmaku:
@@ -249,7 +265,7 @@ class StudySessionCoordinator:
             if fresh:
                 self._emit('danmaku_new', {'texts': fresh[:20],
                                            'window_total': len(self.danmaku.snapshot_texts())})
-        return self._service.update(bundle)
+        return result
 
     def _ensure_scheduler(self, bundle):
         with self._lock:
