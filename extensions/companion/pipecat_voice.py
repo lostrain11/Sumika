@@ -136,6 +136,8 @@ class CompanionTurnProcessor(FrameProcessor):
         elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._speaking:
             audio = bytes(self._audio)
             self._clear_audio()
+            # The frozen P6 latency report needs the stop-speaking boundary.
+            await self._event('user_stopped')
             if audio:
                 self._turn_task = asyncio.create_task(self._respond(audio, self._epoch))
         # Raw PCM terminates here: it must not accidentally reach logs or context.

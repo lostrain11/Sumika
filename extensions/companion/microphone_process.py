@@ -76,9 +76,15 @@ class MicrophoneProcess:
                 self._controls.clear()
                 self._state, self._target, self._error = 'starting', initial.target, None
             try:
+                # Worker stderr is swallowed by default; an explicit log path
+                # (same pattern as the browser audio child log) keeps real
+                # start failures diagnosable without changing normal runs.
+                worker_log = os.environ.get('SUMIKA_MIC_WORKER_LOG')
+                worker_stderr = (open(worker_log, 'w', encoding='utf8')
+                                 if worker_log else subprocess.DEVNULL)
                 process = subprocess.Popen([interpreter, '-X', 'utf8', '-B', '-m',
                     'extensions.companion.microphone_worker'], cwd=self.root,
-                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=worker_stderr,
                     text=True, encoding='utf8',
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 with self._lock:
@@ -97,6 +103,11 @@ class MicrophoneProcess:
                     raise RuntimeError('study voice startup timed out')
                 with self._lock:
                     if epoch != self._epoch:
+                        # The reader failed the worker while startup waited;
+                        # surface its real error instead of masking it as a
+                        # superseded start.
+                        if self._state == 'error' and self._error:
+                            raise RuntimeError('study voice worker failed: ' + self._error)
                         raise RuntimeError('study voice start was revoked')
                     if self._state != 'listening':
                         raise RuntimeError('study voice worker failed to start')
@@ -232,7 +243,8 @@ class MicrophoneProcess:
                     # Callbacks must be quick; this lock fences publication on stop.
                     self.on_event(packet)
                     if packet['event'] == 'error' and packet.get('fatal') is True:
-                        raise RuntimeError('study voice worker reported failure')
+                        raise RuntimeError('study voice worker reported failure: '
+                                           + str(packet.get('reason') or 'unknown'))
         except Exception as error:
             self._fail(process, epoch, error)
 
@@ -241,7 +253,7 @@ class MicrophoneProcess:
             if epoch != self._epoch:
                 return
             self._epoch += 1
-            self._state, self._error = 'error', type(error).__name__
+            self._state, self._error = 'error', f'{type(error).__name__}: {error}'
             self._pending = None
             self._controls.clear()
             if self._text_token is not None:
