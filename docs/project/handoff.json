@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-10T06:47:11.308886+00:00",
-  "current_goal": "实施已批准的整理、DSH 0.2.0-rc.2 升级和独立桌宠陪学；最高优先级为现有软件中的学习内容问答",
+  "updated_at": "2026-10-11T19:55:20.130538+00:00",
+  "current_goal": "按2026-10-12执行稿修复现有缺陷，并交付日常行为子记忆及用户自定义自动陪伴模式",
   "current_phase": "P6",
   "phase_status": "in_progress",
   "completed": [
@@ -46,11 +46,13 @@
     "验收基座修复：工作台 frame 改为按结构特征定位（不再硬编码 :5175）；矩阵验收改为按偏好走界面原路还原主题并复验，避免改坏用户设置",
     "Python 单测套件取证闭环：沙箱 safe-delete 垫片有官方开关 CODEBUDDY_SAFE_DELETE_ENABLED=0，关闭后 572 项 0 失败 0 错误（1 skip），此前登记的 92 个 error 全部证伪为垫片产物",
     "真实产品缺陷修复：extensions/roles/speech_playback.py 使用不存在的 winsound.SND_SYNC，Windows 上真实语音播放必然 AttributeError；改为 SND_FILENAME | SND_NODEFAULT 后 test_speech_playback 5/5 通过",
-    "验收基座二次收口：verify_ui_v2（真因是 DSH 首次配置弹窗遮罩拦截点击，非 not-stable）与 verify_ui_task_intent（真因是夹具未分页与 limit=3 分页渲染冲突，非角色模型未启用）由失败转通过"
+    "验收基座二次收口：verify_ui_v2（真因是 DSH 首次配置弹窗遮罩拦截点击，非 not-stable）与 verify_ui_task_intent（真因是夹具未分页与 limit=3 分页渲染冲突，非角色模型未启用）由失败转通过",
+    "2026-10-12：三份详细方案及ZCode/GLM5.3flash逐包入口归档；产品实施未开始"
   ],
   "remaining": [
-    "候选DSH隔离回归已通过，日用尚未切换；profile迁移、来宾原生启动与覆盖回退待验收",
-    "桌宠文字问答/OCR与真实微信读书DeepSeek闭环已通过；连续语音/主动讨论硬件实测、当前宿主发行安装及总交付待完成"
+    "F01～F10及G01～G07未闭环，见修复总入口；历史单测通过不能代替产品验收",
+    "行为学习与自定义模式详细方案已归档，尚未实现；下一包P01",
+    "现有五个未提交审计文档保留；本轮只追加文档/记录，不提交推送"
   ],
   "constraints": [
     "DSH原生Web；新增核心独立，优先复用社区插件/开源方案",
@@ -67,7 +69,7 @@
     "Office设置入口：已安装.agents/skills/sumika-office/runtime.json；enabled控制新脚本启动，保留原生Skill发现，不是终端权限沙箱；详见extensions/office/README.md。",
     "OCR扩展不截屏、不控制窗口、不自动下载模型；provider缺失时失败关闭，翻译由后续模型步骤处理。"
   ],
-  "next_action": "ZCode / GLM5.3flash: P4 real page-flip acceptance is now COMPLETE (20 runs all passed, 21 counted real page inputs, scanned/chinese-math OCR, same-name rejection, continuous lifecycle x18, zero paid model calls; selection/dual-window/zoom sub-slices honestly listed as not exercised in this round). REMAINING USER-GATED GATES: P3 real Bilibili 30-minute acceptance (user watches a real video, run the soak verifier against the real site per the frozen doc), P6 voice hardware (30 continuous turns with microphone and speakers), P8 final candidate rebuild with clean runtime inputs plus install/upgrade/rollback/clean-machine acceptance. Ask the user which gate to run next and pause for their participation; do not simulate any of them.",
+  "next_action": "ZCode / GLM5.3flash：完整阅读 repair-and-acceptance-plan.md、behavior-memory-plan.md、companion-profiles-plan.md；核对P00归档及现场diff后从P01统一观察入口/新鲜度开始，按P00～P17依赖执行。产品尚未实施、整体未通过；逐包回执及验证，不重放unknown。",
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
   "parallel_work": {
     "ui": "用户另选模型负责；本轮不改UI设计文件",
@@ -754,6 +756,90 @@
     "authorization": "User selected the recommended scheme in the preceding freeze discussion: reuse companion detail for Bilibili/PDF targets and separate capture permissions; extension popup only Connect current tab / Disconnect / status. Record of confirmed choice, not a verbatim requirement."
   },
   "execution_handoff": {
+    "document": "docs/project/repair-and-acceptance-plan.md",
+    "supporting_documents": [
+      "docs/project/behavior-memory-plan.md",
+      "docs/project/companion-profiles-plan.md"
+    ],
+    "version": "2026-10-12 v1",
+    "executor": {
+      "tool": "ZCode",
+      "model": "GLM5.3flash"
+    },
+    "status": "p00_archived_scene_verified_p01_next",
+    "current_delivery_package": "P01",
+    "package_order": [
+      "P00 归档与现场核对",
+      "P01 观察入口/新鲜度",
+      "P02 取消/busy/文字记录",
+      "P03 音轨代次worker",
+      "P04 音轨启动/错误/回收",
+      "P05 B站UI/扩展交付",
+      "P06 PDF/弹幕/笔记/用量",
+      "P07 修复验收/工具",
+      "P08 行为库",
+      "P09 目录/空间/多根备份",
+      "P10 许可/前台跟随",
+      "P11 Raw Input聚合",
+      "P12 行为规则/序列",
+      "P13 询问/习惯/进度",
+      "P14 profile配置",
+      "P15 自动路由",
+      "P16 产品界面",
+      "P17 最终候选/回退"
+    ],
+    "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
+    "next_action": "P01: implement F-08/F-09 fixes (route Bridge._companion_publish through coordinator.publish_observation with acceptance-first side effects; freshness-gated behavior time) to turn the pre-written failing tests green, then per-package receipts.",
+    "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
+    "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
+    "acceptance_report": "docs/project/acceptance-20261012.md",
+    "verified_this_turn": "Executor scene verification complete: the three plan documents, acceptance-20261012.md, requirements R-126~R-131, reconciled master records and corrected UI coverage table are all in place and now committed. The P01 failing tests through the real Bridge entry (F-08 scheduler bypass, F-09 stale-projection dwell) are written and left uncommitted as the working state for P01."
+  },
+  "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
+  "independent_acceptance": {
+    "date": "2026-10-12",
+    "report": "docs/project/acceptance-20261012.md",
+    "source_commit": "6bbecd6f766285dd88cb1029be77d7c632e0a157",
+    "status": "not_passed_functional_gaps_reproduced",
+    "scope": "Independent overall review only; no product fixes, device capture, paid model calls or installation changes.",
+    "tests": {
+      "unit": {
+        "run": 996,
+        "skipped": 21,
+        "result": "OK"
+      },
+      "voice_optional": {
+        "run": 58,
+        "result": "OK"
+      },
+      "installed_ui_matrix": {
+        "cells": 128,
+        "result": "passed"
+      },
+      "packaged_inventory": 42368,
+      "packaged_capabilities": "passed",
+      "continuity_role_plugin_lifecycle": "passed in isolated profiles using installed DSH"
+    },
+    "confirmed_findings": [
+      "F-01 Bilibili UI pairing/target/QA and extension package incomplete",
+      "F-02 audio epoch rotation retains old ASR media identity; fusion rejects after seek",
+      "F-03 stop does not clear audio context; sequence gap stays running; automatic recovery violates unknown failure boundary",
+      "F-04 failed audio start reported as running",
+      "F-05 text-mode proactive toggle not applied and replies immediately cleared",
+      "F-06 user text questions do not cancel proactive generation",
+      "F-07 danmaku snapshot returns timestamps instead of text"
+    ],
+    "limitations": [
+      "PDF selected prose unavailable despite selected flag",
+      "Live voice waiver R-126 respected; stop-speech latency and latest SenseVoice performance unverified",
+      "Live Bilibili subtitle 30-minute and final visual model QA lack evidence",
+      "Installed config multimodal and auxiliary disabled",
+      "Detailed native UI interaction verifier blocked by initial config modal after loader adaptation"
+    ],
+    "evidence_directory": ".sumika-next/acceptance-20261012",
+    "user_direction": "First inspect defects and incomplete functionality; user will then use a more capable model for optimization and new requirements."
+  },
+  "execution_handoff_previous_20261009": {
     "document": "docs/project/companion-implementation.md",
     "section": "当前冻结执行稿：Sumika 阶段归档与 B站／PDF 陪学交付",
     "version": "2026-10-09 v1",
@@ -761,8 +847,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p8_complete_all_packages_done",
-    "current_delivery_package": "DONE — P0-P8 complete on candidate 2026.10.11-p8 (installer SHA 043507d8...)",
+    "status": "independent_acceptance_not_passed",
+    "current_delivery_package": "P2/P3/P5 integration and lifecycle defects; see independent acceptance report",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -787,7 +873,24 @@
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a",
-    "next_action": "Frozen delivery plan P0-P8 complete. Optional follow-ups outside the plan: public release license review before any binary publication (stage-upload vs public release separation stands)."
+    "next_action": "Read docs/project/acceptance-20261012.md for the independent acceptance findings. Overall acceptance has not passed. Await the user's next optimization/new-requirement instruction; this audit does not authorize product fixes or new UI features.",
+    "previous_zcode_status": "p8_complete_all_packages_done",
+    "acceptance_report": "docs/project/acceptance-20261012.md"
   },
-  "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。"
+  "planning_delivery": {
+    "status": "documented_not_implemented",
+    "date": "2026-10-12",
+    "executor": {
+      "tool": "ZCode",
+      "model": "GLM5.3flash"
+    },
+    "documents": [
+      "docs/project/repair-and-acceptance-plan.md",
+      "docs/project/behavior-memory-plan.md",
+      "docs/project/companion-profiles-plan.md"
+    ],
+    "verification": "记录/schema及文档链接校验；无产品变更",
+    "P00": "documented; executor must verify current workspace",
+    "P01_P17": "not_started"
+  }
 }

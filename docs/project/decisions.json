@@ -90,6 +90,60 @@
       "kind": "implementation_default",
       "reason": "R-114允许推进非UI任务；社区MCP候选已有相同文件库，本轮基础范围无需自建解析器或额外工具服务。",
       "evidence": "office-reuse.md"
+    },
+    {
+      "id": "D-013",
+      "decision": "授权后跟随前台；本地记录并按已有许可使用配置模型；细粒度键鼠特征不保存输入正文/剪贴板正文/完整按键串",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户选择 observation_scope=授权后跟随前台、behavior_data=本地记录＋按需模型、input_granularity=细粒度操作特征",
+      "evidence": "repair-and-acceptance-plan.md",
+      "recorded_at": "2026-10-11T19:55:20.130538+00:00"
+    },
+    {
+      "id": "D-014",
+      "decision": "模式可新建/复制/编辑并自动匹配，手动选择持续优先；控件在现有详情/权限/数据页，无新导航",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户选择 profile_model=可自定义＋自动匹配、ui_placement=复用现有页面",
+      "evidence": "repair-and-acceptance-plan.md",
+      "recorded_at": "2026-10-11T19:55:20.130538+00:00"
+    },
+    {
+      "id": "D-015",
+      "decision": "仅按新规则明确保存的许可可随Sumika启动恢复；旧一次性许可不升级，旧target/grant不复用；mic/audio不自动开",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户选择 daily_start=记住授权并恢复；实现边界见模式计划",
+      "evidence": "repair-and-acceptance-plan.md",
+      "recorded_at": "2026-10-11T19:55:20.130538+00:00"
+    },
+    {
+      "id": "D-016",
+      "decision": "行为数据长期保存，不按期限/容量自动删；空间不足提醒、危急停写；可独立选盘迁移",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户长期保留原话及storage_location=可单独选行为目录",
+      "evidence": "repair-and-acceptance-plan.md",
+      "recorded_at": "2026-10-11T19:55:20.130538+00:00"
+    },
+    {
+      "id": "D-017",
+      "decision": "通用行为习惯用户层共享，互动偏好role隔离；询问默认10分钟1次、日6次且可调",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户选择role_sharing=通用共享、互动隔离，prompt_frequency=适中且可调",
+      "evidence": "repair-and-acceptance-plan.md",
+      "recorded_at": "2026-10-11T19:55:20.130538+00:00"
+    },
+    {
+      "id": "D-018",
+      "decision": "补回答保存笔记/详情recent，弹幕仅显式摘要；执行者ZCode/GLM5.3flash",
+      "status": "active",
+      "kind": "user_confirmed",
+      "reason": "用户选择existing_completion=一并补齐并明确指定执行工具模型",
+      "evidence": "repair-and-acceptance-plan.md",
+      "recorded_at": "2026-10-11T19:55:20.130538+00:00"
     }
   ]
 }

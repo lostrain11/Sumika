@@ -1,5 +1,9 @@
 # Sumika 新版项目连续性记录
 
+## 当前 ZCode / GLM5.3flash 执行入口（2026-10-12）
+
+先读 [repair-and-acceptance-plan.md](repair-and-acceptance-plan.md)，再完整读 [behavior-memory-plan.md](behavior-memory-plan.md)、[companion-profiles-plan.md](companion-profiles-plan.md) 与 [acceptance-20261012.md](acceptance-20261012.md)。P00归档完成，P01～P17未实施；整体未通过验收。总入口包含可直接交给ZCode的启动指令，下一包P01。旧companion-implementation.md冻结稿为历史依据，不重放旧上传/安装动作。
+
 本目录是新版项目的持久化交接入口，独立于模型上下文和 Harness 实现。
 
 ## 文件
