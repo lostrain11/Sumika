@@ -134,7 +134,11 @@ begin
   Result := True;
   if CurPageID = wpSelectDir then begin
     if DirExists(WizardDirValue) or FileExists(WizardDirValue) then begin
-      MsgBox('请选择尚不存在的新安装目录；旧安装会保留，不原地覆盖。', mbError, MB_OK);
+      // Script-level MsgBox calls ignore /SUPPRESSMSGBOXES; in a silent
+      // install the same condition aborts through PrepareToInstall without
+      // any dialog, so only interactive runs may ask.
+      if not WizardSilent then
+        MsgBox('请选择尚不存在的新安装目录；旧安装会保留，不原地覆盖。', mbError, MB_OK);
       Result := False;
     end;
   end;

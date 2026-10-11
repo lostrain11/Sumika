@@ -717,7 +717,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: task backlog closed 2026-10-12 — P3 audio-gap UI wording, P6 fault legs (honest failures, single attempt, bridge healthy), P4 selection/dual-window/zoom slices all pass (suite 996 OK/21 skips). ONLY REMAINING: P8 clean-Windows verification, which needs a user-provided clean machine or VM. Daily use is on Sumika 2026.10.11-p8 at E:/Work/Sumika.",
+  "next_action": "ZCode / GLM5.3flash: FROZEN DELIVERY PLAN P0-P8 COMPLETE (2026-10-12). Clean-Windows leg closed via Windows Sandbox — it caught a real defect (VC++ redistributable DLLs missing from bundled runtimes; voice VAD and desktop sensing would break on clean machines), fixed by shipping the six DLLs app-locally, candidate and installer rebuilt, sandbox re-run all green. Daily use on Sumika 2026.10.11-p8 at E:/Work/Sumika with personal data preserved. Remaining outside the plan: public binary release requires license review per the frozen boundary.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",

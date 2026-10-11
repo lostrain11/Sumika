@@ -761,8 +761,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "backlog_closed_only_clean_windows_left",
-    "current_delivery_package": "Clean-Windows leg only (needs a user-provided VM/machine); everything else done",
+    "status": "p8_complete_all_packages_done",
+    "current_delivery_package": "DONE — P0-P8 complete on candidate 2026.10.11-p8 (installer SHA 043507d8...)",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -777,7 +777,7 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "2026-10-12 backlog closure: P3 audio-capability-gap UI (browser tab-audio relay state + explicit gap wording in the companion detail, UI verifier 42 checks); P6 fault-injection legs (refused TLS + local-provider 500: honest unknown-status errors, no fabricated text, single fast attempt per ask, bridge healthy, E:/SumikaBuild/companion-faults/); P4 slices (selection via the product text collector with the Edge UIA empty-intersection limit recorded, dual-window no-cross-talk, zoom via UIA toolbar buttons with digest changes and stable pages, E:/SumikaBuild/pdf-slices/). Suite 996 OK (21 skips).",
+    "verified_this_turn": "2026-10-12: clean-Windows leg CLOSED via Windows Sandbox (no user machine needed). First sandbox run exposed a real packaging defect: bundled runtimes lacked VC++ redistributable DLLs (onnxruntime and win32ui DLL load failed on clean Windows) — fixed by shipping the six redistributable DLLs app-locally in both runtimes, candidate rebuilt (42,368 files, capability probe passed), sandbox re-run ALL GREEN (install/voice imports/desktop imports/bridge/companion status). Daily install upgraded to the DLL-fixed build at E:/Work/Sumika (user request; bridge python child must be killed alongside Sumika processes — recorded). Installer silent-mode MsgBox bug fixed (WizardSilent guard), installer SHA 043507d85754bf3e2a9a798a1a3472860b42ac05fe458720a0bc9756760f2d0e. Harness: E:/SumikaBuild/cleanvm-input/.",
     "limitations": [
       "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
@@ -787,7 +787,7 @@
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a",
-    "next_action": "Only the clean-Windows leg remains — user provides a clean machine/VM, then run the installer (SHA 6d8728a4...) there. Daily use is on the new install at E:/Work/Sumika."
+    "next_action": "Frozen delivery plan P0-P8 complete. Optional follow-ups outside the plan: public release license review before any binary publication (stage-upload vs public release separation stands)."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。"
 }
