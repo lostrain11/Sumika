@@ -717,7 +717,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: P8 real-install acceptance COMPLETE 2026-10-12 — daily use switched to Sumika 2026.10.11-p8 at E:/Work/Sumika (user-directed uninstall-old + install-to-old-path); data backup verified, legacy profile migrated via the product tool, DSH 0.2.0-rc.2 verified against the migrated profile. OPEN: only the clean-Windows leg (needs user VM/machine) and the P3 audio-gap UI wording leftover. All delivery packages P0-P8 otherwise complete on this candidate.",
+  "next_action": "ZCode / GLM5.3flash: task backlog closed 2026-10-12 — P3 audio-gap UI wording, P6 fault legs (honest failures, single attempt, bridge healthy), P4 selection/dual-window/zoom slices all pass (suite 996 OK/21 skips). ONLY REMAINING: P8 clean-Windows verification, which needs a user-provided clean machine or VM. Daily use is on Sumika 2026.10.11-p8 at E:/Work/Sumika.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",

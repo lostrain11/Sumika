@@ -813,8 +813,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p8_real_install_done_daily_switched_clean_windows_open",
-    "current_delivery_package": "P8 clean-Windows leg only (needs a user-provided VM/machine); all other P8 items done",
+    "status": "backlog_closed_only_clean_windows_left",
+    "current_delivery_package": "Clean-Windows leg only (needs a user-provided VM/machine); everything else done",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -829,7 +829,7 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "2026-10-12: real-install acceptance COMPLETE. Personal data backed up+verified (19 files); old 2026.09.20-k uninstalled (user directive, data kept); 2026.10.11-p8 installed at E:/Work/Sumika (user chose the old path; an interim D:-drive install was uninstalled); bridge serves 8765 on existing data; legacy DSH profile migrated via import_legacy_profile (9 files verified, source preserved); workbench ran DSH 0.2.0-rc.2 against the migrated profile. Rollback posture: data snapshot + same-hash installer (old runtime gone by user directive — pair-rollback itself remains verified in isolation). Clean-Windows leg open.",
+    "verified_this_turn": "2026-10-12 backlog closure: P3 audio-capability-gap UI (browser tab-audio relay state + explicit gap wording in the companion detail, UI verifier 42 checks); P6 fault-injection legs (refused TLS + local-provider 500: honest unknown-status errors, no fabricated text, single fast attempt per ask, bridge healthy, E:/SumikaBuild/companion-faults/); P4 slices (selection via the product text collector with the Edge UIA empty-intersection limit recorded, dual-window no-cross-talk, zoom via UIA toolbar buttons with digest changes and stable pages, E:/SumikaBuild/pdf-slices/). Suite 996 OK (21 skips).",
     "limitations": [
       "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
@@ -839,7 +839,7 @@
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a",
-    "next_action": "Clean-Windows verification when the user provides a VM/machine. Daily use is on the new install; user opens Sumika.exe at E:/Work/Sumika as before."
+    "next_action": "Only the clean-Windows leg remains — user provides a clean machine/VM, then run the installer (SHA 6d8728a4...) there. Daily use is on the new install at E:/Work/Sumika."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。"
 }
