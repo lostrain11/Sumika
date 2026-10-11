@@ -717,7 +717,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: P8 candidate rebuilt from current source and the full headless verification chain passed 2026-10-11 (staging, capability, DSH plugin lifecycle, 0.1.5->0.2.0 upgrade-rollback with paired rollback, isolated packaged install + EXE lifecycle; installer Sumika-Setup-2026.10.11-p8.exe SHA 6d8728a4...). REMAINING (USER-GATED): real install/upgrade/rollback on the daily installation (free desktop needed, backup first), daily-use switch, clean-Windows leg (VM/machine). P3 leftover: audio-gap UI wording.",
+  "next_action": "ZCode / GLM5.3flash: P8 real-install acceptance COMPLETE 2026-10-12 — daily use switched to Sumika 2026.10.11-p8 at E:/Work/Sumika (user-directed uninstall-old + install-to-old-path); data backup verified, legacy profile migrated via the product tool, DSH 0.2.0-rc.2 verified against the migrated profile. OPEN: only the clean-Windows leg (needs user VM/machine) and the P3 audio-gap UI wording leftover. All delivery packages P0-P8 otherwise complete on this candidate.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -824,7 +824,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-11",
+  "updated_at": "2026-10-12",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
