@@ -717,7 +717,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: P6 closed 2026-10-11 with live voice evidence (15 full Q&A turns with real DeepSeek, zero errors, zero audible late playback after 29 barge-ins, first-audio median 2596 ms/P95 5155 ms; R-126 waives the 30-turn count) and the R-126 pause optimization implemented (continuation grace 0.6 s merge, 9/9 tests under the packaged voice runtime; suite 996 OK/21 skips). NEXT: P8 final candidate rebuild (sanitize runtime inputs) + install/upgrade/rollback acceptance — USER GATED. Open: P3 audio-gap UI wording, P6 fault-injection legs, WASAPI 16 kHz open issue.",
+  "next_action": "ZCode / GLM5.3flash: P8 candidate rebuilt from current source and the full headless verification chain passed 2026-10-11 (staging, capability, DSH plugin lifecycle, 0.1.5->0.2.0 upgrade-rollback with paired rollback, isolated packaged install + EXE lifecycle; installer Sumika-Setup-2026.10.11-p8.exe SHA 6d8728a4...). REMAINING (USER-GATED): real install/upgrade/rollback on the daily installation (free desktop needed, backup first), daily-use switch, clean-Windows leg (VM/machine). P3 leftover: audio-gap UI wording.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
