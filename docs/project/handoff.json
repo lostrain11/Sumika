@@ -761,8 +761,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p3_live_soak_done_p6_user_gate_next",
-    "current_delivery_package": "P6 continuous voice hardware (needs the user, 30 turns); then P8 final candidate rebuild/install",
+    "status": "p6_closed_with_waiver_p8_next",
+    "current_delivery_package": "P8 final candidate rebuild + install/upgrade/rollback (needs user authorization; clean-machine leg needs a machine/VM)",
     "package_order": [
       "P0 阶段快照提交上传",
       "P1 可恢复基线及DSH依赖",
@@ -777,7 +777,7 @@
     "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
     "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
     "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
-    "verified_this_turn": "2026-10-10: P3 REAL Bilibili 30-minute soak PASSED (BV1QN4y1c7RQ, anonymous muted playback): 17914 packets / 1791.4 s audio, 123 real vosk transcripts, 6 seek epoch rotations, pause fence zero-packet, track alive at end; extension recovery defects fixed (stale-rejection race, rotate-on-any-stop bounded 30/min); fixture part-change soak and live smoke re-passed; full suite 994 OK (19 skips), one known flaky WinError5 at roles.py:137 recorded for the packaging turn. Evidence E:/SumikaBuild/companion-soak-live-20261010/. Earlier this turn: all-image realbook weak-mode live acceptance passed 22/22.",
+    "verified_this_turn": "2026-10-11: P6 live voice acceptance closed. Real mic (EMEET device 2, MME) + packaged voice interpreter + real DeepSeek (user-supplied key, env-only): 30 VAD turns / 15 full Q&A turns, zero errors, silence test zero interrupts (no echo), zero audible late playback after barge-in (old answers never resumed), first-char median 2316 ms / P95 5150 ms, first-audio median 2596 ms / P95 5155 ms. R-126 waives the 30-turn single-session count by user direction (recorded as deviation). Product fixes: revoked-mask of dead worker now surfaces real error + SUMIKA_MIC_WORKER_LOG, user_stopped event (lives with P8 rebuild), continuation-grace pause merge (0.6 s, R-126) with tests under the packaged runtime 9/9; full suite 996 OK/21 skips. Known issue: WASAPI-only device indexes fail PortAudioError at 16 kHz (use MME inputs). Untested: fault injection legs, speaker-echo variant. Evidence E:/SumikaBuild/voice-live-20261011-r2/.",
     "limitations": [
       "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
       "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
@@ -787,7 +787,7 @@
     ],
     "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
     "p0_snapshot_commit": "a20548a",
-    "next_action": "P6 continuous voice hardware acceptance needs the USER (real microphone + speaker, 30 turns including interruption); user asked to be paused and notified for it. After P6: P8 final candidate rebuild + install/upgrade/rollback (needs user authorization; clean-machine leg needs a machine/VM). Open P3 leftover: audio-capability-gap UI wording."
+    "next_action": "P8: rebuild the final candidate (runtime inputs must be sanitized), then install/upgrade/rollback acceptance — needs user authorization to touch the real installation; clean-machine leg needs a machine/VM. P3 leftover: audio-capability-gap UI wording. P6 leftovers ride with P8 (user_stopped in the packaged runtime)."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。"
 }

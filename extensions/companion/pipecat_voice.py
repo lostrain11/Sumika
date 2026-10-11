@@ -26,13 +26,16 @@ class CompanionTurnProcessor(FrameProcessor):
 
     def __init__(self, *, transcribe, answer, speak, stop_playback,
                  on_event=None, sample_rate=16000, max_seconds=30,
-                 answer_and_speak=None, **kwargs):
+                 answer_and_speak=None, continuation_grace=0.6, **kwargs):
         super().__init__(**kwargs)
         for provider in (transcribe, answer, speak, stop_playback):
             if not inspect.iscoroutinefunction(provider):
                 raise TypeError('voice providers must be async and cancellable')
         if sample_rate != 16000 or type(max_seconds) is not int or not 1 <= max_seconds <= 120:
             raise ValueError('16kHz mono PCM and bounded turn duration required')
+        if (type(continuation_grace) not in (int, float)
+                or not 0 <= continuation_grace <= 5):
+            raise ValueError('invalid continuation grace')
         self.transcribe, self.answer, self.speak = transcribe, answer, speak
         self.stop_playback = stop_playback
         if answer_and_speak is not None and not inspect.iscoroutinefunction(answer_and_speak):
@@ -41,10 +44,18 @@ class CompanionTurnProcessor(FrameProcessor):
         self.on_event = on_event or (lambda event, detail: None)
         self.sample_rate = sample_rate
         self._limit = max_seconds * sample_rate * 2
+        # Mid-sentence thinking pauses are normal speech. After the VAD says
+        # "stopped", hold the buffered turn for this long before dispatching;
+        # resumed speech within the grace joins the same turn instead of
+        # splitting it into fragments and cancelling a half-heard question.
+        self._grace = continuation_grace
         self._preroll = deque()
         self._preroll_bytes = 0
         self._audio = bytearray()
         self._speaking = False
+        self._holding = False
+        self._held = b''
+        self._hold_task = None
         self._epoch = 0
         self._turn_task = None
         self._closed = False
@@ -72,7 +83,16 @@ class CompanionTurnProcessor(FrameProcessor):
         previous_epoch = self._epoch
         self._epoch += 1
         task, self._turn_task = self._turn_task, None
+        hold, self._hold_task = self._hold_task, None
+        self._holding = False
+        self._held = b''
         try:
+            if hold is not None:
+                hold.cancel()
+                try:
+                    await hold
+                except asyncio.CancelledError:
+                    pass
             if task is not None:
                 task.cancel()
                 try:
@@ -107,12 +127,30 @@ class CompanionTurnProcessor(FrameProcessor):
             self._clear_audio()
             await self._interrupt()
         elif isinstance(frame, VADUserStartedSpeakingFrame) and not self._closed:
-            if self._text_question:
-                self._text_question = False
-                await self._event('text_interrupted')
-            await self._interrupt()
-            self._audio = bytearray(b''.join(self._preroll))
-            self._preroll.clear()
+            if self._holding:
+                # Resumed within the grace: same logical turn, same epoch.
+                # No barge-in, no interrupted event, nothing is playing.
+                hold, self._hold_task = self._hold_task, None
+                self._holding = False
+                if hold is not None:
+                    hold.cancel()
+                    try:
+                        await hold
+                    except asyncio.CancelledError:
+                        pass
+                self._audio = bytearray(self._held + b''.join(self._preroll))
+                self._held = b''
+                self._preroll.clear()
+                self._preroll_bytes = 0
+                self._speaking = True
+                return
+            else:
+                if self._text_question:
+                    self._text_question = False
+                    await self._event('text_interrupted')
+                await self._interrupt()
+                self._audio = bytearray(b''.join(self._preroll))
+                self._preroll.clear()
             self._preroll_bytes = 0
             self._speaking = True
             await self._event('user_started')
@@ -138,15 +176,39 @@ class CompanionTurnProcessor(FrameProcessor):
             self._clear_audio()
             # The frozen P6 latency report needs the stop-speaking boundary.
             await self._event('user_stopped')
-            if audio:
+            if not audio:
+                return
+            if self._grace > 0:
+                # Thinking pause: hold the half-heard turn; resumed speech
+                # within the grace merges back into this same turn.
+                self._holding = True
+                self._held = audio
+                self._hold_task = asyncio.create_task(
+                    self._hold_then_respond(self._epoch))
+            else:
                 self._turn_task = asyncio.create_task(self._respond(audio, self._epoch))
         # Raw PCM terminates here: it must not accidentally reach logs or context.
         if not isinstance(frame, InputAudioRawFrame):
             await self.push_frame(frame, direction)
 
+    async def _hold_then_respond(self, epoch):
+        try:
+            await asyncio.sleep(self._grace)
+        except asyncio.CancelledError:
+            return
+        async with self._turn_lock:
+            if self._closed or epoch != self._epoch or not self._holding:
+                return
+            self._holding = False
+            self._hold_task = None
+            audio, self._held = self._held, b''
+            self._turn_task = asyncio.create_task(self._respond(audio, epoch))
+
     @property
     def busy(self):
-        return self._closed or self._text_question or self._speaking or (self._turn_task is not None and not self._turn_task.done())
+        return (self._closed or self._text_question or self._speaking
+                or self._holding
+                or (self._turn_task is not None and not self._turn_task.done()))
 
     def start_discussion(self, prompt):
         """Use the same cancellable turn/player as user questions."""
@@ -206,13 +268,14 @@ class CompanionTurnProcessor(FrameProcessor):
 
 
 def build_voice_worker(*, approved=False, transcribe, answer, speak, stop_playback,
-                       on_event=None, answer_and_speak=None):
+                       on_event=None, answer_and_speak=None, continuation_grace=0.6):
     """Build the actual native VAD pipeline; host supplies authorized mic frames."""
     if approved is not True:
         raise PermissionError('explicit microphone consent required')
     turn = CompanionTurnProcessor(transcribe=transcribe, answer=answer, speak=speak,
                                   stop_playback=stop_playback, on_event=on_event,
-                                  answer_and_speak=answer_and_speak)
+                                  answer_and_speak=answer_and_speak,
+                                  continuation_grace=continuation_grace)
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(
         sample_rate=16000, params=VADParams(stop_secs=0.5)))
     worker = PipelineWorker(Pipeline([vad, turn]),

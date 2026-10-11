@@ -717,7 +717,7 @@
       "evidence": []
     }
   ],
-  "next_action": "ZCode / GLM5.3flash: P3 REAL Bilibili 30-minute soak PASSED 2026-10-10 (BV1QN4y1c7RQ anonymous muted: 17914 packets, 123 real transcripts, seek rotations clean, pause fence zero-packet; extension stale-rejection race and rotate-on-any-stop recovery fixed and bounded; full suite 994 OK/19 skips; evidence E:/SumikaBuild/companion-soak-live-20261010/). NEXT: P6 continuous voice hardware — USER-GATED (real microphone + speaker, 30 turns incl. interruption; user asked to be notified). Then P8 final candidate rebuild + install/upgrade/rollback/clean-machine. P3 leftover: audio-capability-gap UI wording. Same turn: all-image realbook weak-mode live acceptance passed 22/22 (E:/SumikaBuild/realbook-weak-20261010/).",
+  "next_action": "ZCode / GLM5.3flash: P6 closed 2026-10-11 with live voice evidence (15 full Q&A turns with real DeepSeek, zero errors, zero audible late playback after 29 barge-ins, first-audio median 2596 ms/P95 5155 ms; R-126 waives the 30-turn count) and the R-126 pause optimization implemented (continuation grace 0.6 s merge, 9/9 tests under the packaged voice runtime; suite 996 OK/21 skips). NEXT: P8 final candidate rebuild (sanitize runtime inputs) + install/upgrade/rollback acceptance — USER GATED. Open: P3 audio-gap UI wording, P6 fault-injection legs, WASAPI 16 kHz open issue.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
@@ -824,7 +824,7 @@
     ],
     "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
   },
-  "updated_at": "2026-10-10",
+  "updated_at": "2026-10-11",
   "learning_scenarios_priority_checkpoint": {
     "status": "prioritized_implementation_pending",
     "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",

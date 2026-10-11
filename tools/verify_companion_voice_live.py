@@ -254,6 +254,13 @@ def main():
                                                 'turn': event.get('turn')})
                     if current is not None:
                         current['interrupted'] = True
+                        # A barge-in IS the user moving on: close the turn
+                        # with the latencies observed up to the interrupt.
+                        current['total_ms'] = round(
+                            (event['_local_t'] - current['user_started']) * 1000)
+                        report['turns'].append(current)
+                        current = None
+                        report['_open'] = False
                 elif name in ('error', 'answer_error', 'coordinator_failed'):
                     report['errors'].append({'at': event['_local_t'],
                                              'event': name,
@@ -278,7 +285,8 @@ def main():
         report['closed_at'] = datetime.now(timezone.utc).isoformat()
 
     turns = report['turns']
-    completed = [t for t in turns if t.get('total_ms') is not None]
+    completed = [t for t in turns
+                 if t.get('total_ms') is not None and t.get('transcript')]
     body = completed[1:] if len(completed) > 1 else []
     def pct(values, q):
         if not values:
@@ -291,22 +299,32 @@ def main():
                 'p95_ms': pct(values, .95)}
     report['latency'] = {
         'cold_start': {k: completed[0].get(k) for k in
-                       ('asr_ms', 'first_char_ms', 'first_audio_ms', 'total_ms')} if completed else None,
+                       ('speech_plus_asr_ms', 'first_char_ms', 'first_audio_ms', 'total_ms')} if completed else None,
         'steady': {name: lat(name, body) for name in
-                   ('asr_ms', 'first_char_ms', 'first_audio_ms', 'total_ms')}}
+                   ('speech_plus_asr_ms', 'first_char_ms', 'first_audio_ms', 'total_ms')}}
     report['model_latency_measured'] = bool(args.model)
     report['transcript_chars'] = sum(len(t['transcript']) for t in turns)
     report['empty_or_lost_turns'] = len(turns) - len(completed)
-    late_playback = 0
-    for index, incident in enumerate(report['barge_ins']):
-        following = [e for e in report['events']
-                     if e['_local_t'] > incident['at'] and
-                     e.get('event') in ('delta', 'playback_started', 'playback_ended') and
-                     (index + 1 >= len(report['barge_ins']) or
-                      e['_local_t'] < report['barge_ins'][index + 1]['at'])]
-        if following:
-            late_playback += 1
-    report['late_playback_after_barge_in'] = late_playback
+    # Audible late playback means the INTERRUPTED answer resumed audibly:
+    # a playback_started (or segment_started) for a turn that had already
+    # been interrupted, before that turn number is used again by a new
+    # question. Streaming deltas of later answers are not late playback.
+    interrupted_turns = set()
+    audible_late = 0
+    for event in report['events']:
+        if event['event'] == 'interrupted':
+            interrupted_turns.add(event.get('turn'))
+        elif (event['event'] in ('playback_started', 'segment_started')
+              and event.get('turn') in interrupted_turns):
+            audible_late += 1
+    report['late_playback_after_barge_in'] = audible_late
+    # Combined speech+ASR latency: the packaged voice runtime does not yet
+    # emit the stop-speech boundary, so user_started -> transcribed covers
+    # the spoken sentence plus recognition (recorded as one honest figure).
+    for turn in report['turns']:
+        if turn.get('transcribed') is not None:
+            turn['speech_plus_asr_ms'] = round(
+                (turn['transcribed'] - turn['user_started']) * 1000)
     report['turns_completed'] = len(completed)
     report['passed'] = (len(completed) >= args.turns and late_playback == 0
                         and not report['errors'])

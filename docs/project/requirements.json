@@ -1319,6 +1319,16 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "aa30a009ac9fa53692f8c2aa74b5f4f8216f28f780dc4bc26a75a4b1dc237a71"
+    },
+    {
+      "id": "R-126",
+      "sequence": 126,
+      "original": "感觉不用测了，就用上次的录音再测试就行。另外句中停顿超过半秒很正常，人说话需要思考，你想想怎么优化",
+      "source": "visible-conversation: user message; locator=ZCode session 2026-10-11 P6 voice hardware acceptance, live-run direction",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "1e588b786c34391933c10f91c31477d3aa0dadfed263618f7f0e5d67c8879d9b"
     }
   ]
 }

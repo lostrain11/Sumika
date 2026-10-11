@@ -280,3 +280,81 @@ class PipecatVoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(closed, [True])
         self.assertTrue(processor._closed)
         self.assertFalse(processor._audio)
+
+    async def test_mid_sentence_pause_merges_into_one_turn(self):
+        """A thinking pause inside a sentence joins the same turn (R-126)."""
+        from extensions.companion.pipecat_voice import build_voice_worker
+        from pipecat.frames.frames import (InputAudioRawFrame, VADUserStartedSpeakingFrame,
+                                           VADUserStoppedSpeakingFrame)
+        from pipecat.workers.runner import WorkerRunner
+        transcribed_audio = []
+        events = []
+        answer_done = asyncio.Event()
+        async def asr(audio, **kwargs):
+            transcribed_audio.append(bytes(audio))
+            return 'merged question'
+        async def answer(text):
+            answer_done.set()
+            return 'answer'
+        async def speak(text):
+            await asyncio.sleep(0.01)
+        async def stop():
+            pass
+        def event(name, detail):
+            events.append(name)
+        worker, turn = build_voice_worker(approved=True, transcribe=asr, answer=answer,
+            speak=speak, stop_playback=stop, on_event=event, continuation_grace=0.05)
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+        running = asyncio.create_task(runner.run())
+        try:
+            # Sentence part one, VAD stop (thinking pause), part two.
+            await worker.queue_frame(VADUserStartedSpeakingFrame())
+            await worker.queue_frame(InputAudioRawFrame(audio=b''*640, sample_rate=16000, num_channels=1))
+            await worker.queue_frame(VADUserStoppedSpeakingFrame())
+            self.assertTrue(await worker.flush_pipeline(timeout=1))
+            self.assertTrue(turn.busy)  # holding, not yet dispatched
+            await worker.queue_frame(VADUserStartedSpeakingFrame())
+            await worker.queue_frame(InputAudioRawFrame(audio=b'"'*640, sample_rate=16000, num_channels=1))
+            await worker.queue_frame(VADUserStoppedSpeakingFrame())
+            self.assertTrue(await worker.flush_pipeline(timeout=1))
+            await asyncio.wait_for(answer_done.wait(), 3)
+            self.assertEqual(transcribed_audio, [b''*640 + b'"'*640])
+            self.assertEqual(events.count('user_started'), 1)
+            self.assertNotIn('interrupted', events)
+        finally:
+            await worker.cancel()
+            await asyncio.wait_for(running, 8)
+
+    async def test_silence_beyond_grace_dispatches_first_segment_only(self):
+        from extensions.companion.pipecat_voice import build_voice_worker
+        from pipecat.frames.frames import (InputAudioRawFrame, VADUserStartedSpeakingFrame,
+                                           VADUserStoppedSpeakingFrame)
+        from pipecat.workers.runner import WorkerRunner
+        transcribed_audio = []
+        answer_done = asyncio.Event()
+        async def asr(audio, **kwargs):
+            transcribed_audio.append(bytes(audio))
+            return 'question'
+        async def answer(text):
+            answer_done.set()
+            return 'answer'
+        async def speak(text):
+            await asyncio.sleep(0.01)
+        async def stop():
+            pass
+        worker, turn = build_voice_worker(approved=True, transcribe=asr, answer=answer,
+            speak=speak, stop_playback=stop, continuation_grace=0.05)
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+        running = asyncio.create_task(runner.run())
+        try:
+            await worker.queue_frame(VADUserStartedSpeakingFrame())
+            await worker.queue_frame(InputAudioRawFrame(audio=b'3'*640, sample_rate=16000, num_channels=1))
+            await worker.queue_frame(VADUserStoppedSpeakingFrame())
+            self.assertTrue(await worker.flush_pipeline(timeout=1))
+            await asyncio.wait_for(answer_done.wait(), 3)
+            self.assertEqual(transcribed_audio, [b'3'*640])
+        finally:
+            await worker.cancel()
+            await asyncio.wait_for(running, 8)
