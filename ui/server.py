@@ -821,8 +821,12 @@ class Bridge:
             status = self._microphone.status()
             capture = self._perception.status()
             application_audio = self._application_audio.status()
+            # Browser tab audio relay (P3): the companion detail surfaces the
+            # relay's real state and gap reasons alongside the process track.
+            browser_audio = self._browser_audio.status()
             with self._voice_events_lock:
                 return {**status, 'capture':capture, 'application_audio':application_audio,
+                        'browser_audio':browser_audio,
                         'cursor':self._voice_event_sequence,
                         'events':[dict(event) for event in self._voice_events if event['sequence'] > after]}
         if action in ('stop', 'pause'):

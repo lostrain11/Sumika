@@ -63,6 +63,9 @@ export function mountCompanionSession(host) {
   applicationAudio.setAttribute('aria-label','采集应用声音'); audioRow.append(audioLabel,applicationAudio);
   const audioStatus=document.createElement('p'); audioStatus.className='sumika-form-note';
   audioStatus.setAttribute('role','status'); audioStatus.dataset.applicationAudioStatus='';
+  const browserAudioStatus=document.createElement('p'); browserAudioStatus.className='sumika-form-note';
+  browserAudioStatus.setAttribute('role','status'); browserAudioStatus.dataset.browserAudioStatus='';
+  browserAudioStatus.hidden=true;
   const captureStatus=document.createElement('p'); captureStatus.className='sumika-form-note';
   captureStatus.setAttribute('role','status'); captureStatus.dataset.captureStatus='';
   const playbackStatus=document.createElement('p'); playbackStatus.className='sumika-form-note';
@@ -112,6 +115,27 @@ export function mountCompanionSession(host) {
       const audioLabels={stopped:'已停止',paused:'已暂停',starting:'正在启动',running:'正在采集',stopping:'正在停止',error:'异常'};
       audioStatus.textContent=`应用声音：${audioLabels[state.application_audio.status] || '状态未知'}${state.application_audio.error ? ` · ${state.application_audio.error}` : ''}`;
     } else {audioStatus.textContent='应用声音：状态未知';}
+    if(state.browser_audio) {
+      const relay=state.browser_audio;
+      // P3 capability gaps get explicit wording instead of a bare code.
+      const relayGaps={'player audio track unavailable':'该播放器没有可采集的音轨',
+        'player audio already active':'采集已在进行',
+        'player changed during audio start':'连接期间播放器已变化',
+        'player origin changed':'页面来源已变化',
+        'media element audio capture unavailable':'该播放器不支持音频采集',
+        'unambiguous playing video required':'需要唯一正在播放的视频',
+        '16kHz browser audio unavailable':'音频采集初始化失败',
+        'player_changed':'播放器已更换或暂停',
+        'audio_consumer_overflow':'识别队列溢出，音轨已停止',
+        'audio_consumer_failed':'识别进程异常，音轨已停止',
+        'invalid_audio_packet':'音频包校验失败，音轨已停止',
+        'browser audio queue overflow':'中继队列溢出，音轨已停止'};
+      if (relay.alive || relay.error) {
+        const relayLabels={starting:'正在连接',running:'正在收音',stopped:'已停止'};
+        browserAudioStatus.hidden=false;
+        browserAudioStatus.textContent=`网页声音：${relayLabels[relay.status] || '状态未知'}${relay.error ? ` · ${relayGaps[relay.error] || relay.error}` : ''}`;
+      } else { browserAudioStatus.hidden=true; browserAudioStatus.textContent=''; }
+    } else { browserAudioStatus.hidden=true; browserAudioStatus.textContent=''; }
     status.textContent = `${state.status==='stopped' && captureActive ? '正在观察 · 文字交流' : labels[state.status] || '状态未知'}${state.target ? ` · ${state.target}` : ''}`;
     let speaking = playbackSpeaking;
     for (const event of state.events || []) {
@@ -212,7 +236,7 @@ export function mountCompanionSession(host) {
   });
   scan.addEventListener('click',loadTargets);
   mode.addEventListener('change',controls);
-  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,captureStatus,playbackStatus,option,commands,transcript); host.append(section);
+  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript); host.append(section);
   loadTargets();
   hydrateIconsAsync(section);
   controls(); poll();

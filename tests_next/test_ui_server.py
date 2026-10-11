@@ -98,11 +98,16 @@ class UIServerTests(unittest.TestCase):
             thread.join(1)
             return {'status':'running','alive':True}
         with patch.object(bridge._perception,'status',side_effect=capture_status), \
-             patch.object(bridge._application_audio,'status',return_value={'status':'running','alive':True}):
+             patch.object(bridge._application_audio,'status',return_value={'status':'running','alive':True}),              patch.object(bridge._browser_audio,'status',
+                          return_value={'status':'stopped','error':'player audio track unavailable',
+                                        'alive':False,'received':0,'transcripts':0}):
             result=bridge.companion_microphone({'action':'status'})
         self.assertEqual(failures, [])
         self.assertTrue(result['capture']['alive'])
         self.assertTrue(result['application_audio']['alive'])
+        # P3 leftover: the browser tab-audio relay state (and its capability
+        # gap reason) reaches the same companion detail the UI already polls.
+        self.assertEqual(result['browser_audio']['error'],'player audio track unavailable')
         self.assertEqual(result['events'][-1]['text'],'parallel')
 
     def test_microphone_requires_both_consents_before_launch(self):
