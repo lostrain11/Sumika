@@ -50,10 +50,14 @@ class PassiveBrowserAudioTests(unittest.TestCase):
         self.assertEqual(first['sequence'], 0)
         self.audio.receive(GRANT['token'], 'chrome-extension://'+GRANT['extension_id'],
                            packet(1), grant=grant)
+        # R4: a gap stops the track explicitly (user restart required).
         with self.assertRaisesRegex(PermissionError, 'sequence gap'):
             self.audio.receive(GRANT['token'], 'chrome-extension://'+GRANT['extension_id'],
                                packet(3), grant=grant)
-        with self.assertRaisesRegex(ValueError, 'outside the active epoch'):
+        self.assertEqual(self.audio.status()['status'], 'stopped')
+        self.assertIn('sequence gap', self.audio.status()['error'])
+        # Any further packet is rejected: the session is gone.
+        with self.assertRaisesRegex(PermissionError, 'not active'):
             self.audio.receive(GRANT['token'], 'chrome-extension://'+GRANT['extension_id'],
                                packet(2, epoch='epoch-2'), grant=grant)
 

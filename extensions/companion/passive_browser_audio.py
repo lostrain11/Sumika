@@ -180,6 +180,9 @@ class PassiveBrowserAudio:
                     or type(payload['sample_offset']) is not int):
                 raise ValueError('browser audio packet outside the active epoch')
             if payload['sequence'] != self._next_sequence:
+                # R4: a gap is an explicit stop — surface the reason and stop
+                # the track; the user restarts, PCM is never replayed.
+                self._fail('browser audio sequence gap; restart required')
                 raise PermissionError('browser audio sequence gap; restart required')
             identity = snapshot_media_identity(payload['media_identity'])
             # Fence on the stable video identity (url, fingerprint, part).
@@ -270,8 +273,17 @@ class PassiveBrowserAudio:
             return self.status()
 
     def stop(self):
+        # R4: a live track's stop immediately clears the fused audio context
+        # (once — repeated stops are idempotent) and the structured failure
+        # reason stays visible until an explicit start clears it.
         with self._lock:
+            had_track = self._process is not None or self._state in ('running', 'starting')
             measured = self._audio_seconds if self._received else 0.0
+        if had_track:
+            try:
+                self.on_clear()
+            except Exception:
+                pass
         if measured and self.on_usage is not None:
             try:
                 self.on_usage(round(measured, 1))
@@ -279,11 +291,6 @@ class PassiveBrowserAudio:
                 pass
         with self._lock:
             self._audio_seconds = 0.0
-        diagnostic = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
-        if diagnostic:
-            import traceback
-            with open(diagnostic, 'a', encoding='utf8') as out:
-                out.write('[stop] called from:\n' + ''.join(traceback.format_stack()[-6:-1]))
         with self._condition:
             self._epoch += 1
             self._state = 'stopping'
@@ -315,10 +322,7 @@ class PassiveBrowserAudio:
                 self._state, self._target = 'stopped', None
                 self._audio_epoch = self._identity = None
                 self._next_sequence = None
-                existed_error = self._error
-                self._error = None
                 result = self.status()
-                result['previous_error'] = existed_error
                 return result
 
     def _fail(self, message):

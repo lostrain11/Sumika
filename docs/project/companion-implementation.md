@@ -1731,3 +1731,14 @@ rotate_epoch(audio_epoch, identity=None) no longer just resets bridge expectatio
 ui/server.py passes no identity at rotation time (the post-seek identity arrives with the relayed packets, which update the live identity before transcripts flow). Extension rotation/restart behavior (F-03's auto-restart concern) is reworked in P04.
 
 Tests: tests_next/test_p03_epoch_rebuild.py (4): rotation rebuilds the worker with the post-seek identity and its transcripts carry timeline_revision 1; packets outside the new epoch are rejected while sequence 0 of the new epoch is accepted; an old generation's reader death does not stop the new track; rotation failure stops cleanly. Existing 6 audio transport tests pass unchanged. Suite: 1015 tests, 21 skips, OK. not_run: real-site seek E2E (P07/P05 coverage).
+
+
+### P04 receipt (2026-10-12): F-03/F-04 — audio lifecycle: explicit stops, persistent errors, honest starts
+
+**Host (passive_browser_audio.py)**: a sequence gap now stops the track explicitly (_fail with the structured reason) instead of leaving it running across the hole; stop() invokes on_clear exactly once per live track (repeated stops idempotent) so the fused audio context clears immediately, and the failure reason persists after the stop (only an explicit start clears it). Queue overflow already stopped; both now surface in status for the UI's existing gap wording.
+
+**Extension (build_companion_extension.mjs)**: audio-stopped auto-recovery is restricted to seek/rate/pause (player_changed) under standing consent — transport rejections (host_rejected, send_failed) and recognizer failures stop the track, surface the reason (lastAudioError in status for the popup), and wait for explicit user restart. The unconditional 5-second start-audio kick is removed (R4: no second start path). startConnection checks the content script's start-audio reply: a failed audio start throws with the reason instead of claiming running (F-04).
+
+**Server**: window capture start (companion_perception start) and bridge shutdown now explicitly stop the browser-audio track alongside the other audio owners (the audit's leak repro).
+
+Tests: tests_next/test_p04_lifecycle.py — host lifecycle (gap stops+persists+clears, normal stop idempotent, start clears stale reason), bridge lifecycle (perception start/shutdown stop the track), and a Node-VM arbitration test driving the BUILT worker with stubbed chrome/fetch: failed audio start throws with audioActive=false, host_rejected/send_failed produce zero epoch requests, player_changed rotates exactly once. Legacy strict-sequence test updated to the explicit-stop semantics. Suite: 1021 tests, 21 skips, OK. not_run: real-site legs (user resting).

@@ -719,7 +719,7 @@
       "correction": "StudyNotes实际保存显式笔记正文，不是只存哈希；行为实现未开始。"
     }
   ],
-  "next_action": "P03 complete (F-02 fixed, per-epoch worker rebuild, 1015 tests OK). Next: P04 — stop/error/start lifecycle and recovery (R4).",
+  "next_action": "P04 complete (F-03/F-04 fixed, 1021 tests OK). Next: P05 — Bilibili UI wiring + extension in-package (R5).",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",

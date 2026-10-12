@@ -1003,6 +1003,7 @@ class Bridge:
             _identity(handle, pid)
             self._passive_browser.stop()
             self._application_audio.stop()
+            self._browser_audio.stop()
             self._microphone.stop()
             return self._perception.start(handle=payload.get('handle'),
                 process_id=payload.get('process_id'), approved=payload.get('consent'),
@@ -1241,6 +1242,7 @@ class Bridge:
         self._shutdown_requested.set()
         self._passive_browser.stop()
         self._application_audio.stop()
+        self._browser_audio.stop()
         self._microphone.stop()
         self._perception.stop()
         self.stop_speech(closing=True)

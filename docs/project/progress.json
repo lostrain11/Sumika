@@ -816,8 +816,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p03_done_p04_next",
-    "current_delivery_package": "P04: stop/error/start lifecycle and recovery (F-03/F-04)",
+    "status": "p04_done_p05_next",
+    "current_delivery_package": "P05: Bilibili UI wiring + extension in-package (F-01)",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -839,11 +839,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P04 (F-03/F-04) per repair-and-acceptance-plan.md R4.",
+    "next_action": "P05 (F-01) per repair-and-acceptance-plan.md R5.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P03 COMPLETE 2026-10-12: F-02 fixed — rotate_epoch rebuilds one recognizer per audio epoch (old generation fenced and torn down precisely, fresh worker with the live full media identity, sequence 0 after ready); transcripts stamped with the live identity at the bridge so post-seek transcripts pass the fusion fence; old-generation deaths cannot fail the new track; rotation failures stop cleanly. Tests 4 new + 6 existing audio + full suite 1015 OK (21 skips)."
+    "verified_this_turn": "P04 COMPLETE 2026-10-12: F-03 fixed (gap stops track with persistent structured reason; stop calls on_clear once; idempotent; errors persist until explicit start); F-04 fixed (extension checks start-audio reply and fails loudly; auto-rotation restricted to player_changed; transport rejections stop and surface; 5s unconditional kick removed); perception start/shutdown explicitly stop browser audio. Node-VM arbitration test drives the built worker. Suite 1021 OK (21 skips)."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
