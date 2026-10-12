@@ -272,7 +272,7 @@ class BehaviorNoteTests(unittest.TestCase):
             current=lambda: None, on_event=lambda name, detail:
             self.events.append({'event': name, **detail}),
             include_images=lambda: False, scheduler_thread=False,
-            behavior_tracker=self.tracker)
+            behavior_tracker=self.tracker, monotonic=lambda: self.now[0])
         scheduler = ObservationScheduler(self.coordinator._perception,
             on_observation=self.coordinator._observe,
             on_proactive=self.coordinator._dispatch_proactive,
@@ -322,14 +322,40 @@ class BehaviorNoteTests(unittest.TestCase):
         return [item for item in self.events
                 if item['event'] == 'proactive_text' and item.get('kind') == 'behavior']
 
+    def settle_thread(self):
+        """Wait for the current background generation thread so the fake
+        clock's fence and the arbitration gates are deterministic."""
+        time.sleep(0.02)
+        thread = self.coordinator._proactive_thread
+        if thread is not None:
+            thread.join(2)
+
     def test_fast_flipping_triggers_one_behavior_note(self):
         self.coordinator.publish_observation(self.page_bundle(1))
         self.scheduler.notify_user_activity(0)
         self.scheduler.tick()  # the first tick only sets the baseline page
+        self.settle_thread()
         self.flip_to(2, 3, 4, 5, 6, 7)  # the burst reports on the 6th change
-        # Later ticks flush a report that was queued behind a busy background
-        # thread; the same episode itself stays silent.
-        self.assertTrue(self.flush(11))
+        # The burst report lands inside the proactive speech fence and is
+        # dropped (stale by the time the fence opens), never queued.
+        for _ in range(20):
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(self.page_bundle(11))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+        self.assertEqual(self.behavior_prompts(), [])
+        # Past the fence (baseline emission ~1001 + 120), a NEW burst (a
+        # fresh episode) dispatches one note; the loop crosses the fence.
+        for step in range(150):
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(
+                self.page_bundle(11 if step % 2 == 0 else 13, tick=step * 3))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+            if self.behavior_prompts():
+                break
+        self.settle_thread()
+        self.assertTrue(self.behavior_prompts())
         prompt = self.behavior_prompts()[0]
         # The note carries the behavior only: never the page body, no image.
         self.assertNotIn('lesson body', prompt['prompt'])
@@ -347,23 +373,16 @@ class BehaviorNoteTests(unittest.TestCase):
         self.coordinator.publish_observation(self.page_bundle(4))
         self.scheduler.notify_user_activity(0)
         self.scheduler.tick()  # baseline at the current page
-        for step in range(183):
-            self.now[0] += 1.0
-            self.coordinator.publish_observation(self.page_bundle(4, tick=step))
-            self.scheduler.notify_user_activity(0)
-            self.scheduler.tick()
-        # In production the 1 Hz tick retries a queued report once the burst
-        # of publishes stops contending with the proactive thread; drive the
-        # same flush here.
-        for step in range(6):
+        self.settle_thread()
+        for step in range(200):
             self.now[0] += 1.0
             self.coordinator.publish_observation(self.page_bundle(4, tick=1000 + step))
             self.scheduler.notify_user_activity(0)
             self.scheduler.tick()
-            time.sleep(0.05)
-            if self.behavior_prompts():
+            if self.behavior_events():
                 break
-        self.assertTrue(self.wait_for(lambda: bool(self.behavior_prompts())))
+        self.settle_thread()
+        self.assertTrue(self.behavior_prompts())
         self.assertIn('long_dwell', self.behavior_prompts()[0]['prompt'])
         self.assertEqual(self.behavior_events()[0]['behavior']['kind'], 'long_dwell')
 
@@ -393,8 +412,24 @@ class BehaviorNoteTests(unittest.TestCase):
         self.coordinator.publish_observation(self.page_bundle(1))
         self.scheduler.notify_user_activity(0)
         self.scheduler.tick()  # baseline at the current page
+        self.settle_thread()
         self.flip_to(2, 3, 4, 5, 6, 7)
-        self.assertTrue(self.flush(8))
+        # Calm ends the episode; past the fence the new burst dispatches.
+        for _ in range(30):
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(self.page_bundle(8, tick=100 + _))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+        for step in range(200):
+            self.now[0] += 1.0
+            self.coordinator.publish_observation(
+                self.page_bundle(8 if step % 2 == 0 else 10, tick=200 + step * 2))
+            self.scheduler.notify_user_activity(0)
+            self.scheduler.tick()
+            if self.behavior_prompts():
+                break
+        self.settle_thread()
+        self.assertTrue(self.behavior_prompts())
         self.assertEqual(self.behavior_events(), [])
 
     def test_behavior_note_rejects_unknown_pattern(self):

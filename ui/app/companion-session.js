@@ -164,7 +164,7 @@ export function mountCompanionSession(host) {
     playbackSpeaking = speaking;
     playbackStatus.textContent = `朗读：${speaking ? '正在朗读' : '空闲'}`;
     cursor = state.cursor ?? cursor;
-    if (state.status === 'stopped') { transcript.replaceChildren(); answer = null; activeTurn = null; }
+    if (state.status === 'stopped' && !captureActive) { transcript.replaceChildren(); answer = null; activeTurn = null; }
     controls();
   }
   async function poll() {
@@ -189,6 +189,11 @@ export function mountCompanionSession(host) {
         captureActive=true;
         await endpoint('/api/companion/perception',{action:'start',handle:selected.handle,
           process_id:selected.process_id,process_creation:selected.process_creation,consent:true});
+        if (payload.mode === 'text') {
+          // F-05: the text session applies the proactive settings itself.
+          await endpoint('/api/companion/session',{action:'start',mode:'text',
+            proactive:payload.proactive});
+        }
         const deadline=Date.now()+15000;
         while(true) {
           const capture=await endpoint('/api/companion/perception',{action:'status'});

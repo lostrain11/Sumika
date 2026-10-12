@@ -62,6 +62,22 @@ class ReadingBehaviorTracker:
         self._last_fresh_at = None
         self._dwell_effective = 0.0
 
+    def rearm(self, kind):
+        """Re-arm one reported pattern: its emission was suppressed (for
+        example by the speech fence), so the continuing behavior may report
+        again as a fresh episode."""
+        if kind not in KINDS:
+            raise ValueError('unknown behavior kind')
+        with self._lock:
+            self._reported.discard(kind)
+
+    def rearm_all(self):
+        """Re-arm every pattern while emissions are suppressed by the speech
+        fence: the continuing behavior keeps evaluating and its first report
+        after the fence dispatches as a fresh episode."""
+        with self._lock:
+            self._reported.clear()
+
     def reset(self):
         with self._lock:
             self._events.clear()

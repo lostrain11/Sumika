@@ -86,7 +86,8 @@ class StudySessionCoordinator:
                  include_images=None, proactive_interval=120.0,
                  proactive_enabled=True, pending_ttl=180.0,
                  scheduler_thread=True, behavior_tracker=None,
-                 behavior_note_cooldown=60.0):
+                 behavior_note_cooldown=60.0, speech_fence=120.0,
+                 monotonic=time.monotonic):
         """``chat`` is the shared RoleChat callable; ``current`` projects the
         latest fused observation; ``on_event`` receives coordinator/UI events.
         ``scheduler_thread=False`` serves deterministic tests that drive ticks.
@@ -130,6 +131,20 @@ class StudySessionCoordinator:
         self._behavior_note_cooldown = behavior_note_cooldown
         self._behavior_note_at = None
         self._queued_behavior_report = None
+        if type(speech_fence) not in (int, float) or not 0 <= speech_fence <= 3600:
+            raise ValueError('invalid speech fence')
+        if not callable(monotonic):
+            raise ValueError('monotonic clock must be callable')
+        # R2 arbitration: user activity invalidates in-flight background
+        # generations, and every audible/visible emission opens a shared
+        # speech fence that proactive and behavior notes both respect.
+        self._speech_fence = speech_fence
+        self._speech_fence_until = None
+        self._monotonic = monotonic
+        self._activity_revision = 0
+        self._background_tokens = set()
+        self._text_busy = False
+        self._voice_busy = False
         # Local-rule danmaku dedup: scrolling comments collapse per window and
         # never trigger model calls on their own.
         self.danmaku = DanmakuBuffer()
@@ -168,8 +183,20 @@ class StudySessionCoordinator:
         # re-projecting the latest bundle never accumulates dwell time.
         observation_id = observation.metadata.get('observation_id')
         if observation_id is None:
+            # Derived identity includes the content: two different pages can
+            # share an observed_at, and only a re-projection of the SAME
+            # observation may be deduplicated.
+            import hashlib as _hashlib
+            content_hash = _hashlib.sha1(
+                (observation.source + '|' + observation.text).encode('utf8')).hexdigest()[:12]
             observation_id = (observation.observed_at.isoformat() + '|'
-                              + observation.source + '|' + observation.target)
+                              + observation.target + '|' + content_hash)
+        # While the speech fence suppresses emissions the tracker re-arms on
+        # every fresh verification, so a continuing behavior reports as a
+        # fresh episode right after the fence opens.
+        if (self._speech_fence_until is not None
+                and self._monotonic() < self._speech_fence_until):
+            self._behavior.rearm_all()
         report = self._behavior.feed(
             page if type(page) is int and page >= 1 else None,
             valid=observation.valid, observation_id=observation_id)
@@ -180,7 +207,7 @@ class StudySessionCoordinator:
             with self._lock:
                 queued = self._queued_behavior_report
                 if queued is not None:
-                    if time.monotonic() - queued[0] <= 15.0:
+                    if self._monotonic() - queued[0] <= 15.0:
                         report = queued[1]
                     else:
                         self._queued_behavior_report = None
@@ -190,30 +217,40 @@ class StudySessionCoordinator:
     def _maybe_behavior_note(self, report):
         """Dispatch one behavior note; shares the proactive thread and budget.
 
-        Gated like proactive discussion: off when proactive is disabled, and
-        never while a user question is bound or in flight — a spoken answer
-        must not be talked over by a comment about page flipping. A report
-        blocked by the busy thread or the budget is queued (latest wins) and
-        retried on later ticks; one dispatched note silences further notes
-        for the cooldown window.
+        Gated like proactive discussion: off when proactive is disabled,
+        never while a user question or voice turn is active (the report is
+        queued for the later ticks instead of interrupting), and inside the
+        shared speech fence opened by any prior emission. A report blocked
+        by the busy thread or the budget is queued (latest wins) and retried
+        on later ticks; one dispatched note silences further notes for the
+        cooldown window.
         """
         with self._lock:
-            if self._failed is not None or not self._proactive_enabled:
+            now = self._monotonic()
+            # A report inside the speech fence is stale by the time the fence
+            # opens (the reader moved on minutes ago): drop it, never queue.
+            # The underlying episode may continue past the fence, so its
+            # pattern re-arms and can report again as a fresh episode.
+            if (self._speech_fence_until is not None
+                    and now < self._speech_fence_until):
+                if report.get('kind') in ('flip_burst', 'long_dwell', 'revisit'):
+                    self._behavior.rearm(report['kind'])
                 return
-            if self._active or self._voice_bindings:
+            busy = (self._failed is not None or not self._proactive_enabled
+                    or self._text_busy or self._voice_busy
+                    or self._active or self._voice_bindings)
+            if busy or (self._behavior_note_at is not None
+                        and now - self._behavior_note_at < self._behavior_note_cooldown):
+                # One flurry of navigation is one comment; a report blocked
+                # by a short block stays queued for the later ticks.
+                self._queued_behavior_report = (now, report)
                 return
-            now = time.monotonic()
-            # One flurry of navigation is one comment: a second pattern
-            # detected inside the cooldown joins the same moment, not a new
-            # interruption.
-            if (self._behavior_note_at is not None
-                    and now - self._behavior_note_at < self._behavior_note_cooldown):
-                return
-            self._queued_behavior_report = (now, report)
             thread = self._proactive_thread
             if thread is not None and thread.is_alive():
+                self._queued_behavior_report = (now, report)
                 return
             if not self._background_budget.allow():
+                self._queued_behavior_report = (now, report)
                 return
             self._queued_behavior_report = None
             self._behavior_note_at = now
@@ -233,6 +270,11 @@ class StudySessionCoordinator:
         text = result.get('text')
         if not isinstance(text, str) or not text.strip() or text.strip() == '暂不提示':
             return
+        # R2: the user may have started a question while the provider ran;
+        # a superseded or busy-suppressed note is dropped, never emitted.
+        if not self._background_gate():
+            return
+        self._open_speech_fence()
         with self._lock:
             if (self._failed is not None or self._scheduler_target is None
                     or self._active or self._voice_bindings):
@@ -308,6 +350,10 @@ class StudySessionCoordinator:
         with self._lock:
             self._proactive_enabled = enabled
             self._scheduler.proactive_interval = interval_seconds
+        if not enabled:
+            # R2: disabling proactive immediately cancels in-flight
+            # background generations; existing text answers stay.
+            self._invalidate_background()
 
     def cancel_voice_requests(self):
         """Cancel tracked voice requests without touching the shared context."""
@@ -322,16 +368,26 @@ class StudySessionCoordinator:
         """User-visible stop: cancel dispatch, discard context and history."""
         self.cancel_voice_requests()
         self.context_cleared()
+        self._invalidate_background()
         return self._service.revoke()
 
     # -- text mode (no microphone required) ----------------------------------
     def ask_text(self, question, *, session_id='companion', on_delta=None,
                  cancellation_token=None):
         self._require_ready()
-        binding = self._service.bind_question()
-        return self._service.ask(question, session_id=session_id, on_delta=on_delta,
-            binding=binding, cancellation_token=cancellation_token,
-            include_images=bool(self._include_images()))
+        # R2: a user text question preempts background generations for its
+        # whole span and holds the text-busy gate against new dispatches.
+        self._invalidate_background()
+        with self._lock:
+            self._text_busy = True
+        try:
+            binding = self._service.bind_question()
+            return self._service.ask(question, session_id=session_id, on_delta=on_delta,
+                binding=binding, cancellation_token=cancellation_token,
+                include_images=bool(self._include_images()))
+        finally:
+            with self._lock:
+                self._text_busy = False
 
     # -- voice transport -----------------------------------------------------
     def attach_speaker(self, speaker):
@@ -349,7 +405,9 @@ class StudySessionCoordinator:
         with self._lock:
             self._voice_bindings.clear()
             self._voice_bindings[turn] = self._service.bind_question()
+        self._voice_busy = True
         self._cancel_proactive_generation()
+        self._invalidate_background()
         self._scheduler.notify_user_activity()
 
     def voice_request(self, *, request, turn, text, record_history, on_delta=None):
@@ -413,32 +471,96 @@ class StudySessionCoordinator:
             # generation/revision checks once user activity is registered.
             self._scheduler.notify_user_activity(1.1)
 
+    def _invalidate_background(self):
+        """User activity: in-flight background generations are cancelled and
+        their results, when they eventually return, are dropped."""
+        with self._lock:
+            self._activity_revision += 1
+            tokens = list(self._background_tokens)
+            self._background_tokens.clear()
+        for token in tokens:
+            token.cancel()
+
+    def _background_gate(self):
+        """Return True when a background result may still be emitted."""
+        with self._lock:
+            if (self._failed is not None or not self._proactive_enabled
+                    or self._text_busy or self._voice_busy
+                    or self._active or self._voice_bindings):
+                return False
+            if (self._speech_fence_until is not None
+                    and self._monotonic() < self._speech_fence_until):
+                return False
+            return True
+
+    def _open_speech_fence(self):
+        with self._lock:
+            self._speech_fence_until = (self._monotonic() + self._speech_fence
+                                        if self._speech_fence else None)
+
+    def text_question_span(self):
+        """Mark a user text question span: background work is cancelled and
+        suppressed until the question completes."""
+        coordinator = self
+
+        class _Span:
+            def __enter__(self):
+                coordinator._require_ready()
+                coordinator._invalidate_background()
+                with coordinator._lock:
+                    coordinator._text_busy = True
+
+            def __exit__(self, *exc):
+                with coordinator._lock:
+                    coordinator._text_busy = False
+                return False
+        return _Span()
+
     def _dispatch_proactive(self, observation):
         with self._lock:
-            if self._failed is not None or not self._proactive_enabled:
+            if (self._failed is not None or not self._proactive_enabled
+                    or self._text_busy or self._voice_busy
+                    or self._active or self._voice_bindings):
                 return
             if not self._background_budget.allow():
                 return
             thread = self._proactive_thread
             if thread is not None and thread.is_alive():
                 return
+            token = CancellationToken()
+            self._background_tokens.add(token)
+            activity = self._activity_revision
             self._proactive_thread = threading.Thread(
-                target=self._generate_proactive, args=(observation,),
+                target=self._generate_proactive, args=(observation, token, activity),
                 name='sumika-proactive', daemon=True)
             self._proactive_thread.start()
 
-    def _generate_proactive(self, observation):
+    def _generate_proactive(self, observation, token=None, activity=0):
         try:
             result = self._service.proactive(expected_observation=observation,
                                              prompt=DISCUSSION_PROMPT)
         except Exception as error:
             self._emit('proactive_error', {'error': type(error).__name__})
             return
+        finally:
+            with self._lock:
+                self._background_tokens.discard(token)
+        # R2: the user may have started a question while the provider ran.
+        # A superseded or busy-suppressed generation is dropped, never
+        # emitted or spoken — even when the provider ignored cancellation.
+        if token is not None:
+            try:
+                token.check()
+            except RequestCancelled:
+                return
+        if activity != self._activity_revision or not self._background_gate():
+            return
         if not isinstance(result, dict) or result.get('status') != 'proactive':
             return
         text = result.get('text')
         if not isinstance(text, str) or not text.strip():
             return
+        self._open_speech_fence()
         self._emit('proactive_text', {'text': text,
             'observation_at': result.get('observation_at'),
             'observation_source': result.get('observation_source'),

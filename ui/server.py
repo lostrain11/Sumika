@@ -920,6 +920,30 @@ class Bridge:
             return self._pet_host.start(self.listen_port)
         raise ValueError('invalid pet action')
 
+    def companion_session(self, payload):
+        """P02: the text-session entry applies the proactive settings that
+        the microphone entry applies for voice sessions (F-05)."""
+        if not isinstance(payload, dict):
+            raise ValueError('session action required')
+        if payload.get('action') != 'start':
+            raise ValueError('invalid session action')
+        if payload.get('mode') != 'text':
+            raise ValueError('session start supports the text mode; voice uses the microphone entry')
+        proactive = payload.get('proactive')
+        if not isinstance(proactive, dict):
+            raise ValueError('proactive settings required')
+        enabled = proactive.get('enabled')
+        interval = proactive.get('interval_seconds', 120)
+        if type(enabled) is not bool or type(interval) not in (int, float):
+            raise ValueError('invalid proactive settings')
+        observation = self._companion.latest
+        if observation is None or not observation.valid:
+            raise ValueError('select valid visible content before starting a text session')
+        self._coordinator.reset()
+        self._coordinator.set_proactive(enabled=bool(enabled), interval_seconds=int(interval))
+        return {'status': 'started', 'mode': 'text',
+                'proactive_enabled': bool(enabled)}
+
     def companion_ask(self, question, *, session_id='companion', on_delta=None, expected_target=None):
         passive = self._passive_browser.status()
         if expected_target is not None:
@@ -930,9 +954,12 @@ class Bridge:
             passive_matches = passive.get('status') == 'running' and passive.get('target') == expected_target
             if not window_matches and not passive_matches:
                 raise ValueError('learning target was stopped or changed')
-        with self._microphone.text_question() as token:
-            return self._companion_ask_bound(question, session_id=session_id,
-                on_delta=on_delta, expected_target=expected_target, cancellation_token=token)
+        # R2: the ask-stream path shares the coordinator's text-busy span so
+        # background generations are cancelled and suppressed identically.
+        with self._coordinator.text_question_span():
+            with self._microphone.text_question() as token:
+                return self._companion_ask_bound(question, session_id=session_id,
+                    on_delta=on_delta, expected_target=expected_target, cancellation_token=token)
 
     def _companion_ask_bound(self, question, *, session_id, on_delta, expected_target, cancellation_token):
         with self._context_lock:
@@ -1770,6 +1797,11 @@ def _handler(bridge):
                     return self._json(200, bridge.companion_observe(self._body()))
                 except (ValueError, TypeError, OSError) as error:
                     return self._json(400, {"error": str(error)})
+            if route == '/api/companion/session':
+                try:
+                    return self._json(200, bridge.companion_session(self._body()))
+                except (ValueError, RuntimeError, PermissionError) as error:
+                    return self._json(400, {'error': str(error)})
             if route == '/api/companion/ask-stream':
                 try:
                     payload = self._body()

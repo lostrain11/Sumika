@@ -1055,5 +1055,65 @@ class UIServerTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 400)
 
 
+
+
+class CompanionSessionEntryTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.settings_path = root / "settings.json"
+        capability_path = root / "capabilities.db"
+        connection = sqlite3.connect(capability_path)
+        connection.execute("CREATE TABLE capabilities (id TEXT PRIMARY KEY, position INTEGER, enabled INTEGER, provider TEXT, options TEXT)")
+        connection.commit()
+        connection.close()
+        settings = example(_role_dir(root), root / "sumika.db")
+        save_settings(settings, self.settings_path)
+        self.server = serve(self.settings_path, port=0, capability_database=capability_path,
+                            schedule_directory=root / "schedules")
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.bridge = self.server.sumika_bridge
+
+    def tearDown(self):
+        # R1: never wait on serve_forever here — a daemon service thread that
+        # died would hang shutdown() forever. Close the socket (which runs the
+        # bridge shutdown and releases the data lease) and let the daemon exit.
+        self.thread.join(timeout=5)
+        self.server.server_close()
+        self._tmp.cleanup()
+
+    def test_text_session_start_applies_proactive_settings(self):
+        bridge = self.bridge
+        bridge.companion_observe({'source':'web','target':'lesson','valid':True,'text':'lesson'})
+        result = bridge.companion_session({'action':'start','mode':'text',
+            'proactive':{'enabled':False,'interval_seconds':120}})
+        self.assertEqual(result['status'],'started')
+        self.assertFalse(bridge._coordinator._proactive_enabled)
+        result = bridge.companion_session({'action':'start','mode':'text',
+            'proactive':{'enabled':True,'interval_seconds':300}})
+        self.assertTrue(bridge._coordinator._proactive_enabled)
+        self.assertEqual(bridge._coordinator._scheduler.proactive_interval, 300)
+
+    def test_text_session_start_validates(self):
+        bridge = self.bridge
+        bridge.companion_observe({'source':'web','target':'lesson','valid':True,'text':'lesson'})
+        with self.assertRaises(ValueError):
+            bridge.companion_session({'action':'start','mode':'voice',
+                'proactive':{'enabled':True,'interval_seconds':120}})
+        # interval_seconds defaults to 120 when omitted (intentional).
+        result = bridge.companion_session({'action':'start','mode':'text',
+            'proactive':{'enabled':True}})
+        self.assertEqual(result['status'], 'started')
+        with self.assertRaises(ValueError):
+            bridge.companion_session({'action':'stop'})
+
+    def test_text_session_start_requires_visible_content(self):
+        bridge = self.bridge
+        with self.assertRaises(ValueError):
+            bridge.companion_session({'action':'start','mode':'text',
+                'proactive':{'enabled':True,'interval_seconds':120}})
+
+
 if __name__ == "__main__":
     unittest.main()
