@@ -47,11 +47,17 @@ def build_track(config, observation):
     model_path = config['model']
     if config.get('source') == 'pipe':
         capture = PipePcmCapture()
+        # Preload the ASR model BEFORE reporting ready: the parent's drain
+        # window then covers only the pipe start, never the model load.
         if provider_name == 'sherpa-onnx-sensevoice':
-            return SegmentedApplicationAudioTrack(capture, SenseVoicePcmProvider(model_path),
+            provider = SenseVoicePcmProvider(model_path)
+            provider.load_model()
+            return SegmentedApplicationAudioTrack(capture, provider,
                 target=config['target'], on_transcript=observation,
                 speech_detector=SileroSpeechDetector())
-        return ApplicationAudioTrack(capture, VoskPcmProvider(model_path),
+        provider = VoskPcmProvider(model_path)
+        provider.load_model()
+        return ApplicationAudioTrack(capture, provider,
             target=config['target'], on_transcript=observation)
     track = ApplicationAudioTrack.configured(helper=config['helper'],
         process_id=config['process_id'], creation_time=config['creation'],
