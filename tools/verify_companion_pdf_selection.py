@@ -11,6 +11,7 @@ import argparse
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -75,6 +76,17 @@ def main():
     parser.add_argument('--allow-desktop-input', action='store_true', required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
+    # Edge accessibility COM calls can block forever on this machine; a stuck
+    # probe must still leave its partial evidence on disk and die loudly.
+    def watchdog():
+        time.sleep(150)
+        (args.output/'report.json').write_text(json.dumps(
+            {'passed': False, 'watchdog': 'probe exceeded 150s; UIA call hung'},
+            ensure_ascii=False), encoding='utf8')
+        print('WATCHDOG: probe exceeded 150s', flush=True)
+        import os
+        os._exit(124)
+    threading.Thread(target=watchdog, daemon=True).start()
     from tools.verify_companion_pdf import generate
     pdf = args.output/'lesson.pdf'
     generate(pdf)
@@ -158,6 +170,42 @@ def main():
         except Exception as error:
             selected_on_node = {'node': 'active Document TextPattern',
                                 'error': type(error).__name__}
+        # UIA text pattern on the FOCUSED element + TextPattern2 caret range
+        # (pywinauto's wrapper never exposes iface_text2; use its raw UIA
+        # singleton: Text=10014, TextV2=10024).
+        try:
+            from pywinauto.uia_defines import IUIA, pattern_ids
+            automation = IUIA()
+            focused = automation.iuia.GetFocusedElement()
+            selected_on_node['focused_name'] = (focused.CurrentName or '')[:80]
+            text_id, text_iface = pattern_ids['Text']
+            raw_text = focused.GetCurrentPattern(text_id)
+            if raw_text is not None:
+                ranges = raw_text.QueryInterface(text_iface).GetSelection()
+                selected_on_node['focused_text_selection'] = ranges.Length
+                if ranges.Length:
+                    selected_on_node['focused_selection_text'] = \
+                        ranges.GetElement(0).GetText(-1)[:200]
+            else:
+                selected_on_node['focused_text_selection'] = 'no pattern'
+            v2_id, v2_iface = pattern_ids['TextV2']
+            raw_text2 = focused.GetCurrentPattern(v2_id)
+            selected_on_node['focused_text_pattern2'] = raw_text2 is not None
+            if raw_text2 is not None:
+                caret_range, active = raw_text2.QueryInterface(v2_iface).GetCaretRange()
+                selected_on_node['caret_active'] = bool(active)
+                if caret_range is not None:
+                    selected_on_node['caret_text'] = caret_range.GetText(64)
+            # TextPattern2 on the active document itself.
+            v2_doc = document.element_info.element.GetCurrentPattern(v2_id)
+            selected_on_node['document_text_pattern2'] = v2_doc is not None
+            if v2_doc is not None:
+                caret_range, active = v2_doc.QueryInterface(v2_iface).GetCaretRange()
+                selected_on_node['document_caret_active'] = bool(active)
+                if caret_range is not None:
+                    selected_on_node['document_caret_text'] = caret_range.GetText(64)
+        except Exception as error:
+            selected_on_node['focused_probe_error'] = f'{type(error).__name__}: {error}'[:200]
         for entry in document.descendants(control_type='Text'):
             if not entry.is_visible():
                 continue

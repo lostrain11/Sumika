@@ -766,8 +766,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p06_partial_danmaku_notes_usage_done_pdf_probe_paused_user_gaming",
-    "current_delivery_package": "P06 remainder: PDF selection probe multi-round confirmation (user paused — desktop probes pop windows over their game; run only when the user says OK). Danmaku/notes/usage implemented and tested.",
+    "status": "p06_danmaku_notes_usage_done_pdf_selection_concluded_fail_closed",
+    "current_delivery_package": "P06 remaining decisions for the user: paste/point-region fallback UI (R6 allows it; needs user confirmation before any new UI per AGENTS.md). Next package P07 per R7 after that decision.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -789,11 +789,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P06 remainder, resume ONLY when the user accepts desktop popups: tools/verify_companion_pdf_selection.py with the retry wrapper (3 rounds, office-env python) — round 1 already proved Document TextPattern GetSelection()=0 after a real double-click (Edge PDF does not expose selection via UIA TextPattern; explains the acceptance empty_intersection), collect() reports honest selection_unavailable, no stale selection after page flip. Remaining to verify: multi-round stability + where the selection actually lives (Text children vs inner host vs not exposed) + whether TextPattern2/GetCaretRange helps (pywinauto wrapper lacks iface_text2). Then decide the product path: keep fail-closed selection_unavailable and surface paste/point-region fallback, per R6. Danmaku/notes/usage are code-complete with tests.",
+    "next_action": "P06 PDF selection CLOSED on round-1 evidence: Edge PDF does not expose the live selection via UIA TextPattern (real double-click -> Document GetSelection()=0, no Text child reports one); collector stays fail-closed with selection_status=selection_unavailable and no stale selection after a page flip. TextPattern2/GetCaretRange follow-up stays OPEN: the probe (tools/verify_companion_pdf_selection.py, now with a 150s in-process watchdog) hung in UIA COM on retry rounds — rerun only when the machine cooperates. Ask the user whether they want the paste/point-region fallback UI before building any. Then P07 per R7.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P06 partial. Danmaku: F-07 fixed (snapshot_texts returned first_seen floats, now returns TTL-pruned texts), clear() on target switch/revoke/context-cleared, summarize_danmaku captures the consent epoch and drops late results, /api/companion/danmaku summarize route via auxiliary.summarize_learning, UI 总结当前弹幕 button + danmaku_summary event labelled 观众讨论. Notes: qa.ask() records answer_id -> frozen observation source (bounded 32), note_source() resolves by id or last answer and None-fails-closed, revoke clears it, companion_notes save_answer saves the answer text under its frozen provenance (page flip keeps the old page), UI 保存笔记 button + 最近笔记 list. Usage: category column (additive), deterministic migrate_categories, per-category totals with metric applicability (audio seconds are not token unknowns), known_sum/unknown_count/by_status, writers tagged (room/companion via session prefix, audio, vision), management.py usage() returns all categories, management.js renders them. Tests: 39 targeted OK (study_extras incl. F-07 regression + categories + migration, coordinator incl. epoch-drop + answer binding, model extensions); 95 role-chat/UI-server/management OK; 11 p01/model OK — 145 total this package. PDF probe round 1 evidence: E:/SumikaBuild/pdf-selection-probe-r1/report.json."
+    "verified_this_turn": "PDF probe final round: watchdog fired at 150s (UIA COM hang on this machine today); evidence E:/SumikaBuild/pdf-selection-final/report.json. Investigation stands on the completed round 1 (E:/SumikaBuild/pdf-selection-probe-r1/report.json): after a real double-click on a known fixture word, Document TextPattern GetSelection()=0, no Text child reports a selection, product collect returns honest selection_unavailable, page flip serves no stale selection — matching the independent acceptance empty_intersection=true and explaining it. Danmaku/notes/usage remain code-complete (145 tests green, commit 4199e80)."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
