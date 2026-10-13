@@ -144,6 +144,11 @@ class Bridge:
         from extensions.behavior.permission import BehaviorPermissions
         self._behavior_permissions = BehaviorPermissions(
             self._behavior_locator.resolve())
+        # P13: old pending prompts never auto-pop after a restart.
+        try:
+            self._behavior_library.expire_pending_prompts(scope=self._behavior_scope())
+        except Exception:
+            pass
         self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
@@ -298,6 +303,36 @@ class Bridge:
                 payload.get('name'), revision=payload.get('revision'))}
         if action == 'startup_rebind':
             return self.behavior_startup_resume()
+        if action == 'prompt_show':
+            # P13: persist BEFORE display; the prompt_id travels with every
+            # reply so the host can bind the answer to what was asked.
+            return self._behavior_library.record_prompt(
+                payload.get('kind'), scope=scope, reason=payload.get('reason'))
+        if action == 'prompt_state':
+            return self._behavior_library.set_prompt_state(
+                payload.get('prompt_id'), payload.get('state'), scope=scope)
+        if action == 'prompts_expire_pending':
+            return self._behavior_library.expire_pending_prompts(
+                scope=scope, state=payload.get('state') or 'expired')
+        if action == 'prompt_mute_kind':
+            return self._behavior_library.mute_kind(
+                payload.get('kind'), scope=scope, day=payload.get('day'),
+                mute=payload.get('mute', True))
+        if action == 'progress_record':
+            return self._behavior_library.record_progress(
+                payload.get('material'), payload.get('position'),
+                effective_seconds=payload.get('effective_seconds'),
+                source=payload.get('source') or 'unknown', scope=scope)
+        if action == 'progress_get':
+            return {'progress': self._behavior_library.progress_for(
+                payload.get('material'), scope=scope)}
+        if action == 'habit_context':
+            recent = self._behavior_library.context(scope=scope, limit=3)
+            habits = self._behavior_library.habit_summaries(
+                payload.get('kind'), scope=scope, limit=3)
+            from extensions.behavior.prompts import behavior_context_block
+            return {'block': behavior_context_block(recent, habits),
+                    'recent': recent, 'habits': habits}
         if action == 'list':
             return library.list_records(scope=scope, kind=payload.get('kind'),
                                         cursor=payload.get('cursor'),

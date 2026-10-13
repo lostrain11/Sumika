@@ -172,6 +172,8 @@ class BehaviorLibrary:
                    'source TEXT, at TEXT NOT NULL)')
         db.execute('CREATE INDEX IF NOT EXISTS feedback_event '
                    'ON feedback(scope_user, event_id)')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS progress_material '
+                   'ON progress(scope_user, record_id)')
         db.execute('CREATE TABLE IF NOT EXISTS frames ('
                    'scope_user TEXT NOT NULL, worker_epoch INTEGER NOT NULL, '
                    'sequence INTEGER NOT NULL, at TEXT NOT NULL, '
@@ -593,6 +595,172 @@ class BehaviorLibrary:
                               'scope_user=? AND active=1',
                               (user,)).fetchall()
         return [row[0] for row in rows]
+
+    # -- prompts, progress and habits (P13) -----------------------------------
+    PROMPT_STATES = ('pending', 'answered', 'dismissed', 'expired',
+                     'superseded')
+
+    def record_prompt(self, kind, *, scope, reason=None):
+        """Persist a prompt BEFORE it is displayed; pending, with an id.
+
+        The id travels with every display and reply so the host can bind the
+        user's answer to exactly what was asked.
+        """
+        kind = _bounded_label(kind, 'prompt kind')
+        user, session = self._scope(scope)
+        prompt_id = secrets.token_hex(8)
+        at = _utc_iso(self._clock)
+        with self._lock, self._connection() as db:
+            db.execute('INSERT INTO prompts(scope_user,prompt_id,state,at,'
+                       'reason) VALUES(?,?,?,?,?)',
+                       (user, prompt_id, 'pending', at, reason))
+            self._bump_revision(db)
+        return {'prompt_id': prompt_id, 'state': 'pending', 'at': at,
+                'kind': kind}
+
+    def set_prompt_state(self, prompt_id, state, *, scope):
+        """pending -> answered/dismissed/expired/superseded; one-way."""
+        prompt_id = _bounded_label(prompt_id, 'prompt_id')
+        if state not in self.PROMPT_STATES or state == 'pending':
+            raise ValueError('invalid prompt target state')
+        user, _ = self._scope(scope)
+        with self._lock, self._connection() as db:
+            row = db.execute('SELECT state FROM prompts WHERE scope_user=? '
+                             'AND prompt_id=?', (user, prompt_id)).fetchone()
+            if row is None:
+                raise ValueError('prompt not found')
+            if row[0] != 'pending':
+                return {'status': 'ignored', 'previous': row[0]}
+            db.execute('UPDATE prompts SET state=? WHERE scope_user=? AND '
+                       'prompt_id=?', (state, user, prompt_id))
+            self._bump_revision(db)
+        return {'status': 'updated', 'state': state}
+
+    def expire_pending_prompts(self, *, scope, state='expired'):
+        """Restart sweep: old pending prompts never auto-pop; they expire
+        (or become superseded when the host explicitly replaces them)."""
+        if state not in ('expired', 'superseded'):
+            raise ValueError('sweep target must be expired or superseded')
+        user, _ = self._scope(scope)
+        with self._lock, self._connection() as db:
+            count = db.execute(
+                "UPDATE prompts SET state=? WHERE scope_user=? AND "
+                "state='pending'", (state, user)).rowcount
+            if count:
+                self._bump_revision(db)
+        return {'status': 'swept', 'expired': count}
+
+    def mute_kind(self, kind, *, scope, day=None, mute=True):
+        """"Stop asking about this kind": recorded as mute feedback for the
+        LOCAL DAY (ignore same kind) or persistently (stop-asking keeps its
+        own record; history is never deleted by it). Un-muting removes the
+        day record, or every record when no day is given."""
+        kind = _bounded_label(kind, 'prompt kind')
+        if day is not None:
+            _bounded_label(day, 'day key')
+        user, _ = self._scope(scope)
+        feedback_id = secrets.token_hex(8)
+        with self._lock, self._connection() as db:
+            if mute:
+                db.execute('INSERT INTO feedback(scope_user,feedback_id,'
+                           'user_event_id,verdict,corrected,at) '
+                           'VALUES(?,?,?,?,?,?)',
+                           (user, feedback_id, 'host:'+day,
+                            'mute', 'kind:' + kind, _utc_iso(self._clock)))
+            else:
+                if day is not None:
+                    db.execute("DELETE FROM feedback WHERE scope_user=? AND "
+                               "verdict='mute' AND corrected=? AND at>=?",
+                               (user, 'kind:' + kind, day + 'T00:00:00'))
+                else:
+                    db.execute("DELETE FROM feedback WHERE scope_user=? AND "
+                               "verdict='mute' AND corrected=?",
+                               (user, 'kind:' + kind))
+            self._bump_revision(db)
+        return {'status': 'muted' if mute else 'unmuted', 'kind': kind}
+
+    def kind_muted_today(self, kind, *, scope, day):
+        user, _ = self._scope(scope)
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT COUNT(*) FROM feedback WHERE scope_user=? AND "
+                "verdict='mute' AND corrected=?", (user, 'kind:' + kind)).fetchone()
+            persistent = row[0] or 0
+            row = db.execute(
+                "SELECT COUNT(*) FROM feedback WHERE scope_user=? AND "
+                "verdict='mute' AND corrected=? AND at>=?",
+                (user, 'kind:' + kind, day + 'T00:00:00')).fetchone()
+        return persistent > 0 or (row[0] or 0) > 0
+
+    def record_progress(self, material_identity, position, *,
+                        effective_seconds=None, source, scope):
+        """Upsert one material's reliable progress: last visible page/video
+        position plus effective observation time. Never a completion claim."""
+        user, _ = self._scope(scope)
+        record_id = self.material_identity(material_identity)
+        at = _utc_iso(self._clock)
+        with self._lock, self._connection() as db:
+            db.execute('INSERT INTO progress(scope_user,record_id,material,'
+                       'position,effective_seconds,source,at) VALUES(?,?,?,?,?,?,?) '
+                       'ON CONFLICT(scope_user,record_id) DO UPDATE SET '
+                       'position=excluded.position,'
+                       'effective_seconds=excluded.effective_seconds,'
+                       'source=excluded.source,at=excluded.at',
+                       (user, record_id, material_identity[:128],
+                        json.dumps(position) if position is not None else None,
+                        effective_seconds, source, at))
+            self._bump_revision(db)
+        return {'status': 'recorded', 'material': record_id, 'position': position}
+
+    def progress_for(self, material_identity, *, scope):
+        user, _ = self._scope(scope)
+        record_id = self.material_identity(material_identity)
+        with self._connection() as db:
+            row = db.execute('SELECT position,effective_seconds,source,at '
+                             'FROM progress WHERE scope_user=? AND record_id=?',
+                             (user, record_id)).fetchone()
+        return (None if row is None else
+                {'position': json.loads(row[0]) if row[0] else None,
+                 'effective_seconds': row[1], 'source': row[2],
+                 'at': row[3]})
+
+    def habit_summaries(self, kind, *, scope, limit=3, now=None,
+                        half_life_days=90.0):
+        """Up to 3 weighted behavior/feedback summaries for one kind.
+
+        Time weight uses a 90-day half-life and only affects RANKING —
+        history is never deleted by it. Counter-evidence (correct) counts
+        immediately; model-derived entries never appear as confirmed.
+        """
+        if type(limit) is not int or not 1 <= limit <= 10:
+            raise ValueError('habit limit must be 1..10')
+        user, _ = self._scope(scope)
+        now_epoch = self._clock() if now is None else now
+        with self._connection() as db:
+            rows = db.execute(
+                'SELECT verdict,corrected,at FROM feedback WHERE scope_user=? '
+                'AND (corrected LIKE ? OR verdict=?) ORDER BY at DESC '
+                'LIMIT 200', (user, 'kind:' + kind, 'mute')).fetchall()
+        weighted = {}
+        for verdict, corrected, at in rows:
+            try:
+                from datetime import datetime
+                age_days = max(0.0, (now_epoch - datetime.fromisoformat(at)
+                                     .timestamp()) / 86400)
+            except ValueError:
+                continue
+            weight = 0.5 ** (age_days / half_life_days)
+            if corrected and corrected.startswith('kind:'):
+                key = corrected.split(':', 1)[1]
+            else:
+                key = kind
+            entry = weighted.setdefault(key, {'confirm': 0.0, 'mute': 0.0})
+            entry[verdict if verdict in ('confirm', 'mute') else 'mute'] += weight
+        summaries = [{'kind': key, 'support': round(value['confirm'], 3),
+                      'muted': value['mute'] > 0}
+                     for key, value in weighted.items()]
+        summaries.sort(key=lambda item: item['support'], reverse=True)
+        return summaries[:limit]
 
     # -- input frames (P11) ---------------------------------------------------
     def record_frames(self, batch, *, scope):

@@ -599,6 +599,38 @@ class UIServerTests(unittest.TestCase):
         self.server.server_close()
         self._tmp.cleanup()
 
+    def test_behavior_prompt_lifecycle_route(self):
+        # P13: show persists pending with an id; restart sweep expires; mute
+        # kind blocks for the day; progress round-trips by material.
+        _, prompt = self.request("/api/manage/behavior", method="POST", body={
+            "action": "prompt_show", "kind": "flip_burst",
+            "reason": "sequence detected"})
+        self.assertEqual(prompt["state"], "pending")
+        _, answered = self.request("/api/manage/behavior", method="POST", body={
+            "action": "prompt_state", "prompt_id": prompt["prompt_id"],
+            "state": "answered"})
+        self.assertEqual(answered["state"], "answered")
+        _, swept = self.request("/api/manage/behavior", method="POST", body={
+            "action": "prompts_expire_pending"})
+        self.assertEqual(swept["expired"], 0)
+        _, shown = self.request("/api/manage/behavior", method="POST", body={
+            "action": "prompt_show", "kind": "long_dwell"})
+        _, muted = self.request("/api/manage/behavior", method="POST", body={
+            "action": "prompt_mute_kind", "kind": "long_dwell",
+            "day": "2026-10-14", "mute": True})
+        self.assertEqual(muted["status"], "muted")
+        _, progress = self.request("/api/manage/behavior", method="POST", body={
+            "action": "progress_record", "material": "E:/Books/lesson.pdf",
+            "position": 41, "effective_seconds": 600,
+            "source": "reading-tracker"})
+        self.assertEqual(progress["position"], 41)
+        _, fetched = self.request("/api/manage/behavior", method="POST", body={
+            "action": "progress_get", "material": "E:/Books/lesson.pdf"})
+        self.assertEqual(fetched["progress"]["position"], 41)
+        _, context = self.request("/api/manage/behavior", method="POST", body={
+            "action": "habit_context", "kind": "flip_burst"})
+        self.assertIn("block", context)
+
     def test_behavior_permission_route_roundtrip(self):
         # P10: the persisted permission is revision-guarded, pause survives a
         # rebuild, and a startup rebind without grant answers not_resumed.
@@ -628,7 +660,7 @@ class UIServerTests(unittest.TestCase):
         # beneath it.
         status, state = self.request("/api/manage/behavior")
         self.assertEqual(status, 200)
-        self.assertEqual(state["schema_version"], 1)
+        self.assertEqual(state["schema_version"], 3)
         self.assertTrue(state["enabled"])
         revision = state["revision"]
         _, recorded = self.request("/api/manage/behavior", method="POST", body={

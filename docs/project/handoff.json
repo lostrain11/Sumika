@@ -766,8 +766,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p12_done_sequence_detection_and_anomaly_honesty",
-    "current_delivery_package": "P13 询问/习惯/进度 (R13, behavior-memory-plan §4.2/4.3) — next per the frozen order (P12 closed). Open shelved: PDF paste/point-region fallback UI.",
+    "status": "p13_done_prompts_quota_habits_progress",
+    "current_delivery_package": "P14 profile配置 (R14, companion-profiles-plan: 模式store/CRUD/迁移、手动锁、revision、空/损坏) — next per the frozen order (P13 closed). Open shelved: PDF paste/point-region fallback UI.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -789,11 +789,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P13 per R13: 询问状态与用户事件（10分钟/日6次quota跨重启、120秒围栏、pending状态机、prompt_id绑定、纠正/不再问）、习惯与进度（相似检索≤3条、90天半衰期、进度只记可靠材料位置与时长）。Wiring: feed P11 frames + P12 detector into episodes; prompts consume ask candidates. Shelved: PDF paste fallback UI. Low priority: PDF probe TextPattern2 round; P11 real keystroke soak user-gated.",
+    "next_action": "P14 per R14/companion-profiles-plan: 模式store/CRUD/迁移、手动锁、revision、空/损坏失败关闭。Then P15 自动路由, P16 产品界面 (含 P10 权限页暂停/恢复控件、P12/P13 prompt/习惯可见面), P17 最终候选/回退. Shelved: PDF paste fallback UI. Low priority: TextPattern2 round; P11 real keystroke soak user-gated.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P12 closed. sequences.py (pure): merge_actions with typing/scroll runs; EpisodeTracker (60s idle / host same-session rule / paused / capture gap end episodes; paused and gapped actions dropped without starting a new episode); signatures = 2-6 n-grams of merged kinds at the tail, once per episode, ≤5 new candidates; select_ask_candidate (confirmed > longest supported > stable id); robust_anomaly (20 episodes / 3 sessions, median/MAD z>3.5, MAD=0 and thin data refuse, novel≠abnormal, per-version baselines). Library: record_episode (host session required), pattern_candidates (distinct episodes/sessions), promote_pattern (active=0 until user confirms), confirmed_patterns; episodes.session added via additive v2→v3 migration. ReadingBehaviorTracker PDF/video rules untouched. Tests: 19 sequence + 74 behavioral regression green."
+    "verified_this_turn": "P13 closed. prompts.py quota profiles (quiet 30/3, medium 10/6, active 5/12) with cross-restart counters, busy/disabled before budget, corrupt state resets. Library: record_prompt persists pending with id BEFORE display; one-way pending transitions; restart sweep expires old pending (no auto-pop); mute_kind same-day ignore + persistent stop-asking with explicit un-mute; record_progress/progress_for upsert by HMAC material (JSON-typed page/video position, never completion); habit_summaries 90-day half-life ranking ≤3; behavior_context_block bounded and labeled. Route: prompt_show/prompt_state/prompts_expire_pending/prompt_mute_kind/progress_record/progress_get/habit_context; bridge init sweeps old pending. Tests: 10 prompts + 1 route roundtrip + 67 ui_server + 120 behavioral green. Test-infra note: a debugging change to the shared ui_server request harness (raise on 4xx) broke 30 tests expecting legitimate 400/403 — reverted same session. Boundaries: quota decides, nothing auto-asks yet (coordinator proactive flow unchanged); UI surfaces deferred to P16."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
