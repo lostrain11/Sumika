@@ -719,7 +719,7 @@
       "correction": "StudyNotes实际保存显式笔记正文，不是只存哈希；行为实现未开始。"
     }
   ],
-  "next_action": "P05 remainder (fresh session): the lazy-start window (recognizer model load ~seconds) races the passive grant watchdog (10s no-packet expiry) and the /audio 5s post timeout — hold/renew the grant across the lazy start (or pre-spawn the recognizer at approve), rerun E2E (tools/verify_companion_bilibili_wiring.mjs) twice green, then P06 (R6), P07, P08-P17.",
+  "next_action": "P05 remainder (fresh session): /audio posts time out (5s) during the lazy-start model load and the passive grant expires despite the 30s watchdog hold — analyze which bridge path blocks the HTTP thread during start(), fix, rerun E2E (tools/verify_companion_bilibili_wiring.mjs) twice green, then P06 (R6), P07, P08-P17.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
