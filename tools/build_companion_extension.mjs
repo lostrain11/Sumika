@@ -210,15 +210,22 @@ async function startConnection(configuration) {
     const result=await chrome.tabs.sendMessage(grant.tab_id,{type:'start',origin:grant.origin,capture_frame:grant.capture_frame});
     if(!result?.started)throw new Error('collector did not start');
     if(grant.audio) {
-      const audioStart=await chrome.tabs.sendMessage(grant.tab_id,
-        {type:'start-audio',consent:true,audio_epoch:grant.audio_epoch});
-      if(!audioStart?.started){
-        audioActive=false;lastAudioError=audioStart?.error||'start failed';
-        throw new Error('audio capture failed: '+lastAudioError);
+      // R4/F-04: the video track can buffer before its audio track appears
+      // (MSE). Retry the audio start bounded; on persistent failure the
+      // video connection stays alive and the gap stays visible in status.
+      let audioStart=null;
+      for(let attempt=0;attempt<4;attempt++){
+        audioStart=await chrome.tabs.sendMessage(grant.tab_id,
+          {type:'start-audio',consent:true,audio_epoch:grant.audio_epoch});
+        if(audioStart?.started){audioActive=true;lastAudioError=null;break;}
+        audioActive=false;
+        lastAudioError=audioStart?.error||'start failed';
+        console.log('[sumika] audio start attempt',attempt,'failed:',lastAudioError);
+        await new Promise(resolve=>setTimeout(resolve,1500));
       }
-      audioActive=true;lastAudioError=null;
+      if(!audioActive)console.log('[sumika] audio unavailable:',lastAudioError);
     }
-    lastStatus='running';return {status:lastStatus,tab_id:tab.id,audio:grant.audio===true,audio_error:lastAudioError};
+    lastStatus='running';return {status:lastStatus,tab_id:tab.id,audio:audioActive===true,audio_error:lastAudioError};
   } catch(error) {if(connection===owner)connection=null;throw error;}
 }
 async function stopConnection() {
