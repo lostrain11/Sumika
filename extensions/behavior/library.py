@@ -37,7 +37,7 @@ DEFAULT_CAPACITY = {'remind_tier_bytes': 5 * 1024 ** 3,
                     'low_free_ratio': 0.10,
                     'pause_free_bytes': 1 * 1024 ** 3}
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 FRAMES_SCHEMA = 'input-frame-v1'
 EVENT_KINDS = ('flip_burst', 'long_dwell', 'revisit', 'app_focus', 'note')
 PROMPT_STATES = ('pending', 'answered', 'dismissed', 'expired', 'superseded')
@@ -120,13 +120,17 @@ class BehaviorLibrary:
             elif int(row[0]) > SCHEMA_VERSION:
                 raise ValueError('behavior database is newer than this build')
             elif int(row[0]) < SCHEMA_VERSION:
-                # Additive migration with the journal anchor §3.1 requires;
-                # the steps are CREATE IF NOT EXISTS, safe to re-run.
+                # Additive migrations with the journal anchor §3.1 requires;
+                # the steps are CREATE/ALTER IF-missing, safe to re-run.
+                columns = {item[1] for item in
+                           db.execute('PRAGMA table_info(episodes)').fetchall()}
+                if 'session' not in columns:
+                    db.execute('ALTER TABLE episodes ADD COLUMN session TEXT')
                 db.execute('INSERT INTO management(key,value) VALUES(?,?) '
                            'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                            ('migration_1_to_2',
                             json.dumps({'state': 'complete',
-                                        'step': 'frames table'})))
+                                        'step': 'frames + episodes.session'})))
                 db.execute("UPDATE management SET value=? "
                            "WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             # Migration journal: every schema change records prepare/complete
@@ -145,8 +149,9 @@ class BehaviorLibrary:
                    'ON events(scope_user, at DESC)')
         db.execute('CREATE TABLE IF NOT EXISTS episodes ('
                    'scope_user TEXT NOT NULL, episode_id TEXT PRIMARY KEY, '
-                   'started_at TEXT, ended_at TEXT, effective_seconds REAL, '
-                   'pattern TEXT, features TEXT, detector_version TEXT)')
+                   'session TEXT, started_at TEXT, ended_at TEXT, '
+                   'effective_seconds REAL, pattern TEXT, features TEXT, '
+                   'detector_version TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS prompts ('
                    'scope_user TEXT NOT NULL, prompt_id TEXT PRIMARY KEY, '
                    'event_id TEXT, episode_id TEXT, state TEXT NOT NULL, '
@@ -514,6 +519,80 @@ class BehaviorLibrary:
             return {'status': 'deleted', 'deleted_events': deleted,
                     'deleted_feedback': feedback,
                     'behavior_epoch': int(self._meta(db, _EPOCH))}
+
+    # -- episodes and pattern candidates (P12) -------------------------------
+    def record_episode(self, episode, *, scope):
+        """Persist one finished detection episode, idempotent on episode_id."""
+        if not isinstance(episode, dict):
+            raise ValueError('episode required')
+        for key in ('episode_id', 'pattern', 'started_at', 'ended_at'):
+            if not isinstance(episode.get(key), str) or not episode[key]:
+                raise ValueError(f'episode {key} required')
+        if 'session' not in episode:
+            raise ValueError('episode session required (host-assigned)')
+        features = json.dumps(episode.get('features') or {}, ensure_ascii=False)
+        if len(features) > 2048:
+            raise ValueError('episode features exceed budget')
+        user, _ = self._scope(scope)
+        with self._lock, self._connection() as db:
+            exists = db.execute('SELECT 1 FROM episodes WHERE scope_user=? '
+                                'AND episode_id=?',
+                                (user, episode['episode_id'])).fetchone()
+            if exists:
+                return {'status': 'duplicate'}
+            db.execute('INSERT INTO episodes(scope_user,episode_id,session,'
+                       'started_at,ended_at,effective_seconds,pattern,'
+                       'features,detector_version) VALUES(?,?,?,?,?,?,?,?,?)',
+                       (user, episode['episode_id'], episode['session'],
+                        episode['started_at'], episode['ended_at'],
+                        episode.get('effective_seconds'), episode['pattern'],
+                        features, episode.get('detector_version')))
+            self._bump_revision(db)
+            return {'status': 'recorded', 'episode_id': episode['episode_id']}
+
+    def pattern_candidates(self, signature, *, scope):
+        """Support counts for one signature: distinct episodes and distinct
+        real sessions (the host's session field decides, never the target)."""
+        user, _ = self._scope(scope)
+        with self._connection() as db:
+            row = db.execute(
+                'SELECT COUNT(*), COUNT(DISTINCT session) FROM episodes '
+                'WHERE scope_user=? AND pattern=?',
+                (user, signature)).fetchone()
+            confirmed = db.execute(
+                'SELECT active FROM patterns WHERE scope_user=? AND '
+                'signature=?', (user, signature)).fetchone()
+        return {'episodes': row[0] or 0, 'sessions': row[1] or 0,
+                'confirmed': bool(confirmed and confirmed[0])}
+
+    def promote_pattern(self, signature, *, scope, derived_version,
+                        supports=None):
+        """Record a candidate pattern (active=0 until a user confirms it)."""
+        user, _ = self._scope(scope)
+        pattern_id = hashlib.sha256(
+            f'{user}|{signature}'.encode('utf8')).hexdigest()[:24]
+        with self._lock, self._connection() as db:
+            exists = db.execute('SELECT 1 FROM patterns WHERE scope_user=? '
+                                'AND pattern_id=?',
+                                (user, pattern_id)).fetchone()
+            if exists:
+                return {'status': 'duplicate'}
+            db.execute('INSERT INTO patterns(scope_user,pattern_id,signature,'
+                       'active,supports,sample_count,derived_version) '
+                       'VALUES(?,?,?,?,?,?,?)',
+                       (user, pattern_id, signature, 0,
+                        json.dumps(supports or []), len(supports or []),
+                        derived_version))
+            self._bump_revision(db)
+            return {'status': 'promoted', 'pattern_id': pattern_id}
+
+    def confirmed_patterns(self, *, scope):
+        user, _ = self._scope(scope)
+        with self._connection() as db:
+            rows = db.execute('SELECT signature FROM patterns WHERE '
+                              'scope_user=? AND active=1',
+                              (user,)).fetchall()
+        return [row[0] for row in rows]
 
     # -- input frames (P11) ---------------------------------------------------
     def record_frames(self, batch, *, scope):
