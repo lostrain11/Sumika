@@ -934,8 +934,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p10_done_persistent_permission_and_foreground_rebind",
-    "current_delivery_package": "P11 Raw Input聚合 (R11, behavior-memory-plan §2.2/2.3: input_features.py 纯函数 + windows_input_worker.py + input_process.py, 安装版 desktop Python) — next. P10 closed.",
+    "status": "p11_done_raw_input_aggregation",
+    "current_delivery_package": "P12 行为检测/通用序列 (R12, behavior-memory-plan §4.1) — next per the frozen order (P10/P11 closed). Open shelved: PDF paste/point-region fallback UI.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -957,11 +957,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P11 per R11: Raw Input薄适配（RegisterRawInputDevices INPUTSINK、WM_INPUT、不hook不吞键、VK/scan瞬时归类不落盘）、InputFeatureFrame 1秒帧/白名单快捷键/网格/16KiB/120帧队列、每10秒或256帧事务落盘、焦点探针IsPassword限频、缺口隔离停通道。Open shelved: PDF paste fallback UI. Low priority: PDF probe TextPattern2 round.",
+    "next_action": "P12 per R12: 有效活动与规则（重叠不刷次数、freshness）、通用序列检测，写 P08 行为库 episodes/patterns 域。Open shelved: PDF paste fallback UI (user 2026-10-14). Low priority: PDF probe TextPattern2 round. Real keystroke soak for P11 frames remains user-gated per the plan.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P10 closed. BehaviorPermissions inside the behavior root: missing dir/corrupt file fail closed (never relocated/recreated), revision-guarded switches (recording/use_memory/questions/startup_resume), pause persists and never auto-resumes, revoke is terminal, own-process exclusions irremovable, old one-shot consents do not migrate (defaults grant nothing). Startup rebinding: fresh current-foreground identity via GetForegroundWindow + validated availability + process creation; paused/ungranted permissions decided before touching the OS; excluded images fail closed. Route: permission_status/save/pause/resume/revoke/exclusion_add/exclusion_remove/startup_rebind. The behavior sink persists only under the saved recording permission. Tests: 10 permission + 1 real-server route roundtrip + 34 P08/P09 suites green. Boundaries: settings-page pause/resume controls deferred to the UI package (coverage-table step); no hardware foreground walk; Raw Input is P11."
+    "verified_this_turn": "P11 closed. input_features.py (pure): classification, shortcut whitelist, 16×16 grids, interval buckets, bursts, 32-op merge cap, 16KiB budget with ordered shrink (also caps unbounded drag lists), password-pause clearing, coarse-coverage marking. windows_input_worker.py: hidden window + RegisterRawInputDevices keyboard/mouse INPUTSINK (NULL target — explicit target fails ERROR_INVALID_PARAMETER on current Windows, verified by bisection), WM_INPUT parsed to anonymous counts in the callback, foreground WinEventHook seals frames immediately, stdin stop watcher posts WM_QUIT to the PUMP thread id, bounded flush. input_process.py: desktop-runtime spawn, 120-frame/1MiB bounded queue (oldest dropped — the frame-bound-only spin found by test), 10s/256-frame transactional commits into the library frames table, failure isolation, RLock deadlock fix. Library schema v2: additive frames table with journal anchor, record_frames idempotent on (scope, worker_epoch, sequence). Tests: 12 pure + 6 parent/smoke (REAL worker start→idle→stop against the desktop runtime, registration verified, no keys pressed) + 68 behavioral regression green. Boundaries: real keystroke soak user-gated per the plan; focus probe not exercised without real password focus; frames product UI is P16."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/plan.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

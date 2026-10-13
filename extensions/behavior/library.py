@@ -37,7 +37,8 @@ DEFAULT_CAPACITY = {'remind_tier_bytes': 5 * 1024 ** 3,
                     'low_free_ratio': 0.10,
                     'pause_free_bytes': 1 * 1024 ** 3}
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+FRAMES_SCHEMA = 'input-frame-v1'
 EVENT_KINDS = ('flip_burst', 'long_dwell', 'revisit', 'app_focus', 'note')
 PROMPT_STATES = ('pending', 'answered', 'dismissed', 'expired', 'superseded')
 FEEDBACK_VERDICTS = ('confirm', 'correct', 'ignore', 'mute')
@@ -118,6 +119,16 @@ class BehaviorLibrary:
                            (_KEY, secrets.token_hex(32)))
             elif int(row[0]) > SCHEMA_VERSION:
                 raise ValueError('behavior database is newer than this build')
+            elif int(row[0]) < SCHEMA_VERSION:
+                # Additive migration with the journal anchor §3.1 requires;
+                # the steps are CREATE IF NOT EXISTS, safe to re-run.
+                db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                           'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                           ('migration_1_to_2',
+                            json.dumps({'state': 'complete',
+                                        'step': 'frames table'})))
+                db.execute("UPDATE management SET value=? "
+                           "WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             # Migration journal: every schema change records prepare/complete
             # here before touching user tables (idempotent, per the plan).
             self._reconcile_migration(db)
@@ -156,6 +167,11 @@ class BehaviorLibrary:
                    'source TEXT, at TEXT NOT NULL)')
         db.execute('CREATE INDEX IF NOT EXISTS feedback_event '
                    'ON feedback(scope_user, event_id)')
+        db.execute('CREATE TABLE IF NOT EXISTS frames ('
+                   'scope_user TEXT NOT NULL, worker_epoch INTEGER NOT NULL, '
+                   'sequence INTEGER NOT NULL, at TEXT NOT NULL, '
+                   'frame TEXT NOT NULL, PRIMARY KEY(scope_user, worker_epoch, '
+                   'sequence))')
 
     # -- capacity guard (§3.2) -----------------------------------------------
     def _usage_bytes(self):
@@ -498,6 +514,42 @@ class BehaviorLibrary:
             return {'status': 'deleted', 'deleted_events': deleted,
                     'deleted_feedback': feedback,
                     'behavior_epoch': int(self._meta(db, _EPOCH))}
+
+    # -- input frames (P11) ---------------------------------------------------
+    def record_frames(self, batch, *, scope):
+        """Transactional InputFeatureFrame persistence, idempotent on
+        (scope, worker_epoch, sequence): the same frame replays as a no-op,
+        a changed frame is rejected like any event-id reuse."""
+        if not isinstance(batch, list) or not batch or len(batch) > 256:
+            raise ValueError('bounded frame batch required')
+        user, _ = self._scope(scope)
+        prepared = []
+        for frame in batch:
+            if not isinstance(frame, dict) or frame.get('schema') != FRAMES_SCHEMA:
+                raise ValueError('unknown frame schema')
+            for key in ('worker_epoch', 'sequence'):
+                if type(frame.get(key)) is not int or frame[key] < 0:
+                    raise ValueError(f'frame {key} required')
+            encoded = json.dumps(frame, ensure_ascii=False,
+                                 separators=(',', ':'))
+            if len(encoded.encode('utf8')) > 16 * 1024:
+                raise ValueError('frame exceeds the 16KiB budget')
+            prepared.append((frame['worker_epoch'], frame['sequence'],
+                             frame.get('observed_to'), encoded))
+        with self._lock, self._connection() as db:
+            for worker_epoch, sequence, at, encoded in prepared:
+                existing = db.execute(
+                    'SELECT frame FROM frames WHERE scope_user=? AND '
+                    'worker_epoch=? AND sequence=?',
+                    (user, worker_epoch, sequence)).fetchone()
+                if existing is not None:
+                    if existing[0] != encoded:
+                        raise ValueError('frame replay with different content')
+                    continue
+                db.execute('INSERT INTO frames(scope_user,worker_epoch,'
+                           'sequence,at,frame) VALUES(?,?,?,?,?)',
+                           (user, worker_epoch, sequence, at, encoded))
+        return {'status': 'recorded', 'frames': len(prepared)}
 
     # -- root migration (§3.2) -----------------------------------------------
     @staticmethod
