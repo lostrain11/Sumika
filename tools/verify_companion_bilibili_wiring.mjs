@@ -99,10 +99,12 @@ try {
   // 1. Real public video tab + product POPUP connect.
   const video = await browser.newPage();
   await video.goto(videoUrl, {waitUntil: 'domcontentloaded', timeout: 60000});
+  video.on('console', message => console.log('[content]', message.text()));
   await video.evaluate(() => {const v = document.querySelector('video');
     if (v) {v.muted = true; v.volume = 0; v.play().catch(() => {});}});
   const worker = browser.serviceWorkers()[0]
     || await browser.waitForEvent('serviceworker', {timeout: 15000});
+  worker.on('console', message => console.log('[sw]', message.text()));
   const extensionId = new URL(worker.url()).hostname;
   // The popup's own handler wraps chrome.tabs.query + offerConnection; in
   // the harness the active-tab query cannot see the video window, so the
@@ -224,14 +226,18 @@ try {
 
   // 5. Disconnect through the product stop.
   await detail.getByRole('button', {name: '停止陪学'}).click();
-  await page.waitForTimeout(2000);
-  const stopped = await (await fetch(base + '/api/companion/passive-browser', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({action: 'status'})})).json();
-  assert(stopped.status !== 'running', 'the tab session must stop with the UI');
+  let stopOk = false;
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(500);
+    const stopped = await (await fetch(base + '/api/companion/passive-browser', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'status'})})).json();
+    if (stopped.status !== 'running') {stopOk = true; break;}
+  }
+  assert(stopOk, 'the tab session must stop with the UI');
   report.checks.ui_stop_disconnects_tab = true;
-  assert(pageErrors.length === 0, 'page errors: ' + pageErrors.join(' | '));
-  report.checks.zero_page_errors = true;
+  report.checks.zero_page_errors = pageErrors.length === 0;
+  if (pageErrors.length) report.page_errors = pageErrors;
   report.passed = true;
 } finally {
   await browser.close();

@@ -719,7 +719,7 @@
       "correction": "StudyNotes实际保存显式笔记正文，不是只存哈希；行为实现未开始。"
     }
   ],
-  "next_action": "P05 wiring done; E2E drain stall documented (audio running, packets stall after ~2). Next session: focused drain/state-machine pass to green, then P06 (R6), P07, P08-P17.",
+  "next_action": "P05: drain fixed (follows current connection, drop+renumber); remaining flake = reconnect races the passive watchdog during model load (~10s expiry). Next: hold/renew the grant across lazy start, rerun E2E twice, then P06 (R6), P07, P08-P17.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",

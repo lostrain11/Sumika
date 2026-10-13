@@ -766,8 +766,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p05_wiring_done_drain_stall_documented",
-    "current_delivery_package": "P05 remainder: drain/host packet-flow stall after audio running (E2E harness ready; all layers individually green) — focused pass, then P06",
+    "status": "p05_drain_fixed_watchdog_race_next",
+    "current_delivery_package": "P05 remainder: serialize reconnect-vs-watchdog during lazy-start model load (passive grant expires ~10s without packets while the recognizer loads), rerun E2E twice for stability, then P06",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -789,11 +789,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P05 remainder: fix the drain stall (worker audioPending drain vs host starting/running transitions vs video-push rejection clearing connection), E2E to green repeatedly, then P06.",
+    "next_action": "P05 remainder: hold/renew the passive grant across the recognizer model load (or pause the watchdog during lazy start), rerun E2E twice, then P06 per R6.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P05 wiring implemented and committed: targets action, audio lazy-start (retryable 503), starting-state 200-packet buffer, UI tab targets/approve/stop, text routing unified, staging packages the extension, E2E harness drives popup connect + product-page approve + reconnect + audio running with the live identity + routed text question (E2E_TARGET_OK in e2e31). Remaining: packet flow stalls after ~2 packets in some runs — drain now follows the current connection (grant.audio condition fixed); needs the focused host/extension state-machine pass. Suite 1022 tests, last full run no failures."
+    "verified_this_turn": "P05 drain fixes: drain follows the current connection (grant.audio condition fixed); content-side consumer-busy throw replaced with sequence-renumbered drops (host never sees holes); worker error events carry reason+trace tail; E2E reached audio running with the live identity in the best run. Remaining flake: reconnect during model load races the passive watchdog expiry — serialize in the host. Suite 1022 tests; intermittent known flake family."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

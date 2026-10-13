@@ -47,19 +47,24 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       await audioCapture?.stop();
       currentAudioEpoch=message.audio_epoch;
       let restartTimer=null;
+      let pendingSends=0;let pendingDrops=0;let sendSequence=0;
       audioCapture=createAudio({consent:true,origin:location.origin,
         readSnapshot:collect,workletUrl:chrome.runtime.getURL('player-pcm-worklet.js'),
         onPcm:packet=>{
-          if(audioBusy)throw Error('audio consumer busy');
-          audioBusy=true;
-          const done=()=>{audioBusy=false;};
-          // Bind the verdict to the capture that sent this packet: a stale
-          // rejection arriving after a rotation must not stop the new one.
+          // P05: during the recognizer's model load the in-flight window
+          // fills; a busy consumer DROPS this packet and renumbers the next
+          // one so the host never sees a sequence hole (graceful audio
+          // degradation instead of killing the capture).
+          if(audioBusy || pendingSends>=4){pendingDrops++;return;}
+          audioBusy=true;pendingSends++;
+          const done=()=>{audioBusy=false;pendingSends--;};
           const mine=audioCapture;
-          send({type:'audio-packet',sequence:packet.sequence,sample_offset:packet.sample_offset,
+          const sequence=sendSequence++;
+          send({type:'audio-packet',sequence:sequence,sample_offset:packet.sample_offset,
                 media_identity:packet.media_identity,pcm_base64:btoa(String.fromCharCode(...new Uint8Array(packet.pcm)))})
             .then(result=>{done();if(result?.accepted===false)mine?.stop('host_rejected');})
-            .catch(()=>{done();mine?.stop('send_failed');});
+            .catch(()=>{done();pendingSends--;console.log('[sumika-audio] send failed');
+                        mine?.stop('send_failed');});
         }});
       await audioCapture.start();
       console.log('[sumika-audio] capture started, epoch', currentAudioEpoch);
@@ -115,7 +120,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
 })();`);
   await writeFile(join(directory,'worker.js'),`
 let connection=null;
-let lastStatus='idle';let lastAudioError=null;let audioPending;let draining=false;
+let lastStatus='idle';let lastAudioError=null;let audioPending;let draining=false;let audioDrainRetries=0;
 let requestedConnection=null;
 let audioActive=false;
 // One loopback bridge, one approved tab. The popup is the only entry; page
@@ -261,7 +266,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       pcm_base64:message.pcm_base64});
     respond({accepted:true});
     if(!draining){
-      draining=true;
+      draining=true;audioDrainRetries=0;
       (async()=>{
         while(connection && connection.grant && connection.grant.audio && audioPending.length){
           const pending=audioPending[0];
@@ -272,12 +277,17 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
               sample_rate:16000,channels:1,format:'pcm_s16le',
               sample_offset:pending.sample_offset,pcm_base64:pending.pcm_base64});
             if(result?.status!=='accepted'){audioPending.length=0;
-              audioActive=false;lastAudioError='host_rejected';break;}
+              audioActive=false;lastAudioError='host_rejected';
+              console.log('[sumika] audio packet rejected:',JSON.stringify(result));break;}
             audioPending.shift();
           } catch(error) {
-            if(String(error?.message||'').includes('recognizer starting')){
+            const text=String(error?.message||'');
+            if(text.includes('recognizer starting')){
+              if(audioDrainRetries++ % 5 === 0)
+                console.log('[sumika] audio drain retrying while recognizer starts');
               await new Promise(resolve=>setTimeout(resolve,400));continue;
             }
+            console.log('[sumika] audio drain failed:',text.slice(0,120));
             // A transport failure stops the audio track only; the approved
             // video connection stays alive for frames and subtitles.
             audioActive=false;lastAudioError='send_failed';
