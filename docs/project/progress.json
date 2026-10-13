@@ -816,8 +816,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p07_done_soak_green_latency_decomposition_build_receipt",
-    "current_delivery_package": "P08 行为库 (R8) — next package per the frozen order. P07 closed: hardened soak (pause-zero-new-packets, final-reference-after-every-seek, rotation-tolerant) green exit 0; recorded-sample voice latency decomposition; build receipt in package-manifest.json; shared DSH first-run fixture.",
+    "status": "p08_done_behavior_library_and_management_contract",
+    "current_delivery_package": "P09 选盘/空间/多根备份 (R9 behavior-memory-plan §3.2/§3.3) — next per the frozen order. P08 closed: behavior library (idempotent host-scoped events, bounded fields, revision-guarded mutations, confirmed deletion) + /api/manage/behavior + coordinator sink.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -839,11 +839,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P08 per R8 (行为库及管理契约: 隔离、幂等、删除) after P02. Open user decision from P06: whether to build the paste/point-region fallback UI for PDF selections (R6 allows it; new UI needs explicit user approval per AGENTS.md). Open low-priority follow-up: PDF selection probe TextPattern2/GetCaretRange round on a cooperative machine (probe code ready with watchdog).",
+    "next_action": "P09 per R9: 存储位置与容量（专用目录/owner标识/lease、5GiB档位与磁盘余量提醒、SQLITE_FULL暂停新增）、迁移 prepare→…→complete journal、多根快照 v2 roots.personal/roots.behavior、恢复重绑 locator。Open user decision: PDF paste/point-region fallback UI (shelved by user 2026-10-14, revisit on request). Low priority: PDF probe TextPattern2 round.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P07 closed. Soak green (exit 0, E:/SumikaBuild/soak-p07g.log): pause fence + pause-zero-new-packets, 3× final-reference-after-seek (20-31s bindings tracked post-seek), 315 packets, 2 transcripts, healthy track. Three real product defects fixed en route: (a) stale-epoch queued PCM posted under the new epoch tripped the sequence fence on any player flap — worker now tags/drops/clears (Node-VM test caught the never-initialized-queue crash in the clear); (b) /audio-epoch rebuilt the recognizer in the HTTP thread (~20s stall per flap) — now a background thread under the starting flag; (c) epoch-ahead packets during a rebuild 400ed (hard stop) — now a retryable 503. Soak fixture recorded a 2.5s looping video that fired player_changed ~230×/run — now a 35s lesson segment. Voice: recorded-sample tool produces the live-tool latency decomposition (停说→ASR 848-907ms, SAPI-file first-char/first-audio boundary; R-126 unchanged). Build receipt (source/inputs/generator/command/acceptance/resource-warning policy) ships in package-manifest.json; helper-level unit tests only, no full candidate build yet. Shared DSH first-run fixture (tools/lib/dsh-first-run.mjs) uses the modal product button; native entries stay. 30 targeted unit tests OK; coverage table 待P06 rows marked complete."
+    "verified_this_turn": "P08 closed. BehaviorLibrary (extensions/behavior/library.py): idempotent events (same id same payload = duplicate no-op; different payload rejected), host-only scope assignment, structurally bounded fields (raw content keys rejected), material HMAC stable and never exported, revision-guarded correct/configure/delete, confirmed deletion with explicit selection that removes events+bound feedback, expires pending prompts, deactivates patterns, bumps behavior_epoch; nothing-selected deletion is a no-op including revision. /api/manage/behavior limited action mapping through standard admission; coordinator behavior_sink persists detected episodes with stable hashed ids, failures surface as events without touching the feed. Tests: 98 green (11 library + 1 sink + 1 real-server route roundtrip + 85 regression across ui_server/session_coordinator). Boundaries: detection rules/prompts/backup/UI are later packages; no product UI reads the store yet."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

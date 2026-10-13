@@ -426,6 +426,10 @@ class Management:
     def dispatch(self, method, path, payload=None):
         parts = [unquote(p) for p in urlparse(path).path.split('/') if p]
         with self.lock:
+            if parts == ['api','manage','behavior'] and method == 'POST':
+                return self.bridge.behavior_manage(payload)
+            if parts == ['api','manage','behavior'] and method == 'GET':
+                return self.bridge.behavior_manage({'action': 'status'})
             if parts == ['api','manage','personal-data'] and method == 'GET':
                 return {'directory': str(self.bridge.settings_path.parent.resolve()),
                         'note': '迁移会保留旧目录和备份，不移动外部模型库；完成后重启生效。'}

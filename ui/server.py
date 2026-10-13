@@ -105,7 +105,8 @@ class Bridge:
             chat=self._companion_chat,
             current=lambda: self._fusion_snapshot(),
             include_images=lambda: load_settings(self.settings_path)['multimodal']['enabled'],
-            on_event=self._coordinator_event)
+            on_event=self._coordinator_event,
+            behavior_sink=self._record_behavior_event)
         self._companion = self._coordinator.service
         self._context_lock = threading.RLock()
         self._fusion = ContextFusion()
@@ -131,6 +132,10 @@ class Bridge:
         from extensions.companion.study_extras import StudyNotes
         # Explicit user notes with provenance; a separate store that the
         # memory engine never reads and screen content never fills alone.
+        from extensions.behavior.library import BehaviorLibrary
+        # P08 behavior sub-memory: local, host-scoped, idempotent events.
+        self._behavior_library = BehaviorLibrary(
+            self.settings_path.parent/'behavior'/'behavior.sqlite3')
         self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
@@ -222,6 +227,64 @@ class Bridge:
                                    + str(result.get('status', 'unknown')))
             return {'text': text}
         return self._coordinator.summarize_danmaku(summarize=summarize)
+
+    def _behavior_scope(self):
+        """Host-assigned behavior scope: the project owns the records.
+
+        Pages and model output can never name a user or confirm anything —
+        this method is the only scope source for the behavior library.
+        """
+        settings = load_settings(self.settings_path)
+        return {'user': settings['role']['project_id'], 'session': None}
+
+    def behavior_manage(self, payload):
+        """/api/manage/behavior: the limited action mapping for P08.
+
+        observe stays host-internal (the coordinator's detection feeds it);
+        this surface covers the management contract only.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError('behavior action required')
+        action = payload.get('action')
+        library = self._behavior_library
+        scope = self._behavior_scope()
+        if action == 'status':
+            return {**library.status(), 'scope': scope}
+        if action == 'list':
+            return library.list_records(scope=scope, kind=payload.get('kind'),
+                                        cursor=payload.get('cursor'),
+                                        limit=payload.get('limit', 50))
+        if action == 'context':
+            return {'context': library.context(scope, limit=3)}
+        if action == 'export':
+            return library.export(scope)
+        if action == 'feedback':
+            entry = payload.get('entry')
+            if not isinstance(entry, dict):
+                raise ValueError('feedback entry required')
+            return library.feedback(entry, scope=scope)
+        if action == 'correct':
+            return library.correct(payload.get('feedback_id'),
+                                   payload.get('corrected'), scope=scope,
+                                   revision=payload.get('revision'))
+        if action == 'delete':
+            return library.delete_records(
+                scope=scope, event_ids=payload.get('event_ids') or (),
+                kinds=payload.get('kinds') or (), before=payload.get('before'),
+                confirmed=payload.get('confirmed') is True,
+                revision=payload.get('revision'))
+        if action == 'configure':
+            return library.configure(payload.get('settings'),
+                                     revision=payload.get('revision'))
+        raise ValueError('unsupported behavior action')
+
+    def _record_behavior_event(self, event):
+        """Coordinator detection sink; persistence never breaks the feed."""
+        try:
+            self._behavior_library.observe(event, scope=self._behavior_scope())
+        except Exception as error:
+            self._coordinator_event('behavior_persist_error',
+                                    {'error': type(error).__name__})
 
     def playback_configuration(self, role_id):
         from extensions.desktop.audio_devices import env_python

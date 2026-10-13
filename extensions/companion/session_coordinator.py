@@ -87,6 +87,7 @@ class StudySessionCoordinator:
                  proactive_enabled=True, pending_ttl=180.0,
                  scheduler_thread=True, behavior_tracker=None,
                  behavior_note_cooldown=60.0, speech_fence=120.0,
+                 behavior_sink=None,
                  monotonic=time.monotonic):
         """``chat`` is the shared RoleChat callable; ``current`` projects the
         latest fused observation; ``on_event`` receives coordinator/UI events.
@@ -101,6 +102,12 @@ class StudySessionCoordinator:
         self._behavior = behavior_tracker or ReadingBehaviorTracker()
         if not isinstance(self._behavior, ReadingBehaviorTracker):
             raise TypeError('behavior tracker required')
+        # P08: optional persistence sink for detected behavior episodes; the
+        # host owns scope and idempotency, and a sink failure never touches
+        # the feed.
+        if behavior_sink is not None and not callable(behavior_sink):
+            raise ValueError('behavior sink must be callable')
+        self._behavior_sink = behavior_sink
         # The published service bundle stays authoritative for scheduling; the
         # host projection is only a backstop for paths that bypass publish.
         self._perception = FusionPerception(
@@ -212,6 +219,24 @@ class StudySessionCoordinator:
                     else:
                         self._queued_behavior_report = None
         if report is not None:
+            if self._behavior_sink is not None:
+                try:
+                    import hashlib as _hashlib
+                    self._behavior_sink({
+                        # Bounded stable id: the same detection re-fed must
+                        # stay idempotent in the library.
+                        'event_id': _hashlib.sha1(
+                            f'{observation_id}|{report["kind"]}'.encode('utf8')
+                        ).hexdigest()[:24],
+                        'kind': report['kind'],
+                        'source': 'reading-tracker',
+                        'target': observation.target[:256],
+                        'features': {key: value for key, value in report.items()
+                                     if key != 'kind'
+                                     and isinstance(value, (str, int, float, bool))},
+                    })
+                except Exception:
+                    pass
             self._maybe_behavior_note(report)
 
     def _maybe_behavior_note(self, report):

@@ -599,6 +599,40 @@ class UIServerTests(unittest.TestCase):
         self.server.server_close()
         self._tmp.cleanup()
 
+    def test_behavior_manage_route_roundtrip(self):
+        # P08: the manage surface maps only the limited actions; the library
+        # contract (isolation, idempotency, confirmed deletion) is enforced
+        # beneath it.
+        status, state = self.request("/api/manage/behavior")
+        self.assertEqual(status, 200)
+        self.assertEqual(state["schema_version"], 1)
+        self.assertTrue(state["enabled"])
+        revision = state["revision"]
+        _, recorded = self.request("/api/manage/behavior", method="POST", body={
+            "action": "feedback",
+            "entry": {"feedback_id": "f-route", "user_event_id": "host-1",
+                      "verdict": "confirm"}})
+        self.assertEqual(recorded["status"], "recorded")
+        _, listing = self.request("/api/manage/behavior", method="POST", body={
+            "action": "list", "limit": 100})
+        self.assertEqual(listing["records"], [])
+        # The feedback write bumped the revision; the stale one must conflict.
+        try:
+            self.request("/api/manage/behavior", method="POST", body={
+                "action": "delete", "confirmed": True, "revision": revision,
+                "kinds": ["flip_burst"]})
+            raise AssertionError('stale revision must not delete')
+        except urllib.error.HTTPError as error:
+            self.assertEqual(error.code, 400)
+        _, fresh = self.request("/api/manage/behavior")
+        _, deleted = self.request("/api/manage/behavior", method="POST", body={
+            "action": "delete", "confirmed": True,
+            "revision": fresh["revision"], "kinds": ["flip_burst"]})
+        self.assertEqual(deleted["status"], "nothing_selected")
+        status2, after = self.request("/api/manage/behavior")
+        # A nothing-selected deletion changed nothing: no revision bump.
+        self.assertEqual(after["revision"], fresh["revision"])
+
     def request(self, path, *, method="GET", body=None):
         headers = {"Content-Type": "application/json"}
         if method not in ('GET', 'HEAD'):

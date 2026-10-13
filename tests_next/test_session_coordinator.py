@@ -375,6 +375,23 @@ class BehaviorNoteTests(unittest.TestCase):
         if thread is not None:
             thread.join(2)
 
+    def test_behavior_sink_receives_bounded_episode_events(self):
+        """P08: detected episodes persist through the injected sink with
+        bounded host-side fields; a sink failure never breaks the feed."""
+        seen = []
+        self.coordinator._behavior_sink = seen.append
+        self.flip_to(1, 2, 3, 4, 5, 6, 7, 8)
+        events = [event for event in seen if event['kind'] == 'flip_burst']
+        self.assertTrue(events, 'a flip burst must reach the behavior sink')
+        first = events[0]
+        self.assertEqual(first['source'], 'reading-tracker')
+        self.assertLessEqual(len(first['event_id']), 256)
+        self.assertIsInstance(first['features'].get('flips'), int)
+        # The feed tolerates a missing sink (persistence is optional).
+        self.coordinator._behavior_sink = None
+        self.flip_to(9)
+        self.assertEqual(len(seen), len(events))
+
     def test_fast_flipping_triggers_one_behavior_note(self):
         self.coordinator.publish_observation(self.page_bundle(1))
         self.scheduler.notify_user_activity(0)
