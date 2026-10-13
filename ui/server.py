@@ -1604,6 +1604,11 @@ def _handler(bridge):
                         # seconds); the sender retries while it is starting.
                         if (not bridge._browser_audio.status()['alive']
                                 and grant.get('audio') is True):
+                            try:
+                                bridge._passive_browser.hold_watchdog(
+                                    token, self.headers.get('Origin'), 30)
+                            except PermissionError:
+                                pass
                             bridge.start_browser_audio_from_packet(grant, body)
                             return self._json(503, {
                                 'error': 'browser audio recognizer starting',

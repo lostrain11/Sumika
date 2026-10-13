@@ -127,6 +127,26 @@ class PassiveBrowserTests(unittest.TestCase):
             clock=lambda:self.t,utcnow=lambda:self.now,watchdog=False)
         self.grant = self.connection.start(SELECTION)
 
+    def test_watchdog_hold_suspends_no_packet_expiry_and_expires_still_enforced(self):
+        # R4/P05: the no-packet watchdog is suspendable while the tab-audio
+        # recognizer loads; the hard expires deadline still applies.
+        self.assertIn(self.connection.status()['status'], ('running', 'starting'))
+        # The hold requires the audio consent flag on the grant.
+        self.connection.start(dict(SELECTION, action='start', audio=True))
+        token = self.connection._grant['token']
+        self.connection.hold_watchdog(token, ORIGIN, 60)
+        self.t += 60
+        self.assertEqual(self.connection.status()['status'], 'running')
+        # The hard expires deadline (clock+1800) still tears the grant down.
+        self.t += 1800
+        self.assertEqual(self.connection.status()['status'], 'stopped')
+
+    def test_hold_requires_active_audio_grant_and_is_bounded(self):
+        with self.assertRaises(PermissionError):
+            self.connection.hold_watchdog('no-token', ORIGIN, 30)
+        with self.assertRaises(ValueError):
+            self.connection.hold_watchdog(self.grant['token'], ORIGIN, 500)
+
     def receive(self, value=None, token=None, origin=ORIGIN):
         return self.connection.receive(token or self.grant['token'],origin,value or packet(self.now))
 
@@ -303,3 +323,12 @@ class PassiveBrowserHTTPTests(unittest.TestCase):
             result=self.bridge._passive_browser.receive(grant['token'],ORIGIN,value)
             self.assertEqual(result['status'],'updated')
             self.assertEqual(self.bridge._companion.latest.text,f'lesson {sequence}')
+
+
+    def test_hold_requires_active_audio_grant_and_is_bounded(self):
+        connection = PassiveBrowserConnection(lambda: None, lambda: None,
+                                              clock=lambda: 0, watchdog=False)
+        with self.assertRaises(PermissionError):
+            connection.hold_watchdog('no-token', ORIGIN, 30)
+        with self.assertRaises(ValueError):
+            connection.hold_watchdog('no-token', ORIGIN, 500)

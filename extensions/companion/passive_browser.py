@@ -163,7 +163,8 @@ class PassiveBrowserConnection:
                 tab_id=tab, origin=origin, capture_frame=capture, audio=audio,
                 audio_epoch=secrets.token_hex(8) if audio else None,
                 target=f'browser-passive:{secrets.token_hex(16)}:tab:{tab}',
-                expires=self.clock()+1800, sequence=-1, observed_at=None, received=None, signature=None, paused=False)
+                expires=self.clock()+1800, sequence=-1, observed_at=None, received=None, signature=None, paused=False,
+                watchdog_hold_until=0)
             if self._watchdog_enabled:
                 wake = self._wake = threading.Event()
                 threading.Thread(target=self._watch, args=(wake,),daemon=True,
@@ -179,6 +180,23 @@ class PassiveBrowserConnection:
                 return None
             return {key: grant[key] for key in ('token', 'extension_id', 'tab_id',
                                                 'origin', 'audio', 'audio_epoch')}
+
+    def hold_watchdog(self, token, extension_origin, seconds=30):
+        """Suspend the no-packet watchdog while a consumer starts (the
+        tab-audio recognizer's model-load window). The hard expires deadline
+        still applies; the hold is bounded and per-connection."""
+        if type(seconds) not in (int, float) or not 0 < seconds <= 120:
+            raise ValueError('bounded watchdog hold required')
+        with self._lock:
+            self._expire()
+            grant = self._grant
+            if (grant is None or grant['paused'] or not grant['audio']
+                    or not isinstance(token, str)
+                    or not hmac.compare_digest(token, grant['token'])
+                    or extension_origin != 'chrome-extension://' + grant['extension_id']):
+                raise PermissionError('browser audio grant unavailable')
+            grant['watchdog_hold_until'] = self.clock() + seconds
+            return {'status': 'held', 'seconds': seconds}
 
     def rotate_audio_epoch(self, token, extension_origin):
         """Mint a fresh audio epoch after seek/rate/pause invalidated capture.
@@ -221,8 +239,16 @@ class PassiveBrowserConnection:
     def _expire(self):
         if self._grant is not None:
             grant = self._grant
-            if (self.clock() >= grant['expires'] or (not grant['paused']
-                    and grant['received'] is not None and self.clock()-grant['received'] >= 10)):
+            if self.clock() >= grant['expires']:
+                self.stop()
+                return
+            # The 10s no-packet watchdog is suspended while a consumer holds
+            # it (the tab-audio recognizer's model-load window): the hard
+            # expires deadline still tears the grant down eventually.
+            if self.clock() < grant.get('watchdog_hold_until', 0):
+                return
+            if (not grant['paused'] and grant['received'] is not None
+                    and self.clock()-grant['received'] >= 10):
                 self.stop()
 
     def pause(self):
@@ -243,7 +269,8 @@ class PassiveBrowserConnection:
             # audio epoch fence transcripts from before the pause.
             old_token = self._grant['token']
             self._grant.update(token=secrets.token_urlsafe(32), paused=False,
-                               sequence=-1, observed_at=None, received=None, signature=None)
+                               sequence=-1, observed_at=None, received=None, signature=None,
+                               watchdog_hold_until=0)
             if self._grant['audio']:
                 self._grant['audio_epoch'] = secrets.token_hex(8)
             for request in self._requests.values():
