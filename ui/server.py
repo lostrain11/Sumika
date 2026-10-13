@@ -112,6 +112,8 @@ class Bridge:
         self._voice_events_lock = threading.Lock()
         self._voice_events = deque(maxlen=64)
         self._voice_event_sequence = 0
+        self._browser_audio_starting = False
+        self._browser_audio_start_lock = threading.Lock()
         self._application_audio = ApplicationAudioProcess(root=UI_ROOT.parent,
             on_observation=self._companion_audio_observe, on_clear=self._companion_audio_clear)
         self._microphone = MicrophoneProcess(root=UI_ROOT.parent,
@@ -843,9 +845,12 @@ class Bridge:
             # Browser tab audio relay (P3): the companion detail surfaces the
             # relay's real state and gap reasons alongside the process track.
             browser_audio = self._browser_audio.status()
+            # P05: the passive browser session (tab connection) is part of
+            # the authoritative status so text questions can route to it.
+            passive = self._passive_browser.status()
             with self._voice_events_lock:
                 return {**status, 'capture':capture, 'application_audio':application_audio,
-                        'browser_audio':browser_audio,
+                        'browser_audio':browser_audio, 'passive':passive,
                         'cursor':self._voice_event_sequence,
                         'events':[dict(event) for event in self._voice_events if event['sequence'] > after]}
         if action in ('stop', 'pause'):
@@ -1164,6 +1169,12 @@ class Bridge:
         if not isinstance(payload, dict):
             raise ValueError('passive browser action required')
         action = payload.get('action')
+        if action == 'targets':
+            # P05: the companion target selector lists Bilibili tabs (pending
+            # connection requests and the live connection) next to windows.
+            return {'pending': self._passive_browser.pending_connections(),
+                    'passive': self._passive_browser.status(),
+                    'audio': self._browser_audio.status()}
         if action == 'pending':
             return {'requests':self._passive_browser.pending_connections()}
         if action == 'approve':
@@ -1180,6 +1191,65 @@ class Bridge:
                 self._browser_audio.stop()
             return getattr(self._passive_browser, action)()
         raise ValueError('invalid passive browser action')
+
+    def start_browser_audio_from_packet(self, grant, body):
+        """P05: start the tab-audio recognizer from the first relayed packet.
+
+        Model load takes seconds, so the packet's HTTP reply is a retryable
+        503 and the spawn happens once, in a background thread, using the
+        packet's own media identity. A failed start surfaces through the
+        track's error status (F-03), never silently.
+        """
+        with self._browser_audio_start_lock:
+            if self._browser_audio_starting:
+                return
+            self._browser_audio_starting = True
+        def run():
+            try:
+                self._browser_audio_starting_body(grant, body)
+            except Exception as error:
+                self._companion_event('browser_audio_start_failed',
+                                      {'error': str(error)})
+            finally:
+                with self._browser_audio_start_lock:
+                    self._browser_audio_starting = False
+        threading.Thread(target=run, name='sumika-browser-audio-lazy',
+                         daemon=True).start()
+
+    def _browser_audio_starting_body(self, grant, body):
+        import base64 as _b64
+        from extensions.companion.contracts import ObservationBundle
+        from datetime import datetime, timezone as _tz
+        from extensions.capabilities import CapabilityStore
+        payload = body if isinstance(body, dict) else json.loads(body)
+        identity = payload.get('media_identity')
+        # The audio grant view carries no target; the live passive
+        # connection's target is the authoritative one.
+        target = (self._passive_browser.status().get('target')
+                  or grant['origin'] + ':' + str(grant['tab_id']))
+        observation = ObservationBundle.now(
+            source='application-audio-transcript', target=target,
+            valid=True, text='',
+            metadata={'media_identity': identity} if identity else {})
+        voice = load_settings(self.settings_path)['voice']
+        if not voice['enabled'] or not voice.get('asr_model'):
+            raise PermissionError('enable recognition and configure its model')
+        model = Path(voice['asr_model'])
+        if not model.is_absolute():
+            model = self.workbench.root/model
+        if not self.capability_database:
+            raise PermissionError('ASR capability not configured')
+        store = CapabilityStore(self.capability_database)
+        try:
+            selected_asr = store.resolve('asr')
+            if selected_asr['provider'] not in ('vosk', 'sherpa-onnx-sensevoice'):
+                raise PermissionError('selected browser audio ASR provider is not connected')
+        finally:
+            store.close()
+        self._browser_audio.start(target=target,
+            identity=observation.metadata.get('media_identity'),
+            model=model, capabilities=self.capability_database, asr=selected_asr,
+            audio_epoch=grant['audio_epoch'])
 
     def companion_browser_audio(self, payload):
         """Approved browser tab audio into the isolated recognizer (Sumika side)."""
@@ -1528,8 +1598,18 @@ def _handler(bridge):
                         grant = bridge._passive_browser.audio_grant()
                         if grant is None:
                             raise PermissionError('browser audio grant unavailable')
+                        body = self._body()
+                        # P05 lazy start: the first relayed packet spawns the
+                        # recognizer in a background thread (model load takes
+                        # seconds); the sender retries while it is starting.
+                        if (not bridge._browser_audio.status()['alive']
+                                and grant.get('audio') is True):
+                            bridge.start_browser_audio_from_packet(grant, body)
+                            return self._json(503, {
+                                'error': 'browser audio recognizer starting',
+                                'retry': True})
                         return self._json(200, bridge._browser_audio.receive(
-                            token, self.headers.get('Origin'), self._body(), grant=grant))
+                            token, self.headers.get('Origin'), body, grant=grant))
                     return self._json(200, bridge._passive_browser.receive(token,
                         self.headers.get('Origin'), self._body()))
                 except PermissionError as error:

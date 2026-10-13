@@ -19,6 +19,10 @@ from .application_audio_worker import require_asr, snapshot_media_identity
 
 PACKET_BYTES = 3200
 QUEUE_LIMIT = 20
+# While a freshly spawned recognizer is still loading, relayed packets
+# buffer generously (the model load takes seconds); the 20-packet live bound
+# applies once the track is running.
+STARTING_QUEUE_LIMIT = 200
 
 
 class PassiveBrowserAudio:
@@ -201,7 +205,8 @@ class PassiveBrowserAudio:
                 raise ValueError('invalid browser audio encoding') from error
             if len(pcm) != PACKET_BYTES:
                 raise ValueError('browser audio packet must be exactly 100ms')
-            if len(self._queue) >= QUEUE_LIMIT:
+            limit = QUEUE_LIMIT if self._state == 'running' else STARTING_QUEUE_LIMIT
+            if len(self._queue) >= limit:
                 self._fail('browser audio queue overflow')
                 raise RuntimeError('browser audio queue overflow; track stopped')
             self._queue.append(pcm)

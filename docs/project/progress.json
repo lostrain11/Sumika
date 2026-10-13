@@ -816,8 +816,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p04_done_p05_next",
-    "current_delivery_package": "P05: Bilibili UI wiring + extension in-package (F-01)",
+    "status": "p05_partial_wiring_done_e2e_drain_stall_next",
+    "current_delivery_package": "P05 remainder: fix the extension drain-loop stall after reconnect (transcripts stall after first accepted packet), then re-run the wiring E2E to green",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -839,11 +839,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P05 (F-01) per repair-and-acceptance-plan.md R5.",
+    "next_action": "Fix the drain-loop stall, E2E to green, then P06 per repair-and-acceptance-plan.md R6.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P04 COMPLETE 2026-10-12: F-03 fixed (gap stops track with persistent structured reason; stop calls on_clear once; idempotent; errors persist until explicit start); F-04 fixed (extension checks start-audio reply and fails loudly; auto-rotation restricted to player_changed; transport rejections stop and surface; 5s unconditional kick removed); perception start/shutdown explicitly stop browser audio. Node-VM arbitration test drives the built worker. Suite 1021 OK (21 skips)."
+    "verified_this_turn": "P05 wiring implemented 2026-10-12: targets action; audio lazy-start with retryable 503; starting-state 200-packet buffer; UI tab targets + approve + stop flow; text routing unified to companion history; staging packages the extension (42,375-file candidate verified). E2E: connect/pending/UI-approve/reconnect all pass through product paths; audio track reaches running with the live identity but packet flow stalls (drain-loop owner rebinding suspected). Suite 1022 tests, intermittent known flake family; last full run no failures."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

@@ -8,7 +8,8 @@ from pathlib import Path, PurePosixPath
 REQUIRED = ('Sumika.exe', 'tools/start_sumika.ps1', 'tools/start_ui_bridge.ps1',
             'ui/server.py', 'sumika_next/cli.py', 'runtime/dsh/release.json')
 ALLOWED_ROOTS = frozenset(('Sumika.exe', 'SumikaPet.exe', 'package-manifest.json', 'tools', 'ui',
-                         'extensions', 'sumika_next', 'runtime', 'licenses'))
+                         'extensions', 'sumika_next', 'runtime', 'licenses',
+                         'browser-extensions'))
 FORBIDDEN_PARTS = frozenset(('.sumika-next', '.sumika-continuity', '.git',
                              '__pycache__', '.pytest_cache', '.env', 'env.ps1'))
 INVALID_NAME_CHARS = frozenset('<>:"/\\|?*')

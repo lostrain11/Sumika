@@ -159,6 +159,30 @@ class EpochRebuildTests(unittest.TestCase):
             self.assertEqual(audio.status()['status'], 'running')
             audio.stop()
 
+    def test_starting_state_buffers_packets_across_model_load(self):
+        # P05: while the recognizer is starting, packets buffer generously
+        # (model load takes seconds); the 20-packet bound applies when running.
+        from extensions.companion.passive_browser_audio import QUEUE_LIMIT
+        audio = self._audio()
+        audio._state = 'starting'
+        audio._audio_epoch = 'epoch-1'
+        audio._identity = self._identity(0)
+        audio._next_sequence = 0
+        audio._consented = True
+        self.audio_receive = audio.receive
+        grant = dict(GRANT)
+        accepted = 0
+        for sequence in range(100):
+            try:
+                audio.receive(grant['token'],
+                    'chrome-extension://'+grant['extension_id'],
+                    packet(sequence, 'epoch-1', self._identity(0)), grant=grant)
+                accepted += 1
+            except (PermissionError, RuntimeError):
+                break
+        self.assertGreater(accepted, QUEUE_LIMIT,
+                           'starting-state buffering must exceed the running bound')
+
     def test_rotation_failure_stops_cleanly(self):
         audio = self._audio()
         with patch('extensions.companion.passive_browser_audio.capability_python',

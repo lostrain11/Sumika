@@ -71,7 +71,7 @@ export function mountCompanionSession(host) {
   const playbackStatus=document.createElement('p'); playbackStatus.className='sumika-form-note';
   playbackStatus.setAttribute('role','status'); playbackStatus.dataset.playbackStatus='';
   let selected = null, captureActive=false, audioActive=false, cursor = 0, timer, working = false, polling = false, epoch = 0, unknown = true, currentState = 'unknown';
-  let answer = null, activeTurn = null, playbackSpeaking = false;
+  let answer = null, activeTurn = null, playbackSpeaking = false, tabSession = false;
   const labels = {stopped:'已停止',starting:'正在启动',listening:'正在聆听',stopping:'正在停止',error:'服务异常'};
   const start = command('chara-voice','开始陪学', async () => {
     if (working || unknown || currentState !== 'stopped') return;
@@ -186,6 +186,38 @@ export function mountCompanionSession(host) {
     working = true; controls();
     try {
       if (payload.action === 'start') {
+        // P05/F-01: a Bilibili tab target connects through the extension
+        // (approve + bounded audio) instead of window capture.
+        if(selected?.kind==='tab-pending' || selected?.kind==='tab-live'){
+          tabSession=true; captureActive=true;
+          if(selected.kind==='tab-pending') {
+            await endpoint('/api/companion/passive-browser',{action:'approve',
+              request_id:selected.request_id, consent:true, capture_frame:true,
+              audio:applicationAudio.checked});
+          }
+          const deadline=Date.now()+15000;
+          while(true) {
+            const state=await endpoint('/api/companion/microphone',{action:'status',after:cursor});
+            if(state.passive?.status==='running') break;
+            if(Date.now()>deadline) throw Error('B站标签页连接未就绪');
+            await new Promise(done=>setTimeout(done,300));
+          }
+          if (payload.mode === 'text') {
+            await endpoint('/api/companion/session',{action:'start',mode:'text',
+              proactive:payload.proactive});
+          } else {
+            // Voice on a tab: the mic binds to the published tab observation.
+            const micDeadline=Date.now()+15000;
+            let micError=null;
+            while(Date.now()<micDeadline){
+              try { await endpoint('/api/companion/microphone',{action:'start',
+                mode:'voice',microphone_consent:true,playback_consent:true,
+                proactive:payload.proactive}); micError=null; break; }
+              catch(error){ micError=error; await new Promise(done=>setTimeout(done,500)); }
+            }
+            if(micError) throw micError;
+          }
+        } else {
         captureActive=true;
         await endpoint('/api/companion/perception',{action:'start',handle:selected.handle,
           process_id:selected.process_id,process_creation:selected.process_creation,consent:true});
@@ -206,9 +238,14 @@ export function mountCompanionSession(host) {
           await endpoint('/api/companion/audio',{action:'start',consent:true,
             process_id:selected.process_id,process_creation:selected.process_creation});
         }
+        }
       }
       if(payload.action==='stop') {
         await endpoint('/api/companion/revoke',{});
+        if(tabSession){
+          await endpoint('/api/companion/passive-browser',{action:'stop'});
+          tabSession=false;
+        }
         captureActive=false;
         audioActive=false;
       }
@@ -230,13 +267,43 @@ export function mountCompanionSession(host) {
         const option=document.createElement('option'); option.value=JSON.stringify(value);
         option.textContent=value.title; targets.append(option);
       }
+      // P05/F-01: Bilibili tabs (pending requests and the live connection)
+      // are first-class targets in the SAME selector — no second entry.
+      try {
+        const tabsResponse=await bridgeFetch('/api/companion/passive-browser', {
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({action:'targets'})});
+        const tabs=await tabsResponse.json();
+        if(tabsResponse.ok) {
+          for(const request of tabs.pending || []) {
+            const option=document.createElement('option');
+            option.value=JSON.stringify({kind:'tab-pending',request_id:request.request_id,
+              title:request.title,url:request.url,tab_id:request.tab_id});
+            option.textContent=`B站标签页（待确认）：${request.title}`;
+            targets.append(option);
+          }
+          if(tabs.passive?.status==='running' && tabs.passive?.target) {
+            const option=document.createElement('option');
+            option.value=JSON.stringify({kind:'tab-live',target:tabs.passive.target,
+              tab_id:tabs.passive.target, title:'B站标签页（已连接）'});
+            option.textContent='B站标签页（已连接）';
+            targets.append(option);
+          }
+        }
+      } catch(_) { /* tab targets are additive; windows remain usable */ }
       selected=null; targets.value=''; controls();
     } catch(error) { status.textContent=`窗口列表不可用：${error.message}`; }
     finally { scan.disabled=false; }
   }
   targets.addEventListener('change',()=>{
     selected=targets.value ? JSON.parse(targets.value) : null;
-    scope.textContent=selected ? `目标：${selected.title} · 仅采集窗口画面；应用声音需另行授权。` : '仅采集所选窗口画面；应用声音需另行授权。';
+    if(selected?.kind==='tab-pending') {
+      scope.textContent=`目标：${selected.title} · 连接后采集画面字幕${applicationAudio.checked?'和标签页声音':''}，不启动窗口画面采集。`;
+    } else if(selected?.kind==='tab-live') {
+      scope.textContent='目标：B站标签页（已连接） · 采集画面字幕，不启动窗口画面采集。';
+    } else {
+      scope.textContent=selected ? `目标：${selected.title} · 仅采集窗口画面；应用声音需另行授权。` : '仅采集所选窗口画面；应用声音需另行授权。';
+    }
     controls();
   });
   scan.addEventListener('click',loadTargets);

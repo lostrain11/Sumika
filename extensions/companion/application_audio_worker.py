@@ -124,7 +124,12 @@ def run(input_stream, output_stream):
         return 0
     except Exception as error:
         if not stop.is_set():
-            emit({'error': type(error).__name__})
+            import traceback as _tb
+            detail = _tb.format_exc()[-1500:]
+            sys.stderr.write(detail)
+            sys.stderr.flush()
+            emit({'error': type(error).__name__, 'reason': repr(error)[:200],
+                  'trace_tail': detail.strip().splitlines()[-3:]})
         return 1
     finally:
         stop.set()

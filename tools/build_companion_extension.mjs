@@ -115,7 +115,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
 })();`);
   await writeFile(join(directory,'worker.js'),`
 let connection=null;
-let lastStatus='idle';
+let lastStatus='idle';let lastAudioError=null;
 let requestedConnection=null;
 let audioActive=false;
 // One loopback bridge, one approved tab. The popup is the only entry; page
@@ -205,10 +205,15 @@ async function startConnection(configuration) {
     const result=await chrome.tabs.sendMessage(grant.tab_id,{type:'start',origin:grant.origin,capture_frame:grant.capture_frame});
     if(!result?.started)throw new Error('collector did not start');
     if(grant.audio) {
-      await chrome.tabs.sendMessage(grant.tab_id,{type:'start-audio',consent:true,audio_epoch:grant.audio_epoch});
-      audioActive=true;
+      const audioStart=await chrome.tabs.sendMessage(grant.tab_id,
+        {type:'start-audio',consent:true,audio_epoch:grant.audio_epoch});
+      if(!audioStart?.started){
+        audioActive=false;lastAudioError=audioStart?.error||'start failed';
+        throw new Error('audio capture failed: '+lastAudioError);
+      }
+      audioActive=true;lastAudioError=null;
     }
-    lastStatus='running';return {status:lastStatus,tab_id:tab.id,audio:grant.audio===true};
+    lastStatus='running';return {status:lastStatus,tab_id:tab.id,audio:grant.audio===true,audio_error:lastAudioError};
   } catch(error) {if(connection===owner)connection=null;throw error;}
 }
 async function stopConnection() {
@@ -242,37 +247,56 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   }
   const owner=connection;
   if(message?.type==='audio-packet') {
-    if(!ownedSender(message,sender,owner) || owner.audioBusy) {respond({accepted:false});return;}
-    owner.audioBusy=true;
-    (async()=>{
-      try {
-        const result=await post('/api/companion/passive-browser/audio',{
-          tab_id:owner.grant.tab_id,audio_epoch:owner.grant.audio_epoch,
-          sequence:message.sequence,media_identity:message.media_identity,
-          sample_rate:16000,channels:1,format:'pcm_s16le',
-          sample_offset:message.sample_offset,pcm_base64:message.pcm_base64});
-        respond({accepted:result?.status==='accepted'});
-      } catch {
-        // A transport failure stops the audio track only; the approved video
-        // connection stays alive for frames, subtitles and heartbeats.
-        respond({accepted:false});
-      }
-      finally {owner.audioBusy=false;}
-    })();
+    if(!ownedSender(message,sender,owner)) {respond({accepted:false});return;}
+    // P05: the recognizer may still be loading when capture starts. Queue
+    // bounded packets, respond accepted immediately (the capture adapter
+    // stops on consumer overflow), and drain sequentially — retrying while
+    // the host reports the recognizer as starting.
+    if(owner.audioPending===undefined)owner.audioPending=[];
+    if(owner.audioPending.length>=120){respond({accepted:false});return;}
+    owner.audioPending.push({sequence:message.sequence,
+      sample_offset:message.sample_offset,media_identity:message.media_identity,
+      pcm_base64:message.pcm_base64});
+    respond({accepted:true});
+    if(!owner.draining){
+      owner.draining=true;
+      (async()=>{
+        while(connection===owner && owner.audioPending.length){
+          const pending=owner.audioPending[0];
+          try {
+            const result=await post('/api/companion/passive-browser/audio',{
+              tab_id:owner.grant.tab_id,audio_epoch:owner.grant.audio_epoch,
+              sequence:pending.sequence,media_identity:pending.media_identity,
+              sample_rate:16000,channels:1,format:'pcm_s16le',
+              sample_offset:pending.sample_offset,pcm_base64:pending.pcm_base64});
+            if(result?.status!=='accepted'){connection=null;owner.audioPending.length=0;break;}
+            owner.audioPending.shift();
+          } catch(error) {
+            if(String(error?.message||'').includes('recognizer starting')){
+              await new Promise(resolve=>setTimeout(resolve,400));continue;
+            }
+            // A transport failure stops the audio track only; the approved
+            // video connection stays alive for frames and subtitles.
+            audioActive=false;lastAudioError='send_failed';
+            owner.audioPending.length=0;break;
+          }
+        }
+        owner.draining=false;
+      })();
+    }
     return true;
   }
   if(message?.type==='audio-stopped') {
     if(!ownedSender(message,sender,owner)) {respond({});return;}
     console.log('[sumika] audio stopped:',message.reason);
-    // Any capture stop inside the still-approved video restarts under the
-    // standing consent: rotate the epoch so the strict per-epoch sequence
-    // starts clean, then re-kick. Bounded so a persistent failure ends
-    // stopped and visible instead of masking itself with rotation churn.
+    // R4: only seek/rate/pause (player_changed) auto-recovers under the
+    // standing consent. Transport rejections and recognizer failures stop
+    // the track and surface the reason — the user restarts explicitly.
+    if(message.reason!=='player_changed') {
+      audioActive=false;lastAudioError=message.reason||'stopped';
+      respond({restarted:false,final:true});return true;
+    }
     (async()=>{
-      const now=Date.now();
-      owner.epochStarts=(owner.epochStarts||[]).filter(stamp=>now-stamp<60000);
-      if(owner.epochStarts.length>=30) return {restarted:false,throttled:true};
-      owner.epochStarts.push(now);
       const epoch=await post('/api/companion/passive-browser/audio-epoch',{});
       owner.grant.audio_epoch=epoch.audio_epoch;
       await chrome.tabs.sendMessage(owner.grant.tab_id,
@@ -309,13 +333,9 @@ chrome.tabs.onUpdated.addListener((tab,change)=>{
   if(requestedConnection?.tab_id===tab && change.url)cancelRequestedConnection().catch(()=>{});
   else if(connection?.grant.tab_id===tab && change.url)stopConnection();
 });
-// If the host recognizer starts after the connection, re-kick capture with
-// the current epoch; transport rejections above keep this bounded and quiet.
-setInterval(()=>{
-  if(connection?.grant?.audio)
-    chrome.tabs.sendMessage(connection.grant.tab_id,
-      {type:'start-audio',consent:true,audio_epoch:connection.grant.audio_epoch}).catch(()=>{});
-},5000);
+// R4: no unconditional re-kick. Capture starts via the connect flow, the
+// host's explicit start, or a player_changed rotation; anything else stays
+// stopped with its reason visible.
 `);
   await writeFile(join(directory,'popup.html'),`<!DOCTYPE html>
 <html lang="zh-CN">
