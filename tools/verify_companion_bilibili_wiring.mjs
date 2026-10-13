@@ -50,7 +50,7 @@ try:
     def stub(prompt, **kwargs):
         marker = "E2E_TARGET_OK" if "browser-passive" in prompt else "E2E_NO_TAB_CONTEXT"
         with open(markers, "a", encoding="utf8") as out:
-            out.write(marker + " | " + prompt[:300].replace(chr(10), " ") + chr(10))
+            out.write(marker + " | " + prompt[:4000].replace(chr(10), " ") + chr(10))
         return {"text": marker + " 回答"}
     server.sumika_bridge._companion._role_chat = stub
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -170,12 +170,12 @@ try {
   // The video's audio track can lag playback start (MSE buffering); a real
   // user retries the connection — bounded polls do the same.
   let pollResult = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     pollResult = await worker.evaluate(() =>
       pollConnection().then(value => value, error => ({error: error.message})));
     log('pollConnection attempt ' + attempt + ': ' + JSON.stringify(pollResult));
     if (pollResult.status === 'running') break;
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 3000));
   }
   report.checks.extension_poll_after_approve = pollResult.status === 'running';
 
