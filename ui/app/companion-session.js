@@ -110,6 +110,9 @@ export function mountCompanionSession(host) {
       const captureLabels={stopped:'已停止',starting:'正在启动',running:'正在采集',paused:'已暂停',stopping:'正在停止',error:'异常'};
       captureStatus.textContent=`画面：${captureLabels[state.capture.status] || '状态未知'}${state.capture.error ? ` · ${state.capture.error}` : ''}`;
     } else {captureStatus.textContent='画面：状态未知';}
+    // P05/F-01: a live Bilibili tab session keeps the companion controls
+    // active even though no window capture runs for it.
+    if(state.passive?.status==='running') captureActive=true;
     if(state.application_audio) {
       audioActive=state.application_audio.alive;
       const audioLabels={stopped:'已停止',paused:'已暂停',starting:'正在启动',running:'正在采集',stopping:'正在停止',error:'异常'};

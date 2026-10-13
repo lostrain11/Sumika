@@ -289,9 +289,15 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
             audioPending.shift();
           } catch(error) {
             const text=String(error?.message||'');
-            if(text.includes('recognizer starting')){
-              if(audioDrainRetries++ % 5 === 0)
-                console.log('[sumika] audio drain retrying while recognizer starts');
+            // Retry while the recognizer loads OR the post merely timed out
+            // (the vosk model load blocks the child for seconds); a hard
+            // rejection falls through and stops the track with its reason.
+            const retryable=text.includes('recognizer starting')
+              || /timeout|aborted|timed out/i.test(text);
+            if(retryable && audioDrainRetries < 150){
+              audioDrainRetries++;
+              if(audioDrainRetries % 5 === 0)
+                console.log('[sumika] audio drain retrying:',text.slice(0,80));
               await new Promise(resolve=>setTimeout(resolve,400));continue;
             }
             console.log('[sumika] audio drain failed:',text.slice(0,120));
