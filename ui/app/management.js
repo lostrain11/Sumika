@@ -331,8 +331,26 @@ async function openRoles() {
     const usage=await request(`roles/${encodeURIComponent(roleId)}/usage`);
     if(requestRevision!==loadRevision || !modal.isConnected)return;
     content.append(node('h3','角色用量'));
-    if(!usage.groups.length)content.append(node('p','暂无已记录用量；不代表消耗为零。','sumika-form-note'));
+    if(!usage.groups.length)content.append(node('p','本房间会话暂无已记录用量；不代表消耗为零。','sumika-form-note'));
     for(const u of usage.groups) content.append(node('p',`${u.model} · ${u.status} · ${u.total_tokens??'未知'} token（${u.requests} 次记录）`,'sumika-form-note'));
+    // P6/F-10: every business category shows here with the metrics that
+    // apply to it — audio seconds are not missing tokens, and unmetered
+    // rows stay an explicit unknown instead of folding into zero.
+    content.append(node('h3','陪学用量（全部业务类别）'));
+    const categoryLabels={room:'角色房间',companion:'桌宠陪伴',routing:'路由',
+      behavior:'行为观察',audio:'音轨识别',vision:'视觉分析',unknown:'未分类'};
+    const metricLabel=(metric,value)=>value==null?'未知':(metric==='audio_seconds'?`${Math.round(value*10)/10} 秒`
+      :metric==='vision_calls'?`${value} 次视觉调用`:`${value} token`);
+    if(!usage.categories?.length)content.append(node('p','暂无已记录的陪学用量。','sumika-form-note'));
+    for(const c of usage.categories||[]){
+      const label=categoryLabels[c.category]||c.category;
+      const known=Object.entries(c.known_sum||{}).map(([metric,value])=>metricLabel(metric,value)).join(' + ');
+      const knownText=known?`已知小计：${known}`:'无已计量数据';
+      const statuses=[['estimated','估算'],['reported','上报'],['unknown','未知']]
+        .filter(([key])=>c.by_status?.[key]).map(([key,text])=>`${text} ${c.by_status[key]}`).join(' · ');
+      content.append(node('p',`${label}（${c.requests} 次记录）：${knownText}；`+
+        `${c.unknown_count?`${c.unknown_count} 次未计量`:'无未计量'}${statuses?` · ${statuses}`:''}`,'sumika-form-note'));
+    }
   }
   choice.input.addEventListener('change',()=>loadRole().catch(e=>showError(modal,e)));
   await loadRole();

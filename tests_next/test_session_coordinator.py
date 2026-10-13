@@ -212,6 +212,51 @@ class DanmakuSummaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             coordinator.coordinator.summarize_danmaku(summarize='not callable')
 
+    def test_summary_after_target_switch_never_enters_new_session(self):
+        """P06: a summary that finishes after a target switch belongs to a
+        session that no longer exists — it is dropped, not emitted, and the
+        new target's buffer stays clean."""
+        coordinator = CoordinatorTests('test_text_question_answers_without_microphone')
+        coordinator.setUp()
+        first = bundle(text='第一课内容', target='lesson-a')
+        coordinator.coordinator.publish_observation(first)
+        coordinator.coordinator.danmaku.observe(['第一课的弹幕'])
+        release = threading.Event()
+        def slow_summary(content, *, source):
+            release.wait(2)
+            return {'text': '过期的摘要'}
+        started = coordinator.coordinator.summarize_danmaku(summarize=slow_summary)
+        self.assertEqual(started['status'], 'started')
+        coordinator.coordinator.publish_observation(
+            bundle(text='第二课内容', target='lesson-b',
+                   observed_at=first.observed_at + timedelta(seconds=5)))
+        release.set()
+        deadline = time.monotonic() + 2
+        while release.is_set() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        time.sleep(0.1)
+        self.assertEqual([e for e in coordinator.events if e['event'] == 'danmaku_summary'], [])
+        self.assertEqual(coordinator.coordinator.danmaku.snapshot_texts(), [])
+
+    def test_answer_carries_server_bound_note_source(self):
+        """P06: every answer gets an answer_id whose frozen source resolves
+        server-side; unknown ids return None and a revoke clears the rest."""
+        coordinator = CoordinatorTests('test_text_question_answers_without_microphone')
+        coordinator.setUp()
+        coordinator.coordinator.publish_observation(bundle())
+        result = coordinator.coordinator.ask_text('这页讲什么？')
+        self.assertIn('answer_id', result)
+        service = coordinator.coordinator.service
+        source = service.note_source(result['answer_id'])
+        self.assertEqual(source['source'], bundle().source)
+        self.assertEqual(source['target'], bundle().target)
+        self.assertEqual(source['question'], '这页讲什么？')
+        self.assertTrue(source['answer'])
+        self.assertIsNone(service.note_source('bogus-id'))
+        self.assertEqual(service.note_source(), source)  # Last answer default.
+        service.revoke()
+        self.assertIsNone(service.note_source(result['answer_id']))
+
 
 class BackgroundBudgetTests(unittest.TestCase):
     def test_budget_caps_background_starts_per_minute(self):

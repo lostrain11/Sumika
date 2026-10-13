@@ -83,6 +83,53 @@ export function mountCompanionSession(host) {
   });
   const stop = command('lucide:square','停止陪学', () => mutate({action:'stop'}));
   const refresh = command('act-refresh','刷新会话状态', () => poll());
+  // P06: the explicit danmaku summary entry. There is no automatic periodic
+  // summary; the result is audience discussion, never course facts.
+  const danmakuButton = command('chara-chat','总结当前弹幕', async () => {
+    if (danmakuButton.disabled) return;
+    danmakuButton.disabled = true;
+    try {
+      const result = await endpoint('/api/companion/danmaku', {action:'summarize'});
+      if (result.status === 'empty') status.textContent = '当前时间窗内没有待总结的弹幕';
+      else if (result.status === 'skipped') status.textContent = `弹幕摘要暂未启动：${result.reason || '后台预算或失败状态'}`;
+      else if (result.status === 'started') status.textContent = `正在总结 ${result.entries} 条弹幕（观众讨论，非课程内容）…`;
+    } catch (error) { status.textContent = `弹幕摘要失败：${error.message}`; }
+    finally { controls(); }
+  });
+  // P06: save the LAST answer as an explicit note under its frozen source —
+  // a page flip after the answer does not change what gets saved. The client
+  // supplies no provenance; the server resolves it or fails closed.
+  const notesButton = command('act-save','保存当前回答为笔记', async () => {
+    if (notesButton.disabled) return;
+    notesButton.disabled = true;
+    try {
+      const result = await endpoint('/api/companion/notes', {action:'save_answer'});
+      if (result.status === 'saved') status.textContent = '笔记已保存（含回答时的来源）';
+      loadRecentNotes();
+    } catch (error) { status.textContent = `笔记保存失败：${error.message}`; }
+    finally { controls(); }
+  });
+  const notesList = document.createElement('details');
+  notesList.className = 'companion-notes';
+  const notesSummary = document.createElement('summary');
+  notesSummary.textContent = '最近笔记';
+  notesList.append(notesSummary);
+  notesList.addEventListener('toggle', () => { if (notesList.open) loadRecentNotes(); });
+  async function loadRecentNotes() {
+    try {
+      const result = await endpoint('/api/companion/notes', {action:'recent', limit:8});
+      notesSummary.textContent = `最近笔记（${result.notes.length}）`;
+      for (const note of result.notes || []) {
+        const item = document.createElement('p');
+        item.className = 'sumika-form-note';
+        const where = note.source?.page ? `第 ${note.source.page} 页`
+          : note.source?.media_time_seconds != null ? `视频 ${Math.floor(note.source.media_time_seconds)}s`
+          : (note.target || '').split(':')[0];
+        item.textContent = `${where} · ${note.text.slice(0, 80)}${note.text.length > 80 ? '…' : ''}`;
+        notesList.append(item);
+      }
+    } catch { notesSummary.textContent = '最近笔记（不可用）'; }
+  }
   const option = document.createElement('label'); option.className = 'set-row';
   const title = document.createElement('span'); title.textContent = '主动讨论';
   const discussion = document.createElement('input'); discussion.type = 'checkbox'; discussion.checked = true;
@@ -91,6 +138,8 @@ export function mountCompanionSession(host) {
     start.disabled = working || unknown || currentState !== 'stopped' || captureActive || audioActive || !selected;
     stop.disabled = working || (!unknown && currentState === 'stopped' && !captureActive && !audioActive);
     refresh.disabled = working;
+    danmakuButton.disabled = working || unknown || (!captureActive && currentState !== 'running');
+    notesButton.disabled = working || unknown || !answer;
     discussion.disabled = working || unknown || captureActive || currentState !== 'stopped';
     mode.disabled=working || unknown || captureActive || audioActive || currentState!=='stopped';
     targets.disabled = working || captureActive || currentState !== 'stopped';
@@ -155,6 +204,10 @@ export function mountCompanionSession(host) {
         answer.textContent = (answer.textContent + (event.text || '')).slice(-64000);
       }
       if (event.event === 'proactive_text') line(`主动讨论：${event.text || ''}`, 'her');
+      if (event.event === 'danmaku_summary')
+        line(`弹幕讨论（观众讨论，非课程内容）：${event.text || ''}`, 'her');
+      if (event.event === 'danmaku_summary_error')
+        status.textContent = `弹幕摘要失败：${event.reason || event.error || '未知原因'}`;
       if (event.event === 'playback_started') speaking = true;
       if (event.event === 'playback_ended') { speaking = false; answer = null; }
       if (event.event === 'interrupted' || event.event === 'error') {
@@ -311,7 +364,7 @@ export function mountCompanionSession(host) {
   });
   scan.addEventListener('click',loadTargets);
   mode.addEventListener('change',controls);
-  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript); host.append(section);
+  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript,notesList); host.append(section);
   loadTargets();
   hydrateIconsAsync(section);
   controls(); poll();

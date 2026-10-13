@@ -363,14 +363,27 @@ class Management:
         try:
             db = session.memory.db
             if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='usage'").fetchone():
-                return {'groups': [], 'status': 'unknown'}
+                return {'groups': [], 'categories': [], 'status': 'unknown'}
+            # P6/F-10: the usage view covers every business category, not just
+            # this role's room session. Legacy rows are categorized only where
+            # the session id determines one determinably; the rest report as
+            # unknown instead of being guessed into a bucket.
+            from extensions.models.usage import UsageStore
+            store = UsageStore(db)
+            store.migrate_categories(rules={
+                'room-*': 'room', 'companion': 'companion', 'companion-*': 'companion',
+                'study-browser-audio': 'audio', 'reference-research': 'vision'})
             # Role chat currently uses this exact session-id convention.
             session_id = 'room-' + role_id
             rows = db.execute('SELECT provider,model,status,COUNT(*),SUM(prompt_tokens),'
                 'SUM(completion_tokens),SUM(total_tokens) FROM usage WHERE scope=? AND session=? '
                 'GROUP BY provider,model,status', (session.scope['project_id'], session_id))
             groups = [dict(zip(('provider','model','status','requests','prompt_tokens','completion_tokens','total_tokens'), row)) for row in rows]
-            return {'groups': groups, 'status': 'available' if groups else 'unknown'}
+            totals = store.totals(session.scope['project_id'])
+            categories = [dict(category=name, **view) for name, view in
+                          sorted(totals.pop('categories').items())]
+            return {'groups': groups, 'categories': categories, 'totals': totals,
+                    'status': 'available' if groups or categories else 'unknown'}
         finally:
             session.close()
 

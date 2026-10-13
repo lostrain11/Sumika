@@ -70,6 +70,61 @@ class UsageStoreTests(unittest.TestCase):
         self.assertIsNone(audio['vision_calls'])
         connection.close()
 
+    def test_categories_group_rows_by_applicable_metric(self):
+        """P6: each category reports the metrics that APPLY to it — an audio
+        row without tokens is not a token unknown, and known sums never fold
+        unmetered rows into zero."""
+        connection = sqlite3.connect(self.database)
+        store = UsageStore(connection)
+        store.record(scope='p', session='room-r1', provider='ollama', model='m',
+                     prompt_tokens=10, completion_tokens=5, total_tokens=15,
+                     status='reported', category='room')
+        store.record(scope='p', session='room-r2', provider='ollama', model='m',
+                     status='unknown', category='room')
+        store.record(scope='p', session='study-browser-audio', provider='browser-tab',
+                     model='n/a', status='reported', audio_seconds=30.0, category='audio')
+        store.record(scope='p', session='reference-research', provider='ollama', model='m',
+                     status='reported', vision_calls=1, category='vision')
+        categories = store.totals('p')['categories']
+        self.assertEqual(categories['room']['known_sum']['total_tokens'], 15)
+        self.assertEqual(categories['room']['unknown_count'], 1)
+        self.assertEqual(categories['room']['by_status'],
+                         {'estimated': 0, 'reported': 1, 'unknown': 1})
+        # Audio: audio_seconds is the applicable metric; missing tokens on the
+        # same row must not count as a token unknown.
+        self.assertEqual(categories['audio']['known_sum']['audio_seconds'], 30.0)
+        self.assertEqual(categories['audio']['unknown_count'], 0)
+        self.assertEqual(categories['audio']['metric_applicability'], ['audio_seconds'])
+        self.assertEqual(categories['vision']['known_sum']['vision_calls'], 1)
+        self.assertEqual(categories['vision']['unknown_count'], 0)
+        connection.close()
+
+    def test_legacy_rows_migrate_only_when_determinable(self):
+        connection = sqlite3.connect(self.database)
+        store = UsageStore(connection)
+        store.record(scope='p', session='room-r1', provider='ollama', model='m',
+                     prompt_tokens=1, completion_tokens=1, total_tokens=2,
+                     status='reported')
+        store.record(scope='p', session='study-browser-audio', provider='browser-tab',
+                     model='n/a', status='reported', audio_seconds=12.0)
+        store.record(scope='p', session='mystery-session', provider='ollama', model='m',
+                     status='unknown')
+        store.migrate_categories(rules={'room-*': 'room', 'study-browser-audio': 'audio'})
+        categories = store.totals('p')['categories']
+        self.assertEqual(categories['room']['requests'], 1)
+        self.assertEqual(categories['audio']['requests'], 1)
+        # An undeterminable legacy row stays unknown — never guessed.
+        self.assertEqual(categories['unknown']['requests'], 1)
+        self.assertEqual(categories['unknown']['metric_applicability'], 'unknown')
+        connection.close()
+
+    def test_category_is_validated(self):
+        connection = sqlite3.connect(self.database)
+        store = UsageStore(connection)
+        with self.assertRaises(ValueError):
+            store.record(scope='p', session='s', provider='p', model='m', category='tokens')
+        connection.close()
+
 
 class StudyNotesTests(unittest.TestCase):
     def setUp(self):
@@ -132,6 +187,27 @@ class DanmakuBufferTests(unittest.TestCase):
             buffer.observe([f'弹幕{round}'])
         self.assertLessEqual(len(buffer.snapshot_texts()), 10)
         self.assertEqual(buffer.observe([None, 42, '   ']), [])
+
+    def test_snapshot_texts_return_texts_within_ttl(self):
+        """F-07 regression: the snapshot carries the comment TEXTS inside the
+        TTL window — never bookkeeping floats — and reading prunes entries
+        past the window instead of serving stale danmaku forever."""
+        now = [100.0]
+        buffer = DanmakuBuffer(clock=lambda: now[0])
+        buffer.observe(['为什么这里取负号', '下一章什么时候讲'])
+        texts = buffer.snapshot_texts()
+        self.assertEqual(sorted(texts), ['下一章什么时候讲', '为什么这里取负号'])
+        for value in texts:
+            self.assertIsInstance(value, str)
+        now[0] += 121  # Past the 120s window without any new observation.
+        self.assertEqual(buffer.snapshot_texts(), [])
+
+    def test_clear_drops_buffer_for_new_target(self):
+        buffer = DanmakuBuffer()
+        buffer.observe(['旧视频的弹幕'])
+        buffer.clear()
+        self.assertEqual(buffer.snapshot_texts(), [])
+        self.assertEqual(buffer.observe(['旧视频的弹幕']), ['旧视频的弹幕'])
 
 
 if __name__ == '__main__':

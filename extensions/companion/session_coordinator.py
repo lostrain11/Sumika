@@ -315,12 +315,15 @@ class StudySessionCoordinator:
                 return
             if self._scheduler_target == bundle.target and self._perception.state == 'running':
                 return
+            switched = self._scheduler_target is not None and self._scheduler_target != bundle.target
             self._scheduler_target = bundle.target
             # A new target is a new reading session; old page patterns,
-            # reported episodes and a queued note must not leak across
-            # documents.
+            # reported episodes, a queued note and the previous document's
+            # danmaku window must not leak across documents.
             self._behavior.reset()
             self._queued_behavior_report = None
+        if switched:
+            self.danmaku.clear()
         try:
             self._scheduler.stop()
         except Exception:
@@ -337,6 +340,7 @@ class StudySessionCoordinator:
             self._scheduler_target = None
             self._queued_behavior_report = None
         self._behavior.reset()
+        self.danmaku.clear()
         try:
             self._scheduler.stop()
         except Exception:
@@ -574,29 +578,41 @@ class StudySessionCoordinator:
                 self._emit('proactive_error', {'error': type(error).__name__})
 
     def summarize_danmaku(self, *, summarize):
-        """Budget-gated asynchronous danmaku summary; never blocks the loop.
+        """Explicit, budget-gated asynchronous danmaku summary.
 
         ``summarize(content, source)`` is the auxiliary/local summary callable
-        (default off). Runs on a daemon thread, consumes the current deduped
-        buffer, and only emits an event; any failure drops the summary while
-        the question loop continues untouched.
+        (default off; there is no automatic periodic summary). The consent
+        epoch is captured at request time: a summary that finishes after a
+        target switch or revoke belongs to a session that no longer exists
+        and is dropped instead of entering it. Runs on a daemon thread,
+        consumes the current deduped TTL-valid buffer, and only emits an
+        event labelled as audience discussion; any failure drops the summary
+        while the question loop continues untouched.
         """
         if not callable(summarize):
             raise ValueError('summary callable required')
         with self._lock:
             if self._failed is not None or not self._background_budget.allow():
                 return {'status': 'skipped', 'reason': 'background budget or failure state'}
+            epoch = self._service.collection_token()
             texts = self.danmaku.snapshot_texts()
             if not texts:
                 return {'status': 'empty'}
         def run():
             try:
+                if self._service.collection_token() != epoch:
+                    return  # The session ended or changed target mid-summary.
                 result = summarize(chr(10).join(texts), source='danmaku')
                 text = result.get('text') if isinstance(result, dict) else None
                 if isinstance(text, str) and text.strip():
-                    self._emit('danmaku_summary', {'text': text[:2000]})
+                    if self._service.collection_token() != epoch:
+                        return
+                    self._emit('danmaku_summary', {'text': text[:2000],
+                                                   'entries': len(texts),
+                                                   'audience_discussion': True})
             except Exception as error:
-                self._emit('danmaku_summary_error', {'error': type(error).__name__})
+                self._emit('danmaku_summary_error',
+                           {'error': type(error).__name__, 'reason': str(error)[:160]})
         threading.Thread(target=run, name='sumika-danmaku-summary', daemon=True).start()
         return {'status': 'started', 'entries': len(texts)}
 

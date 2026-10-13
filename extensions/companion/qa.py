@@ -5,6 +5,7 @@ authorization, system prompt, or executable instruction.
 """
 import json
 import math
+import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -55,6 +56,10 @@ class CompanionQuestionService:
         self._active_requests = set()
         self._active_proactive = set()
         self._binding_watchers = set()
+        # P06: bounded provenance for saved notes (answer_id -> frozen source).
+        self._answer_sources = {}
+        self._last_answer_id = None
+        self._answer_source_limit = 32
 
     def _cancel_requests(self):
         for token in tuple(self._active_requests | self._active_proactive | self._binding_watchers):
@@ -123,10 +128,26 @@ class CompanionQuestionService:
             self._latest = None
             self._histories.clear()
             self._history_times.clear()
+            # A stopped session stops sprouting new notes from old answers.
+            self._answer_sources.clear()
+            self._last_answer_id = None
             self._generation += 1
             self._content_revision += 1
             self._cancel_requests()
         return {"status": "revoked", "had_context": had_context}
+
+    def note_source(self, answer_id=None):
+        """Frozen provenance of one answer for an explicit note save.
+
+        ``None`` ids resolve to the last answer. Unknown or expired ids return
+        ``None`` — the caller must fail closed instead of guessing a source.
+        """
+        with self._lock:
+            identifier = answer_id if answer_id is not None else self._last_answer_id
+            if not isinstance(identifier, str):
+                return None
+            source = self._answer_sources.get(identifier)
+            return dict(source) if source is not None else None
 
     def update(self, observation, *, collection_token=None):
         if not isinstance(observation, ObservationBundle):
@@ -358,6 +379,27 @@ class CompanionQuestionService:
                        "observation_source": observation.source,
                        "observation_target": observation.target,
                        "context_turns": context_turns})
+        # P06: every companion answer carries a server-side answer_id bound to
+        # the FROZEN observation it answered from. A note saved after a page
+        # flip keeps the answer's page; the client can never forge provenance
+        # because the source is resolved here, by id, or not at all.
+        answer_id = secrets.token_hex(8)
+        with self._lock:
+            self._answer_sources[answer_id] = {
+                'observation_at': observation.observed_at.isoformat(),
+                'source': observation.source,
+                'target': observation.target,
+                'media_time_seconds': observation.media_time_seconds,
+                'metadata': {key: observation.metadata.get(key)
+                             for key in ('page', 'part', 'url', 'file')
+                             if observation.metadata.get(key) is not None},
+                'question': question.strip()[:500],
+                'answer': (answer_text or '')[:2000],
+            }
+            while len(self._answer_sources) > self._answer_source_limit:
+                self._answer_sources.pop(next(iter(self._answer_sources)))
+            self._last_answer_id = answer_id
+        result['answer_id'] = answer_id
         return result
 
     def proactive(self, *, session_id='companion', expected_observation=None,

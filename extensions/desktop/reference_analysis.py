@@ -32,7 +32,7 @@ class ConfiguredReferenceAnalyzer:
                 UsageStore(connection).record(scope=settings['role']['project_id'],
                     session='reference-research', provider=settings['auxiliary']['provider'],
                     model=settings['auxiliary']['model'],
-                    status='reported' if counts else 'unknown', **counts)
+                    status='reported' if counts else 'unknown', category='vision', **counts)
         if result['status'] != 'reported' or result.get('finish_reason') == 'length':
             raise ValueError('reference analysis result unavailable')
         return json.loads(result['text'])

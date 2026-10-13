@@ -273,7 +273,13 @@ class RoleChat:
                 completion_tokens=totals.get("completion_tokens"),
                 total_tokens=totals.get("total_tokens"),
                 status=usage_status,
-                vision_calls=vision_calls)
+                vision_calls=vision_calls,
+                # P06 business category from the deterministic session id:
+                # room role chat vs the companion/pet discussion share this
+                # writer; anything else stays uncategorized (never guessed).
+                category=('room' if str(session_id).startswith('room-')
+                          else 'companion' if str(session_id).startswith('companion')
+                          else None))
         finally:
             connection.close()
 

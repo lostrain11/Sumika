@@ -141,5 +141,19 @@ class DanmakuBuffer:
         return fresh
 
     def snapshot_texts(self):
+        """Current deduped texts still inside the TTL window.
+
+        F-07: this returns the comment TEXTS, never bookkeeping floats — and
+        reading prunes entries past the window, so an unread buffer cannot
+        serve stale danmaku forever.
+        """
+        now = self._clock()
         with self._lock:
-            return [text for text, _ in self._entries.values()]
+            self._entries = {text: entry for text, entry in self._entries.items()
+                             if now - entry[0] < self.window_seconds}
+            return list(self._entries)
+
+    def clear(self):
+        """Drop the buffer: target switches and revokes start a clean window."""
+        with self._lock:
+            self._entries.clear()

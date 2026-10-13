@@ -271,6 +271,10 @@ class WindowsTextCollector:
             metadata={'title': title, 'collector': 'windows-uia',
                       'selected': selected, 'visible_selection_only':visible_selection_only,
                       'text_role': 'reader-navigation' if reader_navigation else 'content',
+                      # R6: an empty selection is an explicit unavailable, never
+                      # a silent fallthrough to the whole page.
+                      'selection_status': ('located' if text.strip() else 'selection_unavailable')
+                                          if selected else None,
                       'truncated': remaining <= 0})
 
 

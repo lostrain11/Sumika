@@ -140,13 +140,34 @@ class Bridge:
 
     def companion_notes(self, payload):
         """Save/list explicit study notes; provenance comes from the current
-        learning observation, never from page-supplied values."""
+        learning observation or from a server-side answer binding, never from
+        page-supplied values."""
         if not isinstance(payload, dict):
             raise ValueError('notes action required')
         action = payload.get('action')
         if action == 'recent':
             return {'notes': self._study_notes.recent(
                 limit=payload.get('limit', 20))}
+        if action == 'save_answer':
+            # P06: save a companion answer under its FROZEN observation. The
+            # client supplies at most an answer_id; the source resolves
+            # server-side or fails closed.
+            frozen = self._companion.note_source(payload.get('answer_id'))
+            if frozen is None:
+                raise ValueError('answer source expired; ask again and save the new answer')
+            text = frozen.pop('answer')
+            provenance = {'kind': 'companion-answer',
+                          'observation_at': frozen['observation_at'],
+                          'observation_source': frozen['source'],
+                          'observation_target': frozen['target'],
+                          'media_time_seconds': frozen['media_time_seconds'],
+                          'question': frozen.get('question')}
+            provenance.update(frozen.get('metadata') or {})
+            if len(text) > self._study_notes.max_note_chars:
+                text = text[:self._study_notes.max_note_chars - 1] + '…'
+                provenance['truncated'] = True
+            return self._study_notes.save(text, target=frozen['target'],
+                                          source=provenance)
         if action != 'save':
             raise ValueError('invalid notes action')
         observation = self._companion.latest
@@ -176,11 +197,31 @@ class Bridge:
                 UsageStore(connection).record(
                     scope=settings['role']['project_id'], session='study-browser-audio',
                     provider='browser-tab', model='n/a', status='reported',
-                    audio_seconds=audio_seconds)
+                    audio_seconds=audio_seconds, category='audio')
             finally:
                 connection.close()
         except (OSError, sqlite3.Error, KeyError, ValueError):
             pass  # Usage bookkeeping must never break the audio session.
+
+    def companion_danmaku(self, payload):
+        """Explicit danmaku summary through the auxiliary/local helper.
+
+        No automatic periodic summary exists; the button is the only entry.
+        The summary is audience discussion, never course facts, and a
+        failure only surfaces as an event.
+        """
+        if not isinstance(payload, dict) or payload.get('action') != 'summarize':
+            raise ValueError('danmaku summarize action required')
+        settings = load_settings(self.settings_path)
+        from extensions.models import auxiliary
+        def summarize(content, source='danmaku'):
+            result = auxiliary.summarize_learning(settings, content, source=source)
+            text = result.get('summary') if isinstance(result, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                raise RuntimeError('auxiliary summary unavailable: '
+                                   + str(result.get('status', 'unknown')))
+            return {'text': text}
+        return self._coordinator.summarize_danmaku(summarize=summarize)
 
     def playback_configuration(self, role_id):
         from extensions.desktop.audio_devices import env_python
@@ -1649,6 +1690,11 @@ def _handler(bridge):
             # lock. Starting/resuming capture still uses normal admission below.
             if route == '/api/companion/revoke':
                 return self._post()
+            if route == '/api/companion/danmaku':
+                try:
+                    return self._json(200, bridge.companion_danmaku(self._body()))
+                except (ValueError, RuntimeError, OSError) as error:
+                    return self._json(400, {'error': str(error)})
             if route == '/api/companion/passive-browser':
                 try:
                     payload = self._body()
