@@ -766,8 +766,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p14_done_companion_profile_store",
-    "current_delivery_package": "P15 自动路由与策略 (R15, companion-profiles-plan §3: 三个独立控制、前台和场景判别、仲裁) — next per the frozen order (P14 closed). Open shelved: PDF paste fallback UI.",
+    "status": "p15_done_auto_routing_engine",
+    "current_delivery_package": "P16 产品界面 (R16: companion detail auto/manual选择+CRUD+runtime显示、权限页控制、行为询问/反馈面、用量计量；含 P10/P12/P13 的可见面接线) — next per the frozen order. Open shelved: PDF paste/point-region fallback UI.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -789,11 +789,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P15 per R15 §3: 三个独立控制（场景判别/主动许可/声音许可）、前台和场景判别（判别器只看名称与用户场景描述）、仲裁和上下文（manual 优先、score、ambiguous 不猜）。Runtime view already reports manual/matched/ambiguous/unknown. Shelved: PDF paste fallback UI. Low priority: TextPattern2 round; P11 real keystroke soak user-gated.",
+    "next_action": "P16 per R16/companion-profiles-plan §4: 陪伴详情 auto/manual选择、CRUD对话框、当前生效/候选/未知原因；连接与权限页行为控制；数据区行为治理入口；桌宠消息流行为询问；用量 routing/behavior 计量。UI 须走设计覆盖表步骤（用 tokens/既有 dialog；不新增主导航）。Shelved: PDF paste fallback UI. Low priority: TextPattern2 round; P11 real keystroke soak user-gated; P15 real-model classification quality labeled-sample acceptance user-gated per §5.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P14 closed. CompanionProfileStore (extensions/behavior/profiles.py): atomic companion-profiles.json, server-computed revision, closed profile schema (no credentials/providers/switches; unknown fields rejected), limits per plan (1-80 name, 2000 texts, 32 profiles, 16 auto, 120-86400 interval, deduped context sources), corrupt file preserved as *.corrupt-* with NEUTRAL standby, first-init templates 学习/游戏/安静 all deletable, new install arms auto / upgrade keeps manual+学习, manual persists across restarts, delete-current-manual leaves null selection never sneaky auto, delete-all legal, runtime reports manual/matched/ambiguous/unknown honestly. Route /api/manage/companion-profiles GET/POST with expected_revision -> 409 conflicts. Tests: 13 store + 1 real-server route roundtrip + 67 ui_server + 11 library green. Boundaries: P15 scoring, P16 UI (existing companion detail placement per confirmed choice), no model calls."
+    "verified_this_turn": "P15 closed. RoutingEngine (extensions/behavior/routing.py, injected classifier = fake-provider determinable): manual never classifies; suspended/global-stop cancels; foreground 1Hz feed with 2s stable bind and immediate unbind on unavailable; qualification top>=0.8 AND lead>=0.15 else ambiguous (contention) vs unknown (no match) as DISTINCT outcomes; garbage (unknown id/NaN/out-of-range/non-dict/raising/stale revision) all unknown with no fallback; rate limits 60s initial / 30s same-target / single in-flight / target change immediate; routing_epoch+foreground_epoch carried in the view. Engine bugs caught by tests: non-reentrant lock deadlock, stale epoch in returned view, switch not clearing classification freshness (target change throttled by the old 60s window), top-below-threshold misreported as ambiguous. Tests: 14 routing + 121 behavioral/profile/ui_server regression green. Boundaries: fake provider only; real-model quality labeled-sample acceptance user-gated per §5; live coordinator/collect wiring lands with P16."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
