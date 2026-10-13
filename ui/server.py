@@ -1249,7 +1249,16 @@ class Bridge:
         self._browser_audio.start(target=target,
             identity=observation.metadata.get('media_identity'),
             model=model, capabilities=self.capability_database, asr=selected_asr,
-            audio_epoch=grant['audio_epoch'])
+            audio_epoch=grant['audio_epoch'],
+            first_sequence=self._first_audio_sequence(payload))
+
+    @staticmethod
+    def _first_audio_sequence(payload):
+        """Sequence of the relayed packet that triggered a lazy start."""
+        sequence = payload.get('sequence') if isinstance(payload, dict) else None
+        if type(sequence) is not int or not 0 <= sequence <= 9007199254740991:
+            raise ValueError('bounded browser audio sequence required')
+        return sequence
 
     def companion_browser_audio(self, payload):
         """Approved browser tab audio into the isolated recognizer (Sumika side)."""

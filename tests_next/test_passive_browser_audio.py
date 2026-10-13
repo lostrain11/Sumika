@@ -90,6 +90,32 @@ class PassiveBrowserAudioTests(unittest.TestCase):
             self.audio.receive(GRANT['token'], 'chrome-extension://'+GRANT['extension_id'],
                                broken, grant=grant)
 
+    def test_start_adopts_first_relayed_sequence(self):
+        """P05: a rebuilt track generation starts at the packet that started
+        it, so a server-side stop and lazy respawn cannot desynchronize from
+        the extension's monotonic counter (the churn behind runs 58/59)."""
+        with patch.object(PassiveBrowserAudio, '_spawn_worker',
+                          lambda self, identity, epoch: None):
+            self.audio.start(target='browser-passive:test:tab:7', identity=IDENTITY,
+                             model='unused', audio_epoch='epoch-1', first_sequence=41)
+        grant = dict(GRANT)
+        accepted = self.audio.receive(GRANT['token'],
+                                      'chrome-extension://'+GRANT['extension_id'],
+                                      packet(41), grant=grant)
+        self.assertEqual(accepted['sequence'], 41)
+        self.assertEqual(self.audio.status()['status'], 'starting')
+        # Continuity inside the generation is still strict: a hole stops.
+        with self.assertRaisesRegex(PermissionError, 'sequence gap'):
+            self.audio.receive(GRANT['token'],
+                               'chrome-extension://'+GRANT['extension_id'],
+                               packet(43), grant=grant)
+
+    def test_start_rejects_unbounded_first_sequence(self):
+        with self.assertRaises(ValueError):
+            self.audio.start(target='browser-passive:test:tab:7', identity=IDENTITY,
+                             model='unused', audio_epoch='epoch-1',
+                             first_sequence='7')
+
     def test_queue_overflow_stops_track_explicitly(self):
         grant = dict(GRANT)
         for sequence in range(QUEUE_LIMIT):

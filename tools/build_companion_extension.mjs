@@ -173,8 +173,13 @@ async function pollConnection() {
   if(!response.ok)throw new Error('connection receipt rejected:'+response.status);
   const result=await response.json();
   if(requestedConnection!==pending)throw new Error('connection request superseded');
-  if(result.status==='approved' && connection?.grant.token!==result.grant.token)
-    return startConnection({base:pending.base,grant:result.grant});
+  if(result.status==='approved') {
+    // The request is consumed: an approved session must never be torn down
+    // by the pending-offer cleanup (a spurious /cancel killed live grants).
+    pending.approved=true;
+    if(connection?.grant.token!==result.grant.token)
+      return startConnection({base:pending.base,grant:result.grant});
+  }
   return {status:result.status};
 }
 async function cancelRequestedConnection() {
@@ -234,6 +239,14 @@ async function stopConnection() {
   try{await chrome.tabs.sendMessage(old.grant.tab_id,{type:'stop-audio'});}catch{}
   return {status:lastStatus};
 }
+// R4: a hard track failure is terminal — the page-side capture stops too, so
+// a dead track cannot be resurrected packet by packet (that churn spawned a
+// new recognizer per packet in the P05 E2E and desynchronized sequences).
+async function stopTabAudio() {
+  const owner=connection;
+  audioActive=false;
+  if(owner)try{await chrome.tabs.sendMessage(owner.grant.tab_id,{type:'stop-audio'});}catch{}
+}
 function ownedSender(message,sender,owner) {
   return sender.id===chrome.runtime.id && owner && sender.tab?.id===owner.grant.tab_id &&
     sender.frameId===0 && new URL(sender.url).origin===owner.grant.origin;
@@ -285,8 +298,14 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
               sample_offset:pending.sample_offset,pcm_base64:pending.pcm_base64});
             if(result?.status!=='accepted'){audioPending.length=0;
               audioActive=false;lastAudioError='host_rejected';
-              console.log('[sumika] audio packet rejected:',JSON.stringify(result));break;}
+              console.log('[sumika] audio packet rejected:',JSON.stringify(result));
+              await stopTabAudio();break;}
             audioPending.shift();
+            // Pace the backlog flush by the host's live queue depth: a burst
+            // dumped at network speed overflowed the 20-packet running bound
+            // while the recognizer was still warming up.
+            if(result.queued>=12)
+              await new Promise(resolve=>setTimeout(resolve,120));
           } catch(error) {
             const text=String(error?.message||'');
             // Retry while the recognizer loads OR the post merely timed out
@@ -301,10 +320,13 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
               await new Promise(resolve=>setTimeout(resolve,400));continue;
             }
             console.log('[sumika] audio drain failed:',text.slice(0,120));
-            // A transport failure stops the audio track only; the approved
-            // video connection stays alive for frames and subtitles.
+            // A transport failure stops the audio track and the page-side
+            // capture; the approved video connection stays alive for frames
+            // and subtitles, and the reason stays visible until an explicit
+            // user restart.
             audioActive=false;lastAudioError='send_failed';
-            audioPending.length=0;break;
+            audioPending.length=0;
+            await stopTabAudio();break;
           }
         }
         draining=false;
@@ -319,7 +341,10 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     // standing consent. Transport rejections and recognizer failures stop
     // the track and surface the reason — the user restarts explicitly.
     if(message.reason!=='player_changed') {
-      audioActive=false;lastAudioError=message.reason||'stopped';
+      audioActive=false;
+      // The first hard failure is the diagnostic one; the follow-up
+      // stop-audio ack must not overwrite it with a generic 'stopped'.
+      if(!lastAudioError)lastAudioError=message.reason||'stopped';
       respond({restarted:false,final:true});return true;
     }
     (async()=>{
@@ -356,8 +381,14 @@ chrome.tabs.onRemoved.addListener(tab=>{
   else if(connection?.grant.tab_id===tab)stopConnection();
 });
 chrome.tabs.onUpdated.addListener((tab,change)=>{
-  if(requestedConnection?.tab_id===tab && change.url)cancelRequestedConnection().catch(()=>{});
-  else if(connection?.grant.tab_id===tab && change.url)stopConnection();
+  // Only a URL change invalidates an offer. Every other update event (title,
+  // audible, loading state) fired this constantly on Bilibili; with the
+  // approved request still registered it posted /cancel and killed the live
+  // grant mid-lesson (run 58/60).
+  if(!change.url)return;
+  if(requestedConnection?.tab_id===tab && !requestedConnection.approved)
+    cancelRequestedConnection().catch(()=>{});
+  else if(connection?.grant.tab_id===tab)stopConnection();
 });
 // R4: no unconditional re-kick. Capture starts via the connect flow, the
 // host's explicit start, or a player_changed rotation; anything else stays

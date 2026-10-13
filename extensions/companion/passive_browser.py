@@ -7,13 +7,39 @@ from datetime import datetime, timezone
 import hmac
 import hashlib
 import json
+import os
 import re
 import secrets
 import threading
 import time
+import traceback
 from urllib.parse import urlsplit
 
 from .browser_video import browser_video_observation
+
+
+def _diag(event, detail):
+    """Optional stop-provenance trace (P05 drain race); off unless the env
+    variable names a file. One JSON line per event, bounded stack. The lock
+    keeps concurrent bridge threads from clobbering each other's lines
+    (Windows appends are seek+write, not atomic)."""
+    path = os.environ.get('SUMIKA_PASSIVE_DIAG')
+    if not path:
+        return
+    with _DIAG_LOCK:
+        try:
+            stack = ' '.join(f'{frame.filename.split("/")[-1].split(chr(92))[-1]}:{frame.lineno}'
+                             for frame in traceback.extract_stack()[-5:-1])
+            line = json.dumps({'at': datetime.now(timezone.utc).isoformat(),
+                               'mono': round(time.monotonic(), 3), 'event': event,
+                               'detail': detail, 'stack': stack}, ensure_ascii=False)
+            with open(path, 'a', encoding='utf8') as out:
+                out.write(line + '\n')
+        except OSError:
+            pass
+
+
+_DIAG_LOCK = threading.Lock()
 
 
 class PassiveBrowserConnection:
@@ -196,6 +222,8 @@ class PassiveBrowserConnection:
                     or extension_origin != 'chrome-extension://' + grant['extension_id']):
                 raise PermissionError('browser audio grant unavailable')
             grant['watchdog_hold_until'] = self.clock() + seconds
+            _diag('watchdog_hold', {'target': grant['target'],
+                'token': grant['token'][:8], 'seconds': seconds})
             return {'status': 'held', 'seconds': seconds}
 
     def rotate_audio_epoch(self, token, extension_origin):
@@ -240,6 +268,8 @@ class PassiveBrowserConnection:
         if self._grant is not None:
             grant = self._grant
             if self.clock() >= grant['expires']:
+                _diag('expire_stop', {'reason': 'hard_expires',
+                    'target': grant['target'], 'token': grant['token'][:8]})
                 self.stop()
                 return
             # The 10s no-packet watchdog is suspended while a consumer holds
@@ -249,6 +279,10 @@ class PassiveBrowserConnection:
                 return
             if (not grant['paused'] and grant['received'] is not None
                     and self.clock()-grant['received'] >= 10):
+                _diag('expire_stop', {'reason': 'no_packet_watchdog',
+                    'target': grant['target'], 'token': grant['token'][:8],
+                    'silent_seconds': round(self.clock()-grant['received'], 1),
+                    'received_packets': grant['sequence']})
                 self.stop()
 
     def pause(self):
@@ -280,6 +314,10 @@ class PassiveBrowserConnection:
 
     def stop(self):
         with self._lock:
+            if self._grant is not None:
+                _diag('grant_stop', {'target': self._grant['target'],
+                    'token': self._grant['token'][:8], 'audio': self._grant['audio'],
+                    'sequence': self._grant['sequence']})
             self._requests.clear()
             existed = self._grant is not None
             self._grant = None
@@ -297,6 +335,8 @@ class PassiveBrowserConnection:
             if (grant is None or grant['paused'] or not isinstance(token, str)
                     or not hmac.compare_digest(token, grant['token'])
                     or extension_origin != 'chrome-extension://' + grant['extension_id']):
+                _diag('receive_rejected', {'reason': 'grant_unavailable',
+                    'had_grant': grant is not None, 'paused': grant is not None and grant['paused']})
                 raise PermissionError('passive browser grant unavailable')
             if not isinstance(payload, dict):
                 raise ValueError('invalid passive browser packet')
@@ -327,6 +367,9 @@ class PassiveBrowserConnection:
                 raise ValueError('incomplete passive video state')
             parsed = urlsplit(bundle.metadata['url'])
             if grant.get('approved_url') is not None and bundle.metadata['url'] != grant['approved_url']:
+                _diag('receive_rejected', {'reason': 'approved_url_changed',
+                    'target': grant['target'], 'token': grant['token'][:8],
+                    'url': bundle.metadata['url'][:128]})
                 raise PermissionError('approved video changed; reconnect required')
             if (parsed.username or parsed.password or parsed.fragment
                     or not parsed.path.startswith('/video/')
@@ -335,8 +378,13 @@ class PassiveBrowserConnection:
             age = (self.utcnow()-bundle.observed_at).total_seconds()
             if (not -2 <= age <= 5 or (grant['observed_at'] is not None
                     and bundle.observed_at < grant['observed_at'])):
+                _diag('receive_rejected', {'reason': 'stale_observation',
+                    'target': grant['target'], 'token': grant['token'][:8],
+                    'age_seconds': round(age, 2)})
                 raise ValueError('stale passive browser observation')
             grant.update(sequence=sequence, observed_at=bundle.observed_at, received=self.clock())
+            _diag('receive_accepted', {'target': grant['target'], 'token': grant['token'][:8],
+                'sequence': sequence, 'paused': snapshot.get('paused')})
             signature = hashlib.sha256(json.dumps({
                 'identity': bundle.metadata.get('media_identity'),
                 'text': bundle.text,

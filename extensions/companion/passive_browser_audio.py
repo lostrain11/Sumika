@@ -16,12 +16,16 @@ import os
 from extensions.desktop.runtime import capability_python
 from sumika_next.child_job import ChildJob
 from .application_audio_worker import require_asr, snapshot_media_identity
+from .passive_browser import _diag
 
 PACKET_BYTES = 3200
-QUEUE_LIMIT = 20
 # While a freshly spawned recognizer is still loading, relayed packets
-# buffer generously (the model load takes seconds); the 20-packet live bound
-# applies once the track is running.
+# buffer generously (the model load takes seconds); the live bound applies
+# once the track is running. 60 packets (6s) absorb the post-load warm-up
+# (the first AcceptWaveform calls stall the child for seconds under real
+# CPU load) without weakening the R4 contract: a genuinely stuck consumer
+# still overflows and stops the track explicitly.
+QUEUE_LIMIT = 60
 STARTING_QUEUE_LIMIT = 200
 
 
@@ -59,8 +63,15 @@ class PassiveBrowserAudio:
                     'alive': self._process is not None and self._process.poll() is None}
 
     def start(self, *, target, identity, model, capabilities=None, asr=None,
-              audio_epoch=None):
-        """Spawn the pipe-fed recognizer for one approved browser audio epoch."""
+              audio_epoch=None, first_sequence=0):
+        """Spawn the pipe-fed recognizer for one approved browser audio epoch.
+
+        ``first_sequence`` adopts the sequence of the relayed packet that
+        triggered this start (P05 lazy start): a rebuilt track generation
+        begins at the first packet offered to it, so a server-side stop and
+        respawn cannot desynchronize from the extension's monotonic counter.
+        Strict in-generation continuity is still enforced in ``receive``.
+        """
         identity = snapshot_media_identity(identity)
         if identity is None:
             raise ValueError('browser audio requires the bound media identity')
@@ -68,6 +79,8 @@ class PassiveBrowserAudio:
             raise ValueError('bounded audio epoch required')
         if not isinstance(target, str) or not target.strip() or len(target) > 512:
             raise ValueError('bounded observation target required')
+        if type(first_sequence) is not int or not 0 <= first_sequence <= 9007199254740991:
+            raise ValueError('bounded browser audio sequence required')
         with self._lifecycle:
             if self._process is not None:
                 raise RuntimeError('stop browser audio before restarting')
@@ -78,7 +91,7 @@ class PassiveBrowserAudio:
                 self._target, self._state, self._error = target, 'starting', None
                 self._identity = identity
                 self._audio_epoch = audio_epoch
-                self._next_sequence = 0
+                self._next_sequence = first_sequence
                 self._queue.clear()
                 self._consented = True
                 self._received = 0
@@ -109,6 +122,9 @@ class PassiveBrowserAudio:
                   'asr': self._asr, 'media_identity': identity}
         child_log = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
         child_stderr = open(child_log, 'a', encoding='utf8') if child_log else subprocess.DEVNULL
+        if child_log:
+            with open(child_log, 'a', encoding='utf8') as out:
+                out.write(f'[parent] spawn epoch={epoch} model_load_before_ready=True\n')
         process = subprocess.Popen([interpreter, '-X', 'utf8', '-B', '-m',
             'extensions.companion.application_audio_worker'], cwd=self.root,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=child_stderr,
@@ -134,6 +150,10 @@ class PassiveBrowserAudio:
             self._reader.start()
             self._writer.start()
             if not self._ready.wait(15):
+                if child_log:
+                    with open(child_log, 'a', encoding='utf8') as out:
+                        out.write(f'[parent] startup timeout epoch={epoch} '
+                                  f'alive={process.poll() is None}\n')
                 raise RuntimeError('browser audio startup timed out')
             with self._lock:
                 if epoch != self._epoch:
@@ -167,6 +187,8 @@ class PassiveBrowserAudio:
         with self._lock:
             if (self._state not in ('running', 'starting') or self._audio_epoch is None
                     or not self._consented):
+                _diag('audio_receive_rejected', {'reason': 'session_not_active',
+                    'state': self._state, 'epoch': self._epoch, 'target': self._target})
                 raise PermissionError('browser audio session is not active')
             expected = {'tab_id', 'audio_epoch', 'sequence', 'media_identity',
                         'sample_rate', 'channels', 'format', 'sample_offset', 'pcm_base64'}
@@ -176,6 +198,9 @@ class PassiveBrowserAudio:
                     or extension_origin != 'chrome-extension://' + grant['extension_id']
                     or grant.get('audio') is not True
                     or payload['tab_id'] != grant['tab_id']):
+                _diag('audio_receive_rejected', {'reason': 'grant_mismatch',
+                    'state': self._state, 'epoch': self._epoch,
+                    'audio_epoch': self._audio_epoch})
                 raise PermissionError('browser audio grant unavailable')
             if (payload['audio_epoch'] != self._audio_epoch
                     or payload['sample_rate'] != 16000 or payload['channels'] != 1
@@ -284,6 +309,10 @@ class PassiveBrowserAudio:
         with self._lock:
             had_track = self._process is not None or self._state in ('running', 'starting')
             measured = self._audio_seconds if self._received else 0.0
+            if had_track:
+                _diag('audio_stop', {'epoch': self._epoch, 'state': self._state,
+                    'target': self._target, 'received': self._received,
+                    'error': self._error})
         if had_track:
             try:
                 self.on_clear()
@@ -336,6 +365,8 @@ class PassiveBrowserAudio:
                 return
             self._error = message
             process = self._process
+            _diag('audio_fail', {'reason': message, 'epoch': self._epoch,
+                'target': self._target, 'received': self._received})
         if process is not None:
             try:
                 code = process.wait(timeout=5)

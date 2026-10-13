@@ -4,7 +4,7 @@
 // provenance markers (no paid model calls).
 import {spawn} from 'node:child_process';
 import {mkdir, writeFile, readFile} from 'node:fs/promises';
-import {readdirSync} from 'node:fs';
+import {readdirSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {createInterface} from 'node:readline';
 import assert from 'node:assert/strict';
@@ -14,6 +14,15 @@ import {buildCompanionExtension} from './build_companion_extension.mjs';
 const output = resolve(process.argv[2] || 'E:/SumikaBuild/companion-wiring-e2e');
 await mkdir(output, {recursive: true});
 await mkdir(join(output, 'bridge-data'), {recursive: true});
+// Global watchdog: run 58 hung >20 minutes (unbounded browser.close() once the
+// track churned). A stuck harness must die loudly with its evidence on disk.
+setTimeout(() => {
+  console.log('[e2e] GLOBAL WATCHDOG: run exceeded 8 minutes; dumping and exiting');
+  try {writeFileSync(join(output, 'report.json'), JSON.stringify({
+    passed: false, watchdog: '8-minute global timeout', checks: report.checks,
+    phases: report.phases}, null, 2));} catch { }
+  process.exit(124);
+}, 8 * 60 * 1000).unref();
 const voskModel = 'E:/Models/Speech/sumika/vosk-model-small-cn-0.22';
 const voicePython = 'E:/SumikaBuild/p05-stage-check/runtime/voice/python.exe';
 const videoUrl = 'https://www.bilibili.com/video/BV1QN4y1c7RQ/';
@@ -69,7 +78,8 @@ const bridge = spawn(process.env.SUMIKA_TEST_PYTHON || 'python',
    join(output, 'bridge-data'), markers, settings, voskModel],
   {cwd: resolve('.'), stdio: ['pipe', 'ignore', 'pipe'],
    env: {...process.env, SUMIKA_VOICE_PYTHON: voicePython,
-         SUMIKA_BROWSER_AUDIO_CHILD_LOG: join(output, 'audio-child.log')}});
+         SUMIKA_BROWSER_AUDIO_CHILD_LOG: join(output, 'audio-child.log'),
+         SUMIKA_PASSIVE_DIAG: join(output, 'passive-diag.log')}});
 bridge.on('error', error => console.log('[bridge spawn error]', error.message));
 bridge.on('exit', (code, signal) => console.log('[bridge exit]', code, signal));
 bridge.stderr.setEncoding('utf8');
@@ -209,12 +219,16 @@ try {
 
   // 4. A text question through the PRODUCT routing function: the stubbed
   //    chat echoes provenance markers proving the tab context reached it.
-  await page.evaluate(async () => {
-    const {sendCompanionText} = await import('/app/companion-text.js');
-    window.__e2eAnswer = '';
-    await sendCompanionText('这节课在讲什么？', text => {window.__e2eAnswer = text;});
-  });
-  const answer = await page.evaluate(() => window.__e2eAnswer);
+  //    Bounded: an unbounded evaluate is how run 58 hung for >20 minutes.
+  const answer = await Promise.race([
+    page.evaluate(async () => {
+      const {sendCompanionText} = await import('/app/companion-text.js');
+      window.__e2eAnswer = '';
+      await sendCompanionText('这节课在讲什么？', text => {window.__e2eAnswer = text;});
+      return window.__e2eAnswer;
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error(
+      'text question did not settle in 60s (bridge handler stuck?)')), 60000))]);
   assert(answer.includes('E2E_TARGET_OK'),
          'the answer must come from the tab context, got: ' + answer);
   report.checks.text_question_routed_to_tab_context = true;
@@ -225,6 +239,8 @@ try {
     markerLog.includes('browser-passive');
 
   // 5. Disconnect through the product stop, with request diagnostics.
+  //    First record whether the passive grant is STILL running at this point:
+  //    run 58 lost the grant mid-run, long before any stop click.
   const stopCalls = [];
   page.on('request', request => {
     const url = request.url();
@@ -233,22 +249,37 @@ try {
             && request.method() === 'POST'))
       stopCalls.push('/api/' + url.split('/api/')[1]);
   });
+  const statusProbe = async () => {
+    const session = await (await fetch(base + '/api/manage/session')).json();
+    return (await fetch(base + '/api/companion/passive-browser', {
+      method: 'POST', headers: {'Content-Type': 'application/json',
+        'X-Sumika-CSRF': session.csrf},
+      body: JSON.stringify({action: 'status'})})).json();
+  };
+  const preStop = await statusProbe();
+  report.checks.passive_still_running_before_stop = preStop.status === 'running';
+  log('pre-stop passive status: ' + JSON.stringify(preStop));
+  assert(preStop.status === 'running',
+    'the passive grant died before the stop click (run-58 symptom); diag: '
+    + join(output, 'passive-diag.log'));
   await detail.getByRole('button', {name: '停止陪学'}).click();
   let stopOk = false;
   for (let i = 0; i < 20; i++) {
     await page.waitForTimeout(500);
-    const stopped = await (await fetch(base + '/api/companion/passive-browser', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action: 'status'})})).json();
+    const stopped = await statusProbe();
     if (stopped.status !== 'running') {stopOk = true; break;}
   }
   report.checks.ui_stop_requests_sent = stopCalls;
   report.checks.ui_stop_disconnects_tab = stopOk;
   assert(stopOk, 'the tab session must stop with the UI; requests: '
     + JSON.stringify(stopCalls));
+  report.passed = true;
 } finally {
   await browser.close();
   bridge.kill();
+  try {const diag = await readFile(join(output, 'passive-diag.log'), 'utf8');
+    console.log('[e2e] passive-diag tail:\n' + diag.trim().split('\n').slice(-40).join('\n'));
+  } catch { }
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({passed: report.passed, checks: report.checks,
     evidence: join(output, 'report.json')}));
