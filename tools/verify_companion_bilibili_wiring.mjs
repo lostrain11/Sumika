@@ -224,7 +224,15 @@ try {
   report.checks.model_prompt_contains_tab_target =
     markerLog.includes('browser-passive');
 
-  // 5. Disconnect through the product stop.
+  // 5. Disconnect through the product stop, with request diagnostics.
+  const stopCalls = [];
+  page.on('request', request => {
+    const url = request.url();
+    if (url.endsWith('/api/companion/revoke')
+        || (url.endsWith('/api/companion/passive-browser')
+            && request.method() === 'POST'))
+      stopCalls.push('/api/' + url.split('/api/')[1]);
+  });
   await detail.getByRole('button', {name: '停止陪学'}).click();
   let stopOk = false;
   for (let i = 0; i < 20; i++) {
@@ -234,11 +242,10 @@ try {
       body: JSON.stringify({action: 'status'})})).json();
     if (stopped.status !== 'running') {stopOk = true; break;}
   }
-  assert(stopOk, 'the tab session must stop with the UI');
-  report.checks.ui_stop_disconnects_tab = true;
-  report.checks.zero_page_errors = pageErrors.length === 0;
-  if (pageErrors.length) report.page_errors = pageErrors;
-  report.passed = true;
+  report.checks.ui_stop_requests_sent = stopCalls;
+  report.checks.ui_stop_disconnects_tab = stopOk;
+  assert(stopOk, 'the tab session must stop with the UI; requests: '
+    + JSON.stringify(stopCalls));
 } finally {
   await browser.close();
   bridge.kill();
