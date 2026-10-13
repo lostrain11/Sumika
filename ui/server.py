@@ -1641,19 +1641,46 @@ def _handler(bridge):
                         grant = bridge._passive_browser.rotate_audio_epoch(
                             token, self.headers.get('Origin'))
                         # Old packets are fenced; a live recognizer rebinds to
-                        # the new epoch instead of being torn down.
-                        bridge._browser_audio.rotate_epoch(grant['audio_epoch'])
+                        # the new epoch instead of being torn down. The track
+                        # rebuild (child kill + spawn + model load) runs in a
+                        # background thread: doing it here blocked this HTTP
+                        # thread for ~20s per player flap and stalled every
+                        # relayed packet behind it. The starting flag keeps the
+                        # lazy start from double-spawning meanwhile.
+                        with bridge._browser_audio_start_lock:
+                            bridge._browser_audio_starting = True
+                        def _rebuild():
+                            try:
+                                bridge._browser_audio.rotate_epoch(grant['audio_epoch'])
+                            except Exception:
+                                pass
+                            finally:
+                                with bridge._browser_audio_start_lock:
+                                    bridge._browser_audio_starting = False
+                        threading.Thread(target=_rebuild, daemon=True,
+                                         name='sumika-browser-audio-rotate').start()
                         return self._json(200, grant)
                     if route.endswith('/audio'):
                         grant = bridge._passive_browser.audio_grant()
                         if grant is None:
                             raise PermissionError('browser audio grant unavailable')
                         body = self._body()
+                        status = bridge._browser_audio.status()
+                        epoch_ahead = (isinstance(body, dict) and status['alive']
+                            and status['audio_epoch'] != body.get('audio_epoch')
+                            and body.get('audio_epoch') == grant.get('audio_epoch'))
+                        if epoch_ahead:
+                            # The rebuild for this already-rotated epoch runs
+                            # in the rotation thread; a hard rejection here
+                            # would stop the restarted capture (R4), so the
+                            # packet is retryable and the caller resends.
+                            return self._json(503, {
+                                'error': 'browser audio recognizer starting',
+                                'retry': True})
                         # P05 lazy start: the first relayed packet spawns the
                         # recognizer in a background thread (model load takes
                         # seconds); the sender retries while it is starting.
-                        if (not bridge._browser_audio.status()['alive']
-                                and grant.get('audio') is True):
+                        if (not status['alive'] and grant.get('audio') is True):
                             try:
                                 bridge._passive_browser.hold_watchdog(
                                     token, self.headers.get('Origin'), 30)

@@ -36,6 +36,7 @@ async def verify(model, sample, output, voice):
             raise ValueError('nonempty sample up to 30 seconds required')
     began = time.perf_counter()
     events, prompts, segments = [], [], []
+    first_char_marks = []
     first_segment = asyncio.Event()
     completed = asyncio.Event()
     model_cancelled = threading.Event()
@@ -44,11 +45,19 @@ async def verify(model, sample, output, voice):
     def reply(prompt, *, on_delta, **kwargs):
         counts['replies'] += 1
         prompts.append(prompt)
+        marked = {'first': True}
+        def timed_delta(value):
+            if marked['first']:
+                marked['first'] = False
+                # R7 latency decomposition: first reply character per turn,
+                # compared against the transcribed event on the same turn.
+                first_char_marks.append(round((time.perf_counter()-began)*1000, 1))
+            on_delta(value)
         if counts['replies'] == 1:
             release = threading.Event()
             unregister = _CURRENT.get().register(release.set)
             try:
-                on_delta('当前教程说明导数代表变化率。')
+                timed_delta('当前教程说明导数代表变化率。')
                 if not release.wait(15):
                     raise TimeoutError('second speech did not cancel fixture model')
                 model_cancelled.set()
@@ -56,7 +65,7 @@ async def verify(model, sample, output, voice):
             finally:
                 unregister()
         text = '我们继续讨论当前教程。请指出不理解的公式。'
-        on_delta(text)
+        timed_delta(text)
         return {'text':text}
 
     service = CompanionQuestionService(reply)
@@ -132,7 +141,55 @@ async def verify(model, sample, output, voice):
                       turn_pcm_cleared=not turn._audio and not turn._preroll,
                       worker_stopped=running.done())
         report['passed'] = report['passed'] and report['turn_pcm_cleared'] and report['worker_stopped']
+        report['latency_decomposition'] = decompose(events, first_char_marks)
     return report
+
+
+def decompose(events, first_char_marks):
+    """R7 latency decomposition from the SAME recorded sample.
+
+    Per turn: 停说→ASR (user_stopped -> transcribed), ASR→首字 (transcribed
+    -> first fixture reply character), ASR→首音 (transcribed -> first
+    playback_started). The last leg ends at real SAPI file synthesis — no
+    hardware speaker or microphone is involved here (R-126 waiver stands;
+    the live hardware decomposition remains the user-gated tool).
+    """
+    turns, current, marks = [], None, list(first_char_marks)
+    for entry in events:
+        name, at = entry['name'], entry['elapsed_ms']
+        if name == 'user_started':
+            current = {'user_started_ms': at}
+        elif name == 'user_stopped' and current is not None:
+            current['user_stopped_ms'] = at
+        elif name == 'transcribed' and current is not None:
+            current['transcribed_ms'] = at
+            if 'user_stopped_ms' in current:
+                current['stop_speak_to_asr_ms'] = round(at - current['user_stopped_ms'], 1)
+            if marks:
+                current['asr_to_first_char_ms'] = round(marks[0] - at, 1)
+                marks.pop(0)
+        elif name == 'playback_started' and current is not None:
+            if 'transcribed_ms' in current:
+                current['asr_to_first_audio_ms'] = round(at - current['transcribed_ms'], 1)
+        elif name in ('playback_ended', 'interrupted') and current is not None:
+            for key in ('user_started_ms', 'user_stopped_ms', 'transcribed_ms'):
+                current.pop(key, None)
+            current['interrupted'] = name == 'interrupted'
+            turns.append(current)
+            current = None
+    def summarize(key):
+        values = sorted(turn[key] for turn in turns if turn.get(key) is not None)
+        if not values:
+            return None
+        middle = values[len(values)//2]
+        return {'min': values[0], 'median': middle, 'max': values[-1]}
+    return {'turns': turns,
+            'summary': {key: summarize(key) for key in
+                        ('stop_speak_to_asr_ms', 'asr_to_first_char_ms',
+                         'asr_to_first_audio_ms')},
+            'boundary': 'first audio = SAPI file synthesis ready; no audible '
+                        'playback or hardware; R-126 hardware decomposition '
+                        'remains in tools/verify_companion_voice_live.py'}
 
 
 def main():

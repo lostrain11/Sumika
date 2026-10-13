@@ -2,6 +2,7 @@
 import {loadPlaywright} from './lib/playwright.mjs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {findNativeFrame, waitForNativeFrame} from './lib/native-frame.mjs';
+import {dismissFirstRunDialog} from './lib/dsh-first-run.mjs';
 const {chromium} = loadPlaywright();
 const base = process.argv[2] || 'http://127.0.0.1:8765';
 const dir = '.sumika-next/evidence/ui-v2';
@@ -56,17 +57,9 @@ try {
   results.push({theme,shellTheme,expectedBase});
   if(theme.palette!==shellTheme) errors.push(`工作台配色 ${theme.palette} 与外壳 ${shellTheme} 不一致`);
   else if(expectedBase&&theme.base!==expectedBase) errors.push(`${shellTheme} 主题的工作台底色为 ${theme.base}，期望 ${expectedBase}`);
-  // DSH 自己的首次配置弹窗在全新浏览器上下文里会盖住工作台：它带一层拦截指针事件的
-  // 遮罩，会让下面点侧栏开关的动作永远等不到可点击状态（表现为超时，而不是报出遮罩）。
-  // 用弹窗自己的「稍后配置」关掉它再继续。
-  for (const label of ['稍后配置','Later','Skip']) {
-    const button=frame.getByRole('button',{name:label});
-    if (await button.count().catch(()=>0)) {
-      await button.first().click().catch(()=>{});
-      await page.waitForTimeout(800);
-      break;
-    }
-  }
+  // R7: the shared first-run fixture dismisses DSH's own configuration modal
+  // through its product button; native entries stay visible.
+  await dismissFirstRunDialog(frame, page);
   const toggle=frame.locator('[class*="_logoRow"] [class*="_toggle"]').first();
   await toggle.click({timeout:5000});
   await toggle.hover();

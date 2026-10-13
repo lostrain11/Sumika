@@ -282,6 +282,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     if(audioPending===undefined)audioPending=[];
     if(audioPending.length>=120){respond({accepted:false});return;}
     audioPending.push({sequence:message.sequence,
+      epoch:connection.grant.audio_epoch,
       sample_offset:message.sample_offset,media_identity:message.media_identity,
       pcm_base64:message.pcm_base64});
     respond({accepted:true});
@@ -290,6 +291,9 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       (async()=>{
         while(connection && connection.grant && connection.grant.audio && audioPending.length){
           const pending=audioPending[0];
+          // R3: packets captured under a rotated epoch are dead with it —
+          // posting one under the new epoch would trip the sequence fence.
+          if(pending.epoch!==connection.grant.audio_epoch){audioPending.shift();continue;}
           try {
             const result=await post('/api/companion/passive-browser/audio',{
               tab_id:connection.grant.tab_id,audio_epoch:connection.grant.audio_epoch,
@@ -348,6 +352,8 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       respond({restarted:false,final:true});return true;
     }
     (async()=>{
+      // R3: queued PCM belongs to the dead epoch; it never crosses it.
+      if(audioPending)audioPending.length=0;
       const epoch=await post('/api/companion/passive-browser/audio-epoch',{});
       owner.grant.audio_epoch=epoch.audio_epoch;
       await chrome.tabs.sendMessage(owner.grant.tab_id,

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 import subprocess
 
@@ -95,7 +96,7 @@ def executable_asset(path):
     """Reject scripts renamed to EXE before creating a candidate directory."""
     path = path.resolve(strict=True)
     if path.suffix.lower() != '.exe' or not path.is_file() or path.is_symlink() or path.is_junction():
-        raise ValueError('physical Windows executable required: ' + str(path))
+        raise ValueError('Windows executable required: ' + str(path))
     with path.open('rb') as source:
         header = source.read(64)
         if len(header) != 64 or header[:2] != b'MZ':
@@ -107,6 +108,80 @@ def executable_asset(path):
         if source.read(4) != b'PE\x00\x00':
             raise ValueError('Windows executable PE header missing: ' + str(path))
     return path
+
+
+def directory_digest(directory):
+    """Bounded input summary: one sha256 over sorted relative paths and sizes.
+
+    The full per-file inventory ships in the manifest; this digest only pins
+    the INPUT directory a candidate was built from.
+    """
+    import hashlib
+    accumulator = hashlib.sha256()
+    count = 0
+    for path, relative in physical_files(directory):
+        accumulator.update(relative.as_posix().encode('utf8'))
+        accumulator.update(str(path.stat().st_size).encode('ascii'))
+        count += 1
+    return {'files': count, 'sha256': accumulator.hexdigest()}
+
+
+def source_state(root):
+    """Source identity for the receipt: commit plus an honest dirty summary."""
+    import subprocess
+    def git(*arguments):
+        try:
+            result = subprocess.run(['git', *arguments], cwd=str(root),
+                                    capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return result.stdout.strip() if result.returncode == 0 else None
+    status = git('status', '--porcelain')
+    dirty = status.splitlines() if status else []
+    return {'commit': git('rev-parse', 'HEAD') or 'unavailable',
+            'dirty': bool(dirty),
+            'dirty_entries': len(dirty),
+            'dirty_sample': sorted(dirty)[:20]}
+
+
+def build_receipt(args, destination):
+    """R7 build receipt: source, inputs, generator, command and acceptance.
+
+    Inventory success is not acceptance, so the receipt records the
+    acceptance COMMAND, never a pass claim. Resource warnings, when a build
+    produces any, are located separately in their own evidence file; this
+    section stays empty unless a located warning is being reported — it is
+    never a leak claim and never a place to hide one.
+    """
+    inputs = {'launcher': {'sha256': digest(args.launcher.resolve())},
+              'host_runtimes': directory_digest(args.host_runtimes.resolve(strict=True)),
+              'dsh_runtime': directory_digest(args.dsh_runtime.resolve(strict=True))}
+    lock = args.dsh_runtime.resolve(strict=True)/'release.json'
+    if lock.is_file():
+        data = json.loads(lock.read_text(encoding='utf8'))
+        inputs['dsh_lock'] = {'version': data.get('version'), 'sha256': digest(lock)}
+    for name, path in (('pet_host', args.pet_host),
+                       ('process_audio_helper', args.process_audio_helper),
+                       ('desktop_runtime', args.desktop_runtime),
+                       ('voice_runtime', args.voice_runtime)):
+        if path is not None:
+            resolved = path.resolve(strict=True)
+            inputs[name] = (digest(resolved) if resolved.is_file()
+                            else directory_digest(resolved))
+    return {
+        'source': source_state(ROOT),
+        'inputs': inputs,
+        'generator': {'companion_extension_builder': {
+            'sha256': digest(ROOT/'tools'/'build_companion_extension.mjs')}},
+        'command': {'argv': list(sys.argv), 'destination': str(destination)},
+        'acceptance': {
+            'command': 'python -B tools/verify_portable_staging.py --destination '
+                       + str(destination),
+            'status': 'not_run_by_builder; inventory success is not release acceptance'},
+        'resource_warnings': [],
+        'resource_warning_policy': 'located in separate evidence with a cause; '
+                                   'never a leak claim, never hidden here',
+    }
 
 
 def main():
@@ -192,6 +267,7 @@ def main():
         inventory.append({'path': relative.as_posix(), 'size': target.stat().st_size, 'sha256': digest(target)})
     manifest = {'kind': 'portable-staging', 'schema_version': 2,
                 'status': 'internal-test-candidate', 'files': inventory,
+                'build': build_receipt(args, destination),
                 'boundary': 'No release acceptance; optional dependencies, licenses and lifecycle still require verification.'}
     (destination/'package-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf8')
     print(json.dumps(verify(destination), indent=2))

@@ -176,6 +176,7 @@ const worker = await readFile(process.argv[2], 'utf8');
 const id = 'abcdefghijklmnopabcdefghijklmnop';
 let listener = null;
 let epochCalls = 0, startAudioCalls = 0, startAudioReply = {started: true};
+let audioPosts = [];
 const context = vm.createContext({URL, AbortSignal, Date, console,
   setInterval() {}, clearTimeout() {},
   chrome: {runtime: {id,
@@ -191,6 +192,10 @@ const context = vm.createContext({URL, AbortSignal, Date, console,
       }}},
   async fetch(url, options) {
     if (url.endsWith('/audio-epoch')) epochCalls++;
+    if (url.endsWith('/passive-browser/audio')) {
+      audioPosts.push(JSON.parse(options.body).sequence);
+      return {ok: true, async json() { return {status: 'accepted', queued: 0}; }};
+    }
     return {ok: true, async json() { return {audio_epoch: 'fresh'}; }};
   }});
 vm.runInContext(worker, context);
@@ -226,6 +231,21 @@ const rotated = await listener({type: 'audio-stopped', reason: 'player_changed'}
   sender, () => {});
 results.player_changed = {epoch_requests: epochCalls - before,
   verdict: rotated};
+// R3/P07: queued PCM under a rotated epoch is dropped, never posted under
+// the new one (the old sequence would trip the server's sequence fence).
+await listener({type: 'audio-packet', sequence: 0, sample_offset: 0,
+  media_identity: {}, pcm_base64: 'AAAA'}, sender, () => {});
+await listener({type: 'audio-packet', sequence: 1, sample_offset: 1600,
+  media_identity: {}, pcm_base64: 'AAAA'}, sender, () => {});
+await new Promise(resolve => setTimeout(resolve, 80));  // drain settles
+before = epochCalls;
+await listener({type: 'audio-stopped', reason: 'player_changed'}, sender, () => {});
+await new Promise(resolve => setTimeout(resolve, 50));
+await listener({type: 'audio-packet', sequence: 0, sample_offset: 0,
+  media_identity: {}, pcm_base64: 'AAAA'}, sender, () => {});
+await new Promise(resolve => setTimeout(resolve, 120));
+results.stale_epoch_fencing = {posted_sequences: audioPosts,
+  epoch_requests: epochCalls - before};
 console.log(JSON.stringify(results));
 ''', encoding='utf8')
         run = subprocess.run(['node', str(harness), str(worker_path)],
@@ -244,6 +264,10 @@ console.log(JSON.stringify(results));
         self.assertEqual(results['send_failed']['epoch_requests'], 0)
         # Only player lifecycle changes auto-rotate.
         self.assertEqual(results['player_changed']['epoch_requests'], 1)
+        # R3: rotation clears stale queued packets; only the fresh epoch's
+        # sequence reaches the host.
+        self.assertEqual(results['stale_epoch_fencing']['posted_sequences'], [0, 0])
+        self.assertEqual(results['stale_epoch_fencing']['epoch_requests'], 1)
 
 
 if __name__ == '__main__':

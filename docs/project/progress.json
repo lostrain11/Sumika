@@ -816,8 +816,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p06_danmaku_notes_usage_done_pdf_selection_concluded_fail_closed",
-    "current_delivery_package": "P06 remaining decisions for the user: paste/point-region fallback UI (R6 allows it; needs user confirmation before any new UI per AGENTS.md). Next package P07 per R7 after that decision.",
+    "status": "p07_done_soak_green_latency_decomposition_build_receipt",
+    "current_delivery_package": "P08 行为库 (R8) — next package per the frozen order. P07 closed: hardened soak (pause-zero-new-packets, final-reference-after-every-seek, rotation-tolerant) green exit 0; recorded-sample voice latency decomposition; build receipt in package-manifest.json; shared DSH first-run fixture.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -839,11 +839,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P06 PDF selection CLOSED on round-1 evidence: Edge PDF does not expose the live selection via UIA TextPattern (real double-click -> Document GetSelection()=0, no Text child reports one); collector stays fail-closed with selection_status=selection_unavailable and no stale selection after a page flip. TextPattern2/GetCaretRange follow-up stays OPEN: the probe (tools/verify_companion_pdf_selection.py, now with a 150s in-process watchdog) hung in UIA COM on retry rounds — rerun only when the machine cooperates. Ask the user whether they want the paste/point-region fallback UI before building any. Then P07 per R7.",
+    "next_action": "P08 per R8 (行为库及管理契约: 隔离、幂等、删除) after P02. Open user decision from P06: whether to build the paste/point-region fallback UI for PDF selections (R6 allows it; new UI needs explicit user approval per AGENTS.md). Open low-priority follow-up: PDF selection probe TextPattern2/GetCaretRange round on a cooperative machine (probe code ready with watchdog).",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "PDF probe final round: watchdog fired at 150s (UIA COM hang on this machine today); evidence E:/SumikaBuild/pdf-selection-final/report.json. Investigation stands on the completed round 1 (E:/SumikaBuild/pdf-selection-probe-r1/report.json): after a real double-click on a known fixture word, Document TextPattern GetSelection()=0, no Text child reports a selection, product collect returns honest selection_unavailable, page flip serves no stale selection — matching the independent acceptance empty_intersection=true and explaining it. Danmaku/notes/usage remain code-complete (145 tests green, commit 4199e80)."
+    "verified_this_turn": "P07 closed. Soak green (exit 0, E:/SumikaBuild/soak-p07g.log): pause fence + pause-zero-new-packets, 3× final-reference-after-seek (20-31s bindings tracked post-seek), 315 packets, 2 transcripts, healthy track. Three real product defects fixed en route: (a) stale-epoch queued PCM posted under the new epoch tripped the sequence fence on any player flap — worker now tags/drops/clears (Node-VM test caught the never-initialized-queue crash in the clear); (b) /audio-epoch rebuilt the recognizer in the HTTP thread (~20s stall per flap) — now a background thread under the starting flag; (c) epoch-ahead packets during a rebuild 400ed (hard stop) — now a retryable 503. Soak fixture recorded a 2.5s looping video that fired player_changed ~230×/run — now a 35s lesson segment. Voice: recorded-sample tool produces the live-tool latency decomposition (停说→ASR 848-907ms, SAPI-file first-char/first-audio boundary; R-126 unchanged). Build receipt (source/inputs/generator/command/acceptance/resource-warning policy) ships in package-manifest.json; helper-level unit tests only, no full candidate build yet. Shared DSH first-run fixture (tools/lib/dsh-first-run.mjs) uses the modal product button; native entries stay. 30 targeted unit tests OK; coverage table 待P06 rows marked complete."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

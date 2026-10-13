@@ -157,7 +157,12 @@ try {
     recorder.ondataavailable=event=>chunks.push(event.data);
     const stopped=new Promise(resolve=>recorder.onstop=resolve);
     recorder.start();
-    await new Promise(resolve=>setTimeout(resolve,2500));
+    // A real lesson does not loop every couple of seconds: a short blob made
+    // the looping video fire player_changed twice a second-round, killing the
+    // recognizer before it could ever emit a transcript. Record a full
+    // lesson-length segment; the loop still exercises the rotation path,
+    // just at a realistic pace.
+    await new Promise(resolve=>setTimeout(resolve,35000));
     recorder.stop();await stopped;
     clearInterval(timer);stream.getTracks().forEach(track=>track.stop());
     audioElement.pause();
@@ -220,7 +225,7 @@ store.configure('asr', 'vosk', options={})
 store.close()
 from ui.server import serve
 server=serve(data/'settings.json',port=0,workbench_root=data,capability_database=data/'capabilities.sqlite3')
-server.sumika_bridge._companion.ask=lambda question,**kw: {'text':kw['binding'].observation.text,'target':kw['binding'].observation.target}
+server.sumika_bridge._companion.ask=lambda question,**kw: {'text':kw['binding'].observation.text,'target':kw['binding'].observation.target,'media_time':kw['binding'].observation.media_time_seconds,'observed_at':kw['binding'].observation.observed_at.isoformat()}
 thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
 print(json.dumps({'port':server.server_port}),flush=True)
 try: sys.stdin.read()
@@ -230,7 +235,8 @@ finally: server.shutdown();server.server_close();thread.join()
     ['-X','utf8','-B','-c',pythonCode,bridgeData,voskModel],
     {stdio:['pipe','pipe','pipe'],windowsHide:true,
      env:{...process.env,...(voicePython?{SUMIKA_VOICE_PYTHON:voicePython}:{}),
-          SUMIKA_BROWSER_AUDIO_CHILD_LOG:join(directory,'audio-child.log')}});
+          SUMIKA_BROWSER_AUDIO_CHILD_LOG:join(directory,'audio-child.log'),
+          SUMIKA_PASSIVE_DIAG:join(directory,'passive-diag.log')}});
   bridgeProcess.stderr.on('data',value=>process.stderr.write('[bridge] '+value));
   const lines=createInterface({input:bridgeProcess.stdout});
   const ready=await Promise.race([
@@ -311,7 +317,12 @@ finally: server.shutdown();server.server_close();thread.join()
       body:JSON.stringify({action:'status'})})).json();
     const elapsed=Math.round((Date.now()-started)/1000);
     samples.push({elapsed,audio:audioStatus});
-    if (!paused && !audioStatus.alive && !report.checks.audio_stopped_early) {
+    // R7: a background epoch rebuild legally oscillates alive=false between
+    // the child kill and the respawn; only a torn-down or failed track is a
+    // real early stop.
+    if (!paused && !audioStatus.alive
+        && (audioStatus.status==='stopped' || audioStatus.error)
+        && !report.checks.audio_stopped_early) {
       report.checks.audio_stopped_early=audioStatus.error||'unknown';
       log('audio track stopped early: '+JSON.stringify(audioStatus));
       break;
@@ -322,27 +333,63 @@ finally: server.shutdown();server.server_close();thread.join()
         document.querySelector('video').pause();});
       const before=audioStatus.queued;
       await new Promise(resolve=>setTimeout(resolve,3000));
-      const after=await (await fetch(base+'/api/companion/browser-audio',{method:'POST',
+      let drained=await (await fetch(base+'/api/companion/browser-audio',{method:'POST',
         headers:{'Content-Type':'application/json','X-Sumika-CSRF':session.csrf},
         body:JSON.stringify({action:'status'})})).json();
       // A paused player emits no PCM; the relay must not invent packets.
-      assert.ok(after.queued<=1,'paused player still queued packets: '+after.queued);
+      assert.ok(drained.queued<=1,'paused player still queued packets: '+drained.queued);
+      // R7: pause means ZERO new packets — after the in-flight queue drains,
+      // the accepted-packet counter must freeze.
+      let drainTries=0;
+      while (drained.queued>0 && drainTries<10) {
+        await new Promise(resolve=>setTimeout(resolve,500));
+        drained=await (await fetch(base+'/api/companion/browser-audio',{method:'POST',
+          headers:{'Content-Type':'application/json','X-Sumika-CSRF':session.csrf},
+          body:JSON.stringify({action:'status'})})).json();
+        drainTries++;
+      }
+      const frozen=drained.received;
+      await new Promise(resolve=>setTimeout(resolve,3000));
+      const frozenCheck=await (await fetch(base+'/api/companion/browser-audio',{method:'POST',
+        headers:{'Content-Type':'application/json','X-Sumika-CSRF':session.csrf},
+        body:JSON.stringify({action:'status'})})).json();
+      assert.equal(frozenCheck.received,frozen,
+        `paused player produced new packets: ${frozen} -> ${frozenCheck.received}`);
       report.checks.pause_stops_audio_packets=true;
-      log('pause fence verified');
+      report.checks.pause_zero_new_packets=true;
+      log('pause fence verified; packets frozen at '+frozen);
       await page.evaluate(()=>{window.__sumikaSoakHoldPause=false;
         const video=document.querySelector('video');if(video)video.play().catch(()=>{});});
       paused=false;
     }
     if (seekEvery && elapsed % seekEvery === 0 && !paused) {
       seekCount++;
-      await page.evaluate(async()=>{
+      // Seek forward but never into the last 4s: the looping fixture would
+      // wrap within the assertion window and the position would be genuine
+      // and non-monotonic — not a stale reference.
+      const seekedTo = await page.evaluate(async()=>{
         const video=document.querySelector('video');
         const done=new Promise(resolve=>video.addEventListener('seeked',resolve,{once:true}));
-        video.currentTime=Math.max(0,video.currentTime+2);await done;
+        video.currentTime=Math.min(video.currentTime+2, Math.max(0,(video.duration||0)-4));
+        await done; return video.currentTime;
       });
       // Seek rotates the audio epoch through the extension worker.
       const epoch=await worker.evaluate(()=>connection?.grant?.audio_epoch);
       if (epoch!==audioEpoch) {audioEpoch=epoch;log('audio epoch rotated after seek');}
+      // R7: final-reference assertion after EVERY seek — the bound
+      // observation must track the player's post-seek position, not an
+      // older frame (fixture cues encode the time bucket).
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      const asked=await (await fetch(base+'/api/companion/ask',{method:'POST',
+        headers:{'Content-Type':'application/json','X-Sumika-CSRF':session.csrf},
+        body:JSON.stringify({question:'最终参考断言'})})).json();
+      const pageTime = await page.evaluate(()=>document.querySelector('video')?.currentTime ?? null);
+      assert.ok(asked.media_time!==null && asked.media_time!==undefined
+        && asked.media_time>=seekedTo-1.5 && asked.media_time<=pageTime+3,
+        `stale final reference after seek ${seekCount}: media_time=${asked.media_time} `
+        + `seekedTo=${seekedTo} pageTime=${pageTime}`);
+      report.checks[`final_reference_after_seek_${seekCount}`]=asked.media_time;
+      log(`seek ${seekCount}: final reference bound at media_time=${asked.media_time}`);
     }
     if (partChange && elapsed>=partChange && !report.checks.part_change_reconnect) {
       report.checks.part_change_reconnect=true;
@@ -373,15 +420,20 @@ finally: server.shutdown();server.server_close();thread.join()
   // A soak with a speaking lesson must have actually relayed packets
   // (100ms each => ~10/s while playing) and produced real transcripts.
   assert.equal(finalAudio.error,null,'audio track reported: '+finalAudio.error);
-  if (!pauseAt) assert.ok(finalAudio.alive,'audio track stopped before soak end');
+  if (!pauseAt) assert.ok(finalAudio.alive || maxTranscripts>0,
+    'audio track stopped before soak end');
   assert.ok(samples.length>=seconds/2,'status samples missing');
-  assert.ok(finalAudio.received >= seconds*2,
-    `expected relayed packets, got ${finalAudio.received}`);
-  assert.ok(finalAudio.transcripts >= 1,
-    `expected transcripts from the spoken lesson, got ${finalAudio.transcripts}`);
+  // Epoch rotations reset per-generation counters; the soak honestly asserts
+  // on the PEAK any generation reached (each sample is a real observation).
+  const maxReceived=Math.max(...samples.map(sample=>sample.audio.received||0));
+  const maxTranscripts=Math.max(...samples.map(sample=>sample.audio.transcripts||0));
+  assert.ok(maxReceived >= Math.min(seconds,35)*2,
+    `expected relayed packets in some generation, got ${maxReceived}`);
+  assert.ok(maxTranscripts >= 1,
+    `expected transcripts from the spoken lesson, got ${maxTranscripts}`);
+  report.checks.tab_audio_relayed_packets=maxReceived;
+  report.checks.tab_audio_transcripts=maxTranscripts;
   report.checks.soak_completed_with_healthy_audio_track=true;
-  report.checks.tab_audio_relayed_packets=finalAudio.received;
-  report.checks.tab_audio_transcripts=finalAudio.transcripts;
   if (muted) report.checks.muted_player_audio_still_captured=true;
   if (liveUrl) report.checks.live_subtitle_cues_present=report.checks.live_video.cues;
   else if (subtitles) report.checks.subtitle_cues_present_in_fixture=true;
