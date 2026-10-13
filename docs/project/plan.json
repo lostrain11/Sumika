@@ -934,8 +934,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p13_done_prompts_quota_habits_progress",
-    "current_delivery_package": "P14 profile配置 (R14, companion-profiles-plan: 模式store/CRUD/迁移、手动锁、revision、空/损坏) — next per the frozen order (P13 closed). Open shelved: PDF paste/point-region fallback UI.",
+    "status": "p14_done_companion_profile_store",
+    "current_delivery_package": "P15 自动路由与策略 (R15, companion-profiles-plan §3: 三个独立控制、前台和场景判别、仲裁) — next per the frozen order (P14 closed). Open shelved: PDF paste fallback UI.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -957,11 +957,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P14 per R14/companion-profiles-plan: 模式store/CRUD/迁移、手动锁、revision、空/损坏失败关闭。Then P15 自动路由, P16 产品界面 (含 P10 权限页暂停/恢复控件、P12/P13 prompt/习惯可见面), P17 最终候选/回退. Shelved: PDF paste fallback UI. Low priority: TextPattern2 round; P11 real keystroke soak user-gated.",
+    "next_action": "P15 per R15 §3: 三个独立控制（场景判别/主动许可/声音许可）、前台和场景判别（判别器只看名称与用户场景描述）、仲裁和上下文（manual 优先、score、ambiguous 不猜）。Runtime view already reports manual/matched/ambiguous/unknown. Shelved: PDF paste fallback UI. Low priority: TextPattern2 round; P11 real keystroke soak user-gated.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P13 closed. prompts.py quota profiles (quiet 30/3, medium 10/6, active 5/12) with cross-restart counters, busy/disabled before budget, corrupt state resets. Library: record_prompt persists pending with id BEFORE display; one-way pending transitions; restart sweep expires old pending (no auto-pop); mute_kind same-day ignore + persistent stop-asking with explicit un-mute; record_progress/progress_for upsert by HMAC material (JSON-typed page/video position, never completion); habit_summaries 90-day half-life ranking ≤3; behavior_context_block bounded and labeled. Route: prompt_show/prompt_state/prompts_expire_pending/prompt_mute_kind/progress_record/progress_get/habit_context; bridge init sweeps old pending. Tests: 10 prompts + 1 route roundtrip + 67 ui_server + 120 behavioral green. Test-infra note: a debugging change to the shared ui_server request harness (raise on 4xx) broke 30 tests expecting legitimate 400/403 — reverted same session. Boundaries: quota decides, nothing auto-asks yet (coordinator proactive flow unchanged); UI surfaces deferred to P16."
+    "verified_this_turn": "P14 closed. CompanionProfileStore (extensions/behavior/profiles.py): atomic companion-profiles.json, server-computed revision, closed profile schema (no credentials/providers/switches; unknown fields rejected), limits per plan (1-80 name, 2000 texts, 32 profiles, 16 auto, 120-86400 interval, deduped context sources), corrupt file preserved as *.corrupt-* with NEUTRAL standby, first-init templates 学习/游戏/安静 all deletable, new install arms auto / upgrade keeps manual+学习, manual persists across restarts, delete-current-manual leaves null selection never sneaky auto, delete-all legal, runtime reports manual/matched/ambiguous/unknown honestly. Route /api/manage/companion-profiles GET/POST with expected_revision -> 409 conflicts. Tests: 13 store + 1 real-server route roundtrip + 67 ui_server + 11 library green. Boundaries: P15 scoring, P16 UI (existing companion detail placement per confirmed choice), no model calls."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/plan.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

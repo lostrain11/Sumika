@@ -149,6 +149,12 @@ class Bridge:
             self._behavior_library.expire_pending_prompts(scope=self._behavior_scope())
         except Exception:
             pass
+        from extensions.behavior.profiles import CompanionProfileStore
+        # P14: 升级安装保持旧行为（manual+学习）；全新安装 auto 建议待选。
+        self._profile_store = CompanionProfileStore(
+            self.settings_path.parent,
+            new_user=not self.settings_path.exists())
+        self._profile_store.load()
         self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
@@ -360,6 +366,49 @@ class Bridge:
             return library.configure(payload.get('settings'),
                                      revision=payload.get('revision'))
         raise ValueError('unsupported behavior action')
+
+    def companion_profiles_manage(self, payload):
+        """P14 /api/manage/companion-profiles: the limited action mapping.
+
+        Writes carry expected_revision (409 at the route on conflict); the
+        profile schema is closed and never grants permissions.
+        """
+        from extensions.behavior.profiles import ProfileError
+        try:
+            return self._companion_profiles_manage(payload)
+        except ProfileError as error:
+            if str(error).startswith('revision conflict'):
+                from ui.management import Conflict
+                raise Conflict(str(error)) from None
+            raise
+
+    def _companion_profiles_manage(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError('companion profiles action required')
+        action = payload.get('action')
+        store = self._profile_store
+        if action == 'list':
+            return store.load()
+        if action == 'runtime':
+            return store.runtime()
+        if action == 'create':
+            return store.create(payload.get('profile'),
+                                expected_revision=payload.get('expected_revision'))
+        if action == 'update':
+            return store.update(payload.get('profile_id'),
+                                payload.get('changes') or {},
+                                expected_revision=payload.get('expected_revision'))
+        if action == 'duplicate':
+            return store.duplicate(payload.get('profile_id'),
+                                   expected_revision=payload.get('expected_revision'))
+        if action == 'delete':
+            return store.delete(payload.get('profile_id'),
+                                expected_revision=payload.get('expected_revision'))
+        if action == 'select':
+            return store.select(payload.get('selection_policy'),
+                                payload.get('profile_id'),
+                                expected_revision=payload.get('expected_revision'))
+        raise ValueError('unsupported companion profiles action')
 
     def behavior_startup_resume(self):
         """P10: rebind the foreground collector under the saved permission.

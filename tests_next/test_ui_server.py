@@ -631,6 +631,73 @@ class UIServerTests(unittest.TestCase):
             "action": "habit_context", "kind": "flip_burst"})
         self.assertIn("block", context)
 
+    def test_companion_profiles_route_roundtrip(self):
+        # P14: templates init, create with revision, 409 on stale revision,
+        # manual select, delete current manual leaves a null selection.
+        _, state = self.request("/api/manage/companion-profiles")
+        self.assertEqual(state["schema_version"], 1)
+        self.assertEqual(state["selection_policy"], "manual")
+        revision = state["revision"]
+        _, created = self.request("/api/manage/companion-profiles",
+                                  method="POST",
+                                  body={"action": "create",
+                                        "expected_revision": revision,
+                                        "profile": {
+                                            "name": "阅读",
+                                            "enabled_for_auto": True,
+                                            "scenario_description": "看文档",
+                                            "response_instructions": "总结要点",
+                                            "settings": {
+                                                "proactive_enabled": False,
+                                                "proactive_interval_seconds": 300,
+                                                "behavior_prompts_enabled": True,
+                                                "context_sources": ["text"]}}})
+        self.assertEqual(created["status"], "created")
+        try:
+            self.request("/api/manage/companion-profiles", method="POST",
+                         body={"action": "update",
+                               "profile_id": created["id"],
+                               "expected_revision": revision,
+                               "changes": {"name": "过期"}})
+            raise AssertionError("stale revision must not update")
+        except urllib.error.HTTPError as error:
+            self.assertEqual(error.code, 409)
+        _, fresh = self.request("/api/manage/companion-profiles")
+        _, updated = self.request("/api/manage/companion-profiles",
+                                  method="POST",
+                                  body={"action": "update",
+                                        "profile_id": created["id"],
+                                        "expected_revision":
+                                            fresh["revision"],
+                                        "changes": {"name": "阅读修改"}})
+        self.assertEqual(updated["status"], "updated")
+        _, current = self.request("/api/manage/companion-profiles")
+        _, selected = self.request("/api/manage/companion-profiles",
+                                   method="POST",
+                                   body={"action": "select",
+                                         "selection_policy": "manual",
+                                         "profile_id": created["id"],
+                                         "expected_revision":
+                                             current["revision"]})
+        self.assertEqual(selected["profile_id"], created["id"])
+        _, runtime = self.request("/api/manage/companion-profiles",
+                                  method="POST",
+                                  body={"action": "runtime"})
+        self.assertEqual(runtime["reason"], "manual")
+        _, current = self.request("/api/manage/companion-profiles")
+        _, deleted = self.request("/api/manage/companion-profiles",
+                                  method="POST",
+                                  body={"action": "delete",
+                                        "profile_id": created["id"],
+                                        "expected_revision":
+                                            current["revision"]})
+        self.assertEqual(deleted["status"], "deleted")
+        _, runtime_after = self.request("/api/manage/companion-profiles",
+                                        method="POST",
+                                        body={"action": "runtime"})
+        self.assertEqual(runtime_after["reason"], "unknown")
+        self.assertIsNone(runtime_after["effective_profile_id"])
+
     def test_behavior_permission_route_roundtrip(self):
         # P10: the persisted permission is revision-guarded, pause survives a
         # rebuild, and a startup rebind without grant answers not_resumed.

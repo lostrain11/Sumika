@@ -428,6 +428,14 @@ class Management:
         with self.lock:
             if parts == ['api','manage','behavior'] and method == 'POST':
                 return self.bridge.behavior_manage(payload)
+            if parts == ['api','manage','companion-profiles'] and method == 'POST':
+                return self.bridge.companion_profiles_manage(payload)
+            if parts == ['api','manage','companion-profiles'] and method == 'GET':
+                return self.bridge.companion_profiles_manage({'action': 'list'})
+            if parts == ['api','manage','companion-profiles'] and method == 'POST':
+                return self.bridge.companion_profiles_manage(payload)
+            if parts == ['api','manage','companion-profiles'] and method == 'GET':
+                return self.bridge.companion_profiles_manage({'action': 'list'})
             if parts == ['api','manage','behavior'] and method == 'GET':
                 return self.bridge.behavior_manage({'action': 'status'})
             if parts == ['api','manage','personal-data'] and method == 'GET':
