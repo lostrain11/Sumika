@@ -100,7 +100,7 @@
     "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
     "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
   ],
-  "next": "Read docs/project/acceptance-20261012.md for the independent acceptance findings. Overall acceptance has not passed. Await the user's next optimization/new-requirement instruction; this audit does not authorize product fixes or new UI features.",
+  "next": "P05 closed (E2E twice green, runs 62/63). Next: P06 per R6 (PDF当前页定位、弹幕文本snapshot+TTL、显式弹幕总结、冻结来源笔记、用量业务类别)。诊断基建保留：SUMIKA_PASSIVE_DIAG 停止溯源。",
   "evidence": [
     "docs/project/phase-01-acceptance.md",
     "docs/project/phase-02-acceptance.md",
@@ -182,7 +182,7 @@
     "role_plugin_evidence": "docs/project/role-plugin-evidence.json",
     "role_model_evidence": "docs/project/role-model-evidence.json"
   },
-  "next_action": "ZCode / GLM5.3flash：完整阅读 repair-and-acceptance-plan.md、behavior-memory-plan.md、companion-profiles-plan.md；核对P00归档及现场diff后从P01统一观察入口/新鲜度开始，按P00～P17依赖执行。产品尚未实施、整体未通过；逐包回执及验证，不重放unknown。",
+  "next_action": "P06 per R6 (P05 closed with E2E twice green, runs 62/63): PDF当前页/selection定位、弹幕snapshot返回文本+TTL、详情显式“总结当前弹幕”、冻结来源笔记绑定answer_id、用量业务类别room/companion/routing/behavior/audio/vision。诊断基建保留：SUMIKA_PASSIVE_DIAG输出停止溯源JSON行。",
   "local_model_evaluation": {
     "status": "in_progress",
     "evidence": "docs/project/local-model-comparison-evidence.json",
@@ -816,8 +816,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p05_drain_race_open_next_session",
-    "current_delivery_package": "P05 remainder: tab-session stop path (passive stays running after UI stop) — one focused fix, then E2E twice, then P06",
+    "status": "p05_closed_e2e_twice_green_next_p06",
+    "current_delivery_package": "P06 PDF/弹幕/笔记/用量 (R6) — next package; P05 tab-session stop path closed with two green E2E runs",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -839,7 +839,7 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "Fresh session, P05 remainder: reproduce the grant stop during lazy-start model load with drain diagnostics on, fix the race, E2E twice green, then P06 per R6. All wiring/layers implemented and committed.",
+    "next_action": "P06 per R6 (P05 closed with E2E twice green, runs 62/63): PDF当前页/selection定位、弹幕snapshot返回文本+TTL、详情显式“总结当前弹幕”、冻结来源笔记绑定answer_id、用量业务类别room/companion/routing/behavior/audio/vision。诊断基建保留：SUMIKA_PASSIVE_DIAG输出停止溯源JSON行。",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",

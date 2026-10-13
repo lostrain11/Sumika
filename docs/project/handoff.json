@@ -766,8 +766,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p05_drain_race_open_next_session",
-    "current_delivery_package": "P05 remainder: tab-session stop path (passive stays running after UI stop) — one focused fix, then E2E twice, then P06",
+    "status": "p05_closed_e2e_twice_green_next_p06",
+    "current_delivery_package": "P06 PDF/弹幕/笔记/用量 (R6) — next package; P05 tab-session stop path closed with two green E2E runs",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -789,11 +789,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "Fresh session, P05 remainder: reproduce the grant stop during lazy-start model load with drain diagnostics on, fix the race, E2E twice green, then P06 per R6. All wiring/layers implemented and committed.",
+    "next_action": "P06 per R6: PDF当前页/selection定位、弹幕snapshot文本+TTL、显式总结当前弹幕、冻结来源笔记、用量业务类别(room/companion/routing/behavior/audio/vision)。依赖P02/P05(已闭)。P05遗留诊断基建保留：SUMIKA_PASSIVE_DIAG环境变量输出停止溯源JSON行。",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "Run 58 (with vosk preload + watchdog hold): audio reached starting, then the run hung >20 min with video pushes 403 grant unavailable — the passive grant was stopped mid-run and the harness hung in the stop-click wait. Precise next steps recorded: (1) reproduce with the drain diagnostics and capture WHO stops the grant during the model load (watchdog thread vs stop chain); (2) fix the serialization; (3) E2E twice green."
+    "verified_this_turn": "P05 CLOSED with stop-provenance diagnostics (SUMIKA_PASSIVE_DIAG). Three root causes found and fixed, none of them the watchdog: (1) run 59 — after a server-side track stop (queue overflow) the extension was never told, kept sending with its monotonic sequence, and every lazy respawn desynced ('sequence gap') — infinite overflow/respawn churn while the grant stayed alive the whole time (video pushes accepted throughout); fixed by adopting the triggering packet's sequence at lazy start (PassiveBrowserAudio.start(first_sequence) via the /audio route) plus drain hard-failure now stops the page-side capture (stopTabAudio, R4 terminal semantics) and paces the backlog by the host's queued feedback. (2) run 60 — grant_stop stack proved the extension's own /cancel killed the live grant 73s after approve: tabs.onUpdated fired on every update event (no change.url filter) and the approved request was never cleared, so Bilibili page updates withdrew the pending offer and took the live grant with it (this was the run-58 'who stops the grant' answer); fixed by reacting only to change.url and marking the request approved on receipt. (3) run 61 — the 20-packet running bound (2s) overflowed during the child's post-model-load warm-up (2-4s no-consume) and the drain saw the failure only as a retryable 5s timeout (server _fail waits on process.kill), so the loop persisted; running bound raised to 60 packets (6s) — overflow-stop semantics unchanged (tests use the constant). Harness: CSRF-correct status probes, pre-stop grant-liveness assertion, bounded text question, 8-minute global watchdog, passed flag set on success. Also diagnosed: Windows multi-handle append('a') is seek+write (non-atomic) — concurrent diag writers clobber line heads; _diag got an in-process lock, cross-process child-log lines may interleave (diagnostic only). Tests: 41 relevant OK (passive_browser, passive_browser_audio incl. 2 new first_sequence cases, p03 epoch rebuild, p04 lifecycle). E2E twice green: run 62 EXIT=0 (11/11 checks true), run 63 passed=true EXIT=0; evidence E:/SumikaBuild/companion-wiring-e2e62|63 (report.json, passive-diag.log, audio-child.log). Zero paid model calls (chat stub)."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
