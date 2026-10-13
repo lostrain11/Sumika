@@ -766,7 +766,7 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p05_lazy_start_race_debug_in_progress",
+    "status": "p05_drain_race_open_next_session",
     "current_delivery_package": "P05 remainder: tab-session stop path (passive stays running after UI stop) — one focused fix, then E2E twice, then P06",
     "package_order": [
       "P00 归档与现场核对",
@@ -789,11 +789,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P05 remainder (one-line-first): in the extension drain, retry drained-post TIMEOUTs like recognizer-starting; add vosk preload at child start; rerun E2E twice green, then P06 per R6.",
+    "next_action": "Fresh session, P05 remainder: reproduce the grant stop during lazy-start model load with drain diagnostics on, fix the race, E2E twice green, then P06 per R6. All wiring/layers implemented and committed.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "Watchdog hold implemented (passive_browser.hold_watchdog <=120s suspends the no-packet expiry; expires still enforced; tests 21 OK incl. hold-suspends/expires-enforced/bounded) and renewed on each retryable 503 in the /audio route. Fresh E2E run with the staged candidate runtime still stalls: /audio posts time out (5s) during the model load and the grant expires — the concurrency fix needs a fresh focused session (hold renewal cadence vs drain, /audio blocking analysis). Final evidence: audio-child.log shows the vosk model mid-load when the drain gave up — fix: treat drained-post TIMEOUT like recognizer-starting (keep retrying), optionally preload vosk at child start. Follow-up: ASR model preloaded at pipe-worker start (before the ready handshake) committed; the E2E rerun with the preload was interrupted — rerun twice green to close P05, watching for the passive-grant stop race observed in e2e57 (video push 403 grant unavailable after UI approve)."
+    "verified_this_turn": "Run 58 (with vosk preload + watchdog hold): audio reached starting, then the run hung >20 min with video pushes 403 grant unavailable — the passive grant was stopped mid-run and the harness hung in the stop-click wait. Precise next steps recorded: (1) reproduce with the drain diagnostics and capture WHO stops the grant during the model load (watchdog thread vs stop chain); (2) fix the serialization; (3) E2E twice green."
   },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

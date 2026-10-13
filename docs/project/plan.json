@@ -719,7 +719,7 @@
       "correction": "StudyNotes实际保存显式笔记正文，不是只存哈希；行为实现未开始。"
     }
   ],
-  "next_action": "P05 remainder: extension drain must retry drained-post TIMEOUTS like recognizer-starting (audio-child.log shows vosk mid-load when it gave up); optionally preload vosk at child start; rerun E2E twice green, then P06 (R6), P07, P08-P17.",
+  "next_action": "P05 remainder (fresh session): reproduce with drain diagnostics on — the passive grant stops mid-run during the lazy-start model load (run 58 hung in stop-click); find and fix the race (watchdog vs lazy start vs stop chain), rerun E2E (tools/verify_companion_bilibili_wiring.mjs) twice green, then P06 (R6), P07, P08-P17.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
