@@ -148,6 +148,17 @@ class BridgeLifecycleTests(unittest.TestCase):
         self.assertEqual(stopped, [True])
 
 
+    def test_revoke_stops_approved_passive_connection(self):
+        bridge = self.bridge
+        with patch.object(bridge._passive_browser, 'start',
+                          return_value={'status': 'running'}),              patch.object(bridge._passive_browser, 'status',
+                          side_effect=[{'status': 'running'},
+                                       {'status': 'stopped'}]),              patch.object(bridge._passive_browser, 'stop') as stop:
+            bridge.companion_revoke()
+        self.assertEqual(stop.call_count, 1,
+                         'companion_revoke must stop the passive connection')
+
+
 class ExtensionArbitrationTests(unittest.TestCase):
     def test_worker_arbitration_policy(self):
         repo = Path(__file__).resolve().parents[1]

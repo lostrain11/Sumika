@@ -719,7 +719,7 @@
       "correction": "StudyNotes实际保存显式笔记正文，不是只存哈希；行为实现未开始。"
     }
   ],
-  "next_action": "P05: wiring green except the tab-session stop leg (passive stays running after UI stop) — fix the stop chain, E2E twice, then P06 (R6), P07, P08-P17.",
+  "next_action": "P05 remainder: tab-session stop leg — bridge stop chain verified; debug the product-page stop click via Playwright, fix, E2E twice, then P06 (R6), P07, P08-P17.",
   "current_remaining_audit": {
     "status": "incomplete_current_integration_and_release",
     "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
