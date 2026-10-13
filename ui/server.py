@@ -141,6 +141,9 @@ class Bridge:
         self._behavior_library = BehaviorLibrary(
             self._behavior_locator.resolve()/'behavior.sqlite3',
             locator=self._behavior_locator)
+        from extensions.behavior.permission import BehaviorPermissions
+        self._behavior_permissions = BehaviorPermissions(
+            self._behavior_locator.resolve())
         self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
@@ -271,6 +274,30 @@ class Bridge:
             return result
         if action == 'resume':
             return library.resume_recording()
+        if action == 'permission_status':
+            return {'permission': self._behavior_permissions.load(),
+                    'effective': self._behavior_permissions.effective()}
+        if action == 'permission_save':
+            return {'effective': self._behavior_permissions.save(
+                payload.get('mutations'),
+                revision=payload.get('revision'))}
+        if action == 'permission_pause':
+            return {'effective': self._behavior_permissions.pause(
+                revision=payload.get('revision'))}
+        if action == 'permission_resume':
+            return {'effective': self._behavior_permissions.resume(
+                revision=payload.get('revision'))}
+        if action == 'permission_revoke':
+            return {'effective': self._behavior_permissions.revoke(
+                revision=payload.get('revision'))}
+        if action == 'exclusion_add':
+            return {'effective': self._behavior_permissions.exclusion_add(
+                payload.get('name'), revision=payload.get('revision'))}
+        if action == 'exclusion_remove':
+            return {'effective': self._behavior_permissions.exclusion_remove(
+                payload.get('name'), revision=payload.get('revision'))}
+        if action == 'startup_rebind':
+            return self.behavior_startup_resume()
         if action == 'list':
             return library.list_records(scope=scope, kind=payload.get('kind'),
                                         cursor=payload.get('cursor'),
@@ -299,14 +326,47 @@ class Bridge:
                                      revision=payload.get('revision'))
         raise ValueError('unsupported behavior action')
 
+    def behavior_startup_resume(self):
+        """P10: rebind the foreground collector under the saved permission.
+
+        The binding is always the CURRENT foreground with a fresh process
+        identity; paused or revoked permissions never resume. Screen capture
+        only — never microphone, application audio or TTS.
+        """
+        from extensions.behavior.permission import (
+            PermissionClosed, current_foreground)
+        try:
+            binding, reason = self._behavior_permissions.startup_binding(
+                current_foreground)
+        except PermissionClosed as error:
+            return {'status': 'not_resumed', 'reason': str(error)}
+        if binding is None:
+            return {'status': 'not_resumed', 'reason': reason}
+        self.companion_perception({'action': 'start',
+            'handle': binding['handle'], 'process_id': binding['process_id'],
+            'process_creation': binding['process_creation'], 'consent': True})
+        return {'status': 'resumed', 'target': binding}
+
     def _rebuild_behavior_library(self):
         self._behavior_library = BehaviorLibrary(
             self._behavior_locator.resolve()/'behavior.sqlite3',
             locator=self._behavior_locator)
+        from extensions.behavior.permission import BehaviorPermissions
+        self._behavior_permissions = BehaviorPermissions(
+            self._behavior_locator.resolve())
 
     def _record_behavior_event(self, event):
-        """Coordinator detection sink; persistence never breaks the feed."""
+        """Coordinator detection sink; persistence never breaks the feed.
+        P10: events persist only under the explicitly saved recording
+        permission — the old per-session consent does not migrate into it."""
         try:
+            from extensions.behavior.permission import PermissionClosed
+            try:
+                effective = self._behavior_permissions.effective()
+            except PermissionClosed:
+                return  # fail closed: no readable permission, no recording
+            if not effective['can_record']:
+                return
             self._behavior_library.observe(event, scope=self._behavior_scope())
         except Exception as error:
             self._coordinator_event('behavior_persist_error',

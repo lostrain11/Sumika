@@ -599,6 +599,29 @@ class UIServerTests(unittest.TestCase):
         self.server.server_close()
         self._tmp.cleanup()
 
+    def test_behavior_permission_route_roundtrip(self):
+        # P10: the persisted permission is revision-guarded, pause survives a
+        # rebuild, and a startup rebind without grant answers not_resumed.
+        _, state = self.request("/api/manage/behavior", method="POST", body={
+            "action": "permission_save",
+            "mutations": {"recording": True, "startup_resume": True},
+            "revision": self.request("/api/manage/behavior", method="POST",
+                                     body={"action": "permission_status"})[1]["permission"]["revision"]})
+        self.assertTrue(state["effective"]["can_record"])
+        _, paused = self.request("/api/manage/behavior", method="POST", body={
+            "action": "permission_pause",
+            "revision": self.request("/api/manage/behavior", method="POST",
+                                     body={"action": "permission_status"})[1]["permission"]["revision"]})
+        self.assertTrue(paused["effective"]["paused"])
+        _, rebind = self.request("/api/manage/behavior", method="POST", body={
+            "action": "startup_rebind"})
+        self.assertEqual(rebind["status"], "not_resumed")
+        _, resumed = self.request("/api/manage/behavior", method="POST", body={
+            "action": "permission_resume",
+            "revision": self.request("/api/manage/behavior", method="POST",
+                                     body={"action": "permission_status"})[1]["permission"]["revision"]})
+        self.assertTrue(resumed["effective"]["can_record"])
+
     def test_behavior_manage_route_roundtrip(self):
         # P08: the manage surface maps only the limited actions; the library
         # contract (isolation, idempotency, confirmed deletion) is enforced

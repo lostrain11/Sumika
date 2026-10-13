@@ -934,8 +934,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p09_done_behavior_storage_capacity_migration_backup_v2",
-    "current_delivery_package": "P10 许可/前台跟随 (R10) — next per the frozen order (P08/P09 prerequisites closed). Open shelved decision: PDF paste/point-region fallback UI.",
+    "status": "p10_done_persistent_permission_and_foreground_rebind",
+    "current_delivery_package": "P11 Raw Input聚合 (R11, behavior-memory-plan §2.2/2.3: input_features.py 纯函数 + windows_input_worker.py + input_process.py, 安装版 desktop Python) — next. P10 closed.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -957,11 +957,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P10 per R10 (持久许可与运行身份 / 前台观察 per behavior-memory-plan §2.1 与修复计划): 持久采集许可、运行身份、前台窗口有效观察。Existing assets: windows_learning collect chain, capability store, P08/P09 behavior library with locator/capacity/migration. Shelved: PDF paste fallback UI (user decision 2026-10-14). Low priority: PDF probe TextPattern2 round.",
+    "next_action": "P11 per R11: Raw Input薄适配（RegisterRawInputDevices INPUTSINK、WM_INPUT、不hook不吞键、VK/scan瞬时归类不落盘）、InputFeatureFrame 1秒帧/白名单快捷键/网格/16KiB/120帧队列、每10秒或256帧事务落盘、焦点探针IsPassword限频、缺口隔离停通道。Open shelved: PDF paste fallback UI. Low priority: PDF probe TextPattern2 round.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P09 closed. Locator: single pointer file, owner id, atomic switch, dedicated-directory validation (own files only, no product tree, no nesting, no foreign owner, same-root idempotent). Capacity: 10s probe cadence, 5GiB tier + disk-low notices, hard pause on <1GiB or SQLITE_FULL persisted in its own transaction, explicit resume refuses under the floor. Migration: six-state journal, both-root leases, hash+integrity verification, locator_committed written into the destination pre-switch, retired source refuses writes (no dual write), idempotent re-run, drifted locator refuses to open the journaled library. Backup v2: roots.personal + roots.behavior leased and hash-verified, locator excluded and freshly rebound at restore, v1 compatible. Tests: 13 storage + 11 library + 1 route + 22 coordinator + 60 personal-data/snapshot/preflight green. Bugs caught by tests: pause marker rolled back by its own context; reconcile compared file path and wrong authority; destination verification connection left open (WinError 32)."
+    "verified_this_turn": "P10 closed. BehaviorPermissions inside the behavior root: missing dir/corrupt file fail closed (never relocated/recreated), revision-guarded switches (recording/use_memory/questions/startup_resume), pause persists and never auto-resumes, revoke is terminal, own-process exclusions irremovable, old one-shot consents do not migrate (defaults grant nothing). Startup rebinding: fresh current-foreground identity via GetForegroundWindow + validated availability + process creation; paused/ungranted permissions decided before touching the OS; excluded images fail closed. Route: permission_status/save/pause/resume/revoke/exclusion_add/exclusion_remove/startup_rebind. The behavior sink persists only under the saved recording permission. Tests: 10 permission + 1 real-server route roundtrip + 34 P08/P09 suites green. Boundaries: settings-page pause/resume controls deferred to the UI package (coverage-table step); no hardware foreground walk; Raw Input is P11."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/plan.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
