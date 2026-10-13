@@ -4,7 +4,8 @@ from pathlib import Path
 
 class DataLease:
     def __init__(self, directory, *, filename='sumika-bridge.lock'):
-        if filename not in ('sumika-bridge.lock', 'sumika-instance.lock'):
+        if filename not in ('sumika-bridge.lock', 'sumika-instance.lock',
+                            'behavior-root.lock'):
             raise ValueError('unsupported ownership lock')
         self.directory = Path(directory).resolve()
         self.filename = filename

@@ -46,13 +46,17 @@ def inventory(root):
             if name == 'sumika-instance.json':
                 if json.loads(path.read_text(encoding='utf8')) != {}:
                     raise ValueError('DSH ownership is not released; stop and reconcile the profile first')
-            if name in ('sumika-bridge.lock', 'sumika-instance.lock'):
+            if name in ('sumika-bridge.lock', 'sumika-instance.lock',
+                        'behavior-locator.json', 'behavior-root.lock'):
+                # P09: the locator is machine-local pointer state; a restored
+                # copy must never point at the original live library, so it
+                # is excluded here and freshly written by the restore/rebind.
                 continue
             files[relative] = {'size': path.stat().st_size, 'sha256': digest(path)}
     return files
 
 
-def backup(source, destination):
+def backup(source, destination, behavior_root=None):
     source = Path(source).absolute()
     destination = Path(destination).absolute()
     if source.is_symlink() or source.is_junction() or not source.is_dir():
@@ -60,8 +64,21 @@ def backup(source, destination):
     source = source.resolve()
     if destination.exists() or destination.resolve().is_relative_to(source):
         raise ValueError('choose a new destination outside the source data')
+    external_behavior = None
+    if behavior_root is not None:
+        external_behavior = Path(behavior_root).absolute()
+        if external_behavior.is_symlink() or external_behavior.is_junction() \
+                or not external_behavior.is_dir():
+            raise ValueError('external behavior root must be a physical directory')
+        external_behavior = external_behavior.resolve()
+        if external_behavior.is_relative_to(source):
+            # Internal behavior rides inside the personal snapshot once.
+            external_behavior = None
     lease = DataLease(source).acquire()
     profile_leases = []
+    behavior_lease = (DataLease(external_behavior,
+                                filename='behavior-root.lock').acquire()
+                      if external_behavior is not None else None)
     try:
         # Independent CLI workbench processes do not hold the bridge lock.
         # Honor their existing byte-range lock without changing ownership records.
@@ -74,25 +91,56 @@ def backup(source, destination):
             if 'sumika-instance.lock' in names or 'sumika-instance.json' in names:
                 profile_leases.append(DataLease(directory, filename='sumika-instance.lock').acquire())
         before = inventory(source)
+        behavior_before = inventory(external_behavior) \
+            if external_behavior is not None else None
         destination.mkdir(parents=True, exist_ok=False)
         payload = destination/'data'
-        payload.mkdir()
+        if external_behavior is None:
+            payload.mkdir()
+            personal_target = payload
+        else:
+            (payload/'personal').mkdir(parents=True)
+            (payload/'behavior').mkdir(parents=True)
+            personal_target = payload/'personal'
         for relative in before:
-            target = payload/relative
+            target = personal_target/relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source/relative, target)
-        copied = inventory(payload)
+        copied = inventory(personal_target)
         after = inventory(source)
         if before != copied or before != after:
             raise ValueError('source changed or snapshot failed verification; incomplete destination retained')
-        manifest = {'schema_version': 1, 'kind': 'sumika-private-offline-snapshot',
-                    'status': 'verified', 'source': str(source), 'files': copied,
-                    'excluded_generated_paths': ['dsh-profiles/*/profiles/node_modules'],
-                    'boundary': 'Private data may contain credentials. External paths not copied; restore/rebinding not verified.'}
+        if external_behavior is None:
+            manifest = {'schema_version': 1, 'kind': 'sumika-private-offline-snapshot',
+                        'status': 'verified', 'source': str(source), 'files': copied,
+                        'excluded_generated_paths': ['dsh-profiles/*/profiles/node_modules'],
+                        'boundary': 'Private data may contain credentials. External paths not copied; restore/rebinding not verified.'}
+        else:
+            behavior_payload = payload/'behavior'
+            for relative in behavior_before:
+                target = behavior_payload/relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(external_behavior/relative, target)
+            behavior_copied = inventory(behavior_payload)
+            behavior_after = inventory(external_behavior)
+            if behavior_before != behavior_copied or behavior_before != behavior_after:
+                raise ValueError('behavior root changed during snapshot; incomplete destination retained')
+            manifest = {'schema_version': 2, 'kind': 'sumika-private-offline-snapshot',
+                        'status': 'verified', 'source': str(source),
+                        'roots': {'personal': {'source': str(source), 'files': copied},
+                                  'behavior': {'source': str(external_behavior),
+                                               'files': behavior_copied}},
+                        'excluded_generated_paths': ['dsh-profiles/*/profiles/node_modules'],
+                        'boundary': 'Private data may contain credentials. The behavior locator is not '
+                                    'snapshotted; restore writes a fresh one bound to the restored roots.'}
         with (destination/'snapshot.json').open('x', encoding='utf8') as output:
             json.dump(manifest, output, ensure_ascii=False, indent=2)
-        return {'status': 'verified', 'files': len(copied), 'snapshot': str(destination)}
+        return {'status': 'verified',
+                'files': sum(len(root['files']) for root in manifest.get('roots', {'personal': manifest}).values()),
+                'snapshot': str(destination)}
     finally:
+        if behavior_lease is not None:
+            behavior_lease.release()
         for profile_lease in reversed(profile_leases):
             profile_lease.release()
         lease.release()
@@ -107,35 +155,95 @@ def verify_snapshot(snapshot):
     if manifest_path.is_symlink() or manifest_path.is_junction():
         raise ValueError('linked snapshot manifest refused')
     manifest = json.loads(manifest_path.read_text(encoding='utf8'))
-    if (not isinstance(manifest, dict) or type(manifest.get('schema_version')) is not int or manifest.get('schema_version') != 1
+    if (not isinstance(manifest, dict) or type(manifest.get('schema_version')) is not int
+            or manifest.get('schema_version') not in (1, 2)
             or manifest.get('kind') != 'sumika-private-offline-snapshot'
-            or manifest.get('status') != 'verified' or not isinstance(manifest.get('files'), dict)):
+            or manifest.get('status') != 'verified'):
         raise ValueError('invalid snapshot manifest')
     payload = snapshot/'data'
-    before = inventory(payload)
-    if before != manifest['files']:
+    if manifest['schema_version'] == 1:
+        if not isinstance(manifest.get('files'), dict):
+            raise ValueError('invalid snapshot manifest')
+        if inventory(payload) != manifest['files']:
+            raise ValueError('snapshot integrity mismatch')
+        return manifest
+    roots = manifest.get('roots')
+    if not isinstance(roots, dict) or not isinstance(
+            (roots.get('personal') or {}).get('files'), dict) or not isinstance(
+            (roots.get('behavior') or {}).get('files'), dict):
+        raise ValueError('invalid v2 snapshot roots')
+    if inventory(payload/'personal') != roots['personal']['files'] \
+            or inventory(payload/'behavior') != roots['behavior']['files']:
         raise ValueError('snapshot integrity mismatch')
     return manifest
 
 
-def restore(snapshot, destination):
-    """Verify and restore bytes into a new directory, without activating it."""
+def restore(snapshot, destination, behavior_destination=None):
+    """Verify and restore bytes into new directories, without activating.
+
+    v2 snapshots restore personal plus the external behavior root; the
+    behavior locator inside the restored personal data is freshly written to
+    the restored roots and never names the original live library. v1
+    restores keep their shape; any carried locator file is removed so the
+    default internal root applies instead of a stale pointer.
+    """
     snapshot = Path(snapshot).absolute()
     destination = Path(destination).absolute()
     manifest = verify_snapshot(snapshot)
     payload = snapshot/'data'
-    before = manifest['files']
     if destination.exists() or destination.resolve().is_relative_to(snapshot.resolve()):
         raise ValueError('restore requires a new directory outside snapshot')
+    if manifest['schema_version'] == 2:
+        behavior_destination = Path(behavior_destination).absolute() \
+            if behavior_destination is not None else destination/'behavior'
+        if behavior_destination.exists() or \
+                behavior_destination.resolve().is_relative_to(snapshot.resolve()):
+            raise ValueError('behavior restore requires a new directory outside snapshot')
+        if behavior_destination.resolve().is_relative_to(destination.resolve()) \
+                and behavior_destination != destination/'behavior':
+            raise ValueError('explicit behavior roots must stay outside the '
+                             'restored personal data (ambiguity)')
+    else:
+        behavior_destination = None
     destination.mkdir(parents=True, exist_ok=False)
+    personal_target = payload/'personal' if manifest['schema_version'] == 2 else payload
+    before = (manifest['roots']['personal']['files'] if manifest['schema_version'] == 2
+              else manifest['files'])
     for relative in before:
         target = destination/relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(payload/relative, target)
-    if inventory(destination) != before or inventory(payload) != before:
+        shutil.copyfile(personal_target/relative, target)
+    if inventory(destination) != before:
         raise ValueError('restore verification failed; incomplete destination retained')
-    return {'status': 'bytes_restored', 'files': len(before), 'destination': str(destination),
-            'boundary': 'Not activated. Absolute path bindings and external dependencies require reconciliation before use.'}
+    result = {'status': 'bytes_restored', 'files': len(before),
+              'destination': str(destination),
+              'boundary': 'Not activated. Absolute path bindings and external dependencies require reconciliation before use.'}
+    if manifest['schema_version'] == 2:
+        behavior_files = manifest['roots']['behavior']['files']
+        behavior_destination.mkdir(parents=True, exist_ok=False)
+        for relative in behavior_files:
+            target = behavior_destination/relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(payload/'behavior'/relative, target)
+        if inventory(behavior_destination) != behavior_files:
+            raise ValueError('behavior restore verification failed')
+        marker = behavior_destination/'behavior-root.json'
+        owner_id = (json.loads(marker.read_text(encoding='utf8'))['owner_id']
+                    if marker.is_file() else None)
+        locator = {'schema_version': 1, 'root': str(behavior_destination),
+                   'owner_id': owner_id,
+                   'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+        (destination/'behavior-locator.json').write_text(
+            json.dumps(locator, ensure_ascii=False, indent=1), encoding='utf8')
+        result['behavior'] = {'status': 'restored',
+                              'destination': str(behavior_destination),
+                              'files': len(behavior_files)}
+        result['files'] += len(behavior_files)
+    else:
+        carried = destination/'behavior-locator.json'
+        if carried.exists():
+            carried.unlink()
+    return result
 
 
 def rebind_role_paths(destination, original_root):
@@ -267,6 +375,8 @@ def main():
     parser.add_argument('--inspect', action='store_true', help='Read-only snapshot and role dependency preflight; no destination or activation')
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--destination', type=Path)
+    parser.add_argument('--behavior-root', type=Path,
+                        help='External behavior root to snapshot alongside the personal data (v2)')
     args = parser.parse_args()
     if args.inspect:
         if args.restore or args.rebind_role_paths or args.resume_role_rebind or args.destination is not None:
@@ -295,7 +405,9 @@ def main():
     if args.rebind_role_paths and not args.restore:
         parser.error('--rebind-role-paths requires --restore')
     action = restore if args.restore else backup
-    result = action(args.source, args.destination)
+    result = (restore(args.source, args.destination, args.behavior_root)
+              if args.restore else backup(args.source, args.destination,
+                                          args.behavior_root))
     if args.rebind_role_paths:
         manifest = json.loads((args.source/'snapshot.json').read_text(encoding='utf8'))
         result['rebind'] = rebind_role_paths(args.destination, manifest['source'])

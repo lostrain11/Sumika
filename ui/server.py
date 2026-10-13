@@ -133,9 +133,14 @@ class Bridge:
         # Explicit user notes with provenance; a separate store that the
         # memory engine never reads and screen content never fills alone.
         from extensions.behavior.library import BehaviorLibrary
+        from extensions.behavior.locator import BehaviorLocator
         # P08 behavior sub-memory: local, host-scoped, idempotent events.
+        # P09: the active root comes from the single locator (default: the
+        # personal directory's own behavior child).
+        self._behavior_locator = BehaviorLocator(self.settings_path.parent)
         self._behavior_library = BehaviorLibrary(
-            self.settings_path.parent/'behavior'/'behavior.sqlite3')
+            self._behavior_locator.resolve()/'behavior.sqlite3',
+            locator=self._behavior_locator)
         self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
@@ -249,7 +254,23 @@ class Bridge:
         library = self._behavior_library
         scope = self._behavior_scope()
         if action == 'status':
-            return {**library.status(), 'scope': scope}
+            return {**library.status(), 'scope': scope,
+                    'root': str(self._behavior_locator.resolve())}
+        if action == 'select_root':
+            result = self._behavior_locator.select(
+                payload.get('destination'),
+                confirmed=payload.get('confirmed') is True)
+            self._rebuild_behavior_library()
+            return result
+        if action == 'migrate':
+            result = library.migrate(
+                payload.get('destination'), locator=self._behavior_locator,
+                confirmed=payload.get('confirmed') is True)
+            if result.get('status') == 'complete':
+                self._rebuild_behavior_library()
+            return result
+        if action == 'resume':
+            return library.resume_recording()
         if action == 'list':
             return library.list_records(scope=scope, kind=payload.get('kind'),
                                         cursor=payload.get('cursor'),
@@ -277,6 +298,11 @@ class Bridge:
             return library.configure(payload.get('settings'),
                                      revision=payload.get('revision'))
         raise ValueError('unsupported behavior action')
+
+    def _rebuild_behavior_library(self):
+        self._behavior_library = BehaviorLibrary(
+            self._behavior_locator.resolve()/'behavior.sqlite3',
+            locator=self._behavior_locator)
 
     def _record_behavior_event(self, event):
         """Coordinator detection sink; persistence never breaks the feed."""

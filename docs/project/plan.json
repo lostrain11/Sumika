@@ -934,8 +934,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p08_done_behavior_library_and_management_contract",
-    "current_delivery_package": "P09 选盘/空间/多根备份 (R9 behavior-memory-plan §3.2/§3.3) — next per the frozen order. P08 closed: behavior library (idempotent host-scoped events, bounded fields, revision-guarded mutations, confirmed deletion) + /api/manage/behavior + coordinator sink.",
+    "status": "p09_done_behavior_storage_capacity_migration_backup_v2",
+    "current_delivery_package": "P10 许可/前台跟随 (R10) — next per the frozen order (P08/P09 prerequisites closed). Open shelved decision: PDF paste/point-region fallback UI.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -957,11 +957,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P09 per R9: 存储位置与容量（专用目录/owner标识/lease、5GiB档位与磁盘余量提醒、SQLITE_FULL暂停新增）、迁移 prepare→…→complete journal、多根快照 v2 roots.personal/roots.behavior、恢复重绑 locator。Open user decision: PDF paste/point-region fallback UI (shelved by user 2026-10-14, revisit on request). Low priority: PDF probe TextPattern2 round.",
+    "next_action": "P10 per R10 (持久许可与运行身份 / 前台观察 per behavior-memory-plan §2.1 与修复计划): 持久采集许可、运行身份、前台窗口有效观察。Existing assets: windows_learning collect chain, capability store, P08/P09 behavior library with locator/capacity/migration. Shelved: PDF paste fallback UI (user decision 2026-10-14). Low priority: PDF probe TextPattern2 round.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P08 closed. BehaviorLibrary (extensions/behavior/library.py): idempotent events (same id same payload = duplicate no-op; different payload rejected), host-only scope assignment, structurally bounded fields (raw content keys rejected), material HMAC stable and never exported, revision-guarded correct/configure/delete, confirmed deletion with explicit selection that removes events+bound feedback, expires pending prompts, deactivates patterns, bumps behavior_epoch; nothing-selected deletion is a no-op including revision. /api/manage/behavior limited action mapping through standard admission; coordinator behavior_sink persists detected episodes with stable hashed ids, failures surface as events without touching the feed. Tests: 98 green (11 library + 1 sink + 1 real-server route roundtrip + 85 regression across ui_server/session_coordinator). Boundaries: detection rules/prompts/backup/UI are later packages; no product UI reads the store yet."
+    "verified_this_turn": "P09 closed. Locator: single pointer file, owner id, atomic switch, dedicated-directory validation (own files only, no product tree, no nesting, no foreign owner, same-root idempotent). Capacity: 10s probe cadence, 5GiB tier + disk-low notices, hard pause on <1GiB or SQLITE_FULL persisted in its own transaction, explicit resume refuses under the floor. Migration: six-state journal, both-root leases, hash+integrity verification, locator_committed written into the destination pre-switch, retired source refuses writes (no dual write), idempotent re-run, drifted locator refuses to open the journaled library. Backup v2: roots.personal + roots.behavior leased and hash-verified, locator excluded and freshly rebound at restore, v1 compatible. Tests: 13 storage + 11 library + 1 route + 22 coordinator + 60 personal-data/snapshot/preflight green. Bugs caught by tests: pause marker rolled back by its own context; reconcile compared file path and wrong authority; destination verification connection left open (WinError 32)."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/plan.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {

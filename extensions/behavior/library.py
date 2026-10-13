@@ -15,11 +15,27 @@ import hashlib
 import hmac
 import json
 import secrets
+import shutil
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+
+
+class CapacityPaused(Exception):
+    """Recording is hard-paused (disk guard or SQLITE_FULL) until the user
+    explicitly resumes; nothing is deleted and nothing claims to be recorded."""
+
+
+class MigrationActive(Exception):
+    """A root migration owns the library; new records fail loudly."""
+
+
+DEFAULT_CAPACITY = {'remind_tier_bytes': 5 * 1024 ** 3,
+                    'low_free_bytes': 10 * 1024 ** 3,
+                    'low_free_ratio': 0.10,
+                    'pause_free_bytes': 1 * 1024 ** 3}
 
 SCHEMA_VERSION = 1
 EVENT_KINDS = ('flip_burst', 'long_dwell', 'revisit', 'app_focus', 'note')
@@ -52,16 +68,24 @@ def _bounded_label(value, field):
 class BehaviorLibrary:
     """SQLite behavior store; one short connection per operation."""
 
-    def __init__(self, database, *, clock=time.time):
+    def __init__(self, database, *, clock=time.time, capacity_overrides=None,
+                 locator=None):
         if isinstance(database, sqlite3.Connection):
             raise ValueError('behavior library requires its own database path')
         self._database = str(database)
+        self._locator = locator
         self._clock = clock
         self._lock = threading.Lock()
+        self._capacity = {**DEFAULT_CAPACITY, **(capacity_overrides or {})}
+        self._capacity_checked_at = None
+        self._retired = False
         self._prepare()
 
     @contextmanager
     def _connection(self):
+        if self._retired:
+            raise RuntimeError('this behavior library was migrated away; '
+                               'rebuild it from the locator')
         connection = sqlite3.connect(self._database, timeout=10)
         try:
             connection.execute('PRAGMA foreign_keys=ON')
@@ -96,6 +120,7 @@ class BehaviorLibrary:
                 raise ValueError('behavior database is newer than this build')
             # Migration journal: every schema change records prepare/complete
             # here before touching user tables (idempotent, per the plan).
+            self._reconcile_migration(db)
 
     def _create_schema(self, db):
         db.execute('CREATE TABLE IF NOT EXISTS events ('
@@ -131,6 +156,120 @@ class BehaviorLibrary:
                    'source TEXT, at TEXT NOT NULL)')
         db.execute('CREATE INDEX IF NOT EXISTS feedback_event '
                    'ON feedback(scope_user, event_id)')
+
+    # -- capacity guard (§3.2) -----------------------------------------------
+    def _usage_bytes(self):
+        with self._connection() as db:
+            pages = db.execute('PRAGMA page_count').fetchone()[0]
+            size = db.execute('PRAGMA page_size').fetchone()[0]
+        return pages * size
+
+    def _meta_int(self, db, key, default):
+        row = self._meta(db, key)
+        try:
+            return int(row) if row is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    def _capacity_state(self, db):
+        paused = self._meta(db, 'capacity_paused') == '1'
+        raw = self._meta(db, 'capacity_notice')
+        notice = json.loads(raw) if raw else None
+        return paused, notice
+
+    def _capacity_allow(self, *, writing):
+        """Bounded cadence (>=10s between probes); a persisted pause always
+        applies immediately. Hard pause at the byte floor; notices otherwise.
+        Growth and free space land in management as low-frequency samples."""
+        now = time.monotonic()
+        if (self._capacity_checked_at is not None
+                and now - self._capacity_checked_at < 10):
+            return
+        self._capacity_checked_at = now
+        with self._connection() as db:
+            if self._meta(db, 'capacity_paused') == '1':
+                raise CapacityPaused('behavior recording is paused; resume '
+                                     'explicitly after freeing space')
+        usage = self._usage_bytes()
+        free, total = shutil.disk_usage(Path(self._database).parent)[1:3]
+        notices = []
+        with self._connection() as db:
+            tier = self._meta_int(db, 'capacity_tier_reminded', 0)
+            reached = usage // self._capacity['remind_tier_bytes']
+            if reached >= 1 and reached > tier:
+                notices.append({'kind': 'usage_tier', 'usage_bytes': usage})
+            if free < self._capacity['low_free_bytes'] or (
+                    total and free / total < self._capacity['low_free_ratio']):
+                notices.append({'kind': 'disk_low', 'free_bytes': free})
+            sample = json.dumps({'at': _utc_iso(self._clock),
+                                 'usage_bytes': usage, 'free_bytes': free,
+                                 'notices': notices}, ensure_ascii=False)
+            key = 'capacity_notice' if notices else 'usage_sample'
+            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       (key, sample))
+            if reached >= 1 and reached > tier:
+                db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                           'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                           ('capacity_tier_reminded', str(reached)))
+        # Persist the pause in its own committed transaction: raising inside
+        # the connection context would roll the marker back with it.
+        if writing and free < self._capacity['pause_free_bytes']:
+            with self._connection() as db:
+                db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                           'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                           ('capacity_paused', '1'))
+            self._capacity_checked_at = None
+            raise CapacityPaused('behavior recording paused: disk space '
+                                 'below the pause floor')
+
+    def resume_recording(self):
+        """Explicit user resume; refused while the byte floor still holds."""
+        free, _total = shutil.disk_usage(Path(self._database).parent)[1:3]
+        if free < self._capacity['pause_free_bytes']:
+            raise CapacityPaused('still below the pause floor; free space first')
+        with self._lock, self._connection() as db:
+            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       ('capacity_paused', '0'))
+            self._bump_revision(db)
+        self._capacity_checked_at = None
+        return {'status': 'resumed'}
+
+    def _guard_write(self):
+        self._capacity_allow(writing=True)
+        with self._connection() as db:
+            if self._meta(db, 'migration_active') == '1':
+                raise MigrationActive('a behavior root migration is running')
+
+    def _pause_on_full(self, error):
+        if 'database or disk is full' in str(error).lower():
+            with self._connection() as db:
+                db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                           'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                           ('capacity_paused', '1'))
+            raise CapacityPaused('behavior recording paused: disk full') from error
+        raise error
+
+    def _reconcile_migration(self, db):
+        """Crash recovery per §3.2: after locator_committed the journal and
+        the LOCATOR must agree — the pointer file is the authority, so a
+        drifted locator refuses to open the migrated library at all."""
+        raw = self._meta(db, 'migration_journal')
+        if not raw:
+            return
+        journal = json.loads(raw)
+        if journal.get('state') == 'locator_committed':
+            if self._locator is not None:
+                active_root = str(self._locator.resolve())
+            else:
+                active_root = str(Path(self._database).resolve().parent)
+            if journal.get('destination') != active_root:
+                raise ValueError('behavior locator diverges from the '
+                                 'migration journal; refusing to guess')
+            journal['state'] = 'complete'
+            db.execute('UPDATE management SET value=? WHERE key=?',
+                       (json.dumps(journal), 'migration_journal'))
 
     # -- management internals -------------------------------------------------
     def _meta(self, db, key):
@@ -221,23 +360,27 @@ class BehaviorLibrary:
         payload_hash = self._payload_hash(payload)
         user, session = self._scope(scope)
         at = _utc_iso(self._clock)
-        with self._lock, self._connection() as db:
-            existing = db.execute('SELECT payload_hash FROM events '
-                                  'WHERE scope_user=? AND event_id=?',
-                                  (user, event_id)).fetchone()
-            if existing is not None:
-                if existing[0] != payload_hash:
-                    raise ValueError('event id reuse with a different payload')
-                return {'status': 'duplicate'}
-            epoch = int(self._meta(db, _EPOCH))
-            db.execute('INSERT INTO events(scope_user,event_id,session,epoch,'
-                       'at,kind,source,app_category,target,material,features,'
-                       'payload_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-                       (user, event_id, session or '', epoch, at, kind, source,
-                        event.get('app_category'), target, material,
-                        json.dumps(features, ensure_ascii=False)
-                        if features is not None else None, payload_hash))
-            return {'status': 'recorded', 'event_id': event_id, 'at': at}
+        self._guard_write()
+        try:
+            with self._lock, self._connection() as db:
+                existing = db.execute('SELECT payload_hash FROM events '
+                                      'WHERE scope_user=? AND event_id=?',
+                                      (user, event_id)).fetchone()
+                if existing is not None:
+                    if existing[0] != payload_hash:
+                        raise ValueError('event id reuse with a different payload')
+                    return {'status': 'duplicate'}
+                epoch = int(self._meta(db, _EPOCH))
+                db.execute('INSERT INTO events(scope_user,event_id,session,epoch,'
+                           'at,kind,source,app_category,target,material,features,'
+                           'payload_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                           (user, event_id, session or '', epoch, at, kind, source,
+                            event.get('app_category'), target, material,
+                            json.dumps(features, ensure_ascii=False)
+                            if features is not None else None, payload_hash))
+                return {'status': 'recorded', 'event_id': event_id, 'at': at}
+        except sqlite3.OperationalError as error:
+            self._pause_on_full(error)
 
     def feedback(self, entry, *, scope):
         """Persist one explicit user verdict; scope and ids are host-filled."""
@@ -262,19 +405,23 @@ class BehaviorLibrary:
             raise ValueError('original text must stay within budget')
         user, _ = self._scope(scope)
         at = _utc_iso(self._clock)
-        with self._lock, self._connection() as db:
-            exists = db.execute('SELECT 1 FROM feedback WHERE scope_user=? '
-                                'AND feedback_id=?', (user, feedback_id)).fetchone()
-            if exists:
-                return {'status': 'duplicate'}
-            db.execute('INSERT INTO feedback(scope_user,feedback_id,user_event_id,'
-                       'prompt_id,event_id,episode_id,original,verdict,corrected,'
-                       'at) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                       (user, feedback_id, user_event_id, entry.get('prompt_id'),
-                        entry.get('event_id'), entry.get('episode_id'), original,
-                        verdict, corrected, at))
-            self._bump_revision(db)
-            return {'status': 'recorded', 'feedback_id': feedback_id, 'at': at}
+        self._guard_write()
+        try:
+            with self._lock, self._connection() as db:
+                exists = db.execute('SELECT 1 FROM feedback WHERE scope_user=? '
+                                    'AND feedback_id=?', (user, feedback_id)).fetchone()
+                if exists:
+                    return {'status': 'duplicate'}
+                db.execute('INSERT INTO feedback(scope_user,feedback_id,user_event_id,'
+                           'prompt_id,event_id,episode_id,original,verdict,corrected,'
+                           'at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                           (user, feedback_id, user_event_id, entry.get('prompt_id'),
+                            entry.get('event_id'), entry.get('episode_id'), original,
+                            verdict, corrected, at))
+                self._bump_revision(db)
+                return {'status': 'recorded', 'feedback_id': feedback_id, 'at': at}
+        except sqlite3.OperationalError as error:
+            self._pause_on_full(error)
 
     def correct(self, feedback_id, corrected, *, scope, revision):
         """User correction on an existing verdict; the corrected reading is
@@ -351,6 +498,136 @@ class BehaviorLibrary:
             return {'status': 'deleted', 'deleted_events': deleted,
                     'deleted_feedback': feedback,
                     'behavior_epoch': int(self._meta(db, _EPOCH))}
+
+    # -- root migration (§3.2) -----------------------------------------------
+    @staticmethod
+    def _file_digest(path):
+        import hashlib
+        accumulator = hashlib.sha256()
+        with Path(path).open('rb') as stream:
+            for chunk in iter(lambda: stream.read(1 << 20), b''):
+                accumulator.update(chunk)
+        return accumulator.hexdigest()
+
+    def _journal(self, state, destination, **extra):
+        with self._connection() as db:
+            payload = json.dumps({'state': state,
+                                  'destination': str(destination.resolve()),
+                                  **extra}, ensure_ascii=False)
+            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       ('migration_journal', payload))
+
+    def migrate(self, destination, *, locator, confirmed=False):
+        """Move the library to a new dedicated root (§3.2).
+
+        Journal order: prepare → paused → copied → verified →
+        locator_committed → complete. The source stays live until the atomic
+        locator switch; a failure before the switch leaves the source as the
+        only live copy, and after the switch this instance is retired so the
+        old path can never be written again (no dual write, no rollback by
+        impression). The caller rebuilds the library from the locator.
+        """
+        if confirmed is not True:
+            raise ValueError('migration requires explicit confirmation')
+        if self._retired:
+            # A retired instance may still ANSWER the idempotency question by
+            # reading its journal; it must never write again.
+            connection = sqlite3.connect(self._database)
+            try:
+                row = connection.execute(
+                    'SELECT value FROM management WHERE key=?',
+                    ('migration_journal',)).fetchone()
+            finally:
+                connection.close()
+            journal = json.loads(row[0]) if row else {}
+            # This instance is only retired AFTER the atomic switch, so a
+            # source journal at 'verified' with the same destination means
+            # the switch already happened for this exact target.
+            if journal.get('destination') == str(Path(destination).resolve())                     and journal.get('state') in ('verified', 'locator_committed',
+                                                 'complete'):
+                return {'status': 'complete', 'idempotent': True,
+                        'destination': journal['destination']}
+            raise RuntimeError('this behavior library was migrated away; '
+                               'rebuild it from the locator')
+        with self._connection() as db:
+            if self._meta(db, 'migration_active') == '1':
+                raise ValueError('a migration is already running')
+            raw = self._meta(db, 'migration_journal')
+        if raw:
+            previous = json.loads(raw)
+            if previous.get('state') == 'complete' and \
+                    previous.get('destination') == str(Path(destination).resolve()):
+                return {'status': 'complete', 'idempotent': True,
+                        'destination': previous['destination']}
+        destination = locator._validate_destination(
+            destination, current=Path(self._database).parent)
+        self._journal('prepare', destination)
+        with self._connection() as db:
+            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       ('migration_active', '1'))
+        self._journal('paused', destination)
+        try:
+            source_lease = locator.lease(Path(self._database).parent).acquire()
+            try:
+                destination_lease = locator.lease(destination).acquire()
+                try:
+                    self._journal('copied', destination)
+                    with self._connection() as db:
+                        db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                    destination.mkdir(parents=True, exist_ok=True)
+                    manifest = {}
+                    base = Path(self._database).name
+                    for suffix in ('', '-wal', '-shm'):
+                        source_file = Path(self._database + suffix)
+                        if source_file.is_file():
+                            target = destination/(base + suffix)
+                            shutil.copyfile(source_file, target)
+                            manifest[target.name] = self._file_digest(target)
+                    self._journal('copied', destination, manifest=manifest)
+                    self._journal('verified', destination, manifest=manifest)
+                    copy_connection = sqlite3.connect(
+                        str(destination/base))
+                    try:
+                        check = copy_connection.execute(
+                            'PRAGMA integrity_check').fetchone()[0]
+                    finally:
+                        copy_connection.close()
+                    if check != 'ok':
+                        raise ValueError('migrated database failed integrity_check')
+                    for name, expected in manifest.items():
+                        if self._file_digest(destination/name) != expected:
+                            raise ValueError('migrated file hash mismatch')
+                    # The destination journal already names its own root as
+                    # locator_committed: a crash after the switch reconciles
+                    # on the next open, and the source stays retained.
+                    copy_db = sqlite3.connect(str(destination/base))
+                    try:
+                        copy_db.execute(
+                            'INSERT INTO management(key,value) VALUES(?,?) '
+                            'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                            ('migration_journal', json.dumps(
+                                {'state': 'locator_committed',
+                                 'destination': str(destination.resolve())})))
+                        copy_db.commit()
+                    finally:
+                        copy_db.close()
+                finally:
+                    destination_lease.release()
+            finally:
+                source_lease.release()
+        except BaseException:
+            with self._connection() as db:
+                db.execute("DELETE FROM management WHERE key='migration_active'")
+            raise
+        locator.select(destination, confirmed=True,
+                       current=Path(self._database).parent)
+        self._retired = True
+        return {'status': 'complete', 'destination': str(destination.resolve()),
+                'source_retained': True,
+                'boundary': 'Rebuild the library instance from the locator; '
+                            'the old directory is retained, never deleted.'}
 
     # -- reads ----------------------------------------------------------------
     def list_records(self, *, scope, kind=None, cursor=None, limit=50):
@@ -443,11 +720,20 @@ class BehaviorLibrary:
             values = dict(db.execute('SELECT key,value FROM management').fetchall())
             counts = db.execute('SELECT kind,COUNT(*) FROM events '
                                 'GROUP BY kind').fetchall()
+            paused, notice = self._capacity_state(db)
+        usage = self._usage_bytes()
+        free, total = shutil.disk_usage(Path(self._database).parent)[1:3]
         return {'schema_version': int(values.get('schema_version', '0')),
                 'revision': int(values.get(_REVISION, '0')),
                 'behavior_epoch': int(values.get(_EPOCH, '0')),
                 'enabled': values.get(_ENABLED) == '1',
-                'events_by_kind': {kind: count for kind, count in counts}}
+                'events_by_kind': {kind: count for kind, count in counts},
+                'capacity': {'usage_bytes': usage, 'free_bytes': free,
+                             'paused': paused,
+                             'notice': notice,
+                             'migration_active':
+                                 values.get('migration_active') == '1',
+                             'migration_journal': values.get('migration_journal')}}
 
     def stop(self):
         pass  # Path mode owns no persistent handle.
