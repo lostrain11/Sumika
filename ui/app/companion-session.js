@@ -41,6 +41,254 @@ export function mountCompanionSession(host) {
     button.append(icon); button.addEventListener('click', action); commands.append(button);
     return button;
   }
+  // P16: companion profiles (companion-profiles-plan §4). Placement per the
+  // confirmed choice: the existing companion detail, no new navigation.
+  const profileStatus = document.createElement('p');
+  profileStatus.className = 'sumika-form-note'; profileStatus.setAttribute('role', 'status');
+  profileStatus.dataset.companionProfiles = '';
+  const profileRow = document.createElement('label'); profileRow.className = 'set-row';
+  const profileTitle = document.createElement('span'); profileTitle.textContent = '陪伴模式';
+  const profileSelect = document.createElement('select'); profileSelect.setAttribute('aria-label', '陪伴模式');
+  const behaviorRow = document.createElement('label'); behaviorRow.className = 'set-row';
+  const behaviorTitle = document.createElement('span'); behaviorTitle.textContent = '行为记录';
+  const behaviorToggle = document.createElement('button');
+  behaviorToggle.type = 'button'; behaviorToggle.className = 'mini-btn';
+  behaviorToggle.setAttribute('aria-label', '暂停或恢复行为记录');
+  behaviorRow.append(behaviorTitle, behaviorToggle);
+  const manageButton = document.createElement('button');
+  manageButton.type = 'button'; manageButton.className = 'mini-btn';
+  manageButton.textContent = '管理模式…';
+  manageButton.setAttribute('aria-label', '管理陪伴模式');
+  profileRow.append(profileTitle, profileSelect, manageButton);
+
+  let profilesState = null;
+  let profileRevision = null;
+  let suspendPermissionEdits = false;
+
+  async function loadProfiles() {
+    const response = await bridgeFetch('/api/manage/companion-profiles');
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || `HTTP ${response.status}`);
+    profilesState = data;
+    profileRevision = data.revision;
+    return data;
+  }
+
+  async function loadRuntime() {
+    const response = await bridgeFetch('/api/manage/companion-profiles',
+      {method: 'POST', headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify({action: 'runtime'})});
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || `HTTP ${response.status}`);
+    return data;
+  }
+
+  function profilesRuntimeLine(runtime, data) {
+    const reasons = {manual: '手动选择', matched: '自动匹配', ambiguous: '自动匹配存疑',
+                     unknown: '未确定', suspended: '已暂停'};
+    const reason = reasons[runtime.reason] || runtime.reason || '未知';
+    const profiles = data.profiles || [];
+    let effective = '无';
+    if (runtime.reason === 'manual' && data.manual_profile_id) {
+      const found = profiles.find(p => p.id === data.manual_profile_id);
+      effective = found ? found.name : '（已删除）';
+    } else if (runtime.effective_profile_id) {
+      const found = profiles.find(p => p.id === runtime.effective_profile_id);
+      effective = found ? found.name : runtime.effective_profile_id;
+    }
+    return `当前模式：${effective} · ${reason}`;
+  }
+
+  async function refreshProfiles() {
+    try {
+      const data = await loadProfiles();
+      const runtime = await loadRuntime().catch(() => ({}));
+      profileStatus.textContent = profilesRuntimeLine(runtime, data);
+      profileSelect.replaceChildren();
+      for (const item of data.profiles || []) {
+        const option = document.createElement('option');
+        option.value = item.id; option.textContent = item.name;
+        profileSelect.append(option);
+      }
+      const auto = document.createElement('option');
+      auto.value = '__auto__'; auto.textContent = '自动匹配';
+      profileSelect.append(auto);
+      profileSelect.value = data.selection_policy === 'auto'
+        ? '__auto__' : (data.manual_profile_id || '');
+      // P10: the behavior recording permission drives the pause button.
+      try {
+        const permissionResponse = await bridgeFetch('/api/manage/behavior',
+          {method: 'POST', headers: {'Content-Type': 'application/json'},
+           body: JSON.stringify({action: 'permission_status'})});
+        const permission = await permissionResponse.json();
+        if (permissionResponse.ok) {
+          behaviorToggle.textContent = permission.effective.paused
+            ? '恢复记录' : '暂停记录';
+          behaviorToggle.dataset.paused = permission.effective.paused
+            ? 'true' : 'false';
+        }
+      } catch { behaviorToggle.textContent = '行为记录状态未知'; }
+    } catch (error) {
+      profileStatus.textContent = `模式状态不可用：${error.message}`;
+    }
+  }
+
+  function profilesDialog() {
+    document.querySelector('dialog.sumika-dialog')?.remove();
+    const el = document.createElement('dialog');
+    el.className = 'sumika-dialog';
+    const head = document.createElement('header');
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button'; closeBtn.textContent = '关闭';
+    closeBtn.addEventListener('click', () => el.close());
+    head.append(Object.assign(document.createElement('h2'), {textContent: '管理陪伴模式'}), closeBtn);
+    el.append(head);
+    return el;
+  }
+
+  async function openProfilesDialog() {
+    suspendPermissionEdits = true;
+    const el = profilesDialog();
+    let data;
+    try { data = await loadProfiles(); }
+    catch (error) { suspendPermissionEdits = false; el.remove();
+      profileStatus.textContent = `模式列表不可用：${error.message}`; return; }
+    const list = document.createElement('ul');
+    list.setAttribute('aria-label', '陪伴模式列表');
+    for (const item of data.profiles || []) {
+      const row = document.createElement('li');
+      row.textContent = `${item.name}${item.enabled_for_auto ? '（自动）' : ''}`;
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button'; editBtn.className = 'mini-btn'; editBtn.textContent = '编辑';
+      const dupBtn = document.createElement('button');
+      dupBtn.type = 'button'; dupBtn.className = 'mini-btn'; dupBtn.textContent = '复制';
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button'; delBtn.className = 'mini-btn'; delBtn.textContent = '删除';
+      row.append(editBtn, dupBtn, delBtn);
+      const editor = document.createElement('div'); editor.hidden = true;
+      const nameInput = document.createElement('input');
+      nameInput.value = item.name; nameInput.maxLength = 80;
+      nameInput.setAttribute('aria-label', '模式名称');
+      const scenarioInput = document.createElement('input');
+      scenarioInput.value = item.scenario_description || ''; scenarioInput.maxLength = 2000;
+      scenarioInput.setAttribute('aria-label', '适用场景描述');
+      const instructionsInput = document.createElement('input');
+      instructionsInput.value = item.response_instructions || ''; instructionsInput.maxLength = 2000;
+      instructionsInput.setAttribute('aria-label', '回应指引');
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button'; saveBtn.textContent = '保存';
+      const errorLine = document.createElement('p'); errorLine.className = 'sumika-form-note';
+      editor.append(nameInput, scenarioInput, instructionsInput, saveBtn, errorLine);
+      editBtn.addEventListener('click', () => { editor.hidden = !editor.hidden; });
+      saveBtn.addEventListener('click', async () => {
+        saveBtn.disabled = true;
+        try {
+          const current = await loadProfiles();
+          const saved = await endpoint('/api/manage/companion-profiles', {
+            action: 'update', profile_id: item.id,
+            expected_revision: current.revision,
+            changes: {name: nameInput.value,
+                      scenario_description: scenarioInput.value,
+                      response_instructions: instructionsInput.value}});
+          if (saved.status === 'updated') { errorLine.textContent = '已保存'; await refreshProfiles(); }
+        } catch (error) { errorLine.textContent = `保存失败：${error.message}`; }
+        finally { saveBtn.disabled = false; }
+      });
+      dupBtn.addEventListener('click', async () => {
+        dupBtn.disabled = true;
+        try {
+          const current = await loadProfiles();
+          await endpoint('/api/manage/companion-profiles', {
+            action: 'duplicate', profile_id: item.id,
+            expected_revision: current.revision});
+          el.close(); await openProfilesDialog(); await refreshProfiles();
+        } catch (error) { dupBtn.disabled = false;
+          errorLine.textContent = `复制失败：${error.message}`; }
+      });
+      delBtn.addEventListener('click', async () => {
+        delBtn.disabled = true;
+        try {
+          const current = await loadProfiles();
+          await endpoint('/api/manage/companion-profiles', {
+            action: 'delete', profile_id: item.id,
+            expected_revision: current.revision});
+          row.remove();
+          await refreshProfiles();
+        } catch (error) { delBtn.disabled = false;
+          errorLine.textContent = `删除失败：${error.message}`; }
+      });
+      row.append(editor);
+      list.append(row);
+    }
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button'; createBtn.textContent = '新建模式';
+    createBtn.className = 'mini-btn';
+    createBtn.setAttribute('aria-label', '新建陪伴模式');
+    const createError = document.createElement('p'); createError.className = 'sumika-form-note';
+    createBtn.addEventListener('click', async () => {
+      createBtn.disabled = true;
+      try {
+        const current = await loadProfiles();
+        await endpoint('/api/manage/companion-profiles', {
+          action: 'create', expected_revision: current.revision,
+          profile: {name: `新模式 ${new Date().toLocaleTimeString()}`,
+                    enabled_for_auto: false, scenario_description: '',
+                    response_instructions: '',
+                    settings: {proactive_enabled: false,
+                               proactive_interval_seconds: 300,
+                               behavior_prompts_enabled: false,
+                               context_sources: ['text']}}});
+        el.close(); await openProfilesDialog(); await refreshProfiles();
+      } catch (error) { createBtn.disabled = false;
+        createError.textContent = `新建失败：${error.message}`; }
+    });
+    el.append(node_p('选择后自动按场景匹配；手动选择优先于自动。'), list,
+              createBtn, createError);
+    document.body.append(el); el.showModal();
+    el.addEventListener('close', () => { el.remove(); suspendPermissionEdits = false; });
+  }
+
+  function node_p(text) {
+    const p = document.createElement('p'); p.className = 'sumika-form-note';
+    p.textContent = text; return p;
+  }
+
+  manageButton.addEventListener('click', openProfilesDialog);
+  profileSelect.addEventListener('change', async () => {
+    if (profileSelect.value === '') return;
+    profileSelect.disabled = true;
+    try {
+      const current = await loadProfiles();
+      await endpoint('/api/manage/companion-profiles', {
+        action: 'select',
+        selection_policy: profileSelect.value === '__auto__' ? 'auto' : 'manual',
+        profile_id: profileSelect.value === '__auto__' ? null : profileSelect.value,
+        expected_revision: current.revision});
+      await refreshProfiles();
+    } catch (error) {
+      profileStatus.textContent = `模式切换未确认：${error.message}`;
+      await refreshProfiles().catch(() => {});
+    } finally { profileSelect.disabled = false; }
+  });
+  behaviorToggle.addEventListener('click', async () => {
+    if (behaviorToggle.disabled) return;
+    behaviorToggle.disabled = true;
+    try {
+      const pause = behaviorToggle.dataset.paused !== 'true';
+      const current = await bridgeFetch('/api/manage/behavior', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'permission_status'})});
+      const state = await current.json();
+      await endpoint('/api/manage/behavior', {
+        action: pause ? 'permission_pause' : 'permission_resume',
+        revision: state.permission.revision});
+      status.textContent = pause ? '行为记录已暂停；恢复需手动操作，重启也不会自动恢复。'
+                                 : '行为记录已恢复。';
+      await refreshProfiles();
+    } catch (error) { status.textContent = `行为记录操作未确认：${error.message}`; }
+    finally { controls(); }
+  });
+
   const transcript = document.createElement('div');
   transcript.className = 'companion-transcript'; transcript.setAttribute('aria-live','polite');
   const targetRow = document.createElement('label'); targetRow.className = 'set-row';
@@ -140,6 +388,9 @@ export function mountCompanionSession(host) {
     refresh.disabled = working;
     danmakuButton.disabled = working || unknown || (!captureActive && currentState !== 'running');
     notesButton.disabled = working || unknown || !answer;
+    behaviorToggle.disabled = suspendPermissionEdits || working || unknown;
+    profileSelect.disabled = suspendPermissionEdits || working || unknown;
+    manageButton.disabled = suspendPermissionEdits || unknown;
     discussion.disabled = working || unknown || captureActive || currentState !== 'stopped';
     mode.disabled=working || unknown || captureActive || audioActive || currentState!=='stopped';
     targets.disabled = working || captureActive || currentState !== 'stopped';
@@ -364,8 +615,14 @@ export function mountCompanionSession(host) {
   });
   scan.addEventListener('click',loadTargets);
   mode.addEventListener('change',controls);
-  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript,notesList); host.append(section);
+  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript,notesList,profileStatus,profileRow,behaviorRow);
+  const profilesManageRow = document.createElement('div');
+  profilesManageRow.className = 'set-row';
+  profilesManageRow.append(manageButton);
+  section.append(profilesManageRow);
+  host.append(section);
   loadTargets();
+  refreshProfiles();
   hydrateIconsAsync(section);
   controls(); poll();
   timer = setInterval(() => {
