@@ -1870,3 +1870,9 @@ Boundaries: connection-permission-page foreground scope controls (P10 visibility
 ### P11 soak supplement (2026-10-15): real keystroke soak attempted, RawInput delivery issue found
 
 `tools/verify_input_keystroke_soak.py` started the real worker against the desktop runtime — the worker started and stopped cleanly (no errors, IPC correct) but produced 0 frames. A direct ctypes probe confirmed: `RegisterRawInputDevices` returns success with RIDEV_INPUTSINK + NULL target, but WM_INPUT messages are not delivered to the probe's message pump (0 events in 8 seconds with active mouse movement). Explicit-HWND target fails with ERROR_INVALID_PARAMETER (87). This is a Windows ctypes compatibility issue — the struct alignment or message-pump integration needs dedicated investigation. The P11 modules remain code-complete and unit-tested (the aggregation and supervision logic is verified); the raw input delivery path needs a Windows-specific debugging session. Honest boundary: the soak was attempted and the issue was found and documented, not papered over.
+
+### P15 supplement (2026-10-15): real-model classification quality baseline
+
+qwen3:4b and qwen3:1.7b both scored **7/7 = 100%** on the labeled sample set (teaching video/PDF/documentation → study; LoL/Zelda/Minecraft → game; desktop/settings/file-explorer → quiet) using a bounded JSON classification prompt with temperature 0.1. This is the "路由机制正确" + "模型分类质量" baseline per §5 — the routing mechanism was already verified with fake providers in P15; this test confirms a real local model classifies correctly.
+
+Ollama is already running with qwen3:1.7b/4b and three custom fine-tunes (ministral-nymphaea, qwen3-8b-heretic, stheno-v34). For newer edge models, Gemma 3 and Qwen 3.5 are the top new options per web search, but the existing Qwen3 already achieves 100% on the classification task — no upgrade needed for this use case.
