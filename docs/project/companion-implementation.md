@@ -1876,3 +1876,11 @@ Boundaries: connection-permission-page foreground scope controls (P10 visibility
 qwen3:4b and qwen3:1.7b both scored **7/7 = 100%** on the labeled sample set (teaching video/PDF/documentation → study; LoL/Zelda/Minecraft → game; desktop/settings/file-explorer → quiet) using a bounded JSON classification prompt with temperature 0.1. This is the "路由机制正确" + "模型分类质量" baseline per §5 — the routing mechanism was already verified with fake providers in P15; this test confirms a real local model classifies correctly.
 
 Ollama is already running with qwen3:1.7b/4b and three custom fine-tunes (ministral-nymphaea, qwen3-8b-heretic, stheno-v34). For newer edge models, Gemma 3 and Qwen 3.5 are the top new options per web search, but the existing Qwen3 already achieves 100% on the classification task — no upgrade needed for this use case.
+
+### P16 supplement (2026-10-15): role-play verified on sumika-qwen3-8b-heretic + local task capability matrix
+
+**Role-play 5-turn test** (安和昴 character, derivative math lesson): sumika-qwen3-8b-heretic maintains perfect character across 5 turns — uses 诶/嘛/hah？ naturally, occasionally teases, offers practice questions, math content correct (chain rule, sin(x²) derivative). Average 18.8s/response. qwen3:4b **breaks character completely** (leaks meta-cognitive reasoning into output even with /no_think + think:false). Architecture: role-play → 8b-heretic, auxiliary → qwen3:4b.
+
+**Local task capability matrix** (10 tasks × 2 models, all passed): scene classification, text summarization, learning suggestions, key-point JSON extraction, context Q&A, code summary, translation (zh→en), intent detection, content rewriting (simpler language), danmaku summary. qwen3:4b avg 20s, 8b-heretic avg 32s. All 8 cloud-auxiliary tasks replaceable locally.
+
+**Model recommendation module** (`extensions/behavior/model_recommendation.py`): detects RAM/GPU/disk, recommends model tier per hardware (tiny→xlarge), marks already-installed models, suggests `ollama pull` command. Route wiring deferred to P16 UI completion.
