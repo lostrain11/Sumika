@@ -816,8 +816,8 @@
       "tool": "ZCode",
       "model": "GLM5.3flash"
     },
-    "status": "p16_done_companion_detail_profiles_and_behavior_controls",
-    "current_delivery_package": "P17 最终候选/回退 (R17: 修复版整体候选打包、验收、回退说明) — final package. P16 closed.",
+    "status": "p17_done_final_candidate_built_full_regression_rollback_documented",
+    "current_delivery_package": "ALL PACKAGES P00-P17 code-complete. Remaining user-gated acceptances: P11 real keystroke soak, P15 real-model classification quality (labeled samples), P17 installed-UI matrix on the candidate, clean-machine install. Shelved: PDF paste fallback UI.",
     "package_order": [
       "P00 归档与现场核对",
       "P01 观察入口/新鲜度",
@@ -839,11 +839,11 @@
       "P17 最终候选/回退"
     ],
     "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
-    "next_action": "P17 per R7/R17: 修复版整体候选打包（build receipt 完整跑一次 build_portable_staging）、验收门槛（旧能力回归+修复候选验证）、回退说明。All functional packages P00-P16 are code-complete with tests; remaining user-gated items: P11 real keystroke soak, P15 real-model classification quality (labeled samples), P16 installed-UI matrix rerun on the final candidate. Shelved: PDF paste fallback UI.",
+    "next_action": "All frozen-order packages P00-P17 code-complete. User-gated remaining: (1) P11 real keystroke soak; (2) P15 real-model classification quality with labeled samples; (3) P17 installed-UI matrix and clean-machine startup on THIS candidate; (4) PDF paste fallback UI (shelved by user). The candidate is at E:/SumikaBuild/p17-candidate (42,390 files, receipt in package-manifest.json). No further agent action until user instruction.",
     "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；此轮仅文档归档。B站专属规则不推广其他站；微信读书专属适配仍暂缓。",
     "authorization_boundary": "已记录用户产品选择；计划记录不等于实施/付费/推送/发布/日用切换。旧一次性采集许可不升级。",
     "acceptance_report": "docs/project/acceptance-20261012.md",
-    "verified_this_turn": "P16 closed. Companion detail (ui/app/companion-session.js): 陪伴模式 selector (all profiles + auto, expected_revision select), runtime line (当前模式：name · reason), 管理模式 dialog (list/edit/duplicate/delete/create via expected_revision), P10 behavior pause/resume toggle (重启也不会自动恢复 stated). verify_companion_profiles_ui.mjs against real bridge: templates init, runtime line, manual select persists, dialog create, permission toggle visible+toggles, ZERO pageerror — passed. Coverage table P16 row added. 92 behavioral/library/ui_server tests green. Boundaries: permission-page foreground scope controls remain in the existing capability page; real-model classification quality acceptance user-gated."
+    "verified_this_turn": "P17 closed. build_portable_staging produced E:/SumikaBuild/p17-candidate: 42,390 files inventory-verified, source fa40ce8 clean, P07 build receipt with all 8 inputs + generator hash + honest acceptance status + empty resource warnings. Full regression: 1150 tests OK (second run; first run single timing flake). Rollback documented: previous install untouched, personal data survives candidate switches, locator excluded from snapshots. Boundaries: clean-machine/UI matrix on candidate user-gated; internal test build not a release."
   },
   "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
