@@ -12,18 +12,26 @@ import ctypes
 import shutil
 import subprocess
 
-# Model tiers: (name, ollama_tag, ram_needed_gb, params_label, use_case)
+# Model tiers ordered by capability. Real-world tested on GTX 1060 laptop:
+# LFM2.5-24B-A2B = reliable (no thinking mode issues, direct output)
+# qwen3.5:9b = thinking mode cannot be disabled (enable_thinking=false fails)
+# qwen3:4b = fast and accurate for classification but cannot do role-play
 MODEL_TIERS = [
-    {'id': 'tiny', 'tag': 'qwen3:1.7b', 'ram_gb': 1.5, 'label': '1.7B',
+    {'id': 'tiny', 'tag': 'qwen3:1.7b', 'ram_gb': 1.5, 'label': 'Qwen3 1.7B',
      'use': '快速分类、意图判断（辅助任务）'},
-    {'id': 'small', 'tag': 'qwen3:4b', 'ram_gb': 2.5, 'label': '4B',
-     'use': '辅助任务全量：分类、摘要、建议、翻译、弹幕总结'},
-    {'id': 'medium', 'tag': 'qwen3:8b', 'ram_gb': 5.0, 'label': '8B',
-     'use': '角色扮演对话、上下文问答（较好质量）'},
-    {'id': 'large', 'tag': 'qwen3:14b', 'ram_gb': 9.0, 'label': '14B',
-     'use': '高质量角色扮演、长文分析'},
-    {'id': 'xlarge', 'tag': 'qwen3:30b-a3b', 'ram_gb': 18.0, 'label': '30B MoE',
-     'use': '最强本地推理（需要充足空闲内存）'},
+    {'id': 'small', 'tag': 'qwen3:4b', 'ram_gb': 2.5, 'label': 'Qwen3 4B',
+     'use': '辅助任务全量：分类、摘要、意图判断（不能做角色扮演）'},
+    {'id': 'lfm25', 'tag': 'LFM2.5-24B-A2B-Q4_K_M', 'ram_gb': 14.5,
+     'label': 'LFM2.5 24B MoE',
+     'use': '角色扮演主力、翻译、复杂问答（实测无思考模式问题，直出正文）',
+     'endpoint': 'http://192.168.31.227:8084/v1',
+     'notes': '需 serve-lfm25.cmd 启动；qwen3.5 思考模式关不掉，此为可靠替代'},
+    {'id': 'qwen35-9b', 'tag': 'qwen3.5:9b', 'ram_gb': 6.1, 'label': 'Qwen3.5 9B',
+     'use': '⚠️ 思考模式关不掉，正文为空，不推荐生产使用',
+     'endpoint': 'http://192.168.31.227:8082/v1',
+     'notes': 'enable_thinking=false 和 /nothink 均无效'},
+    {'id': 'xlarge', 'tag': 'qwen3:30b-a3b', 'ram_gb': 18.0, 'label': 'Qwen3 30B MoE',
+     'use': '最强本地推理（需要充足空闲内存，本机 32GB 不可行）'},
 ]
 
 # Custom fine-tuned models (if already pulled)
@@ -91,15 +99,20 @@ def recommend(*, installed_models=None):
 
     usable = [tier for tier in MODEL_TIERS
               if tier['ram_gb'] <= usable_gb]
-    recommended_role = None
-    recommended_aux = None
-    for tier in reversed(usable):  # largest first
-        if recommended_role is None and tier['ram_gb'] >= 5.0:
-            recommended_role = tier
-        if recommended_aux is None and tier['ram_gb'] >= 2.0:
-            recommended_aux = tier
-    if recommended_aux is None and usable:
-        recommended_aux = usable[0]
+    # Role-play: prefer LFM2.5-24B (reliable, no thinking issues, 24B knowledge)
+    recommended_role = next(
+        (tier for tier in reversed(usable)
+         if tier.get('id') == 'lfm25' and tier['ram_gb'] <= usable_gb),
+        None)
+    if recommended_role is None:
+        # Fall back to largest usable tier with >= 5GB
+        recommended_role = next(
+            (tier for tier in reversed(usable) if tier['ram_gb'] >= 5.0), None)
+    # Auxiliary: prefer qwen3:4b (fast, 100% accurate for classification)
+    recommended_aux = next(
+        (tier for tier in usable if tier.get('id') == 'small'), None)
+    if recommended_aux is None:
+        recommended_aux = usable[0] if usable else None
 
     def mark(tier):
         if tier is None:
