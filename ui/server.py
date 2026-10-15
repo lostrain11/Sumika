@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import uuid
 import tempfile
 from collections import deque
@@ -155,6 +156,12 @@ class Bridge:
             self.settings_path.parent,
             new_user=not self.settings_path.exists())
         self._profile_store.load()
+        # P15: auto routing engine (local model as scene classifier).
+        from extensions.behavior.routing import RoutingEngine
+        self._routing_engine = RoutingEngine(
+            store=self._profile_store,
+            classifier=self._classify_scene,
+            clock=time.monotonic)
         self._study_notes = StudyNotes(self.settings_path.parent/'study-notes.sqlite3')
         self._shutdown_requested = threading.Event()
         self._pet_host = PetHost(UI_ROOT.parent)
@@ -332,6 +339,18 @@ class Bridge:
         if action == 'progress_get':
             return {'progress': self._behavior_library.progress_for(
                 payload.get('material'), scope=scope)}
+        if action == 'scene_classify':
+            material = payload.get('material')
+            identity = payload.get('foreground_identity')
+            return self._routing_engine.on_foreground(
+                identity, material=material)
+        if action == 'routing_view':
+            return self._routing_engine.view()
+        if action == 'routing_config_changed':
+            return self._routing_engine.on_config_changed()
+        if action == 'routing_set_suspended':
+            return self._routing_engine.set_suspended(
+                payload.get('suspended', False))
         if action == 'model_recommendation':
             return self._behavior_model_recommendation(payload)
         if action == 'habit_context':
@@ -427,6 +446,45 @@ class Bridge:
                                 payload.get('profile_id'),
                                 expected_revision=payload.get('expected_revision'))
         raise ValueError('unsupported companion profiles action')
+
+    def _classify_scene(self, request):
+        """P15 classifier: call the local model to match a profile."""
+        import urllib.request as _ur
+    def _classify_scene(self, request):
+        """P15 classifier: call the local model to match a profile."""
+        import urllib.request as _ur
+        scenarios = '\n'.join(
+            f"- id: {s['id']}, 描述: {s['scenario_description']}"
+            for s in request['scenarios'])
+        material = request.get('material') or {}
+        material_desc = material.get('title') or material.get('identity_key') or ''
+        prompt = (
+            '你是场景分类器。根据当前屏幕材料描述，从以下模式中选出最匹配的一个，'
+            '返回 JSON。模式列表：' + scenarios +
+            ' 当前材料：' + material_desc +
+            ' 返回格式：{"profile_id": "...", "score": 0.0到1.0}'
+            ' 只返回 JSON。')
+        settings = load_settings(self.settings_path)
+        model = settings.get('auxiliary', {}).get('model', 'qwen3:4b')
+        endpoint = settings.get('auxiliary', {}).get(
+            'endpoint', 'http://127.0.0.1:11434')
+        body = json.dumps({
+            'model': model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'stream': False, 'options': {'temperature': 0.1}}).encode()
+        api = endpoint.rstrip('/') + '/api/chat'
+        req = _ur.Request(api, data=body,
+                          headers={'Content-Type': 'application/json'})
+        resp = json.loads(_ur.urlopen(req, timeout=60).read())
+        reply = resp['message']['content'].strip()
+        if '<think>' in reply:
+            reply = reply[reply.index('</think>') + 8:].strip()
+        reply = reply.strip().removeprefix('```json').removesuffix('```').strip()
+        parsed = json.loads(reply)
+        revision = self._profile_store.load()['revision']
+        return {'profile_id': parsed.get('profile_id'),
+                'score': parsed.get('score', 0),
+                'profile_revision': revision}
 
     def behavior_startup_resume(self):
         """P10: rebind the foreground collector under the saved permission.

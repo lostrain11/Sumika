@@ -203,6 +203,32 @@ async function buildSettings() {
     button('迁移数据',()=>beginRelocation()),button('从备份恢复',()=>beginRelocation(true)));
   dataCard.append(storageActions,storageStatus);
   add(dataCard,'记录角色用量','usage.enabled',values.usage.enabled,'checkbox');
+  // P16: local model recommendation based on hardware
+  const modelRecStatus=node('p','正在检测本机硬件…','sumika-form-note');
+  dataCard.append(node('h3','本地模型推荐'),modelRecStatus);
+  fetch('/api/manage/behavior',{method:'POST',
+    headers:{'Content-Type':'application/json','X-Sumika-CSRF':csrf},
+    body:JSON.stringify({action:'model_recommendation'})})
+    .then(r=>r.json()).then(rec=>{
+      const hw=rec.hardware||{};
+      const role=rec.recommended?.role_play;
+      const aux=rec.recommended?.auxiliary;
+      if(!role||!aux){modelRecStatus.textContent='硬件检测不可用';return;}
+      modelRecStatus.textContent=
+        `本机 RAM ${hw.total_ram_gb}GB（可用 ${hw.usable_for_model_gb}GB）`+
+        `${hw.has_nvidia_gpu?' · 有 NVIDIA GPU':' · 纯 CPU 推理'}`;
+      const roleLine=node('p','','sumika-form-note');
+      roleLine.innerHTML=`<b>角色扮演推荐</b>：${role.label}（${role.tag}）`+
+        (role.installed?' <span style="color:green">已安装 ✓</span>'
+                        :` <code>ollama pull ${role.tag}</code>`);
+      roleLine.title=role.use||'';
+      const auxLine=node('p','','sumika-form-note');
+      auxLine.innerHTML=`<b>辅助任务推荐</b>：${aux.label}（${aux.tag}）`+
+        (aux.installed?' <span style="color:green">已安装 ✓</span>'
+                       :` <code>ollama pull ${aux.tag}</code>`);
+      auxLine.title=aux.use||'';
+      dataCard.append(roleLine,auxLine);
+    }).catch(()=>{modelRecStatus.textContent='模型推荐不可用';});
   const about=group('关于','about');about.card.append(node('p','Sumika · 晴日部室。工作台由受管 DSH 提供，新增能力通过独立扩展接入。','sumika-form-note'));main.append(about.el);
   const permissions=sections.find(el=>el.dataset.settingsSection==='permissions');
   permissions.querySelector('.set-card').append(button('网页咨询授权',openBrowsers));
