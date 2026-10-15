@@ -795,6 +795,118 @@
     "acceptance_report": "docs/project/acceptance-20261012.md",
     "verified_this_turn": "P17 supplement: installed-UI matrix on the candidate passed (64 cells, 0 overflow, 0 pageerror). Evidence E:/SumikaBuild/p17-matrix-ui/report.json. Remaining user-gated: P11 real keystroke soak (needs user present); P15 real-model classification quality (Ollama not running); PDF paste fallback UI (shelved)."
   },
+  "old_laptop_local_model": {
+    "status": "owned_by_this_task",
+    "owner": "本会话即用户单开的旧笔记本本地模型任务，负责执行该工作流；主 Sumika 会话不承担此线（避免其上下文冗长）",
+    "goal": "利用旧笔记本（Windows）作为本地模型辅助算力：SSH 远程管理 + Ollama 服务端，供 Sumika/DSH 侧远程调用辅助推理",
+    "recorded_at": "2026-10-15",
+    "evidence": "截图为用户提供的旧笔记本 PowerShell 画面；以下 verified_by_probe 为本任务 2026-10-15 从主机实测",
+    "verified_by_probe": [
+      "本机 192.168.31.60；对 192.168.31.0/24 全段扫描 22/11434：唯一开放 22 的主机为 192.168.31.227（即笔记本）",
+      "笔记本 SSH banner 为 OpenSSH_for_Windows_9.5，22 端口从主机实际可达——截图中的防火墙放行 22 由此证实",
+      "SSH 认证方式 publickey,password,keyboard-interactive；本机 BatchMode 免密测试 Permission denied，尚无可用凭据",
+      "全 subnet 无任何主机监听 11434——Ollama 尚未安装完成或未启动（与截图中下载进行中一致）"
+    ],
+    "progress_from_screenshot": [
+      "OpenSSH Server 已安装，sshd 服务状态 Running；此前 Set-Service 曾报「拒绝访问」（疑似非管理员窗口改启动类型失败），自启动是否配置未确认",
+      "已执行 New-NetFirewallRule 放行入站 TCP 22（外部连通性已证实生效）",
+      "OllamaSetup.exe 正在经 Invoke-WebRequest 下载到 %TEMP%（截图时已写入 326,089,296 字节），安装尚未开始"
+    ],
+    "verified_this_pass": [
+      "2026-10-15 全链路打通：SSH 公钥免密（高完整性会话）、sshd AUTO_START、Ollama 0.40.4 安装并监听 0.0.0.0:11434、模型库迁至 F:\\OllamaModels、登录自启计划任务 Sumika-Ollama-Serve",
+      "11434 不通根因=Ollama 首启网络弹窗被取消后系统自动创建的 ollama.exe 程序级阻止规则（公用配置文件）压过端口允许规则；已删除阻止规则并加程序级允许，LAN 访问恢复",
+      "模型经局域网拷贝分发（1.78GB≈40s，SHA256 逐个核验一致），远快于外网重拉",
+      "笔记本 qwen3:4b 纯 CPU 实测 9.6 t/s、首 token 0.3s——辅助节点正式可用",
+      "v4.7（MiniCPM-V 4.7）500 根因=Ollama 0.40.4 内置 llama.cpp 不识别 minicpmv4_7 projector（上游 ollama#18983，1天前有人报同一问题），非硬件问题；blob 拷贝零损坏",
+      "主机 v4.7:moe 经 llama.cpp b11624 Vulkan 版（D:/Tools/llama.cpp，8081 端口，-ngl 99 --n-cpu-moe 99：注意力/共享权重进 RX 5700 XT 显存、MoE 专家留 CPU+mmap 换页——即『显存不够用别的凑』原生方案）成功运行：加载 2m09s，冷启动 2.2 t/s，预热后 ≈9.4 t/s",
+      "v4.7 视觉能力实测通过：deskpet-scene.png 准确识别角色服装（白色蓝饰毛衣、黑色短裤丝袜）与界面按钮（服装/角色/收起）及房间聊天元素",
+      "发现主机 Ollama 一直在用 Vulkan 后端跑 5700 XT——此前『纯 CPU 推理』的旧结论已过时"
+    ],
+    "node_optimization_2026-10-15": {
+      "decision_os_reinstall": "不做重装：远程无法重装（需物理介质+屏幕键盘）、现有系统健康、7700HQ 不支持 Win11、收益不抵停机风险；改为原地深度清理+无头化",
+      "authorization": "用户明确：笔记本只给本任务使用；普通应用可删、驱动可更新、用户全权负责；后追加：用户数据（文档等）必须保留，其余都可清理",
+      "removed": "微信/QQ/腾讯会议/百度网盘/阿里云盘/网易云/WPS/金山文档/搜图神器/OfficePLUS/OneNote/MindMaster/Typora/Bandicam/PotPlayer/Ditto/Bandizip/Afterburner/RTSS/Wireshark/Npcap/UU加速器/UU远程(GameViewer)/Steam/Epic三件套/VS2022/Windows SDK/.NET开发包全家/蓝牙Tweaker/微软电脑管家/手机连接/Cortana；禁用服务：WSearch/SysMain/DiagTrack/Spooler/NvContainer双容器/VMware五服务/TabletInput/Wpn 等",
+      "kept": "VC++运行库全系列/NVIDIA驱动566.36/Ollama 0.40.4/Python 3.12/Git/Edge+WebView2/Defender；F盘与D盘的游戏文件未删（仅卸启动器）",
+      "user_data_preserved": "Documents 350MB、Downloads 2.18GB、Desktop/Pictures/Videos 空但目录保留；微信/QQ 聊天数据在文档目录未触碰；回收站按要求未清空",
+      "power_config": "屏幕10分钟关、永不睡眠、休眠关闭（释放hiberfil）、合盖不做动作、传递优化仅局域网模式",
+      "headless_config": "Ollama 以 SYSTEM ONSTART 计划任务开机自启（免登录，已实测恢复）、sshd AUTO、RDP 已启用（3389 防火墙显式放行，用户可用 mstsc 连 lostrain@192.168.31.227 远程看屏幕）",
+      "results": "C盘空闲 8.7→34.2GB；空闲内存 8.4→14.3GB；ARP 条目 273→69；529天来首次重启并全链路恢复验证（SSH/Ollama/RDP/推理 10.8 t/s）",
+      "leftovers": "VMware 应用文件在 E:\\VMware（无静默卸载器，服务已禁用，重装官方安装包可彻底移除）；Epic/Steam 游戏数据文件保留在 D/F 盘；QQ 目录已随卸载清除",
+      "log_files": "笔记本 C:\\Users\\Lostrain\\cleanup1b.log cleanup2.log cleanup3.log cleanup4.log"
+    },
+    "gpu_inference_2026-10-15": {
+      "trigger": "用户确认显存为6GB后要求打通笔记本GPU推理",
+      "method": "llama.cpp b11624 CUDA 12.4 Windows 版（原生支持 Pascal sm_61，绕开新 Ollama 的 CUDA13 限制）+ cudart 运行时，部署在笔记本 F:\\llama-cuda124",
+      "services": [
+        "8082 端口 qwen3:4b 全 GPU（-ngl 99 --jinja），SYSTEM 开机任务 Sumika-Llama-Qwen4B",
+        "8083 端口 openbmb/minicpm-v4.7:1b 全 GPU 视觉（--mmproj --jinja），SYSTEM 开机任务 Sumika-Llama-V471B——minicpmv4_7 projector 在新版 llama.cpp 上正常加载，Ollama 不支持的问题就此绕开",
+        "11434 端口 Ollama 0.40.4 纯 CPU 保留作为兜底（两模型齐全）"
+      ],
+      "verified": [
+        "qwen3:4b GPU 生成 30.5 t/s（CPU 路径为 9.6~10.8，约 3 倍）",
+        "v4.7:1b GPU 视觉实测：deskpet-scene.png 8.2 秒 103 token，描述准确（角色服装/按钮）",
+        "显存双模型共驻 5002/6144 MiB，仍有余量",
+        "防火墙 8082/8083 均仅限 192.168.31.0/24；任务与 Sumika-Ollama-Serve 同机制（ONSTART+SYSTEM，重启自动拉起）"
+      ],
+      "call_notes": "llama-server 为 OpenAI 兼容 API（/v1/chat/completions）；qwen3 是思考模型，max_tokens 过小时正文为空——调用方读 reasoning_content 或传 chat_template_kwargs {enable_thinking:false}",
+      "leftovers": "Ollama blob 即原始 GGUF，llama-server 直接引用文件，无重复占用磁盘"
+    },
+    "model_campaign_2026-10-15": {
+      "rules": "用户定：只测 3 个月内发布的新模型（越新越好）；只测笔记本部署，主机不再测；主机模型库清空；质量优先、稍有延迟可接受；信息源 aihot.news（API 仅 7 天窗，已全量核对：7 天内可跑笔记本的聊天新模型只有 LFM2.5-24B-A2B 和 MiniCPM-V 4.7）+ ollama.com 发布时间",
+      "results": [
+        "8b-heretic（基线，Qwen3-8B finetune）：任务 10/10、可替代云端 8/8、均 19.2s；RP 六规则全绿，25~35s/轮",
+        "qwen3.5:9b（2026-02，-ngl70 部分卸载）：任务 10/10、8/8；RP 六规则全绿（no-think），3.5~7.5s/轮——速度冠军；带视觉 projector（显存预算内暂未挂载）",
+        "LFM2.5-24B-A2B（2026-10-14，--n-cpu-moe 14.5GB 权重贴内存上限）：任务 10/10、8/8、生成 16.1 t/s；RP 5.5/6（--reasoning-budget 0 后，1 次瞬时 500），按需启动脚本 F:\\llama-cuda124\\serve-lfm25.cmd",
+        "MiniCPM-V 4.7:1b（2026-10-13）：GPU 视觉节点已常驻（识图 8.2s）",
+        "qwen3.6:35b（2026-10，21GB 权重 > 16GB 内存）：实测 0.72 t/s——SSD-offload 边界结论：权重超过内存的模型在这台机器不可用",
+        "出局/跳过：gpt-oss:20b（2025-08 超窗）、qwen3:30b-a3b（2025-04 超窗）、qwen3.8-flash-next（125B 装不下）、muse-glimmer:30b（稠密 18GB>内存，同 qwen3.6 必然 <1 t/s）、nemotron-3.5-lightning:30b（25GB>内存同上）、Ling-3.1-flash（560B）、d1-3B/pplx-embed/EmbeddingGemma 2（决策/嵌入类，非聊天主力）"
+      ],
+      "resident_config": "8082 qwen3.5:9b（-ngl 70 --jinja，文本主力）+ 8083 MiniCPM-V 4.7:1b（GPU 视觉）+ 11434 Ollama CPU 兜底；LFM2.5 按需（serve-lfm25.cmd，未注册常驻，避免与 8082 抢显存）；三个 ONSTART 任务 + 1 个按需脚本",
+      "call_notes": "全部 OpenAI 兼容 /v1/chat/completions；思考模型（qwen3.5/LFM2.5）需读 reasoning_content、传 chat_template_kwargs {enable_thinking:false} 或 llama-server 侧 --reasoning-budget 0，否则 max_tokens 被思考耗尽导致正文为空",
+      "main_machine_cleanup": "主机 ollama 模型库已清空（qwen3.5:9b/4b、qwen3.6:35b、gpt-oss:20b、gemma4:12b/26b、qwen3:30b-a3b、qwen3:1.7b、stheno、ministral-nymphaea、neon-veil、minicpm5×2、minicpm-v4.7 1b/moe 全部卸载）；主机的 v4.7:moe llama-server 进程已停（8081）；LFM2.5 GGUF 保留在 E:/Models/GGUF/lfm2.5（未入 ollama 库）；主机 ollama 服务本身仍在运行作为 Sumika 现有配置的端点",
+      "sumika_takeover_map": "10 项辅助任务中 8 项当前走云端的（场景分类/摘要/学习建议/JSON 提取/上下文问答/代码摘要/意图判断/弹幕总结）全部可由笔记本本地承接（多个模型 10/10 通过）；角色扮演质量门三模型全绿可承接（质量择优）；视觉理解（识图）已本地；后续可接线：提示词优化 F-003 星光按钮、记忆提炼 auto_extract、行为记忆分析、网页咨询交叉审查——均为纯本地零边际成本",
+      "not_covered": "语音 ASR/TTS 不在本次范围（候选：SenseVoice 已有、Fish Drama 3 35B MoE TTS 2026-10-15 开源待评估）；嵌入检索升级候选：pplx-embed-v2-late 9B/0.6B、EmbeddingGemma 2（多模态统一嵌入）——给 SemanticMemory 后续评估",
+      "evidence_dir": ".sumika-next/laptop-model-bench/（heretic.json qwen35-9b.json qwen35-9b-nothink.json lfm25-24b.json lfm25-24b-nothink.json lfm25-24b-rb0.json）"
+    },
+    "audio_campaign_2026-10-15": {
+      "trigger": "用户要求测试音频模型（另一项目在炼安和昴语音模型，可能用到）",
+      "deployed": [
+        "ASR：SenseVoiceSmall int8 ONNX（sherpa-onnx 1.13.8，纯 CPU 4 线程）——实测 RTF 0.03（5.6s 音频 0.17s 转写，33 倍实时），SAPI 合成句转写逐字正确",
+        "TTS 基线：vits-zh-hf-theresa（sherpa-onnx）——RTF 0.23（0.7s 合成 3.1s 音频），已打通 TTS→ASR 回环；音质为基线玩具级，仅验证服务模式"
+      ],
+      "location": "笔记本 F:\\sherpa（模型+test_audio.py 闭环脚本），pip 新增 sherpa-onnx 1.13.8 / numpy / pywin32",
+      "service_pattern": "Sumika 语音线（B站无字幕音轨转写、语音输入）可直接用 RTF 0.03 的本地 ASR；安和昴语音模型训练项目产出的模型（GPT-SoVITS/CosyVoice 类）将来替换 theresa 基线——笔记本 6GB GPU 足够 0.5B 级 TTS 推理",
+      "notes": [
+        "sherpa-onnx 1.13.8 已内置 OfflineQwen3ASRModelConfig（阿里 Qwen3-ASR）——后续可升级为更强中文 ASR",
+        "最新音频大模型记录：Fish Drama 3（35B MoE TTS，2026-10-15 开源，笔记本装不下，训练项目若选 Fish 系可部署在主机或另议）、Grok Voice 3.0（API 闭源）",
+        "sherpa-onnx 1.13.x API 变化：OfflineRecognizer 用 from_sense_voice 等工厂方法；vits 合成返回 samples 为 list",
+        "音频已服务化：8085 端口 Sumika-Audio-HTTP（SYSTEM ONSTART）——POST /asr（wav 字节进，JSON 出，清晰语音 RTF 0.048 转写准确）+ POST /tts（JSON 进 wav 出，RTF 0.4 但基线音质机械、回环 ASR 不可懂属预期）+ GET /health；SYSTEM 账户 PATH 无 python，启动脚本必须用绝对路径 C:\\Users\\Lostrain\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+      ]
+    },
+    "power_policy_2026-10-15": {
+      "decision": "维持 15~17W 常待机（约 7 元/月）——软件层省电空间仅 1~1.5 元/月，不值得牺牲随叫随到；用户已授权全权决定",
+      "implemented": "OLLAMA_KEEP_ALIVE=2m 已生效（模型用完 2 分钟自动卸载内存、下次请求自动重载，实测验证）",
+      "rejected": "自动停 llama-server（省 <2W 但破坏可用性）、睡眠/休眠（WiFi 唤醒不可靠，失去远程访问）",
+      "true_off_option": "如需真正 0W：智能插座(~30元) + BIOS 来电自启——插上电即自动完整启动（启动链已验证），app/手动控制插座即可远程开关机；或不用时手动关机按电源键恢复",
+      "measurements": "GPU 待机 4.71W/0%、CPU 1%、整墙估算 15~17W ≈ 12 度/月 ≈ 6~8 元"
+    },
+    "shared_discovery_2026-10-15": {
+      "what": "笔记本推理节点已注册为 ZCode 用户级技能（所有项目可发现）：~/.agents/skills/laptop-inference/SKILL.md",
+      "content": "服务清单（8082 qwen3.5:9b / 8083 v4.7:1b 视觉 / 11434 Ollama 兜底 / 8084 LFM2.5 按需）、健康检查命令、调用示例（含思考模型 no-think 要点）、适用/不适用判断标准、共享礼仪",
+      "discovery": "新开的 ZCode 会话自动加载用户级技能；当前已开会话需重启后可见"
+    },
+    "audio_upgrade_2026-10-15": {
+      "zipvoice_clone": "ZipVoice int8 蒸馏（109MB，sherpa-onnx 1.13.8 原生支持）零样本音色克隆 demo 通过：参考音频+参考文字稿+目标文本 → 克隆音色说目标句，CPU RTF 0.77，ASR 回环内容正确。脚本 F:\\sherpa\\test_zipvoice.py；安和昴训练项目给出干净参考音频+文字稿后即可切换为她的音色（训练模型仍可后续替换 ZipVoice）",
+      "qwen3_asr_upgrade": "Qwen3-ASR 0.6B int8 官方包（879MB）部署完成并评测通过：与 SenseVoice 同句对比，清晰语音两者同样正确（Qwen3 标点更完整），机械 TTS 音两者均幻觉（音频本身不可懂）；速度 Qwen3 约 0.2 RTF vs SenseVoice 0.03——SenseVoice 为默认快速引擎，Qwen3-ASR 为质量/标点选项。镜像 tokenizer 缺 <asr_text> 特殊标记会导致 C++ 退出进程，必须用官方 tarball 内的 tokenizer（脚本 F:\\sherpa\\test_qwen_asr.py）",
+      "asr_baseline": "双引擎已部署：SenseVoice int8（快速默认）+ Qwen3-ASR 0.6B int8（质量选项），from_qwen3_asr 工厂确认存在于 sherpa-onnx 1.13.8"
+    },
+    "boundaries_and_pending": [
+      "笔记本 v4.7:1b 暂不可用：① Pascal GTX 1060（驱动 566.36）与新版 Ollama CUDA 工具链存在 PTX 代沟；② minicpmv4_7 projector 同样不被 Ollama 支持。等 Ollama 升级或另决策驱动；文本模型不受影响。2026-10-15 更正：显存实测为 6GB（6144MiB，nvidia-smi），此前 4GB 是 WMI 32 位 AdapterRAM 截断——6GB 下 qwen3:4b/8B-q4/v4.7:1b 均可整体进显存，未来 GPU 加速走 llama.cpp cuda-12.4 版即可原生支持 Pascal",
+      "llama-server 进程目前由本会话后台任务持有；跨重启持久化需在主机注册计划任务（未做，等用户确认常驻参数）",
+      "Ollama 支持 minicpmv4_7 后可整体切回 Ollama 统一管理；llama.cpp 只是过渡期的 v4.7 专用通道",
+      "安全边界：SSH 仅内网 + 公钥认证；11434 防火墙规则仅限 192.168.31.0/24；公钥/内网拓扑不入 Git"
+    ]
+  },
   "checkpoint_archive": "2026-10-09 记录整理：243 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/handoff.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
   "independent_acceptance": {
     "date": "2026-10-12",
