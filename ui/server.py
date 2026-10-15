@@ -332,6 +332,8 @@ class Bridge:
         if action == 'progress_get':
             return {'progress': self._behavior_library.progress_for(
                 payload.get('material'), scope=scope)}
+        if action == 'model_recommendation':
+            return self._behavior_model_recommendation(payload)
         if action == 'habit_context':
             recent = self._behavior_library.context(scope=scope, limit=3)
             habits = self._behavior_library.habit_summaries(
@@ -340,32 +342,48 @@ class Bridge:
             return {'block': behavior_context_block(recent, habits),
                     'recent': recent, 'habits': habits}
         if action == 'list':
-            return library.list_records(scope=scope, kind=payload.get('kind'),
-                                        cursor=payload.get('cursor'),
-                                        limit=payload.get('limit', 50))
+            return self._behavior_library.list_records(
+                scope=scope, kind=payload.get('kind'),
+                cursor=payload.get('cursor'), limit=payload.get('limit', 50))
         if action == 'context':
-            return {'context': library.context(scope, limit=3)}
+            return {'context': self._behavior_library.context(scope=scope, limit=3)}
         if action == 'export':
-            return library.export(scope)
+            return self._behavior_library.export(scope=scope)
         if action == 'feedback':
             entry = payload.get('entry')
             if not isinstance(entry, dict):
                 raise ValueError('feedback entry required')
-            return library.feedback(entry, scope=scope)
+            return self._behavior_library.feedback(entry, scope=scope)
         if action == 'correct':
-            return library.correct(payload.get('feedback_id'),
-                                   payload.get('corrected'), scope=scope,
-                                   revision=payload.get('revision'))
+            return self._behavior_library.correct(
+                payload.get('feedback_id'), payload.get('corrected'),
+                scope=scope, revision=payload.get('revision'))
         if action == 'delete':
-            return library.delete_records(
+            return self._behavior_library.delete_records(
                 scope=scope, event_ids=payload.get('event_ids') or (),
                 kinds=payload.get('kinds') or (), before=payload.get('before'),
                 confirmed=payload.get('confirmed') is True,
                 revision=payload.get('revision'))
-        if action == 'configure':
-            return library.configure(payload.get('settings'),
-                                     revision=payload.get('revision'))
         raise ValueError('unsupported behavior action')
+
+    def _behavior_model_recommendation(self, payload):
+        from extensions.behavior.model_recommendation import recommend
+        installed = []
+        try:
+            import urllib.request as _ur
+            resp = _ur.urlopen('http://127.0.0.1:11434/api/tags', timeout=3)
+            installed = [m['name'] for m in json.loads(resp.read()).get('models', [])]
+        except Exception:
+            pass
+        return recommend(installed_models=installed)
+
+    def _behavior_habit_context(self, payload, scope):
+        recent = self._behavior_library.context(scope=scope, limit=3)
+        habits = self._behavior_library.habit_summaries(
+            payload.get('kind'), scope=scope, limit=3)
+        from extensions.behavior.prompts import behavior_context_block
+        return {'block': behavior_context_block(recent, habits),
+                'recent': recent, 'habits': habits}
 
     def companion_profiles_manage(self, payload):
         """P14 /api/manage/companion-profiles: the limited action mapping.
