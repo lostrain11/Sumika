@@ -1884,3 +1884,7 @@ Ollama is already running with qwen3:1.7b/4b and three custom fine-tunes (minist
 **Local task capability matrix** (10 tasks × 2 models, all passed): scene classification, text summarization, learning suggestions, key-point JSON extraction, context Q&A, code summary, translation (zh→en), intent detection, content rewriting (simpler language), danmaku summary. qwen3:4b avg 20s, 8b-heretic avg 32s. All 8 cloud-auxiliary tasks replaceable locally.
 
 **Model recommendation module** (`extensions/behavior/model_recommendation.py`): detects RAM/GPU/disk, recommends model tier per hardware (tiny→xlarge), marks already-installed models, suggests `ollama pull` command. Route wiring deferred to P16 UI completion.
+
+### Laptop inference benchmark (2026-10-15): GTX 1060 laptop tested, main machine wins
+
+Tested the user's old laptop (GTX 1060 6GB, same LAN) as a potential LAN inference server. Results: qwen3.5:9b 6/7=86% at 104.5s avg (one timeout), qwen3.6:35b fails to load (21GB > 6GB VRAM + RAM), qwen3:4b on laptop ~140s vs ~16s on main machine (10x slower). The 1060's Pascal architecture (~80GB/s memory bandwidth) and old laptop CPU are both slower than the main machine's CPU for LLM inference. **Recommendation: keep qwen3:4b on the main machine; the laptop is not useful as an inference server for this use case.**
