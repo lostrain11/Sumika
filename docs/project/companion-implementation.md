@@ -1888,3 +1888,7 @@ Ollama is already running with qwen3:1.7b/4b and three custom fine-tunes (minist
 ### Laptop inference benchmark (2026-10-15): GTX 1060 laptop tested, main machine wins
 
 Tested the user's old laptop (GTX 1060 6GB, same LAN) as a potential LAN inference server. Results: qwen3.5:9b 6/7=86% at 104.5s avg (one timeout), qwen3.6:35b fails to load (21GB > 6GB VRAM + RAM), qwen3:4b on laptop ~140s vs ~16s on main machine (10x slower). The 1060's Pascal architecture (~80GB/s memory bandwidth) and old laptop CPU are both slower than the main machine's CPU for LLM inference. **Recommendation: keep qwen3:4b on the main machine; the laptop is not useful as an inference server for this use case.**
+
+### Laptop inference integration (2026-10-15): laptop node fully operational, Sumika endpoint ready
+
+The user's parallel session (sess_bfa905df) completed the laptop setup: SSH passwordless, Ollama + llama.cpp server + audio HTTP all running. SKILL documented at `~/.agents/skills/laptop-inference/SKILL.md`. Verified from THIS machine: laptop 8082 endpoint responds correctly to Sumika's calling patterns (4/4 tests pass, avg 17s). To integrate: change Sumika settings auxiliary model endpoint to `http://192.168.31.227:8082/v1`. See the laptop-inference skill for all available endpoints and capabilities.
