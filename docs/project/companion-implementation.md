@@ -1892,3 +1892,15 @@ Tested the user's old laptop (GTX 1060 6GB, same LAN) as a potential LAN inferen
 ### Laptop inference integration (2026-10-15): laptop node fully operational, Sumika endpoint ready
 
 The user's parallel session (sess_bfa905df) completed the laptop setup: SSH passwordless, Ollama + llama.cpp server + audio HTTP all running. SKILL documented at `~/.agents/skills/laptop-inference/SKILL.md`. Verified from THIS machine: laptop 8082 endpoint responds correctly to Sumika's calling patterns (4/4 tests pass, avg 17s). To integrate: change Sumika settings auxiliary model endpoint to `http://192.168.31.227:8082/v1`. See the laptop-inference skill for all available endpoints and capabilities.
+
+### P15 supplement 2 (2026-10-15): LFM2.5-24B classification + role-play verified
+
+LFM2.5-24B-A2B on laptop (8084): **classification 7/7 = 100% at 3.5-4s** (after warm-up; first-run 20-87s), **role-play 5-turn quality excellent** (detailed math explanations, natural tone, references previous discussion). Key finding: needs max_tokens=1000 (not 300) and JSON extraction from reasoning text — the model reasons in English before outputting the answer, so 300 tokens gets cut off mid-thought. The `--reasoning-budget 0` flag reduces but doesn't eliminate internal reasoning.
+
+Comparison summary across all tested models/machines:
+- LFM2.5-24B (laptop 8084): classification 100% at 4s warm; role-play detailed and correct; single model covers both tasks
+- qwen3:4b (main machine): classification 100% at 16s; role-play breaks character
+- sumika-qwen3-8b-heretic (main machine): role-play perfect (more faithful to 安和昴 card); classification 83%
+- qwen3.5:9b (laptop 8082): thinking mode unfixable (content always empty)
+
+**Recommended architecture**: LFM2.5-24B on laptop for classification AND role-play; qwen3:4b on main machine as backup.
