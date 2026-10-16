@@ -1953,3 +1953,9 @@ Tested community-suggested optimization flags on the laptop's LFM2.5-24B:
 - All three combined: avg 55s vs original 18.3s — significantly worse
 
 **Conclusion**: The original `--n-cpu-moe 99` configuration with default batch size and unquantized KV cache is already optimal for GTX 1060 (Pascal). Newer optimization techniques target Turing+ architectures with tensor cores and INT8 acceleration, which Pascal lacks. After warm-up (first 2-3 requests), the model consistently achieves 3.4-6.3s per classification with 100% accuracy.
+
+### MiniCPM-V 4.7 upgrade attempt (2026-10-16): still incompatible after Ollama 0.40.4→0.40.5
+
+Backed up the laptop's Ollama installation (996 files), upgraded from 0.40.4 to 0.40.5, re-pulled MiniCPM-V 4.7:1b. Result: **still 500 Internal Server Error** for both text and vision requests. This confirms the issue is Ollama's underlying llama.cpp not yet supporting MiniCPM-V 4.7's architecture (released Oct 2026), not a corrupted download. All existing models preserved after upgrade. Ollama rolled forward (not back) since 0.40.5 is a superset of 0.40.4.
+
+**Status**: MiniCPM-V 4.7 will work when a future Ollama release adds support for its model architecture. Not blocking any current Sumika functionality — LFM2.5-24B covers all text tasks, and vision (image understanding) is a nice-to-have.
