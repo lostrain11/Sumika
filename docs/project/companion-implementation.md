@@ -1937,3 +1937,9 @@ New models pulled and tested on laptop (gemma3:4b, hermes3:8b) alongside previou
 - **Auxiliary tasks**: LFM2.5-24B (fastest at 4s, most detailed, 24B knowledge) > qwen3:4b > gemma3:4b
 - **Single model for everything**: LFM2.5-24B (covers RP + agent + classification)
 - No model hit content boundaries in tested scenarios — companion role-play is viable on all tested models
+
+### Strata assessment (2026-10-16): NOT compatible with GTX 1060
+
+Tested installing Strata (Niko1221/Strata) on the laptop for MoE inference acceleration. Strata requires RTX 20 series minimum (Turing architecture+). The laptop's GTX 1060 is GTX 10 series (Pascal), one generation too old. Wrong pip package (`strata-26.0.0`) was installed and uninstalled. The current llama.cpp `--n-cpu-moe` approach remains the only viable option for MoE inference on the 1060.
+
+Other projects assessed: AirLLM (works but impractically slow for 24B — layer-by-layer RAM loading), MoE4All (Vulkan-based, might work but newer/untested), vllm-xtu-moe (vLLM has poor Pascal support), ktransformers (overkill for 24B, designed for 70B+). **llama.cpp --n-cpu-moe remains the best and only practical approach for the 1060.**
