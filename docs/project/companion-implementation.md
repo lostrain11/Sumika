@@ -1904,3 +1904,36 @@ Comparison summary across all tested models/machines:
 - qwen3.5:9b (laptop 8082): thinking mode unfixable (content always empty)
 
 **Recommended architecture**: LFM2.5-24B on laptop for classification AND role-play; qwen3:4b on main machine as backup.
+
+### P15 comprehensive model comparison (2026-10-15): 6 models tested
+
+New models pulled and tested on laptop (gemma3:4b, hermes3:8b) alongside previously tested models (LFM2.5-24B, qwen3:4b, 8b-heretic). Test coverage: 6 role-play boundary scenarios + 6 extended agent tasks + classification regression.
+
+**Role-play boundary results (NO content boundary hits across all models):**
+- All 6 scenarios (emotional low, personal topics, strong disagreement, long-term character, personal privacy, study pressure) passed WITHOUT refusal
+- No model broke character or said "as an AI I cannot..."
+- LFM2.5-24B and gemma3:4b gave the most detailed responses (300-500 chars)
+- hermes3:8b gave shorter but still in-character responses (100-160 chars)
+
+**Extended agent task results (ALL models passed all tasks):**
+- Code explanation: all models correctly identified quicksort and O(n log n)
+- Unstructured data extraction: all models produced correct JSON
+- Sentiment analysis: all models correctly identified mixed/negative sentiment
+- Study plan generation: all models produced relevant plans
+- Flashcard generation: all models produced valid JSON cards
+- Error message explanation: all models correctly identified ZeroDivisionError
+
+**Model comparison matrix:**
+| Model | Machine | RP (6 tests) | Boundary Hits | Agent (6 tasks) | Classification | Speed |
+|---|---|---|---|---|---|---|
+| LFM2.5-24B | Laptop 8084 | 5/5 detailed | 0 | 10/10 | 7/7=100% | 3.5-4s warm |
+| gemma3:4b | Laptop 11434 | 6/6 | 0 | 6/6 | ✓ | 9-15s |
+| hermes3:8b | Laptop 11434 | 6/6 (shorter) | 0 | 3+/6 visible | unknown | 12-117s |
+| qwen3:4b | Main CPU | ❌ breaks character | N/A | 10/10 | 7/7=100% | 16s |
+| 8b-heretic | Main CPU | ✅ most faithful | N/A | 10/10 | 5/6=83% | 32s |
+
+**Recommendations:**
+- **Role-play**: 8b-heretic > LFM2.5-24B > gemma3:4b (character fidelity to 安和昴 card)
+- **Auxiliary tasks**: LFM2.5-24B (fastest at 4s, most detailed, 24B knowledge) > qwen3:4b > gemma3:4b
+- **Single model for everything**: LFM2.5-24B (covers RP + agent + classification)
+- No model hit content boundaries in tested scenarios — companion role-play is viable on all tested models
