@@ -1944,6 +1944,8 @@ Tested installing Strata (Niko1221/Strata) on the laptop for MoE inference accel
 
 Other projects assessed: AirLLM (works but impractically slow for 24B — layer-by-layer RAM loading), MoE4All (Vulkan-based, might work but newer/untested), vllm-xtu-moe (vLLM has poor Pascal support), ktransformers (overkill for 24B, designed for 70B+). **llama.cpp --n-cpu-moe remains the best and only practical approach for the 1060.**
 
+ktransformers pip availability double-checked (2026-10-16): `ktransformers 0.7.0.post1` exists on PyPI, but that does not change the verdict — its serving path requires an NVIDIA Ampere-or-newer GPU (sm_80+; benchmarks use L20/RTX 4090, kt-kernel tutorial baseline is 24GB+ VRAM), its CPU kernels target AVX512/AMX (AVX2-only is a compatibility fallback), and its target models are 100B+ MoE (DeepSeek-V3/R1, Kimi-K2, GLM-5). The 7700HQ is AVX2-only and the GTX 1060 is sm_61, two generations below the floor — the wheel would install but kernels would fail with "no kernel image" at runtime. Not installed; llama.cpp stays.
+
 ### Optimization benchmark (2026-10-16): original llama.cpp config is optimal for GTX 1060
 
 Tested community-suggested optimization flags on the laptop's LFM2.5-24B:
