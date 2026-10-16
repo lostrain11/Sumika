@@ -353,6 +353,8 @@ class Bridge:
                 payload.get('suspended', False))
         if action == 'model_recommendation':
             return self._behavior_model_recommendation(payload)
+        if action == 'paste_context':
+            return self.companion_paste_context(payload)
         if action == 'habit_context':
             recent = self._behavior_library.context(scope=scope, limit=3)
             habits = self._behavior_library.habit_summaries(
@@ -905,6 +907,35 @@ class Bridge:
             stream = {'on_delta': on_delta} if on_delta is not None else {}
             return chat.reply(message, session_id=session_id, images=images,
                               task_intent=False, memory_writes=False, **stream)
+
+    def companion_paste_context(self, payload):
+        """P06/搁置恢复: PDF paste fallback — inject pasted text as the
+        current Q&A context when automatic selection is unavailable.
+
+        The text is bounded to 12000 chars (same as the observation budget)
+        and marked source='user-paste' for provenance. This REPLACES the
+        current observation (the user explicitly provides the context).
+        """
+        text = payload.get('text', '')
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError('paste text required')
+        text = text.strip()[:12000]
+        target = 'user-paste'
+        # If a capture target is active, keep it so the companion's routing
+        # and observation freshness still work.
+        passive = self._passive_browser.status()
+        if passive.get('status') == 'running' and passive.get('target'):
+            target = passive['target']
+        else:
+            state = self._perception.status()
+            if state.get('alive') and state.get('target'):
+                t = state['target']
+                target = f"window:{t['handle']}:pid:{t['process_id']}"
+        return self.companion_observe({
+            'source': 'user-paste', 'target': target,
+            'valid': True, 'text': text,
+            'metadata': {'text_source': 'user-paste',
+                         'paste_at': datetime.now(timezone.utc).isoformat()}})
 
     def companion_observe(self, payload, *, collection_token=None, continuous=False):
         if not isinstance(payload, dict):

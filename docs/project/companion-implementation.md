@@ -1959,3 +1959,15 @@ Tested community-suggested optimization flags on the laptop's LFM2.5-24B:
 Backed up the laptop's Ollama installation (996 files), upgraded from 0.40.4 to 0.40.5, re-pulled MiniCPM-V 4.7:1b. Result: **still 500 Internal Server Error** for both text and vision requests. This confirms the issue is Ollama's underlying llama.cpp not yet supporting MiniCPM-V 4.7's architecture (released Oct 2026), not a corrupted download. All existing models preserved after upgrade. Ollama rolled forward (not back) since 0.40.5 is a superset of 0.40.4.
 
 **Status**: MiniCPM-V 4.7 will work when a future Ollama release adds support for its model architecture. Not blocking any current Sumika functionality — LFM2.5-24B covers all text tasks, and vision (image understanding) is a nice-to-have.
+
+### RawInput root cause (2026-10-16): Windows Session Isolation
+
+Confirmed via `query session` on the laptop: SSH-spawned processes run in **Session 0 (services)** while keyboard/mouse input goes to **Session 1 (interactive desktop)**. Raw Input with RIDEV_INPUTSINK does not cross session boundaries — this is a Windows security feature, not a bug. The registration succeeds because the API doesn't validate sessions, but event delivery is session-scoped.
+
+**Fix**: The Raw Input worker must run in the interactive desktop session (Session 1). This requires:
+- Starting via `schtasks /Create /IT` (interactive token) or a logon-triggered scheduled task
+- Or running from an RDP session (which uses the same session as the console)
+- SSH cannot start it (SSH runs in Session 0)
+- The worker itself is correct — it just needs to be in the right session
+
+This is not a P11 code issue — the aggregation, supervision and protocol modules are all verified. The session placement is a deployment consideration.

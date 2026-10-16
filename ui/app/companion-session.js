@@ -615,7 +615,41 @@ export function mountCompanionSession(host) {
   });
   scan.addEventListener('click',loadTargets);
   mode.addEventListener('change',controls);
-  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript,notesList,profileStatus,profileRow,behaviorRow);
+  // P06/搁置恢复: PDF paste fallback — when the automatic selection is
+  // unavailable (selection_unavailable), the user can paste the selected
+  // text here. The paste becomes a user-paste observation for Q&A context.
+  const pasteRow = document.createElement('details');
+  pasteRow.className = 'companion-paste';
+  const pasteSummary = document.createElement('summary');
+  pasteSummary.textContent = 'PDF 选区粘贴（自动选区不可用时）';
+  pasteRow.append(pasteSummary);
+  const pasteArea = document.createElement('textarea');
+  pasteArea.className = 'companion-paste-input';
+  pasteArea.rows = 4;
+  pasteArea.placeholder = '从 PDF 复制选中的文字，粘贴到这里作为问答上下文…';
+  pasteArea.setAttribute('aria-label', '粘贴 PDF 选区文字');
+  const pasteBtn = document.createElement('button');
+  pasteBtn.type = 'button'; pasteBtn.className = 'mini-btn';
+  pasteBtn.textContent = '作为上下文发送';
+  pasteBtn.setAttribute('aria-label', '将粘贴的选区文字作为上下文发送');
+  pasteBtn.addEventListener('click', async () => {
+    const text = pasteArea.value.trim();
+    if (!text) { status.textContent = '请先粘贴选区文字'; return; }
+    pasteBtn.disabled = true;
+    try {
+      const response = await bridgeFetch('/api/companion/paste-context', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text.slice(0, 12000)})});
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error || `HTTP ${response.status}`);
+      status.textContent = '选区文字已作为上下文注入。';
+      pasteArea.value = '';
+    } catch (error) {
+      status.textContent = `上下文注入失败：${error.message}`;
+    } finally { pasteBtn.disabled = false; }
+  });
+  pasteRow.append(pasteArea, pasteBtn);
+  section.append(heading,status,targetRow,modeRow,scope,audioRow,audioStatus,browserAudioStatus,captureStatus,playbackStatus,option,commands,transcript,notesList,profileStatus,profileRow,behaviorRow,pasteRow);
   const profilesManageRow = document.createElement('div');
   profilesManageRow.className = 'set-row';
   profilesManageRow.append(manageButton);
