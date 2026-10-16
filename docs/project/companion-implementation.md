@@ -1943,3 +1943,13 @@ New models pulled and tested on laptop (gemma3:4b, hermes3:8b) alongside previou
 Tested installing Strata (Niko1221/Strata) on the laptop for MoE inference acceleration. Strata requires RTX 20 series minimum (Turing architecture+). The laptop's GTX 1060 is GTX 10 series (Pascal), one generation too old. Wrong pip package (`strata-26.0.0`) was installed and uninstalled. The current llama.cpp `--n-cpu-moe` approach remains the only viable option for MoE inference on the 1060.
 
 Other projects assessed: AirLLM (works but impractically slow for 24B — layer-by-layer RAM loading), MoE4All (Vulkan-based, might work but newer/untested), vllm-xtu-moe (vLLM has poor Pascal support), ktransformers (overkill for 24B, designed for 70B+). **llama.cpp --n-cpu-moe remains the best and only practical approach for the 1060.**
+
+### Optimization benchmark (2026-10-16): original llama.cpp config is optimal for GTX 1060
+
+Tested community-suggested optimization flags on the laptop's LFM2.5-24B:
+- `-ub 2048` (larger batch): worse
+- `-ctk q8_0 -ctv q8_0` (KV cache quantization): worse (Pascal lacks efficient INT8)
+- `-fa` (flash attention): crash (unsupported on Pascal)
+- All three combined: avg 55s vs original 18.3s — significantly worse
+
+**Conclusion**: The original `--n-cpu-moe 99` configuration with default batch size and unquantized KV cache is already optimal for GTX 1060 (Pascal). Newer optimization techniques target Turing+ architectures with tensor cores and INT8 acceleration, which Pascal lacks. After warm-up (first 2-3 requests), the model consistently achieves 3.4-6.3s per classification with 100% accuracy.
