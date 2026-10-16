@@ -1004,5 +1004,19 @@
     "verification": "记录/schema及文档链接校验；无产品变更",
     "P00": "documented; executor must verify current workspace",
     "P01_P17": "not_started"
+  },
+  "dsh_memory_plugin_survey_20261016": {
+    "status": "surveyed_and_storage_layer_tested_zero_cloud_calls",
+    "trigger": "用户：DSH 更新了吗？去看看插件商店，现在就开测",
+    "context": "日用 CLI 已是 @deepseek-ai/dsh 0.1.0-rc.6（dsh plugin 子命令上线）；应用内市场 dshmarket 月下载 59.6万",
+    "tested": {
+      "@tr1v3r/dsh-ltm": "11/12 —— 中文分词检索/修订CAS/遗忘/导出恢复全过；唯一失败=同义改述（纯词法无嵌入）；~115ms",
+      "@fooxe/dsh-memory": "9/9 —— 纯子串检索（改述/同义必败，预期内）、无模型侧删除、凭据仅形状拦截；隔离坑已修并清理共享 home"
+    },
+    "verdict": "Sumika 日用内嵌基线不变（作用域/来源边界插件均不满足）；dsh-ltm 记为 DSH 原生侧首选候选；官方 @mem0/deepseek-plugin 是云后端不采",
+    "integration_smoke": "boot 加载通过（ltm apply 执行并开库）；headless 模型回合在本 shell 挂起未完成；新版 CLI 凭据格式改为扁平映射，v1 结构会被拒（真实凭据未动，副本已删）",
+    "evidence": "docs/project/long-term-memory-evaluation.md（2026-10-16 节）；评测脚本 .sumika-next/dsh-memory-eval/",
+    "test_profiles_left": "共享 home 的 memtest-ltm / memtest-fooxe（未挂日用）",
+    "commit": "0833f46"
   }
 }
