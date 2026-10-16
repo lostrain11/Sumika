@@ -931,11 +931,12 @@ class Bridge:
             if state.get('alive') and state.get('target'):
                 t = state['target']
                 target = f"window:{t['handle']}:pid:{t['process_id']}"
-        return self.companion_observe({
-            'source': 'user-paste', 'target': target,
-            'valid': True, 'text': text,
-            'metadata': {'text_source': 'user-paste',
-                         'paste_at': datetime.now(timezone.utc).isoformat()}})
+        bundle = ObservationBundle.now(
+            source='user-paste', target=target, valid=True, text=text,
+            metadata={'text_source': 'user-paste',
+                      'paste_at': datetime.now(timezone.utc).isoformat()})
+        self._companion.update(bundle)
+        return {'status': 'context_updated', 'chars': len(text)}
 
     def companion_observe(self, payload, *, collection_token=None, continuous=False):
         if not isinstance(payload, dict):
@@ -2057,6 +2058,11 @@ def _handler(bridge):
             # lock. Starting/resuming capture still uses normal admission below.
             if route == '/api/companion/revoke':
                 return self._post()
+            if route == '/api/companion/paste-context':
+                try:
+                    return self._json(200, bridge.companion_paste_context(self._body()))
+                except (ValueError, PermissionError) as error:
+                    return self._json(400, {'error': str(error)})
             if route == '/api/companion/danmaku':
                 try:
                     return self._json(200, bridge.companion_danmaku(self._body()))
