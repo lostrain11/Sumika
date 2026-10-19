@@ -27,3 +27,6 @@
 *.pyc
 .env
 .env.*
+# .NET shell build outputs
+packaging/ShellHost/bin/
+packaging/ShellHost/obj/

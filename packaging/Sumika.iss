@@ -32,7 +32,7 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=no
 RestartApplications=no
-UninstallDisplayIcon={app}\Sumika.exe
+UninstallDisplayIcon={app}\SumikaShell.exe
 SetupLogging=yes
 
 [Languages]
@@ -45,8 +45,8 @@ Name: "desktopicon"; Description: "创建桌面快捷方式（Sumika {#BuildVers
 Source: "{#ProductDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Sumika"; Filename: "{app}\Sumika.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\Sumika {#BuildVersion}"; Filename: "{app}\Sumika.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Sumika"; Filename: "{app}\SumikaShell.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\Sumika {#BuildVersion}"; Filename: "{app}\SumikaShell.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Code]
 var

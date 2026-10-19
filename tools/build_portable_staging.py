@@ -209,6 +209,7 @@ def main():
     parser.add_argument('--host-runtimes', type=Path, required=True)
     parser.add_argument('--launcher', type=Path, required=True)
     parser.add_argument('--pet-host', type=Path, help='Optional self-contained desktop pet host')
+    parser.add_argument('--shell', type=Path, help='Optional self-contained WebView2 desktop shell')
     parser.add_argument('--process-audio-helper', type=Path,
                         help='Optional self-contained process loopback helper executable')
     parser.add_argument('--desktop-runtime', type=Path,
@@ -230,6 +231,8 @@ def main():
     selected.append(reference_registry_asset(ROOT))
     if args.pet_host:
         selected.append((executable_asset(args.pet_host), Path('SumikaPet.exe')))
+    if args.shell:
+        selected.append((single_file_launcher(args.shell), Path('SumikaShell.exe')))
     if args.process_audio_helper:
         selected.append((executable_asset(args.process_audio_helper),
                          Path('runtime/process-audio/SumikaProcessAudio.exe')))

@@ -60,7 +60,7 @@ try {
             ($parts | Where-Object { $_ -eq '..' -or $_ -eq '.' -or $_ -eq '' -or $_ -match '[. ]$|[<>"|?*\x00-\x1f\x7f]' -or $_ -match '^(?i:con|prn|aux|nul|conin\$|conout\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]) *(?:\.|$)' })) {
             throw 'Unsafe archive path'
         }
-        if ($parts[0] -notin @('Sumika.exe','SumikaPet.exe','package-manifest.json','tools','ui','extensions','browser-extensions','sumika_next','runtime','licenses')) {
+        if ($parts[0] -notin @('Sumika.exe','SumikaShell.exe','SumikaPet.exe','package-manifest.json','tools','ui','extensions','browser-extensions','sumika_next','runtime','licenses')) {
             throw 'Archive contains a non-release root'
         }
         if ($parts | Where-Object {
@@ -161,7 +161,7 @@ try {
         if ($Shortcut) {
             $shell = New-Object -ComObject WScript.Shell
             $shortcut = $shell.CreateShortcut($link)
-            $shortcut.TargetPath = Join-Path $destinationPath 'Sumika.exe'
+            $shortcut.TargetPath = Join-Path $destinationPath 'SumikaShell.exe'
             $shortcut.WorkingDirectory = $destinationPath
             $shortcut.Save()
         }

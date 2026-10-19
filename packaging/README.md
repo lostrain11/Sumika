@@ -587,3 +587,20 @@ not enable runtime scheduling or model analysis.
 `packaging/Sumika.iss` omits the personal-data wizard page. The launcher resolves LOCALAPPDATA/Sumika-location.json (or the default Sumika folder); explicit DataDirectory overrides remain available. Settings owns migration/restore through `tools/manage_personal_data.py`, reusing verified offline snapshots. Sources and backups are retained. Interactive uninstall defaults to keep; deletion needs a checkbox and a second confirmation, and the helper only removes known Sumika files while rejecting live writers and links. Silent uninstall always keeps data.
 
 L2 installer: E:/SumikaBuild/wizard-l2/Sumika-Setup-2026.09.20-l.exe. Actual host install verified 26,233 payload hashes; installed EXE lifecycle, isolated migration and storage UI passed. Uninstall dialog default/cancel verified; real deletion not executed. No new clean-guest claim. See docs/project/setup-and-personal-data.md and installer_data_ux_checkpoint. Windows PowerShell launch scripts containing Chinese must retain UTF-8 BOM; first L candidate failed before this was corrected in L2.
+
+## Desktop shell
+
+`ShellHost/SumikaShell.csproj` builds the optional WebView2 main window. It starts
+the existing bridge with `Sumika.exe -NoBrowser`, waits for loopback HTTP, and
+navigates its WebView2 to that URL. Closing the window requests authenticated
+shutdown of the bridge it owns.
+
+```powershell
+dotnet publish packaging/ShellHost/SumikaShell.csproj -c Release -r win-x64 `
+  --self-contained true -p:PublishSingleFile=true -o E:/SumikaBuild/shell-build
+```
+
+Pass `--shell E:/SumikaBuild/shell-build/SumikaShell.exe` to
+`build_portable_staging.py`. The installer and Start Menu shortcut target
+`SumikaShell.exe`. `Sumika.exe -NoBrowser` remains the browser-free startup path
+for diagnostics and automation.
