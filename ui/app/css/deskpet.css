@@ -139,3 +139,6 @@ body.on-room .deskpet{display:none}
 .dp-chat input::placeholder{color:var(--muted-2)}
 .dp-chat [data-dp-send]{width:26px;height:26px;border-radius:8px;background:var(--chara);display:grid;place-items:center;flex:none;transition:background .2s;color:var(--plain);border:none}
 .dp-chat [data-dp-send]:hover{filter:brightness(1.08)}
+
+/* The native shell owns the desktop pet; suppress the in-page clone. */
+html.shell-host #deskpet{display:none!important}

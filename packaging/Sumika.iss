@@ -34,6 +34,7 @@ CloseApplications=no
 RestartApplications=no
 UninstallDisplayIcon={app}\SumikaShell.exe
 SetupLogging=yes
+SetupIconFile=Assets\Sumika.ico
 
 [Languages]
 Name: "zhcn"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"

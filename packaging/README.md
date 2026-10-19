@@ -604,3 +604,21 @@ Pass `--shell E:/SumikaBuild/shell-build/SumikaShell.exe` to
 `build_portable_staging.py`. The installer and Start Menu shortcut target
 `SumikaShell.exe`. `Sumika.exe -NoBrowser` remains the browser-free startup path
 for diagnostics and automation.
+
+### Pet host
+
+The repo root `Sumika.PetHost.csproj` remains the historical source, but release
+packaging must build `PetHostBuild/Sumika.PetHost.csproj`; the isolated project
+avoids picking up the shell XAML from the parent packaging directory and emits a
+self-contained `SumikaPet.exe`.
+
+```powershell
+dotnet publish packaging/PetHostBuild/Sumika.PetHost.csproj -c Release -r win-x64 `
+  --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true `
+  -o E:/SumikaBuild/pet-build
+```
+
+Pass that result through `--pet-host`. The shell launches it only when the page
+leaves the activity room or the shell is minimized; the pet window is a separate
+topmost transparent WebView2 window and starts compact.

@@ -63,11 +63,11 @@ public partial class PetHost : Window
         try
         {
             var handle = new WindowInteropHelper(this).Handle;
-            if (!SetProp(handle, CaptureHostProperty, new IntPtr(1)))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            // Exclude the companion overlay from supported Windows capture APIs.
-            if (!SetWindowDisplayAffinity(handle, 0x11))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
+            Diagnostic("window-created");
+            // Capture exclusion is best effort: some Windows editions refuse the
+            // affinity call, but the companion window must still open.
+            SetProp(handle, CaptureHostProperty, new IntPtr(1));
+            SetWindowDisplayAffinity(handle, 0x11);
             var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Sumika", "WebView2", "PetHost");
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: cache);

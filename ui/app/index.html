@@ -15,6 +15,19 @@
 </head>
 <body>
 <script>if(new URLSearchParams(location.search).get('pet')==='1')document.documentElement.classList.add('pet-host');</script>
+<script>
+/* Native shell host: report route/window visibility without taking over the page. */
+(function(){
+  if(!window.chrome?.webview || document.documentElement.classList.contains('pet-host')) return;
+  const report=()=>{
+    try { window.chrome.webview.postMessage({type:'sumika:context', route:(location.hash||'#room').slice(1)}); } catch (_) {}
+  };
+  addEventListener('hashchange', report);
+  addEventListener('load', report);
+  document.addEventListener('visibilitychange', report);
+  report();
+})();
+</script>
 
 <header class="topbar">
   <div class="brand">
@@ -967,6 +980,10 @@
   if (ACT[qs.get('act')]) setAct(qs.get('act')); else applyCam();
   buildDeskpet();
   syncDeskpet();
+  if (document.documentElement.classList.contains('pet-host')) {
+    document.getElementById('deskpet')?.classList.add('mini');
+    setTimeout(() => window.chrome?.webview?.postMessage('sumika:compact'), 120);
+  }
 </script>
 <script type="module">
   /* ---- VRM 实机渲染：昴（示例角色卡 · VRM 绑定演示位）挂载 AvatarSample_A 真实模型 ----

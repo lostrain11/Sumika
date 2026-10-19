@@ -10,6 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>Sumika</AssemblyName>
+    <ApplicationIcon>Assets\Sumika.ico</ApplicationIcon>
     <RootNamespace>SumikaLauncher</RootNamespace>
   </PropertyGroup>
   <ItemGroup>

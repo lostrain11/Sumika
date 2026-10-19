@@ -30,3 +30,6 @@
 # .NET shell build outputs
 packaging/ShellHost/bin/
 packaging/ShellHost/obj/
+# .NET packaging build outputs
+packaging/PetHostBuild/bin/
+packaging/PetHostBuild/obj/

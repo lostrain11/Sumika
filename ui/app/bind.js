@@ -770,7 +770,7 @@ async function ensureWorkbenchUrl() {
     status = await api('/api/workbench');
     if (!status.running) {
       status = await api('/api/workbench/start', {
-        method: 'POST', body: JSON.stringify({ port: 5175 }),
+        method: 'POST', body: JSON.stringify({ port: 0 }),
       });
     }
     if (!status.embed_ready) return { url: null, error: 'DSH 实例未就绪' };
@@ -835,7 +835,7 @@ async function bindWorkbench() {
       const title = document.createElement('h2');
       title.textContent = '工作台暂不可用';
       const detail = document.createElement('p');
-      detail.textContent = `没有启动新的 DSH 实例：${error || '实例未就绪'}。请确认 5175 端口和 DSH 状态后重试。`;
+      detail.textContent = `没有启动新的 DSH 实例：${error || '实例未就绪'}。请确认 DSH 状态后重试；Sumika 会自动选择空闲端口，不会接管未知进程。`;
       const actions = document.createElement('div');
       actions.className = 'sumika-action-row';
       const retry = document.createElement('button');
