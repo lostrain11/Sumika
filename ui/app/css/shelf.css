@@ -22,12 +22,13 @@
 .cap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--grid-min),1fr));grid-auto-rows:1fr;gap:var(--gap)}
 .cap-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:var(--card-pad);display:flex;flex-direction:column;gap:7px;min-height:var(--card-h);transition:.15s}
 .cap-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--rose-line)}
-.cap-card .top{display:flex;align-items:center;gap:9px}
+.cap-card .top{display:flex;align-items:flex-start;gap:9px}
 .cap-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none;color:var(--ink)}
 .cap-ic svg{width:17px;height:17px}
-.cap-card h4{font-size:12.5px;flex:1;min-width:0;line-height:1.4;padding-right:4px}
+.cap-card h4{font-size:12.5px;min-width:0;line-height:1.4;padding:0}
 .cap-card .st{margin-left:auto;flex:none;margin-top:1px}
-.cap-flags{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px;margin-left:auto;flex:none;height:32px}
+.cap-title{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;min-height:48px}
+.cap-flags{display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:0;flex:none}
 .cap-flags .st{margin:0;font-size:8px;line-height:1.25;padding:1px 6px}
 .st{font-size:8.5px;border-radius:var(--radius-pill);padding:2px 8px;white-space:nowrap}
 .st.on{color:var(--green);background:var(--green-soft);border:1px solid var(--green-line)}

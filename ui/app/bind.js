@@ -105,12 +105,12 @@ function bindHeader(state) {
   const chip = document.querySelector('.model-chip');
   if (chip) {
     if (document.body.classList.contains('on-board')) {
-      chip.textContent = '工作模型 · DSH ▾';
+      chip.textContent = '工作模型 DSH · 工作台 ▾';
       chip.title = '工作模型由 DSH 工作台管理；Sumika 不维护第二份模型配置。';
     } else {
       const name = shortModelName(state.role?.model);
       const location = modelLocation(state.role);
-      chip.textContent = `${name} · ${location} ▾`;
+      chip.textContent = `角色模型 ${name} · ${location} ▾`;
       chip.title = `当前角色模型：${state.role?.model || '未配置'}（${location}）`;
     }
   }
@@ -1006,12 +1006,15 @@ function capabilityCard({ icon, title, status, statusClass, text, source, enable
   glyph.append(mark);
   const heading = document.createElement('h4');
   heading.textContent = title;
-  top.append(glyph, heading);
+  const titleBlock = document.createElement('div');
+  titleBlock.className = 'cap-title';
+  titleBlock.append(heading);
   const flags = document.createElement('span');
   flags.className = 'cap-flags';
   if (status) flags.appendChild(statusPill(status, statusClass));
   if (configurable) flags.appendChild(statusPill('可配置', 'config'));
-  if (flags.childElementCount) top.appendChild(flags);
+  if (flags.childElementCount) titleBlock.appendChild(flags);
+  top.append(glyph, titleBlock);
   const body = document.createElement('p');
   body.textContent = compactCapabilityText(text);
   body.title = text || '';
