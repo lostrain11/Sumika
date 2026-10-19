@@ -146,6 +146,33 @@ class WorkbenchController:
         process = getattr(self.adapter, "process", None)
         return process is not None and process.poll() is None
 
+    def work_model(self):
+        """Best-effort read of the active DSH session model.
+
+        The model is owned by the native workbench, never configured here. A
+        managed Session exposes its last-used selection in the session list;
+        if the instance is unowned or not ready, report unknown instead of
+        inventing a model name.
+        """
+        if not self.running() or self.adapter is None:
+            return None
+        try:
+            value = self.adapter._rpc("session/list", {})
+            items = value.get("items") if isinstance(value, dict) else None
+            if not isinstance(items, list):
+                return None
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                selection = (((item.get("projections") or {}).get("values") or {})
+                             .get("modelSelection") or {})
+                chosen = selection.get("lastUsed") or selection.get("next")
+                if isinstance(chosen, dict) and isinstance(chosen.get("model"), str) and chosen["model"].strip():
+                    return {"provider": chosen.get("provider"), "model": chosen["model"]}
+        except Exception:
+            return None
+        return None
+
     def status(self):
         release = self.release()
         process = getattr(self.adapter, "process", None)
@@ -153,6 +180,7 @@ class WorkbenchController:
                 "url": self.url if self.running() else None,
                 "pid": process.pid if self.running() else None,
                 "embed_ready": bool(self.running() and self._embed_url),
+                "work_model": self.work_model(),
                 "recent_log": list(self.log)[-8:],
                 "timeline": list(self.timeline)}
 

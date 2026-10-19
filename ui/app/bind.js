@@ -99,14 +99,23 @@ function modelLocation(role = {}) {
 }
 
 let lastHeaderState = null;
+let lastWorkbenchState = null;
 
-function bindHeader(state) {
+function bindHeader(state, workbench = null) {
   lastHeaderState = state;
+  lastWorkbenchState = workbench;
   const chip = document.querySelector('.model-chip');
   if (chip) {
     if (document.body.classList.contains('on-board')) {
-      chip.textContent = '工作模型 DSH · 工作台 ▾';
-      chip.title = '工作模型由 DSH 工作台管理；Sumika 不维护第二份模型配置。';
+      const work = workbench?.work_model;
+      if (work?.model) {
+        const where = work.provider ? ` · ${work.provider}` : '';
+        chip.textContent = `工作模型 ${shortModelName(work.model)}${where} ▾`;
+        chip.title = `当前 DSH 工作模型：${work.model}${work.provider ? `（${work.provider}）` : ''}`;
+      } else {
+        chip.textContent = '工作模型 DSH · 工作台 ▾';
+        chip.title = '工作模型由 DSH 工作台管理；启动工作台后读取当前会话模型。';
+      }
     } else {
       const name = shortModelName(state.role?.model);
       const location = modelLocation(state.role);
@@ -121,7 +130,7 @@ function bindHeader(state) {
   }
 }
 
-window.addEventListener('hashchange', () => { if (lastHeaderState) bindHeader(lastHeaderState); });
+window.addEventListener('hashchange', () => { if (lastHeaderState) bindHeader(lastHeaderState, lastWorkbenchState); });
 
 let headerRevision = 0;
 async function refreshHeader() {
@@ -138,8 +147,11 @@ async function refreshHeader() {
     return;
   }
   try {
-    const state = await api('/api/state');
-    if (revision === headerRevision && navigator.onLine) bindHeader(state);
+    const [state, workbench] = await Promise.all([
+      api('/api/state'),
+      api('/api/workbench').catch(() => null),
+    ]);
+    if (revision === headerRevision && navigator.onLine) bindHeader(state, workbench);
   } catch {
     if (revision === headerRevision) unavailable('本地服务连接异常');
   }
@@ -788,6 +800,7 @@ async function bindWorkbench() {
     screen.append(state);
     const {url, error} = await ensureWorkbenchUrl();
     if (url) {
+      void refreshHeader();
       const frame = document.createElement('iframe');
       frame.id = 'sumika-workbench-frame';
       frame.title = 'Sumika 工作台';
@@ -1006,15 +1019,12 @@ function capabilityCard({ icon, title, status, statusClass, text, source, enable
   glyph.append(mark);
   const heading = document.createElement('h4');
   heading.textContent = title;
-  const titleBlock = document.createElement('div');
-  titleBlock.className = 'cap-title';
-  titleBlock.append(heading);
+  top.append(glyph, heading);
   const flags = document.createElement('span');
   flags.className = 'cap-flags';
   if (status) flags.appendChild(statusPill(status, statusClass));
   if (configurable) flags.appendChild(statusPill('可配置', 'config'));
-  if (flags.childElementCount) titleBlock.appendChild(flags);
-  top.append(glyph, titleBlock);
+  if (flags.childElementCount) top.appendChild(flags);
   const body = document.createElement('p');
   body.textContent = compactCapabilityText(text);
   body.title = text || '';
