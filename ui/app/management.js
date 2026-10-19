@@ -27,7 +27,7 @@ function button(text, action) {
   el.addEventListener('click', async () => {
     el.disabled = true;
     try { await action(); } catch(error) { showError(el, error); }
-    finally { el.disabled = false; }
+    finally { el.disabled = el.dataset.locked === 'true'; }
   });
   return el;
 }
@@ -55,7 +55,7 @@ let helpSequence=0;
 function field(label, value, type='text', options=null) {
   const row = node('label', undefined, 'set-row');
   row.append(node('span', label));
-  const input = document.createElement(options ? 'select' : 'input');
+  const input = document.createElement(options ? 'select' : type==='textarea' ? 'textarea' : 'input');
   if (options) {
     options.forEach(([value,text]) => {
       const option=node('option',text);option.value=value;input.append(option);
@@ -65,20 +65,20 @@ function field(label, value, type='text', options=null) {
       missing.value=String(value);input.append(missing);
     }
   }
-  else input.type=type;
+  else if(type!=='textarea') input.type=type;
   if(type==='checkbox') input.checked=Boolean(value); else input.value=value ?? '';
   input.className='sumika-field';
   input.setAttribute('aria-label',label);
   row.append(input);
   if(FIELD_HELP[label]){
     const help=node('span',undefined,'sumika-field-help');
-    const trigger=node('button','?','sumika-help-trigger');trigger.type='button';
+    const trigger=node('button','i','sumika-help-trigger');trigger.type='button';
     trigger.setAttribute('aria-label',`${label}说明`);
     const tip=node('span',FIELD_HELP[label],'sumika-tooltip');tip.id=`sumika-help-${++helpSequence}`;tip.setAttribute('role','tooltip');
     trigger.setAttribute('aria-describedby',tip.id);input.setAttribute('aria-describedby',tip.id);
     trigger.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();help.classList.toggle('open');});
     trigger.addEventListener('keydown',e=>{if(e.key==='Escape')help.classList.remove('open');});
-    help.append(trigger,tip);row.append(help);
+    help.append(trigger,tip);row.insertBefore(help,input);
   }
   return {row,input};
 }
@@ -129,30 +129,102 @@ async function buildSettings() {
     const p=node('section',undefined,'model-usage-panel'); p.dataset.usage=id; panels[id]=p; tabBody.append(p); return p;
   }
   const workPanel=usageTab('work','工作模型');
-  workPanel.append(node('h3','由 DSH 工作台管理'),node('p','工作模型、项目会话、工具权限和审批仍以 DSH 原生配置为唯一来源。Sumika 只读取状态，不在此维护第二份模型配置。','sumika-form-note'),button('打开工作台',()=>{location.hash='#board';}));
+  const workCta=node('div',undefined,'settings-cta');
+  const workCtaCopy=node('div',undefined,'settings-cta-copy');
+  workCtaCopy.append(node('h3','由 DSH 工作台管理'),
+    node('p','工作模型、项目会话、工具权限和审批仍以 DSH 原生配置为唯一来源。Sumika 只读取状态，不在此维护第二份模型配置。'));
+  workCta.append(workCtaCopy,button('打开工作台',()=>{location.hash='#board';}));
+  workPanel.append(workCta);
+
   const rolePanel=usageTab('role','角色模型');
   rolePanel.append(node('p','角色模型只用于活动室陪伴，不获得文件、终端、浏览器或审批权限。','sumika-form-note'));
-  add(rolePanel,'启用角色模型','enabled',values.enabled,'checkbox');
-  const roleProvider=add(rolePanel,'Provider','provider',values.provider,'text', [['ollama','Ollama'],['openai-compatible','OpenAI 兼容 API']]);
+  const roleEnabled=add(rolePanel,'启用角色模型','enabled',values.enabled,'checkbox');
+  const roleOffNote=node('p','关闭后活动室仍保留历史记录，但聊天输入会显示“角色模型已关闭”，不会再向模型发请求。','sumika-form-note');
+  rolePanel.append(roleOffNote);
+  const roleProvider=add(rolePanel,'Provider','provider',values.provider,'text', [
+    ['ollama','Ollama（本机）'],
+    ['openai-compatible','OpenAI 兼容 API（云端 / 局域网）'],
+    ['openai-compatible-local','OpenAI 兼容（仅本机回环）'],
+  ]);
+  const roleProviderNote=node('p','','sumika-form-note');rolePanel.append(roleProviderNote);
   const roleModel=add(rolePanel,'模型名称','model',values.model);
-  add(rolePanel,'服务地址','endpoint',values.endpoint);
-  add(rolePanel,'凭据环境变量名','key_env',values.key_env || 'DEEPSEEK_API_KEY');
-  add(rolePanel,'上下文长度','context_length',values.context_length,'number');
-  add(rolePanel,'回复长度上限','max_tokens',values.max_tokens,'number');
-  add(rolePanel,'温度','temperature',values.temperature,'number').input.step='any';
+  const roleEndpoint=add(rolePanel,'服务地址','endpoint',values.endpoint);
+  const roleKey=add(rolePanel,'API Key 环境变量名','key_env',values.key_env || 'DEEPSEEK_API_KEY');
+  const roleContext=add(rolePanel,'上下文长度','context_length',values.context_length,'number');
+  const roleMax=add(rolePanel,'回复长度上限','max_tokens',values.max_tokens,'number');
+  const roleTemp=add(rolePanel,'温度','temperature',values.temperature,'number');roleTemp.input.step='any';
+  const roleDependents=[roleProvider.row,roleModel.row,roleEndpoint.row,roleKey.row,roleContext.row,roleMax.row,roleTemp.row];
+  const syncRoleFields=()=>{
+    const off=!roleEnabled.input.checked;
+    roleDependents.forEach(row=>{row.hidden=off;});
+    roleProviderNote.hidden=off;
+    roleOffNote.hidden=!off;
+    if(off)return;
+    roleKey.row.hidden=roleProvider.input.value!=='openai-compatible';
+    roleProviderNote.textContent=roleProvider.input.value==='ollama'
+      ? '连接本机或局域网已有的 Ollama 服务；通常填写 http://127.0.0.1:11434，不需要 API Key。'
+      : roleProvider.input.value==='openai-compatible'
+        ? '填写服务商或局域网的 OpenAI 兼容 HTTPS 地址；API Key 通过环境变量读取，不写进配置文件。'
+        : '仅允许 127.0.0.1 / localhost 的 HTTP 服务，适合本机 llama.cpp、LM Studio、vLLM 等运行时。';
+  };
+  roleEnabled.input.addEventListener('change',syncRoleFields);
+  roleProvider.input.addEventListener('change',syncRoleFields);
+  syncRoleFields();
+
   const aux=values.auxiliary;
+  aux.tunnel = aux.tunnel || {enabled:false,host:'',user:'',ssh_port:22,remote_port:11434,preload:false};
   const auxiliaryPanel=usageTab('auxiliary','辅助模型');
   auxiliaryPanel.append(node('p','用于提示词优化预览、角色聊天任务意图判断等轻量辅助；失败时保留原文或不确定状态，不自动切换到云端。','sumika-form-note'));
   add(auxiliaryPanel,'启用辅助模型','auxiliary.enabled',aux.enabled,'checkbox');
-  const auxiliaryProvider=add(auxiliaryPanel,'Provider','auxiliary.provider',aux.provider,'text', [['ollama','Ollama'],['openai-compatible','OpenAI 兼容 API']]);
+  const auxiliaryProvider=add(auxiliaryPanel,'Provider','auxiliary.provider',aux.provider,'text', [
+    ['ollama','Ollama（本机）'],
+    ['openai-compatible','OpenAI 兼容 API（云端 / 局域网）'],
+    ['openai-compatible-local','OpenAI 兼容（仅本机回环）'],
+  ]);
   const auxiliaryModel=add(auxiliaryPanel,'模型名称','auxiliary.model',aux.model);
   add(auxiliaryPanel,'服务地址','auxiliary.endpoint',aux.endpoint);
-  add(auxiliaryPanel,'凭据环境变量名','auxiliary.key_env',aux.key_env || 'AUXILIARY_MODEL_API_KEY');
+  const auxiliaryKey=add(auxiliaryPanel,'API Key 环境变量名','auxiliary.key_env',aux.key_env || 'AUXILIARY_MODEL_API_KEY');
   add(auxiliaryPanel,'上下文长度','auxiliary.context_length',aux.context_length,'number');
   add(auxiliaryPanel,'回复长度上限','auxiliary.max_tokens',aux.max_tokens,'number');
   add(auxiliaryPanel,'温度','auxiliary.temperature',aux.temperature,'number').input.step='any';
+  const syncAuxiliaryFields=()=>{auxiliaryKey.row.hidden=auxiliaryProvider.input.value!=='openai-compatible';};
+  auxiliaryProvider.input.addEventListener('change',syncAuxiliaryFields);syncAuxiliaryFields();
+
+  const tunnelDetails=node('details',undefined,'settings-advanced');
+  tunnelDetails.append(node('summary','远程模型连接（SSH 隧道，可选）'),
+    node('p','只有模型运行在另一台机器、且你已配置 SSH 公钥时才需要。普通本机模型或云端 API 不需要填写。','sumika-form-note'));
+  const tunnelBody=node('div');tunnelDetails.append(tunnelBody);
+  add(tunnelBody,'启用 SSH 隧道','auxiliary.tunnel.enabled',aux.tunnel.enabled,'checkbox');
+  add(tunnelBody,'SSH 主机','auxiliary.tunnel.host',aux.tunnel.host);
+  add(tunnelBody,'SSH 用户','auxiliary.tunnel.user',aux.tunnel.user);
+  add(tunnelBody,'SSH 端口','auxiliary.tunnel.ssh_port',aux.tunnel.ssh_port,'number');
+  add(tunnelBody,'远端 Ollama 端口','auxiliary.tunnel.remote_port',aux.tunnel.remote_port,'number');
+  add(tunnelBody,'连接后预加载模型','auxiliary.tunnel.preload',aux.tunnel.preload,'checkbox');
+  const tunnelStatus=node('p','隧道状态：未读取','sumika-form-note');tunnelStatus.setAttribute('role','status');
+  const tunnelActions=node('div',undefined,'sumika-settings-actions');
+  let tunnelState=null;
+  const tunnelText=()=>{
+    const s=tunnelState;
+    if(!s)return '隧道状态：未读取';
+    if(!s.enabled)return '隧道未启用';
+    const preload=!s.preload||s.preload==='idle'?'':s.preload==='warming'?' · 模型预加载中'
+      :s.preload==='ready'?' · 模型已预加载':s.preload==='error'?' · 预加载失败：'+(s.preload_error||'未知'):'';
+    if(s.healthy)return `隧道已连接：127.0.0.1:${s.local_port} → ${s.remote}${preload}`;
+    if(s.running)return `隧道进程在运行，但健康检查未通过${s.last_error?'：'+s.last_error:''}${preload}`;
+    return `隧道未运行${s.last_error?'：'+s.last_error:''}`;
+  };
+  const refreshTunnel=async()=>{try{tunnelState=await request('tunnel');tunnelStatus.textContent=tunnelText();}catch(error){tunnelStatus.textContent='隧道状态读取失败：'+error.message;}};
+  tunnelActions.append(
+    button('启动隧道',async()=>{tunnelState=await request('tunnel',{action:'start'});tunnelStatus.textContent=tunnelText();}),
+    button('停止隧道',async()=>{tunnelState=await request('tunnel',{action:'stop'});tunnelStatus.textContent=tunnelText();}),
+    button('刷新状态',refreshTunnel));
+  tunnelBody.append(tunnelActions,tunnelStatus);
+  auxiliaryPanel.append(tunnelDetails);
   auxiliaryPanel.append(node('p',`允许的辅助任务：${aux.capabilities.includes('prompt_enhancement')?'提示词优化预览':'无'}${aux.capabilities.includes('task_intent')?'、任务意图建议':''}。任务派发和权限始终由宿主决定。`,'sumika-form-note'));
-  await mountModelLibrary({host:rolePanel,field,node,button,request,roleModel,roleProvider,auxiliaryModel,auxiliaryProvider,onSaved:s=>{currentSettings=s;}});
+
+  const libraryPanel=usageTab('library','本地模型库');
+  await mountModelLibrary({host:libraryPanel,field,node,button,request,roleModel,roleProvider,auxiliaryModel,auxiliaryProvider,onSaved:s=>{currentSettings=s;}});
+  await refreshTunnel();
   function selectUsage(id){
     Object.entries(panels).forEach(([key,p])=>p.hidden=key!==id);
     tabs.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.usage===id));
@@ -171,10 +243,17 @@ async function buildSettings() {
   const data=sections.find(el=>el.dataset.settingsSection==='data');
   data.querySelector('h2 .rsv-tag')?.remove();
   const dataCard=data.querySelector('.set-card');dataCard.replaceChildren();
+  const dataSection=(title,description)=>{
+    const section=node('section',undefined,'data-section');
+    section.append(node('h3',title));
+    if(description)section.append(node('p',description,'sumika-form-note'));
+    dataCard.append(section);
+    return section;
+  };
   const storage=await request('personal-data');
-  const locationRow=field('个人数据目录',storage.directory);locationRow.input.readOnly=true;
-  dataCard.append(locationRow.row);
-  dataCard.append(node('p',storage.note,'sumika-form-note'));
+  const directorySection=dataSection('个人数据目录','迁移会保留旧目录和备份，不移动外部模型库；完成后重启生效。');
+  const locationRow=field('当前目录',storage.directory);locationRow.input.readOnly=true;
+  directorySection.append(locationRow.row);
   const storageActions=node('div',undefined,'sumika-settings-actions');
   const storageStatus=node('p','','sumika-form-note');storageStatus.setAttribute('role','status');
   const beginRelocation=(fromBackup=false)=>{
@@ -201,11 +280,12 @@ async function buildSettings() {
   };
   storageActions.append(button('打开目录',()=>request('personal-data/open',{})),
     button('迁移数据',()=>beginRelocation()),button('从备份恢复',()=>beginRelocation(true)));
-  dataCard.append(storageActions,storageStatus);
-  add(dataCard,'记录角色用量','usage.enabled',values.usage.enabled,'checkbox');
-  // P16: local model recommendation based on hardware
+  directorySection.append(storageActions,storageStatus);
+  const usageSection=dataSection('用量记录','保存角色聊天的 token 使用记录，供查看历史消耗；不是账户余额。关闭后停止新增统计，保留历史。');
+  add(usageSection,'记录角色用量','usage.enabled',values.usage.enabled,'checkbox');
+  const recommendationSection=dataSection('本地模型推荐','按本机内存和推理设备给出建议；不会自动下载、安装或切换当前模型。');
   const modelRecStatus=node('p','正在检测本机硬件…','sumika-form-note');
-  dataCard.append(node('h3','本地模型推荐'),modelRecStatus);
+  recommendationSection.append(modelRecStatus);
   fetch('/api/manage/behavior',{method:'POST',
     headers:{'Content-Type':'application/json','X-Sumika-CSRF':csrf},
     body:JSON.stringify({action:'model_recommendation'})})
@@ -217,21 +297,23 @@ async function buildSettings() {
       modelRecStatus.textContent=
         `本机 RAM ${hw.total_ram_gb}GB（可用 ${hw.usable_for_model_gb}GB）`+
         `${hw.has_nvidia_gpu?' · 有 NVIDIA GPU':' · 纯 CPU 推理'}`;
-      const roleLine=node('p','','sumika-form-note');
+      const roleLine=node('p','','data-recommendation');
       roleLine.innerHTML=`<b>角色扮演推荐</b>：${role.label}（${role.tag}）`+
-        (role.installed?' <span style="color:green">已安装 ✓</span>'
+        (role.installed?' <span class="data-ok">已安装 ✓</span>'
                         :` <code>ollama pull ${role.tag}</code>`);
       roleLine.title=role.use||'';
-      const auxLine=node('p','','sumika-form-note');
+      const auxLine=node('p','','data-recommendation');
       auxLine.innerHTML=`<b>辅助任务推荐</b>：${aux.label}（${aux.tag}）`+
-        (aux.installed?' <span style="color:green">已安装 ✓</span>'
+        (aux.installed?' <span class="data-ok">已安装 ✓</span>'
                        :` <code>ollama pull ${aux.tag}</code>`);
       auxLine.title=aux.use||'';
-      dataCard.append(roleLine,auxLine);
+      recommendationSection.append(roleLine,auxLine);
     }).catch(()=>{modelRecStatus.textContent='模型推荐不可用';});
+  const behaviorSection=dataSection('行为子记忆','观察事实、当前解释、用户确认与派生模式分别保留来源。不会定期自动删除。删除不影响历史手动备份。');
+  await mountBehaviorData(behaviorSection,{embedded:true});
   const about=group('关于','about');about.card.append(node('p','Sumika · 晴日部室。工作台由受管 DSH 提供，新增能力通过独立扩展接入。','sumika-form-note'));main.append(about.el);
   const permissions=sections.find(el=>el.dataset.settingsSection==='permissions');
-  permissions.querySelector('.set-card').append(button('网页咨询授权',openBrowsers));
+  await mountBehaviorPermissions(permissions.querySelector('.set-card'));
   const appearance=sections.find(el=>el.dataset.settingsSection==='appearance');
   appearance.querySelector('h2 .rsv-tag')?.remove();
   const theme=field('主题配色',getTheme(),'text',[['light','晴日 · 浅'],['dark','夜间'],['system','跟随系统']]);
@@ -249,6 +331,15 @@ async function buildSettings() {
   document.documentElement.dataset.density=density.input.value;
   const densityOld=[...appearance.querySelectorAll('.set-row')].find(r=>r.textContent.includes('界面密度'));
   densityOld?.replaceWith(density.row);
+  const readPath=(value,path)=>path.reduce((current,key)=>current==null?undefined:current[key],value);
+  const writePath=(target,path,value)=>{
+    let current=target;
+    for(const key of path.slice(0,-1)){
+      if(!current[key]||typeof current[key]!=='object')current[key]={};
+      current=current[key];
+    }
+    current[path[path.length-1]]=value;
+  };
   const actions=node('div',undefined,'sumika-settings-actions');
   const status=node('span','', 'sumika-form-note');
   actions.append(button('保存设置',async()=>{
@@ -256,14 +347,17 @@ async function buildSettings() {
     for(const c of controls) {
       const value=c.type==='checkbox'?c.input.checked:c.type==='number'?Number(c.input.value):c.type==='device'?(c.input.value===''?null:Number(c.input.value)):c.input.value;
       const parts=c.key.split('.');
-      const old=parts.length===1?currentSettings.data[parts[0]]:currentSettings.data[parts[0]][parts[1]];
+      const old=readPath(currentSettings.data,parts);
       if(value===old)continue;
-      if(parts.length===1)changes[parts[0]]=value;else(changes[parts[0]]??={})[parts[1]]=value;
+      writePath(changes,parts,value);
     }
     if(!Object.keys(changes).length){status.textContent='没有需要保存的修改';return;}
     currentSettings=await request('settings',{expected_revision:currentSettings.revision,changes});
-    window.dispatchEvent(new CustomEvent('sumika:workbench-settings',{detail:currentSettings.data.prompt_enhancement}));
-    status.textContent='已保存';await readStartup();
+    window.dispatchEvent(new CustomEvent('sumika:workbench-settings',{detail:{
+        prompt_enhancement:currentSettings.data.prompt_enhancement,
+        auxiliary:currentSettings.data.auxiliary}}));
+    window.dispatchEvent(new Event('sumika:settings-changed'));
+    status.textContent='已保存';await readStartup();await refreshTunnel();
   }),status);main.append(actions);
   nav.querySelectorAll('button').forEach(b=>b.remove());
   const entries=[['startup','通用与启动'],['appearance','外观'],['models','模型与连接'],['permissions','连接与权限'],['data','数据与存储'],['about','关于']];
@@ -280,6 +374,7 @@ async function buildSettings() {
   select('startup');
 }
 
+window.sumikaOpenRoles = openRoles;
 async function openRoles() {
   const response=await fetch('/api/roles');const roles=await response.json();
   const modal=dialog('角色管理');
@@ -341,7 +436,14 @@ async function openRoles() {
       list.replaceChildren();
       state.memories.filter(m=>m.text.includes(filter.input.value)).forEach(m=>{
         const row=node('div',undefined,'sumika-record');row.append(node('p',m.text),node('small',m.source));
-        row.append(button('遗忘',async()=>{if(confirm('遗忘这条记忆？'))await mutate('forget',{id:m.id,confirmed:true});}));list.append(row);
+        row.append(button('纠正',async()=>{
+          const text=prompt('纠正这条事实（旧版本会保留为历史，不再用于召回）',m.text);
+          if(text===null)return;
+          if(!text.trim())throw new Error('纠正后的事实不能为空。');
+          if(text===m.text)return;
+          if(!confirm(`确认将这条事实纠正为：\n${text}`))return;
+          await mutate('correct',{record_id:m.record_id,text,request_id:crypto.randomUUID(),confirmed:true});
+        }),button('遗忘',async()=>{if(confirm('遗忘这条记忆？'))await mutate('forget',{id:m.id,confirmed:true});}));list.append(row);
       });
     };filter.input.addEventListener('input',renderList);renderList();
     content.append(node('h3',`关系（${state.relations.length}）`));
@@ -350,7 +452,7 @@ async function openRoles() {
     for(const relation of state.relations){
       const row=node('div',undefined,'sumika-record');row.append(node('p',`${relation.subject} → ${relation.predicate} → ${relation.object}`));
       row.append(button('编辑',async()=>{
-        const value=prompt('新的关系对象（同作用域相同关系会一起更新）',relation.object);
+        const value=prompt('新的关系对象（只更新当前这一条关系）',relation.object);
         if(value!==null)await mutate('edit_relation',{...relation,new_object:value});
       }),button('删除',async()=>{if(confirm('删除这项关系？'))await mutate('delete_relation',{...relation,confirmed:true});}));content.append(row);
     }
@@ -362,20 +464,22 @@ async function openRoles() {
     // P6/F-10: every business category shows here with the metrics that
     // apply to it — audio seconds are not missing tokens, and unmetered
     // rows stay an explicit unknown instead of folding into zero.
-    content.append(node('h3','陪学用量（全部业务类别）'));
+    content.append(node('h3','当前项目用量（全部业务类别）'));
+    content.append(node('p','以下汇总当前项目的所有角色和业务类别；不含工作台 DSH 自行记录的用量。输入、输出与合计分别展示，不重复相加。','sumika-form-note'));
     const categoryLabels={room:'角色房间',companion:'桌宠陪伴',routing:'路由',
       behavior:'行为观察',audio:'音轨识别',vision:'视觉分析',unknown:'未分类'};
-    const metricLabel=(metric,value)=>value==null?'未知':(metric==='audio_seconds'?`${Math.round(value*10)/10} 秒`
-      :metric==='vision_calls'?`${value} 次视觉调用`:`${value} token`);
-    if(!usage.categories?.length)content.append(node('p','暂无已记录的陪学用量。','sumika-form-note'));
+    const metricLabel=(metric,value)=>metric==='audio_seconds'?`音频 ${value==null?'未知':`${Math.round(value*10)/10} 秒`}`
+      :metric==='vision_calls'?`视觉调用 ${value==null?'未知':`${value} 次`}`
+      :`${metric==='prompt_tokens'?'输入':metric==='completion_tokens'?'输出':'合计'} ${value==null?'未知':`${value} token`}`;
+    if(!usage.categories?.length)content.append(node('p','暂无已记录的项目用量。','sumika-form-note'));
     for(const c of usage.categories||[]){
       const label=categoryLabels[c.category]||c.category;
-      const known=Object.entries(c.known_sum||{}).map(([metric,value])=>metricLabel(metric,value)).join(' + ');
+      const known=Object.entries(c.known_sum||{}).map(([metric,value])=>metricLabel(metric,value)).join('、');
       const knownText=known?`已知小计：${known}`:'无已计量数据';
       const statuses=[['estimated','估算'],['reported','上报'],['unknown','未知']]
         .filter(([key])=>c.by_status?.[key]).map(([key,text])=>`${text} ${c.by_status[key]}`).join(' · ');
       content.append(node('p',`${label}（${c.requests} 次记录）：${knownText}；`+
-        `${c.unknown_count?`${c.unknown_count} 次未计量`:'无未计量'}${statuses?` · ${statuses}`:''}`,'sumika-form-note'));
+        `${c.unknown_count?`${c.unknown_count} 次记录计量不完整`:'无计量缺失'}${statuses?` · ${statuses}`:''}`,'sumika-form-note'));
     }
   }
   choice.input.addEventListener('change',()=>loadRole().catch(e=>showError(modal,e)));
@@ -383,8 +487,16 @@ async function openRoles() {
 }
 
 async function openRoleResources(roleId) {
+  const roles=await (await fetch('/api/roles')).json();
+  roleId=roleId||roles.active?.id||roles.roles?.[0]?.id;
+  if(!roleId)throw Error('请先导入角色');
   const state=await request(`roles/${encodeURIComponent(roleId)}/resources`);
   const modal=dialog('角色资源');
+  modal.classList.add('role-resource-editor');
+  const choice=field('资源所属角色',roleId,'text',(roles.roles||[]).map(r=>[r.id,r.name]));
+  modal.append(choice.row);choice.input.addEventListener('change',()=>{
+    openRoleResources(choice.input.value).then(()=>{modal.close();modal.remove();}).catch(error=>showError(modal,error));
+  });
   modal.append(node('p',`角色：${state.name} · ${roleId}`,'sumika-form-note'));
   modal.append(node('p',`已绑定：${state.assets.join('、') || '无'}`,'sumika-form-note'));
   if(!state.editable){modal.append(node('p','自带示例资源只读。'));return;}
@@ -393,19 +505,50 @@ async function openRoleResources(roleId) {
   const mutate=async(action,data={})=>{
     const result=await request(`roles/${encodeURIComponent(roleId)}/resources/${action}`,{expected_revision:revision,...data});
     revision=result.revision||revision;
+    modal.querySelector('[data-management-error]')?.remove();
     status.textContent=`已完成，恢复副本：${result.backup || result.path}`;
     window.dispatchEvent(new Event('sumika-role-resources-changed'));
     return result;
   };
   const name=field('客户端显示名',state.name);modal.append(name.row,button('保存显示名',()=>mutate('rename',{name:name.input.value})));
+  const background=field('背景设定',state.background,'textarea');background.input.rows=5;background.input.maxLength=32000;
+  modal.append(node('h3','背景与世界书'),background.row,
+    node('p','世界书按关键词触发；常驻条目无需关键词。高级触发字段随条目保留。保存后用于下一次角色回复。','sumika-form-note'));
+  const entries=structuredClone(state.worldbook||[]),book=node('div');modal.append(book);
+  function renderBook(){
+    book.replaceChildren();
+    entries.forEach((entry,index)=>{
+      const row=node('section',undefined,'sumika-record');row.append(node('h4',`条目 ${index+1}`));
+      const content=field('条目内容',entry.content||'','textarea');content.input.rows=3;content.input.maxLength=32000;
+      const keys=field('关键词（每行一个）',(entry.keys||[]).join('\n'),'textarea');keys.input.rows=2;
+      const enabled=field('启用条目',entry.enabled!==false,'checkbox'),constant=field('常驻条目',entry.constant===true,'checkbox');
+      content.input.addEventListener('input',()=>entry.content=content.input.value);
+      keys.input.addEventListener('input',()=>entry.keys=keys.input.value.split('\n').map(s=>s.trim()).filter(Boolean));
+      enabled.input.addEventListener('change',()=>entry.enabled=enabled.input.checked);
+      constant.input.addEventListener('change',()=>entry.constant=constant.input.checked);
+      row.append(content.row,keys.row,enabled.row,constant.row,
+        button('删除条目',()=>{if(confirm('从本次编辑中删除此条目？保存后生效。')){entries.splice(index,1);renderBook();}}));
+      book.append(row);
+    });
+  }
+  renderBook();modal.append(button('添加世界书条目',()=>{entries.push({content:'',keys:[],enabled:true,constant:false});renderBook();}));
+  const accent=field('角色主色（#RRGGBB，留空用默认）',state.theme?.accent||'');
+  const soft=field('角色浅色（#RRGGBB，留空用默认）',state.theme?.soft||'');
+  modal.append(node('h3','角色主题配色'),accent.row,soft.row,button('保存背景、世界书与配色',async()=>{
+    const theme={...state.theme};
+    for(const [key,input] of [['accent',accent.input],['soft',soft.input]]){
+      const value=input.value.trim();if(value)theme[key]=value;else delete theme[key];
+    }
+    await mutate('edit-context',{changes:{background:background.input.value,worldbook:entries,theme}});
+  }));
   const kind=field('资源类型','model_3d','text',[['model_3d','3D 模型'],['model_2d','2D 模型'],['voice','语音'],['scene','场景']]);
-  const path=field('本机资源文件路径','');modal.append(kind.row,path.row,button('绑定资源',async()=>{
-    if(confirm('绑定将先备份角色资源包，再更新对应资源。继续？'))await mutate('attach',{kind:kind.input.value,path:path.input.value});
+  const path=field('本机资源文件或目录路径','');modal.append(kind.row,path.row,button('绑定资源',async()=>{
+    if(confirm('绑定将先备份角色资源包，再更新对应资源。2D、语音和场景可填写专用资源目录，将完整导入目录内文件并保留相对路径；不会执行或安装其中代码，也不代表运行兼容。3D 请填写独立 VRM 文件。继续？'))await mutate('attach',{kind:kind.input.value,path:path.input.value});
   }));
   modal.append(button('导出角色资源包',()=>mutate('export')),button('从名册移除并归档',async()=>{
     if(!confirm('移除后资源保留在个人备份目录；记忆不会删除。继续？'))return;
     await mutate('archive',{confirmed:true});
-    modal.querySelectorAll('button,input,select').forEach(el=>el.disabled=true);
+    modal.querySelectorAll('button,input,select,textarea').forEach(el=>el.disabled=true);
     modal.append(button('关闭',()=>modal.close()));
   }),status);
   modal.append(node('p','改名不修改角色卡正文。导出的资源包不包含聊天、记忆或凭据。','sumika-form-note'));
@@ -424,12 +567,13 @@ function openRolePackageImport() {
   }),status);
 }
 
+window.sumikaOpenSchedules = openSchedules;
 async function openSchedules() {
   const modal=dialog('定时任务');
   async function render(){
     const state=await request('schedules');modal.querySelector('[data-schedules]')?.remove();
     const body=node('div');body.dataset.schedules='';modal.append(body);
-    body.append(node('p','定义和执行状态分别记录。当前未绑定执行的任务不会自动运行。','sumika-form-note'));
+    body.append(node('p','提醒保存在本机；新建执行任务交给 DSH，在所选会话到期投递。投递成功不代表模型已完成任务。旧执行定义保持原状。','sumika-form-note'),button('打开原生自动化任务',()=>window.dispatchEvent(new Event('sumika:open-native-schedules'))));
     const edit=(old={})=>{
       body.querySelector('form')?.remove();
       const form=node('form');
@@ -439,13 +583,55 @@ async function openSchedules() {
       const zone=field('时区',old.timezone_name||Intl.DateTimeFormat().resolvedOptions().timeZone);
       const mode=field('类型',old.mode||'reminder','text',[['reminder','提醒'],['execute','执行（需要单独绑定）']]);
       form.append(action.row,kind.row,expression.row,zone.row,mode.row,node('p','每日 HH:MM；每周 0..6 HH:MM（0 为周一）；一次性 ISO 日期时间（含时区）。','sumika-form-note'));
-      form.append(button('保存定义',async()=>{
+      const binding=node('div'),resultNote=node('p','','sumika-form-note');
+      let selectedProject,selectedSession,ready=false,busy=false,settled=false;
+      const requestId=crypto.randomUUID();
+      const submit=button('保存定义',async()=>{
+        if(busy||settled)return;
+        if(mode.input.value==='execute' && !old.id){
+          if(!ready||!selectedProject.input.value||!selectedSession.input.value)throw Error('请先选择项目和会话');
+          const detail=`项目：${selectedProject.input.selectedOptions[0].textContent}\n会话：${selectedSession.input.value}\n${kind.input.value} · ${expression.input.value} · ${zone.input.value}\n内容：${action.input.value}\n将创建原生任务，到期可调用模型及已授权工具。确认创建？`;
+          if(!confirm(detail))return;
+          busy=true;submit.disabled=true;
+          try{
+            const result=await request('schedules/native-create',{confirmed:true,request_id:requestId,workspace_id:selectedProject.input.value,session_id:selectedSession.input.value,definition:{id:requestId,action:action.input.value,kind:kind.input.value,expression:expression.input.value,timezone_name:zone.input.value,mode:'execute',enabled:true}});
+            settled=true;
+            resultNote.textContent=result.state==='created'?`已创建原生任务 ${result.record?.id||''}；请到“原生自动化任务”管理。`:'创建结果未确认。请到原生自动化任务核对，勿再次新建相同任务。';
+          }catch(error){
+            // Transport errors can occur after native persistence. Keep this
+            // form fenced until the user has inspected the authoritative list.
+            settled=true;resultNote.textContent=`未确认创建结果：${error.message}。请到原生自动化任务核对，勿重复创建。`;
+          }finally{busy=false;submit.dataset.locked=String(settled);submit.disabled=settled;}
+          return;
+        }
         await request('schedules/save',{expected_revision:state.revision,definition:{id:old.id||crypto.randomUUID(),action:action.input.value,kind:kind.input.value,expression:expression.input.value,timezone_name:zone.input.value,mode:mode.input.value,enabled:old.enabled??false}});await render();
-      }));body.prepend(form);
+      });
+      const updateMode=()=>{
+        binding.hidden=mode.input.value!=='execute'||Boolean(old.id);
+        submit.textContent=mode.input.value==='execute'&&!old.id?'确认并创建原生任务':'保存定义';
+        submit.disabled=settled||(!binding.hidden&&!ready);
+      };
+      mode.input.addEventListener('change',updateMode);
+      form.append(binding,submit,resultNote);body.prepend(form);updateMode();
+      if(old.id){
+        if(old.mode==='execute')resultNote.textContent='这是旧本地定义，仍不会自动执行。需要原生执行时请显式新建，原定义与历史不会迁移。';
+      }else request('schedules/targets').then(targets=>{
+        if(!targets.ready){binding.append(node('p',targets.reason||'请先启动工作台','sumika-form-note'));return;}
+        selectedProject=field('目标项目','','text',[['','请选择项目'],...targets.projects.map(p=>[p.id,p.name])]);
+        selectedSession=field('目标会话','','text',[['','请选择会话']]);
+        selectedProject.input.addEventListener('change',()=>{
+          selectedSession.input.replaceChildren();
+          for(const sid of ['',...(targets.projects.find(p=>p.id===selectedProject.input.value)?.sessions||[])]){
+            const option=node('option',sid||'请选择会话');option.value=sid;selectedSession.input.append(option);
+          }
+        });
+        binding.append(selectedProject.row,selectedSession.row);ready=true;updateMode();
+      }).catch(error=>binding.append(node('p',error.message,'sumika-form-note')));
     };
     body.append(button('新建任务',()=>edit()));
     for(const item of state.definitions){
-      const row=node('div',undefined,'sumika-record');row.append(node('p',item.action),node('small',`${item.kind} · ${item.expression} · ${item.enabled?'已启用':'已停用'} · 下次 ${item.next_due||'未知'}`));
+      const row=node('div',undefined,'sumika-record');row.append(node('p',item.action),node('small',`${item.kind} · ${item.expression} · ${item.enabled?'已启用':'已停用'} · 下次计划 ${item.next_due||(item.enabled?'无后续计划':'停用中')}`));
+      if(state.status?.blocked?.some(blocked=>blocked.id===item.id))row.append(node('p','执行后端未绑定，此任务不会自动执行。','sumika-form-note'));
       row.append(button('编辑',()=>edit(item)),button(item.enabled?'停用':'启用',async()=>{
         const {next_due,...definition}=item;
         await request('schedules/save',{expected_revision:state.revision,definition:{...definition,enabled:!item.enabled}});await render();
@@ -505,10 +691,32 @@ async function capabilitySettings(id, host){
     const item=field(label,value,type,options);controls.push({...item,key,type});host.append(item.row);return item;
   };
   if(id==='speech'){
-    const response=await fetch('/api/voice/devices');const devices=await response.json();
-    if(!host.isConnected)return;
-    add('输入设备','voice.input_device',values.voice.input_device,'device',[
-      ['','请选择输入设备'],...(devices.devices||[]).map(d=>[String(d.index),`${d.name}${d.is_default?'（默认）':''}`])]);
+    // Device discovery must not block text study or the permission controls.
+    // Keep the saved value while unavailable so saving another field cannot
+    // silently clear a previously selected microphone.
+    const savedDevice=values.voice.input_device;
+    const device=add('输入设备','voice.input_device',savedDevice,'device',[
+      [savedDevice===null?'':String(savedDevice),'正在读取输入设备…']]);
+    device.input.disabled=true;
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),8000);
+    void (async()=>{
+      try{
+        const response=await fetch('/api/voice/devices',{signal:controller.signal});
+        if(!response.ok)throw Error('device discovery failed');
+        const devices=await response.json();
+        if(!host.isConnected)return;
+        if(devices.error || !Array.isArray(devices.devices))throw Error('device discovery unavailable');
+        const options=[['','请选择输入设备'],...devices.devices.map(d=>[String(d.index),`${d.name}${d.is_default?'（默认）':''}`])];
+        if(savedDevice!==null && !options.some(([value])=>value===String(savedDevice)))
+          options.push([String(savedDevice),`已保存设备 ${savedDevice}（当前不可用）`]);
+        device.input.replaceChildren(...options.map(([value,label])=>{const option=node('option',label);option.value=value;return option;}));
+        device.input.value=savedDevice===null?'':String(savedDevice);
+        device.input.disabled=false;
+      }catch{
+        if(host.isConnected)device.input.options[0].textContent='设备列表暂不可用，已保留配置；重开详情可刷新';
+      }finally{clearTimeout(timer);}
+    })();
     add('启用语音配置','voice.enabled',values.voice.enabled,'checkbox');
     add('朗读声音','voice.tts_voice',values.voice.tts_voice);
   }else{
@@ -612,6 +820,7 @@ async function capabilitySettings(id, host){
   host.dataset.ready='true';
 }
 
+window.sumikaOpenBrowsers = openBrowsers;
 async function openBrowsers(){
   const modal=dialog('网页咨询授权');
   const body=node('div');modal.append(body);
@@ -723,7 +932,7 @@ try {
   window.addEventListener('sumika-capability-selected',event=>{
     const side=document.querySelector('.cap-side');const previous=side.querySelector('[data-extra-action]');
     const id=event.detail.id;
-    if(previous?.dataset.capabilityId===id && previous.dataset.preserveOnce==='true'){
+    if(previous && id && previous.dataset.capabilityId===id && previous.dataset.preserveOnce==='true'){
       delete previous.dataset.preserveOnce;return;
     }
     previous?.remove();
@@ -736,9 +945,175 @@ try {
       host.dataset.capabilityId=id;
       host.append(node('p','正在读取配置…'));side.querySelector('.hero-d').after(host);
       capabilitySettings(id,host).catch(error=>{if(host.isConnected)showError(host,error);});
-    }else if(id==='schedule'){
-      const action=button('管理定时任务',openSchedules);
+    }else if(id==='role-resources'){
+      const action=button('管理角色资源',()=>openRoleResources());
       action.dataset.extraAction='';side.prepend(action);
     }
   });
 } catch(error) {showError(document.querySelector('.set-main'),error);}
+
+
+// Approved P16 controls stay in the existing permissions/data sections.
+async function mountBehaviorPermissions(host) {
+  const section=node('section'); section.dataset.behaviorPermissions='';
+  section.append(node('h3','行为观察许可'),node('p','仅跟随已授权前台，自动排除 Sumika 自身；画面、文字和应用声音仍遵从陪学会话各自授权。暂停会持续到手动解除。','sumika-form-note'));
+  const form=node('div'),status=node('p','','sumika-form-note'); status.setAttribute('role','status');section.append(form,status);host.append(section);
+  async function render() {
+    const state=await request('behavior',{action:'permission_status'}), controls={};
+    form.replaceChildren();
+    if(state.status==='unavailable' || !state.permission){status.textContent=`行为许可不可用：${state.error || '请检查行为目录'}`;return;}
+    for(const [key,label] of [['recording','允许记录行为特征'],['use_memory','允许参考行为记忆'],['questions','允许主动行为询问'],['startup_resume','随 Sumika 启动恢复已保存许可']]){
+      const item=field(label,state.permission[key],'checkbox');controls[key]=item.input;form.append(item.row);
+    }
+    const questionProfile = field('询问频率','medium','text',[
+      ['quiet','少打扰 · 30分钟 / 3次每天'],
+      ['medium','适中 · 10分钟 / 6次每天'],
+      ['active','积极 · 5分钟 / 12次每天'],
+    ]);
+    questionProfile.input.value = ['quiet','medium','active'].includes(state.permission.question_profile)
+      ? state.permission.question_profile : 'medium';
+    controls.question_profile = questionProfile.input;
+    form.append(questionProfile.row);
+    status.textContent=permissionSummary(state.effective);
+    form.append(button('保存行为许可',async()=>{
+      const mutations=Object.fromEntries(Object.entries(controls).map(([key,input])=>[
+        key, key === 'question_profile' ? input.value : input.checked,
+      ]));
+      // A new explicit save may grant again after a previous revoke.
+      mutations.revoked=false;
+      const result=await request('behavior',{action:'permission_save',revision:state.permission.revision,mutations});
+      await render();status.textContent='许可已保存。'+permissionSummary(result.effective);
+    }));
+    const excludes=field('排除应用（进程名，每行一个）',state.permission.excluded_apps.join('\n'));
+    const area=node('textarea');area.className='sumika-field';area.value=excludes.input.value;area.rows=4;area.setAttribute('aria-label','排除应用（进程名，每行一个）');excludes.input.replaceWith(area);form.append(excludes.row);
+    form.append(button('保存排除应用',async()=>{
+      const excluded_apps=[...new Set(area.value.split(/[\n,，]/).map(x=>x.trim().toLowerCase()).filter(Boolean))];
+      await request('behavior',{action:'permission_save',revision:state.permission.revision,mutations:{excluded_apps}});await render();
+    }));
+    form.append(button(state.effective.paused?'解除暂停':'暂停行为观察',async()=>{
+      const result=await request('behavior',{action:state.effective.paused?'permission_resume':'permission_pause',revision:state.permission.revision});
+      await render();status.textContent=permissionSummary(result.effective);
+    }),button('撤销行为许可',async()=>{
+      if(!confirm('撤销行为记录、记忆参考和询问许可？历史数据保留。'))return;
+      await request('behavior',{action:'permission_revoke',revision:state.permission.revision});await render();
+    }));
+  }
+  try{await render();}catch(error){status.textContent=`行为许可不可用：${error.message}`;}
+}
+function permissionSummary(effective={}) {
+  return `${effective.paused?'已暂停；':effective.revoked?'许可已撤销；':''}行为记录：${effective.can_record?'许可有效':'未启用'} · 记忆参考：${effective.can_use_memory?'许可有效':'未启用'} · 主动询问：${effective.can_answer_questions?'许可有效':'未启用'}`;
+}
+async function mountBehaviorData(host, options={}) {
+  const section=node('section');section.dataset.behaviorData='';
+  if(!options.embedded)section.append(node('h3','行为子记忆'),node('p','观察事实、当前解释、用户确认与派生模式分别保留来源。不会定期自动删除。删除不影响历史手动备份。','sumika-form-note'));
+  const status=node('p','','sumika-form-note');status.setAttribute('role','status');
+  const overview=node('div');overview.dataset.behaviorOverview='';
+  const declarations=node('div');declarations.dataset.behaviorDeclarations='';
+  const view=node('div');section.append(status,overview,declarations,view);host.append(section);
+  let state;
+  const refresh=async()=>{
+    state=await request('behavior',{action:'status'});
+    if(state.status==='unavailable'){status.textContent=`行为数据不可用：${state.error || '请检查行为目录'}`;return;}
+    const capacity=state.capacity || {};
+    const size=value=>Number.isFinite(value)?`${(value/1024/1024).toFixed(1)} MiB`:'未知';
+    status.textContent=`目录：${state.root} · 已用 ${size(capacity.usage_bytes)} · 磁盘可用 ${size(capacity.free_bytes)}${capacity.paused?' · 空间保护已暂停记录':''}${capacity.notice?' · 存储空间达到提醒阈值，请检查可用空间':''}`;
+  };
+  const types={interest:'兴趣',preference:'偏好',goal:'目标',constraint:'限制',routine:'日常习惯'};
+  const editDeclaration=async(item=null)=>{
+    const baseline=await request('behavior',{action:'status'});
+    const pane=dialog(item?'更正你的声明':'告诉我你的偏好或目标');
+    const type=field('记忆类别',item?.type||'interest','text',Object.entries(types));
+    const label=field('你希望记住的内容',item?.label||'');label.input.maxLength=256;
+    const polarity=field('态度',item?.polarity||'positive','text',[['positive','喜欢 / 希望 / 适用'],['negative','不喜欢 / 避免 / 不适用']]);
+    pane.append(type.row,label.row,polarity.row,node('p','仅保存你明确提交的内容；不会根据使用次数认定你喜欢某事。','sumika-form-note'));
+    pane.append(button('保存声明',async()=>{
+      await request('behavior',{action:'declare',event_id:item?.event_id,revision:baseline.revision,
+        declaration:{type:type.input.value,label:label.input.value.trim(),polarity:polarity.input.value}});
+      pane.close();await refresh();await loadOverview();
+    }));
+  };
+  const loadOverview=async()=>{
+    const [data,decl,habits]=await Promise.all([request('behavior',{action:'activity_overview',days:7}),request('behavior',{action:'declarations'}),request('behavior',{action:'habits'})]);
+    overview.replaceChildren(node('h4','当前项目 · 最近 7 天'));
+    const minutes=value=>(Number(value||0)/60).toFixed(1);
+    const stat=(label,value)=>{const card=node('div',undefined,'data-stat');card.append(node('b',value),node('span',label));return card;};
+    const stats=node('div',undefined,'data-stats');stats.append(stat('已观察前台',`${minutes(data.effective_seconds)} 分钟`),stat('应用切换',`${data.switch_count||0} 次`));overview.append(stats);
+    overview.append(node('p','统计仅覆盖已授权、连续核验的前台时段，不代表注意力、学习成果或电脑总使用时长。未记录时段不会补算。','sumika-form-note'));
+    if(data.truncated)overview.append(node('p','统计分组已达到上限，请缩小查询范围。','sumika-form-note'));
+    const rows=data.buckets||[];
+    if(!rows.length)overview.append(node('p','暂无前台时段记录；启用记录后，新数据会逐步积累。','sumika-form-note'));
+    const apps=new Map();for(const row of rows)apps.set(row.app_name,(apps.get(row.app_name)||0)+row.effective_seconds);
+    for(const [app,seconds] of [...apps.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10))overview.append(node('p',`${app} · ${minutes(seconds)} 分钟`));
+    if(rows.length){const detail=node('details');detail.append(node('summary','按日期与小时查看'));
+      for(const row of rows.slice(0,100))detail.append(node('p',`${row.date} ${String(row.hour).padStart(2,'0')}:00 · ${row.app_name} · ${minutes(row.effective_seconds)} 分钟`));
+      if(rows.length>100)detail.append(node('p','此处展示前 100 个时段；其余可导出查看。','sumika-form-note'));overview.append(detail);}
+    const ops=Object.entries(data.operations||{});if(ops.length)overview.append(node('p','已记录操作片段：'+ops.map(([k,v])=>`${k} ${v}`).join(' · ')));
+    const counts=data.feature_counts||{};
+    const categories={text_entry:'文字输入',navigation:'导航',editing:'编辑',function:'功能键',modifier:'组合修饰键',other:'其他',find:'查找',copy:'复制',paste:'粘贴',cut:'剪切',undo:'撤销',redo:'重做',save:'保存',select_all:'全选',print:'打印',left:'左击',right:'右击',middle:'中击',double_click_candidates:'双击候选',moves:'鼠标移动'};
+    for(const [name,title] of [['key_categories','按键类别'],['shortcuts','快捷操作'],['mouse','鼠标操作']]){
+      const values=Object.entries(counts[name]||{}).filter(([,v])=>v>0);
+      if(values.length)overview.append(node('p',`${title}：`+values.map(([k,v])=>`${categories[k]||k} ${v}`).join(' · ')));
+    }
+    for(const q of data.input_quality||[])overview.append(node('p',`输入覆盖：${q.quality} · ${q.frames} 帧 · 缺失 ${q.dropped||0}`,'sumika-form-note'));
+    for(const p of data.progress||[])overview.append(node('p',`材料 ${String(p.material||p.record_id).slice(0,14)}… · 最近观察位置 ${JSON.stringify(p.position)} · 已观察 ${minutes(p.effective_seconds)} 分钟`));
+    if(data.activity_affinity?.length){overview.append(node('h4','持续活动参考 · 推测'));
+      for(const a of data.activity_affinity)overview.append(node('p',`${a.app_name} 在 ${a.day_count} 天出现；其含义和喜好尚未确认。`));}
+    if(habits.records?.length){overview.append(node('h4','根据你过去解释的参考'));
+      for(const h of habits.records)overview.append(node('p',`${h.label} · ${h.sample_count} 次 / ${h.session_count} 个会话 · 同情境支持 ${(h.support_ratio*100).toFixed(0)}% · ${h.stable?'稳定参考':'样本有限'} · ${h.match_quality==='legacy'?'旧记录，情境不完整':h.app_name||'应用未知'}；当前意图仍是推测。`));}
+    declarations.replaceChildren(node('h4','你明确告诉我的偏好与目标'));
+    if(!decl.records?.length)declarations.append(node('p','暂无明确声明。','sumika-form-note'));
+    for(const item of decl.records||[]){const row=node('div',undefined,'behavior-memory-row');row.dataset.declarationId=item.event_id;
+      row.append(node('p',`${types[item.type]||item.type} · ${item.polarity==='negative'?'避免 / 不喜欢':'希望 / 喜欢'} · ${item.label}`),
+        node('p',`来源：你明确提交 · ${item.at} · 版本 ${item.version}`,'sumika-form-note'),
+        button('更正',()=>editDeclaration(item)),button('删除',async()=>{
+          const baseline=await request('behavior',{action:'status'});if(!confirm('仅删除这条声明？'))return;
+          await request('behavior',{action:'forget_declaration',event_id:item.event_id,revision:baseline.revision});await refresh();await loadOverview();
+        }));declarations.append(row);}
+    if(decl.has_more)declarations.append(node('p','此处展示最近 50 条声明，其余可通过导出查看。','sumika-form-note'));
+    declarations.append(button('添加偏好或目标',()=>editDeclaration()));
+  };
+  let layer='feedback',cursor=0;
+  const loadLayer=async(append=false)=>{
+    const data=await request('behavior',{action:'list_layer',layer,cursor:append?cursor:0,limit:20});
+    if(!append)view.replaceChildren();
+    view.querySelector('[data-next-page]')?.remove();
+    if(!data.records?.length&&!append)view.append(node('p','这一层暂无记录。','sumika-form-note'));
+    for(const item of data.records||[]){const row=node('div',undefined,'behavior-memory-row');
+      const label=item.label||item.corrected||item.kind||item.pattern||item.source||layer;
+      row.append(node('p',String(label)),node('p',`${item.at||item.ended_at||''} · ${item.source|| (layer==='feedback'?'用户反馈':'观察 / 派生数据')}`,'sumika-form-note'));
+      if(layer==='feedback'){
+        row.dataset.feedbackId=item.feedback_id;
+        row.append(node('p','历史解释，仅适用于当时情境；不代表当前意图已确认。','sumika-form-note'));
+        row.append(button('更正解释',async()=>{
+          const baseline=await request('behavior',{action:'status'}),pane=dialog('更正这条行为解释'),corrected=field('真实含义或解释',item.label||item.corrected||'');pane.append(corrected.row);
+          pane.append(button('保存更正',async()=>{await request('behavior',{action:'correct',feedback_id:item.feedback_id,corrected:corrected.input.value.trim(),revision:baseline.revision});pane.close();await refresh();await loadOverview();await loadLayer();}));
+        }),button('删除解释',async()=>{
+          const baseline=await request('behavior',{action:'status'});if(!confirm('仅删除这条解释？相关习惯参考会重新计算。'))return;
+          await request('behavior',{action:'forget_feedback',feedback_id:item.feedback_id,revision:baseline.revision});await refresh();await loadOverview();await loadLayer();
+        }));
+      }
+      const detail=node('details');detail.append(node('summary','查看来源与结构'),node('pre',JSON.stringify(item,null,2),'behavior-records'));row.append(detail);view.append(row);
+    }
+    cursor=data.next_cursor;
+    if(cursor!==null&&cursor!==undefined){const more=button('加载更多',()=>loadLayer(true));more.dataset.nextPage='';view.append(more);}
+  };
+  const selector=field('选择记录层','feedback','text',[['feedback','用户行为解释'],['events','活动与观察'],['episodes','操作片段'],['patterns','派生模式'],['progress','材料进度'],['prompts','询问记录']]);
+  selector.input.addEventListener('change',()=>{layer=selector.input.value;cursor=0;loadLayer().catch(e=>showError(selector.input,e));});
+  section.append(node('h4','记录层'),selector.row);
+  const layerActions=node('div',undefined,'sumika-action-row');
+  layerActions.append(button('查看分层记录',()=>loadLayer()),button('刷新使用概览',async()=>{await refresh();await loadOverview();}),
+  button('导出行为数据',async()=>download('sumika-behavior.json',await request('behavior',{action:'export'}))),button('迁移行为目录',async()=>{
+    const pane=dialog('迁移行为目录'),target=field('新的专用行为目录','');pane.append(target.row,node('p','将暂停记录并复制校验，原目录保留；请选择新的本地专用子目录。','sumika-form-note'));
+    pane.append(button('确认迁移',async()=>{
+      if(!target.input.value.trim())throw Error('请输入新目录');
+      const result=await request('behavior',{action:'migrate',destination:target.input.value.trim(),confirmed:true});
+      if(result.status!=='complete')throw Error(`迁移尚未完成：${result.status}`);pane.close();await refresh();
+    }));
+  }),button('删除全部行为记录',async()=>{
+    const baseline=await request('behavior',{action:'status'});
+    if(!confirm('删除全部行为事实、片段、反馈、模式和进度，并取消待回答询问？历史手动备份仍保留。'))return;
+    await request('behavior',{action:'delete',all_records:true,confirmed:true,revision:baseline.revision});view.replaceChildren();await refresh();await loadOverview();
+  }));
+  section.append(layerActions);
+  try{await refresh();if(state.status!=='unavailable')await loadOverview();}catch(error){status.textContent=`行为数据不可用：${error.message}`;}
+}

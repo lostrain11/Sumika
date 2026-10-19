@@ -1,367 +1,521 @@
-"""Hidden Win32 Raw Input worker (P11, behavior-memory-plan §2.2).
-
-Registers keyboard/mouse Generic Desktop with RIDEV_INPUTSINK — no
-NOLEGACY, no CAPTUREMOUSE, no hotkeys; never hooks, swallows keys,
-SendInput or grabs focus; no ToUnicode/ToAscii, no clipboard/IME text, no
-UIA Name/Text/Value reads. Raw VK/scan codes and device handles are
-classified in the moment and never leave this process: only pure
-InputFeatureFrames cross the pipe. The foreground is tracked with a
-OUTOFCONTEXT WinEventHook; the focus probe asks UIA only IsPassword, at
-most 4 times per second with a 200ms timeout. IPC is line JSON on stdio:
-frames out, config/stop in. Any failure stops the channel with its reason.
-"""
+"""Hidden, bounded Raw Input adapter. Only anonymous frames leave this process."""
 import ctypes
+from ctypes import wintypes
 import json
+import os
+import queue
 import sys
 import threading
 import time
+from collections import deque
 
-from extensions.behavior.input_features import FrameAggregator
+from .input_features import BurstState, FrameAggregator, frame_nonempty, validate_frame
 
-WM_INPUT = 0x00FF
-WM_QUIT = 0x0012
-RIM_TYPEKEYBOARD = 1
-RIM_TYPEMOUSE = 0
-RIDEV_INPUTSINK = 0x00000001
-EVENT_SYSTEM_FOREGROUND = 0x0003
-WINEVENT_OUTOFCONTEXT = 0x0000
+WM_INPUT, WM_QUIT = 0x00FF, 0x0012
+RIM_TYPEMOUSE, RIM_TYPEKEYBOARD = 0, 1
+RIDEV_REMOVE, RIDEV_INPUTSINK = 1, 0x100
+EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_FOCUS = 3, 0x8005
+WINEVENT_OUTOFCONTEXT = 0
+DWORD, WORD = ctypes.c_uint32, ctypes.c_uint16
 
 
-def register_raw_input():
-    """Keyboard+mouse sink registration; legacy input stays untouched.
+class RAWINPUTDEVICE(ctypes.Structure):
+    _fields_ = [('usUsagePage', WORD), ('usUsage', WORD), ('dwFlags', DWORD),
+                ('hwndTarget', ctypes.c_void_p)]
 
-    RIDEV_INPUTSINK pairs with a NULL hwndTarget on current Windows: WM_INPUT
-    is delivered to the thread's message queue (this worker's pump), which is
-    exactly the background-sink behavior §2.2 requires. An explicit target
-    window with INPUTSINK is rejected with ERROR_INVALID_PARAMETER.
-    """
-    user32 = ctypes.WinDLL('user32', use_last_error=True)
-    class RAWINPUTDEVICE(ctypes.Structure):
-        _fields_ = [('usUsagePage', ctypes.c_ushort),
-                    ('usUsage', ctypes.c_ushort), ('dwFlags', ctypes.c_ulong),
-                    ('hwndTarget', ctypes.c_void_p)]
-    devices = (RAWINPUTDEVICE * 2)(
-        RAWINPUTDEVICE(1, 6, RIDEV_INPUTSINK, None),   # keyboard
-        RAWINPUTDEVICE(1, 2, RIDEV_INPUTSINK, None))   # mouse
-    if not user32.RegisterRawInputDevices(devices, 2, ctypes.sizeof(RAWINPUTDEVICE)):
-        raise OSError('RegisterRawInputDevices failed: '
-                      + str(ctypes.get_last_error()))
+
+class RAWINPUTHEADER(ctypes.Structure):
+    _fields_ = [('dwType', DWORD), ('dwSize', DWORD),
+                ('hDevice', ctypes.c_void_p), ('wParam', ctypes.c_size_t)]
+
+
+class RAWKEYBOARD(ctypes.Structure):
+    _fields_ = [('MakeCode', WORD), ('Flags', WORD), ('Reserved', WORD),
+                ('VKey', WORD), ('Message', DWORD), ('ExtraInformation', DWORD)]
+
+
+class _MouseButtons(ctypes.Structure):
+    _fields_ = [('usButtonFlags', WORD), ('usButtonData', WORD)]
+
+
+class _MouseUnion(ctypes.Union):
+    _anonymous_ = ('buttons',)
+    _fields_ = [('ulButtons', DWORD), ('buttons', _MouseButtons)]
+
+
+class RAWMOUSE(ctypes.Structure):
+    _anonymous_ = ('button_union',)
+    _fields_ = [('usFlags', WORD), ('button_union', _MouseUnion),
+                ('ulRawButtons', DWORD), ('lLastX', ctypes.c_int32),
+                ('lLastY', ctypes.c_int32), ('ulExtraInformation', DWORD)]
+
+
+class _RawData(ctypes.Union):
+    _fields_ = [('keyboard', RAWKEYBOARD), ('mouse', RAWMOUSE)]
+
+
+class RAWINPUT(ctypes.Structure):
+    _anonymous_ = ('data',)
+    _fields_ = [('header', RAWINPUTHEADER), ('data', _RawData)]
+
+
+def register_raw_input(hwnd, user32=None, *, remove=False):
+    """INPUTSINK requires an actual hidden window; REMOVE requires NULL."""
+    if not remove and not hwnd:
+        raise ValueError('Raw Input sink requires a window')
+    user32 = user32 or ctypes.WinDLL('user32', use_last_error=True)
+    function = user32.RegisterRawInputDevices
+    function.argtypes = [ctypes.POINTER(RAWINPUTDEVICE), wintypes.UINT, wintypes.UINT]
+    function.restype = wintypes.BOOL
+    flags, target = (RIDEV_REMOVE, None) if remove else (RIDEV_INPUTSINK, hwnd)
+    devices = (RAWINPUTDEVICE * 2)(RAWINPUTDEVICE(1, 6, flags, target),
+                                         RAWINPUTDEVICE(1, 2, flags, target))
+    if not function(devices, 2, ctypes.sizeof(RAWINPUTDEVICE)):
+        raise OSError('raw input registration failed')
     return True
 
 
+class PasswordProbe:
+    """One COM daemon and one in-flight request, including hung UIA calls.
+
+    Results expire after 200ms; a hung provider never creates another thread.
+    The probe only reads CurrentIsPassword. No names or text are requested.
+    """
+    def __init__(self, query=None):
+        self._query = query
+        self._requests, self._results = queue.Queue(1), queue.Queue(1)
+        self._pending = None
+        self._next = 0
+        self._serial = 0
+        self._minimum_serial = 1
+        self._quality = 'privacy_context_unknown'
+        self._quality_at = None
+        self._target = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name='sumika-password-probe')
+        self._thread.start()
+
+    def _run(self):
+        com = None
+        query = self._query
+        try:
+            if query is None:
+                # comtypes initializes the importing thread automatically.
+                # Select MTA before its first import; later imports need an
+                # explicit initialization on this dedicated thread.
+                imported = 'comtypes' in sys.modules
+                if not imported: sys.coinit_flags = 0
+                import comtypes as com
+                if imported: com.CoInitializeEx(0)
+                from comtypes.client import CreateObject, GetModule
+                module = GetModule('UIAutomationCore.dll')
+                automation = CreateObject(module.CUIAutomation, interface=module.IUIAutomation)
+                def query():
+                    value = automation.GetFocusedElement().CurrentIsPassword
+                    if type(value) is bool: return value
+                    if type(value) is int and value in (-1, 0, 1): return value != 0
+                    return None
+            while not self._stop.is_set():
+                try: serial, target, at = self._requests.get(timeout=.1)
+                except queue.Empty: continue
+                try:
+                    value = query()
+                    quality = ('password_paused' if value else 'ok') if type(value) is bool else 'privacy_context_unknown'
+                except Exception:
+                    quality = 'privacy_context_unknown'
+                self._results.put_nowait((serial, target, at, quality))
+        except Exception:
+            pass  # unavailable UIA always leaves the channel coarse
+        finally:
+            if com is not None: com.CoUninitialize()
+
+    def invalidate(self):
+        self._target = None
+        self._quality = 'privacy_context_unknown'
+        self._quality_at = None
+        # Keep the one in-flight request, but never trust its old focus sample.
+        self._minimum_serial = self._serial + 1
+
+    def poll(self, target, now):
+        if target != self._target:
+            self.invalidate()
+            self._target = target
+        try:
+            serial, sampled_target, at, quality = self._results.get_nowait()
+            if self._pending and serial == self._pending[0]:
+                self._pending = None
+                if (serial >= self._minimum_serial and target == sampled_target
+                        and 0 <= now - at <= .2):
+                    self._quality = quality
+                    self._quality_at = at
+        except queue.Empty:
+            pass
+        if self._quality_at is None or not 0 <= now - self._quality_at <= .2:
+            self._quality = 'privacy_context_unknown'
+        if target is not None and self._pending is None and now >= self._next:
+            self._serial += 1
+            self._pending = (self._serial, target, now)
+            self._requests.put_nowait(self._pending)
+            self._next = now + .25
+        return self._quality
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=.25)
+
+
+class InputSession:
+    """Single pump-thread state. Events aggregate immediately without a raw queue."""
+    def __init__(self, config, emit, *, clock=time.monotonic):
+        if (config.get('recording') is not True or type(config.get('permission_revision')) is not int
+                or config['permission_revision'] < 1):
+            raise PermissionError('active permission required')
+        self.config, self.emit, self.clock = config, emit, clock
+        self.identity = {'user_scope': config['user_scope'], 'worker_epoch': config['worker_epoch'],
+                         'foreground_epoch': 0, 'focus_epoch': 0, 'window_instance': 0}
+        self.sequence = 0
+        self.target = None
+        self.burst = BurstState()
+        self.aggregator = None
+        self.started = self.clock()
+        self.modifiers, self.held, self.drags = set(), set(), {}
+        self.last_click = None
+        self.quality = 'privacy_context_unknown'
+
+    def _new(self, at, *, restart_interval=True):
+        if restart_interval:
+            self.started = at
+        self.aggregator = FrameAggregator(identity=self.identity, observed_from=str(at),
+                                         sequence=self.sequence, burst_state=self.burst)
+        self.aggregator.focus(self.quality)
+
+    def seal(self, at=None):
+        at = self.clock() if at is None else at
+        if self.aggregator is not None:
+            frame = self.aggregator.seal(str(at))
+            if frame_nonempty(frame):
+                self.emit(frame)
+                self.sequence += 1
+        self.aggregator = None
+        if self.target is not None: self._new(at)
+
+    def foreground(self, target, *, force=False):
+        if not force and target == self.target: return
+        at = self.clock()
+        self.seal(at)
+        self.modifiers.clear(); self.held.clear(); self.drags.clear()
+        self.last_click = None
+        self.burst.reset()
+        self.identity['foreground_epoch'] += 1
+        self.identity['focus_epoch'] += 1
+        self.identity['window_instance'] += 1
+        self.target, self.aggregator = target, None
+        self.quality = 'privacy_context_unknown'
+        if target is not None: self._new(at)
+
+    def focus(self, quality):
+        if quality != self.quality:
+            self.identity['focus_epoch'] += 1
+            # Conservatively discard this partial frame when privacy changes.
+            self.modifiers.clear(); self.held.clear(); self.drags.clear()
+            self.last_click = None
+            self.burst.reset()
+            self.quality = quality
+            # Privacy changes discard the partial frame, not the periodic
+            # flush deadline. Probe freshness can legitimately oscillate at
+            # subsecond intervals; resetting both would starve all output.
+            if self.target is not None: self._new(self.clock(), restart_interval=False)
+
+    def key(self, vk, at, *, down=True):
+        if self.aggregator is None: return
+        if self.quality != 'ok':
+            self.aggregator.key(vk, at, down=down)
+            return
+        names = {0x10:'shift', 0xA0:'shift', 0xA1:'shift', 0x11:'ctrl', 0xA2:'ctrl',
+                 0xA3:'ctrl', 0x12:'alt', 0xA4:'alt', 0xA5:'alt', 0x5B:'win', 0x5C:'win'}
+        modifier = names.get(vk)
+        if not down:
+            self.held.discard(vk)
+            self.modifiers = {names[key] for key in self.held if key in names}
+            return
+        repeat = vk in self.held
+        self.held.add(vk)
+        if modifier: self.modifiers.add(modifier)
+        shortcut = bool(self.modifiers - {'shift'}) and not modifier
+        self.aggregator.key(vk, at, repeat=repeat, semantic=not shortcut)
+        if shortcut: self.aggregator.shortcut(vk, self.modifiers)
+
+    def mouse(self, raw, at, ratios):
+        aggregator = self.aggregator
+        if aggregator is None: return
+        if raw.lLastX or raw.lLastY: aggregator.move()
+        flags = raw.usButtonFlags
+        delta = ctypes.c_int16(raw.usButtonData).value
+        if flags & 0x400: aggregator.scroll('vertical', delta, at)
+        if flags & 0x800: aggregator.scroll('horizontal', delta, at)
+        if self.quality != 'ok':
+            if flags & 0x3f: aggregator.move()
+            return
+        if ratios is None: return
+        for button, down, up in (('left', 1, 2), ('right', 4, 8), ('middle', 16, 32)):
+            if flags & down:
+                cell = (int(ratios[0]*15), int(ratios[1]*15))
+                double = bool(self.last_click and self.last_click[:2] == (button, cell)
+                              and at-self.last_click[2] <= .5)
+                aggregator.click(button, *ratios, double_candidate=double)
+                self.last_click = (button, cell, at)
+                self.drags[button] = (ratios, at)
+            if flags & up and button in self.drags:
+                start, began = self.drags.pop(button)
+                if start != ratios: aggregator.drag(*ratios, max(0, at-began), start=start)
+
+    def tick(self):
+        if self.clock() - self.started >= 1: self.seal()
+
+
 def worker_loop(config, emit, *, stop_event=None, probe=None, clock=None):
-    """Aggregate one second frames until stop; Win32 bindings are injected so
-    the aggregation itself stays testable without a desktop."""
+    """Fake-event adapter retained for deterministic tests; final stop seals too."""
     now = clock or time.monotonic
-    aggregator = None
-    sequence = 0
-    identity = {'user_scope': config['user_scope'],
-                'worker_epoch': config['worker_epoch'],
-                'foreground_epoch': 0, 'focus_epoch': 0, 'window_instance': 0}
+    config = dict(config, recording=config.get('recording', True),
+                  permission_revision=config.get('permission_revision', 1))
+    session = InputSession(config, emit, clock=now)
+    session.foreground(1)
     while not (stop_event and stop_event.is_set()):
-        started = now()
-        aggregator = FrameAggregator(identity=identity,
-                                     observed_from=str(started),
-                                     sequence=sequence)
-        # The platform layer feeds events between here and the seal; with no
-        # real input the frame is skipped entirely (only non-empty frames
-        # exist per §2.3).
-        while not (stop_event and stop_event.is_set()):
-            pending = probe() if probe else None
-            if pending:
-                event, value, at = pending
-                if event == 'key':
-                    aggregator.key(value, at)
-                elif event == 'shortcut':
-                    aggregator.shortcut(*value)
-                elif event == 'click':
-                    aggregator.click(*value)
-                elif event == 'move':
-                    aggregator.move()
-                elif event == 'scroll':
-                    aggregator.scroll(*value)
-                elif event == 'drag':
-                    aggregator.drag(*value)
-                elif event == 'focus':
-                    aggregator.focus(value)
-                elif event == 'foreground':
-                    identity['foreground_epoch'] += 1
-                    identity['window_instance'] = value
-                    aggregator = FrameAggregator(
-                        identity=identity, observed_from=str(started),
-                        sequence=sequence)
-            if now() - started >= 1.0:
-                break
-            time.sleep(0.01)
-        if stop_event and stop_event.is_set():
-            break
-        frame = aggregator.seal(str(now()))
-        if frame['keys']['counts'] or frame['mouse']['moves'] or \
-                frame['mouse']['left'] or frame['scroll']['vertical']['count']:
-            emit(frame)
-            sequence += 1
+        pending = probe() if probe else None
+        if pending:
+            event, value, at = pending
+            if event == 'foreground': session.foreground(value)
+            elif event == 'focus': session.focus(value)
+            elif session.aggregator is not None:
+                if event == 'key': session.key(value, at)
+                elif event in ('shortcut', 'click', 'scroll', 'drag'):
+                    getattr(session.aggregator, event)(*value)
+                elif event == 'move': session.aggregator.move()
+        session.tick()
+        time.sleep(.001)
+    session.seal()
+
+
+def _signatures(user32, kernel32, wndproc_type, hook_type):
+    signatures = {
+        'DefWindowProcW': ([wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM], ctypes.c_ssize_t),
+        'RegisterClassW': ([ctypes.c_void_p], WORD),
+        'UnregisterClassW': ([wintypes.LPCWSTR, wintypes.HINSTANCE], wintypes.BOOL),
+        'CreateWindowExW': ([DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, DWORD] + [ctypes.c_int]*4 +
+                            [wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p], wintypes.HWND),
+        'DestroyWindow': ([wintypes.HWND], wintypes.BOOL),
+        'GetRawInputData': ([ctypes.c_void_p, wintypes.UINT, ctypes.c_void_p,
+                            ctypes.POINTER(wintypes.UINT), wintypes.UINT], wintypes.UINT),
+        'PeekMessageW': ([ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT], wintypes.BOOL),
+        'TranslateMessage': ([ctypes.POINTER(wintypes.MSG)], wintypes.BOOL),
+        'DispatchMessageW': ([ctypes.POINTER(wintypes.MSG)], ctypes.c_ssize_t),
+        'SetWinEventHook': ([DWORD, DWORD, wintypes.HMODULE, hook_type, DWORD, DWORD, DWORD], wintypes.HANDLE),
+        'UnhookWinEvent': ([wintypes.HANDLE], wintypes.BOOL),
+        'GetForegroundWindow': ([], wintypes.HWND),
+        'GetMessageTime': ([], ctypes.c_int32),
+        'GetCursorPos': ([ctypes.POINTER(wintypes.POINT)], wintypes.BOOL),
+        'ScreenToClient': ([wintypes.HWND, ctypes.POINTER(wintypes.POINT)], wintypes.BOOL),
+        'GetClientRect': ([wintypes.HWND, ctypes.POINTER(wintypes.RECT)], wintypes.BOOL),
+        'OpenInputDesktop': ([DWORD, wintypes.BOOL, DWORD], wintypes.HANDLE),
+        'CloseDesktop': ([wintypes.HANDLE], wintypes.BOOL),
+        'GetUserObjectInformationW': ([wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, DWORD, ctypes.POINTER(DWORD)], wintypes.BOOL),
+    }
+    for name, (args, result) in signatures.items():
+        function = getattr(user32, name)
+        function.argtypes, function.restype = args, result
+    kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    kernel32.GetTickCount64.argtypes = []
+    kernel32.GetTickCount64.restype = ctypes.c_uint64
+
+
+def _desktop_available(user32):
+    desktop = user32.OpenInputDesktop(0, False, 1)
+    if not desktop: return False
+    try:
+        name, needed = ctypes.create_unicode_buffer(128), DWORD()
+        return bool(user32.GetUserObjectInformationW(desktop, 2, name, ctypes.sizeof(name),
+                    ctypes.byref(needed))) and name.value.lower() == 'default'
+    finally:
+        user32.CloseDesktop(desktop)
 
 
 def main():
-    """Real Win32 entry: hidden window + Raw Input sink + foreground hook.
-
-    WM_INPUT payloads become anonymous counts immediately; raw VK/scan codes
-    and device handles never leave this function. Failures stop the channel
-    with one structured error line — no restart, no replay.
-    """
-    import os
-    if os.name != 'nt':
-        sys.stderr.write('raw input requires Windows\n')
-        return 1
-    config_line = sys.stdin.readline()
-    if not config_line:
-        return 0
-    config = json.loads(config_line)
+    if os.name != 'nt': return 1
+    handles, handle, registered, window_class = [], None, False, False
+    focus_probe = None
     emit_lock = threading.Lock()
-
-    def emit(line):
+    def emit(message):
         with emit_lock:
-            sys.stdout.write(json.dumps(line, ensure_ascii=False) + '\n')
+            sys.stdout.write(json.dumps(message, ensure_ascii=False) + '\n')
             sys.stdout.flush()
-
-    class RAWINPUTHEADER(ctypes.Structure):
-        _fields_ = [('dwType', ctypes.c_ulong), ('dwSize', ctypes.c_ulong),
-                    ('hDevice', ctypes.c_void_p), ('wParam', ctypes.c_void_p)]
-
-    class RAWKEYBOARD(ctypes.Structure):
-        _fields_ = [('MakeCode', ctypes.c_ushort), ('Flags', ctypes.c_ushort),
-                    ('Reserved', ctypes.c_ushort), ('VKey', ctypes.c_ushort),
-                    ('Message', ctypes.c_uint),
-                    ('ExtraInformation', ctypes.c_ulong)]
-
-    class RAWMOUSE(ctypes.Structure):
-        _fields_ = [('usFlags', ctypes.c_ushort), ('ulButtons', ctypes.c_ulong),
-                    ('ulRawButtons', ctypes.c_ulong), ('ulLastX', ctypes.c_long),
-                    ('ulLastY', ctypes.c_long),
-                    ('ulExtraInformation', ctypes.c_ulong)]
-
-    class RAWINPUT(ctypes.Structure):
-        _fields_ = [('header', RAWINPUTHEADER),
-                    ('padding', ctypes.c_ubyte * 8),
-                    ('keyboard', RAWKEYBOARD), ('mouse', RAWMOUSE)]
-
-    RI_KEY_BREAK = 0x0001
-    RI_MOUSE_LEFT_DOWN = 0x0001
-    RI_MOUSE_RIGHT_DOWN = 0x0004
-    RI_MOUSE_MIDDLE_DOWN = 0x0010
-    RI_MOUSE_WHEEL = 0x0400
-
-    events = []
-    events_lock = threading.Lock()
-    modifiers = set()
-
-    def on_key(vkey, at):
-        if vkey in (0x10, 0xA0, 0xA1):
-            modifiers.add('shift')
-        elif vkey in (0x11, 0xA2, 0xA3):
-            modifiers.add('ctrl')
-        elif vkey in (0x12, 0xA4, 0xA5):
-            modifiers.add('alt')
-        events.append(('key', vkey, at))
-
-    def on_key_up(vkey):
-        for name, codes in (('shift', (0x10, 0xA0, 0xA1)),
-                            ('ctrl', (0x11, 0xA2, 0xA3)),
-                            ('alt', (0x12, 0xA4, 0xA5))):
-            if vkey in codes:
-                modifiers.discard(name)
-
-    def on_shortcut_check(vkey):
-        if modifiers and vkey not in (0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2,
-                                      0xA3, 0xA4, 0xA5):
-            events.append(('shortcut', (vkey, frozenset(modifiers)), None))
-
-    user32 = ctypes.WinDLL('user32', use_last_error=True)
-    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_void_p,
-                                 ctypes.c_uint, ctypes.c_ulonglong,
-                                 ctypes.c_longlong)
-
-    def wndproc(handle, message, wparam, lparam):
-        if message == WM_INPUT:
-            size = ctypes.c_uint(0)
-            header_size = ctypes.sizeof(RAWINPUTHEADER)
-            user32.GetRawInputData(ctypes.c_void_p(lparam), 0x10000003, None,
-                                   ctypes.byref(size), header_size)
-            if size.value:
-                buffer = ctypes.create_string_buffer(size.value)
-                if user32.GetRawInputData(ctypes.c_void_p(lparam), 0x10000003,
-                                          buffer, ctypes.byref(size),
-                                          header_size):
-                    raw = ctypes.cast(buffer,
-                                      ctypes.POINTER(RAWINPUT)).contents
-                    at = time.monotonic()
-                    with events_lock:
-                        if raw.header.dwType == RIM_TYPEKEYBOARD:
-                            vkey = raw.keyboard.VKey & 0xFF
-                            if not raw.keyboard.Flags & RI_KEY_BREAK:
-                                on_key(vkey, at)
-                                on_shortcut_check(vkey)
-                            else:
-                                on_key_up(vkey)
-                        elif raw.header.dwType == RIM_TYPEMOUSE:
-                            buttons = raw.mouse.ulButtons
-                            if buttons & RI_MOUSE_LEFT_DOWN:
-                                events.append(('click', ('left', 0.5, 0.5), at))
-                            if buttons & RI_MOUSE_RIGHT_DOWN:
-                                events.append(('click', ('right', 0.5, 0.5), at))
-                            if buttons & RI_MOUSE_MIDDLE_DOWN:
-                                events.append(('click', ('middle', 0.5, 0.5), at))
-                            if buttons & RI_MOUSE_WHEEL:
-                                events.append(('scroll', ('vertical', 1), at))
-            return 0
-        # Explicit width conversion: a widened wparam/lparam overflows the
-        # default c_int conversion inside the callback.
-        return user32.DefWindowProcW(ctypes.c_void_p(handle),
-                                     ctypes.c_uint(message),
-                                     ctypes.c_ulonglong(wparam),
-                                     ctypes.c_longlong(lparam))
-
-    wndproc_ref = WNDPROC(wndproc)
-
-    class WNDCLASS(ctypes.Structure):
-        _fields_ = [('style', ctypes.c_uint), ('lpfnWndProc', WNDPROC),
-                    ('cbClsExtra', ctypes.c_int), ('cbWndExtra', ctypes.c_int),
-                    ('hInstance', ctypes.c_void_p), ('hIcon', ctypes.c_void_p),
-                    ('hCursor', ctypes.c_void_p),
-                    ('hbrBackground', ctypes.c_void_p),
-                    ('lpszMenuName', ctypes.c_wchar_p),
-                    ('lpszClassName', ctypes.c_wchar_p)]
-
-    instance = kernel32.GetModuleHandleW(None)
-    window_class = WNDCLASS(0, wndproc_ref, 0, 0, instance, None, None, None,
-                            None, 'SumikaInputWorker')
-    if not user32.RegisterClassW(ctypes.byref(window_class)):
-        emit({'error': 'RegisterClassW failed'})
-        return 1
-    handle = user32.CreateWindowExW(0, 'SumikaInputWorker',
-                                    'SumikaInputWorker', 0, 0, 0, 0, 0, None,
-                                    None, instance, None)
-    if not handle:
-        emit({'error': 'CreateWindowExW failed'})
-        return 1
     try:
-        register_raw_input()
-    except OSError as error:
-        emit({'error': str(error)})
-        return 1
-
-    foreground_epoch = [0]
-    hook = []
-    win_event_type = ctypes.WINFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p,
-                                        ctypes.c_uint, ctypes.c_void_p,
-                                        ctypes.c_long, ctypes.c_long,
-                                        ctypes.c_uint, ctypes.c_ulong)
-
-    def win_event_proc(_hook, _event, hwnd, _object, _child, _thread, _time):
-        process_id = ctypes.c_ulong()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
-        foreground_epoch[0] += 1
-        with events_lock:
-            events.append(('foreground', int(hwnd) & 0xFFFF, None))
-
-    hook_ref = win_event_type(win_event_proc)
-    if not user32.SetWinEventHook(EVENT_SYSTEM_FOREGROUND,
-                                  EVENT_SYSTEM_FOREGROUND, None, hook_ref,
-                                  0, 0, WINEVENT_OUTOFCONTEXT):
-        emit({'error': 'SetWinEventHook failed'})
-        return 1
-    hook.append(hook_ref)
-
-    stop = threading.Event()
-    pump_thread_id = kernel32.GetCurrentThreadId()
-
-    def reader():
-        try:
-            for line in sys.stdin:
-                message = json.loads(line)
-                if message.get('action') == 'stop':
-                    break
-        finally:
-            stop.set()
-            # WM_QUIT must reach the MESSAGE-PUMP thread, not this reader.
-            user32.PostThreadMessageW(pump_thread_id, WM_QUIT, 0, 0)
-
-    threading.Thread(target=reader, daemon=True).start()
-
-    sequence = 0
-    identity = {'user_scope': config['user_scope'],
-                'worker_epoch': config['worker_epoch'],
-                'foreground_epoch': 0, 'focus_epoch': 0, 'window_instance': 0}
-    aggregator = None
-    second_started = time.monotonic()
-    flush_at = second_started + 10
-    pending = []
-
-    def record(frame):
-        if frame['keys']['counts'] or frame['mouse']['moves'] or \
-                frame['mouse']['left'] or frame['scroll']['vertical']['count']:
+        line = sys.stdin.buffer.readline(32769)
+        if not line or len(line) > 32768 or not line.endswith(b'\n'):
+            raise ValueError('worker config')
+        config = json.loads(line)
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        wndproc_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND,
+                                          wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+        hook_type = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, DWORD, wintypes.HWND,
+                                       ctypes.c_long, ctypes.c_long, DWORD, DWORD)
+        _signatures(user32, kernel32, wndproc_type, hook_type)
+        pending = deque()
+        def record(frame):
+            # 60 * maximum 16KiB is below the 1MiB cap; callbacks never encode JSON.
+            if len(pending) >= 60: raise RuntimeError('worker frame overflow')
             pending.append(frame)
-            return True
-        return False
-
-    try:
+        session = InputSession(config, record)
+        stop = threading.Event()
+        callback_error = []
+        focus_probe = PasswordProbe()
+        excluded = {str(value).lower().removesuffix('.exe') for value in config['excluded_apps']}
+        excluded_pids = set(config['excluded_pids']) | {os.getpid()}
+        from .permission import current_foreground
+        boundary = [int(kernel32.GetTickCount64()) & 0xffffffff]
+        foreground_handle = [None]
+        focus_token = [0]
+        def refresh(*, force=False):
+            target = current_foreground() if _desktop_available(user32) else None
+            if target:
+                image = target.get('image', '').lower().removesuffix('.exe')
+                if (target['process_id'] in excluded_pids or image in excluded or image == 'unknown'
+                        or not target.get('process_creation')): target = None
+            identity = None if target is None else (target['handle'], target['process_id'], target['process_creation'])
+            if force or identity != session.target:
+                session.foreground(identity, force=force)
+                boundary[0] = int(kernel32.GetTickCount64()) & 0xffffffff
+                focus_token[0] += 1
+                focus_probe.invalidate()
+            # Cache the identity we actually validated. A window switch while
+            # resolving must be observed again before its first raw event.
+            foreground_handle[0] = identity[0] if identity else user32.GetForegroundWindow()
+            return target
+        initial = refresh(force=True)
+        expected = config.get('expected_target')
+        if expected is not None and (initial is None or any(initial.get(key) != expected.get(key)
+                for key in ('handle', 'process_id', 'process_creation'))):
+            raise RuntimeError('initial foreground identity changed')
+        def ratios():
+            if session.target is None: return None
+            point, rect = wintypes.POINT(), wintypes.RECT()
+            hwnd = session.target[0]
+            if (not user32.GetCursorPos(ctypes.byref(point)) or not user32.ScreenToClient(hwnd, ctypes.byref(point))
+                    or not user32.GetClientRect(hwnd, ctypes.byref(rect))): return None
+            width, height = rect.right-rect.left, rect.bottom-rect.top
+            if width <= 0 or height <= 0 or not 0 <= point.x <= width or not 0 <= point.y <= height: return None
+            return point.x/width, point.y/height
+        def wndproc(hwnd, message, wparam, lparam):
+            try:
+                if message == WM_INPUT and not stop.is_set():
+                    if user32.GetForegroundWindow() != foreground_handle[0]: refresh(force=True)
+                    session.focus(focus_probe.poll((session.target, focus_token[0]) if session.target else None, time.monotonic()))
+                    if ((int(user32.GetMessageTime()) & 0xffffffff) - boundary[0]) & 0xffffffff >= 0x80000000:
+                        if session.aggregator: session.aggregator.note_dropped()
+                    elif session.aggregator is not None:
+                        size = wintypes.UINT()
+                        header_size = ctypes.sizeof(RAWINPUTHEADER)
+                        result = user32.GetRawInputData(lparam, 0x10000003, None, ctypes.byref(size), header_size)
+                        if result == 0xffffffff or not header_size <= size.value <= 65536:
+                            raise RuntimeError('raw input size')
+                        buffer = ctypes.create_string_buffer(size.value)
+                        result = user32.GetRawInputData(lparam, 0x10000003, buffer, ctypes.byref(size), header_size)
+                        if result == 0xffffffff or result != size.value or size.value < header_size:
+                            raise RuntimeError('raw input read')
+                        header = ctypes.cast(buffer, ctypes.POINTER(RAWINPUTHEADER)).contents
+                        required = header_size + (ctypes.sizeof(RAWKEYBOARD) if header.dwType == RIM_TYPEKEYBOARD else ctypes.sizeof(RAWMOUSE))
+                        if header.dwType in (RIM_TYPEKEYBOARD, RIM_TYPEMOUSE):
+                            if size.value < required or header.dwSize != size.value: raise RuntimeError('raw input layout')
+                            raw = ctypes.cast(buffer, ctypes.POINTER(RAWINPUT)).contents
+                            at = time.monotonic()
+                            if header.dwType == RIM_TYPEKEYBOARD:
+                                if raw.keyboard.VKey < 256: session.key(raw.keyboard.VKey, at, down=not bool(raw.keyboard.Flags & 1))
+                            else:
+                                relative = ratios() if session.quality == 'ok' and raw.mouse.usButtonFlags & 0x3f else None
+                                session.mouse(raw.mouse, at, relative)
+            except Exception:
+                callback_error.append(True) if not callback_error else None
+                stop.set()
+            return user32.DefWindowProcW(hwnd, message, wparam, lparam)
+        wndproc_ref = wndproc_type(wndproc)
+        class WNDCLASS(ctypes.Structure):
+            _fields_ = [('style', wintypes.UINT), ('lpfnWndProc', wndproc_type),
+                        ('cbClsExtra', ctypes.c_int), ('cbWndExtra', ctypes.c_int),
+                        ('hInstance', wintypes.HINSTANCE), ('hIcon', wintypes.HICON),
+                        ('hCursor', wintypes.HANDLE), ('hbrBackground', wintypes.HBRUSH),
+                        ('lpszMenuName', wintypes.LPCWSTR), ('lpszClassName', wintypes.LPCWSTR)]
+        instance = kernel32.GetModuleHandleW(None)
+        class_name = 'SumikaInputWorker'
+        wc = WNDCLASS(0, wndproc_ref, 0, 0, instance, None, None, None, None, class_name)
+        if not user32.RegisterClassW(ctypes.byref(wc)): raise RuntimeError('window class')
+        window_class = True
+        handle = user32.CreateWindowExW(0, class_name, class_name, 0, 0, 0, 0, 0,
+                                        None, None, instance, None)
+        if not handle: raise RuntimeError('hidden window')
+        register_raw_input(handle, user32)
+        registered = True
+        def on_event(_hook, event, hwnd, _object, _child, _thread, _time):
+            try:
+                if event == EVENT_SYSTEM_FOREGROUND:
+                    refresh(force=True)
+                else:
+                    focus_token[0] += 1
+                    focus_probe.invalidate()
+                    session.focus('privacy_context_unknown')
+            except Exception:
+                if not callback_error: callback_error.append(True)
+                stop.set()
+        hook_ref = hook_type(on_event)
+        for event in (EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_FOCUS):
+            hook = user32.SetWinEventHook(event, event, None, hook_ref, 0, 0, WINEVENT_OUTOFCONTEXT)
+            if not hook: raise RuntimeError('event hook')
+            handles.append(hook)
+        def reader():
+            try:
+                while True:
+                    command = sys.stdin.buffer.readline(1025)
+                    if not command: break
+                    if len(command) > 1024 or json.loads(command) != {'action':'stop'}: break
+                    break
+            finally: stop.set()
+        threading.Thread(target=reader, daemon=True, name='sumika-input-control').start()
+        emit({'status':'ready', 'worker_epoch':config['worker_epoch']})
+        next_refresh = 0
         while not stop.is_set():
-            message = ctypes.c_uint(0)
-            result = user32.GetMessageW(ctypes.byref(message), None, 0, 0)
-            if result <= 0 or message.value == WM_QUIT:
-                break
-            user32.TranslateMessage(ctypes.byref(message))
-            user32.DispatchMessageW(ctypes.byref(message))
-            with events_lock:
-                drained, events[:] = events[:], []
-            for name, value, at in drained:
-                if name == 'foreground':
-                    if aggregator is not None and record(
-                            aggregator.seal(str(time.monotonic()))):
-                        sequence += 1
-                    identity['foreground_epoch'] += 1
-                    identity['window_instance'] = value
-                    aggregator = FrameAggregator(
-                        identity=dict(identity),
-                        observed_from=str(time.monotonic()),
-                        sequence=sequence)
-                    second_started = time.monotonic()
-                elif aggregator is not None:
-                    if name == 'key':
-                        aggregator.key(value, at)
-                    elif name == 'shortcut':
-                        aggregator.shortcut(*value)
-                    elif name == 'click':
-                        aggregator.click(*value)
-                    elif name == 'move':
-                        aggregator.move()
-                    elif name == 'scroll':
-                        aggregator.scroll(*value)
-            if aggregator is None:
-                aggregator = FrameAggregator(
-                    identity=dict(identity),
-                    observed_from=str(time.monotonic()), sequence=sequence)
-            if not stop.is_set() and time.monotonic() - second_started >= 1.0:
-                if record(aggregator.seal(str(time.monotonic()))):
-                    sequence += 1
-                aggregator = FrameAggregator(
-                    identity=dict(identity),
-                    observed_from=str(time.monotonic()), sequence=sequence)
-                second_started = time.monotonic()
-            if pending and (time.monotonic() >= flush_at
-                            or len(pending) >= 256):
-                for frame in pending:
-                    emit({'frame': frame})
-                pending = []
-                flush_at = time.monotonic() + 10
+            message = wintypes.MSG()
+            # A bounded dispatch slice prevents continuous 1000Hz input starving seals.
+            for _ in range(256):
+                if not user32.PeekMessageW(ctypes.byref(message), None, 0, 0, 1): break
+                if message.message == WM_QUIT: stop.set(); break
+                user32.TranslateMessage(ctypes.byref(message)); user32.DispatchMessageW(ctypes.byref(message))
+            now = time.monotonic()
+            if now >= next_refresh:
+                refresh(); next_refresh = now + .25
+            target = (session.target, focus_token[0]) if session.target else None
+            session.focus(focus_probe.poll(target, now))
+            session.tick()
+            while pending:
+                frame = pending.popleft(); validate_frame(frame); emit({'frame':frame})
+            stop.wait(.005)
+        if callback_error: raise RuntimeError('input callback failed')
+        session.seal()
+        while pending:
+            frame = pending.popleft(); validate_frame(frame); emit({'frame':frame})
+        return 0
+    except Exception:
+        try: emit({'error':'input_worker_failed'})
+        except (OSError, ValueError): pass
+        return 1
     finally:
-        for frame in pending:  # bounded flush; a crash loses one batch
-            emit({'frame': frame})
-        if hook:
-            user32.UnhookWinEvent(hook[0])
-        user32.DestroyWindow(handle)
-    return 0
+        if focus_probe is not None: focus_probe.close()
+        if registered:
+            try: register_raw_input(handle, user32, remove=True)
+            except OSError: pass
+        for hook in handles: user32.UnhookWinEvent(hook)
+        if handle: user32.DestroyWindow(handle)
+        if window_class: user32.UnregisterClassW(class_name, instance)
 
 
 if __name__ == '__main__':

@@ -29,9 +29,19 @@ WORKER_SCRIPT = (
     '    if not line: break\n'
     '    packet=json.loads(line)\n'
     '    if packet.get("action")=="stop": break\n'
+    '    if packet.get("action")=="reset":\n'
+    '        print(json.dumps({"observation":{"observed_at":"2026-10-12T12:00:00+00:00",'
+    '"source":"application-audio-transcript","target":config["target"],"valid":True,'
+    '"text":"stale","metadata":{"media_identity":config["media_identity"]}},'
+    '"stream_epoch":config["stream_epoch"]}),flush=True)\n'
+    '        config["media_identity"]=packet["media_identity"]\n'
+    '        config["stream_epoch"]=packet["stream_epoch"]\n'
+    '        print(json.dumps({"status":"reset","stream_epoch":config["stream_epoch"]}),flush=True)\n'
+    '        continue\n'
     '    print(json.dumps({"observation":{"observed_at":"2026-10-12T12:00:00+00:00",'
     '"source":"application-audio-transcript","target":config["target"],"valid":True,'
-    '"text":"lesson","metadata":{"media_identity":config["media_identity"]}}}),flush=True)\n')
+    '"text":"lesson","metadata":{"media_identity":config["media_identity"]}},'
+    '"stream_epoch":config["stream_epoch"]}),flush=True)\n')
 
 
 def packet(sequence, epoch, identity):
@@ -66,7 +76,7 @@ class EpochRebuildTests(unittest.TestCase):
             stderr=subprocess.DEVNULL, text=True, encoding='utf8')
         original = process.stdin.write
         def write(value):
-            if isinstance(value, str) and 'media_identity' in value:
+            if isinstance(value, str) and 'target' in value:
                 self.spawn_configs.append(json.loads(value).get('media_identity'))
             return original(value)
         process.stdin.write = write
@@ -99,19 +109,18 @@ class EpochRebuildTests(unittest.TestCase):
                 audio.receive(grant['token'],
                     'chrome-extension://'+grant['extension_id'],
                     packet(sequence, 'epoch-1', identity_a), grant=grant)
-            # R3: the seek rebuilds the recognizer with the post-seek identity.
+            # R3: the seek resets the recognizer stream without reloading Vosk.
             audio.rotate_epoch('epoch-2', identity=identity_b)
-            self.assertEqual(len(self.spawn_configs), 2)
-            self.assertEqual(self.spawn_configs[-1], identity_b)
+            self.assertEqual(len(self.spawn_configs), 1)
             grant['audio_epoch'] = 'epoch-2'
             for sequence in range(3):
                 audio.receive(grant['token'],
                     'chrome-extension://'+grant['extension_id'],
                     packet(sequence, 'epoch-2', identity_b), grant=grant)
-            # Wait for the REBUILT worker's transcripts BEFORE stopping: the
+            # Wait for the reset worker's transcripts BEFORE stopping: the
             # transcript dicts carry media_identity at the top level.
             self.assertTrue(observations_ready(self.observations, minimum=1),
-                            'the rebuilt worker must produce transcripts')
+                            'the reset worker must produce transcripts')
             audio.stop()
         for value in self.observations:
             identity = value['metadata']['media_identity']
@@ -140,7 +149,7 @@ class EpochRebuildTests(unittest.TestCase):
                           packet(0, 'epoch-2', self._identity(1)), grant=grant)
             audio.stop()
 
-    def test_old_worker_death_does_not_stop_the_new_track(self):
+    def test_epoch_reset_keeps_the_loaded_worker_alive(self):
         audio = self._audio()
         with patch('extensions.companion.passive_browser_audio.capability_python',
                    return_value=self.interpreter), \
@@ -150,14 +159,27 @@ class EpochRebuildTests(unittest.TestCase):
                 identity=self._identity(0), model=self.folder.name,
                 capabilities=str(Path(self.folder.name)/'capabilities.sqlite'),
                 asr=self.selected, audio_epoch='epoch-1')
-            old_reader_epoch = audio._epoch
+            process = audio._process
+            process_epoch = audio._epoch
             audio.rotate_epoch('epoch-2', identity=self._identity(1))
-            # The old reader's pipe died with the killed worker; its failure
-            # path must return quietly instead of failing the new track.
-            fake_old = type('P', (), {'stdout': None})()
-            audio._read(fake_old, old_reader_epoch)
             self.assertEqual(audio.status()['status'], 'running')
+            self.assertIs(audio._process, process)
+            self.assertEqual(audio._epoch, process_epoch)
+            self.assertEqual(self.observations, [],
+                             'late transcript from the previous stream epoch is discarded')
+            audio.rotate_epoch('epoch-3', identity=self._identity(2))
+            self.assertIs(audio._process, process,
+                           'rapid consecutive seeks reuse the same model worker')
+            self.assertEqual(len(self.spawn_configs), 1)
+            self.assertEqual(self.observations, [],
+                             'transcript from the immediately previous epoch is discarded')
+            grant = dict(GRANT, audio_epoch='epoch-3')
+            audio.receive(grant['token'],
+                'chrome-extension://'+grant['extension_id'],
+                packet(0, 'epoch-3', self._identity(2)), grant=grant)
+            self.assertTrue(observations_ready(self.observations, minimum=1))
             audio.stop()
+        self.assertEqual([value['text'] for value in self.observations], ['lesson'])
 
     def test_starting_state_buffers_packets_across_model_load(self):
         # P05: while the recognizer is starting, packets buffer generously
@@ -183,7 +205,7 @@ class EpochRebuildTests(unittest.TestCase):
         self.assertGreater(accepted, QUEUE_LIMIT,
                            'starting-state buffering must exceed the running bound')
 
-    def test_rotation_failure_stops_cleanly(self):
+    def test_epoch_reset_does_not_need_runtime_or_model_reload(self):
         audio = self._audio()
         with patch('extensions.companion.passive_browser_audio.capability_python',
                    return_value=self.interpreter), \
@@ -195,9 +217,10 @@ class EpochRebuildTests(unittest.TestCase):
                 asr=self.selected, audio_epoch='epoch-1')
         with patch('extensions.companion.passive_browser_audio.capability_python',
                    return_value=None):
-            with self.assertRaises(RuntimeError):
-                audio.rotate_epoch('epoch-2', identity=self._identity(1))
-        self.assertEqual(audio.status()['status'], 'stopped')
+            result = audio.rotate_epoch('epoch-2', identity=self._identity(1))
+        self.assertEqual(result['status'], 'running')
+        self.assertEqual(len(self.spawn_configs), 1)
+        audio.stop()
 
 
 def observations_ready(observations, minimum=1):

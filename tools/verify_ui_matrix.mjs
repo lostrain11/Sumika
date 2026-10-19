@@ -56,7 +56,7 @@ const luminance = (rgb) => {
 };
 
 const browser = await chromium.launch({
-  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  channel: 'msedge',
   headless: true,
 });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });

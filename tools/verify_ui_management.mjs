@@ -1,4 +1,4 @@
-import {createRequire} from 'node:module';
+
 import {writeFile} from 'node:fs/promises';
 import {waitForNativeFrame} from './lib/native-frame.mjs';
 import {loadPlaywright} from './lib/playwright.mjs';

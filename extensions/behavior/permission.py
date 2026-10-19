@@ -12,12 +12,13 @@ import json
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA_VERSION = 1
 DEFAULT_EXCLUSIONS = ('sumika', 'sumikapet', 'sumikaprocessaudio')
 _SWITCHES = ('recording', 'use_memory', 'questions', 'startup_resume')
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 
 
 class PermissionClosed(Exception):
@@ -42,6 +43,7 @@ class BehaviorPermissions:
                 'excluded_apps': list(DEFAULT_EXCLUSIONS),
                 'recording': False, 'use_memory': False, 'questions': False,
                 'startup_resume': False, 'paused': False, 'revoked': False,
+                'question_profile': 'medium',
                 'updated_at': _utc(self._clock)}
 
     def load(self):
@@ -62,6 +64,11 @@ class BehaviorPermissions:
                 or state.get('schema_version') != SCHEMA_VERSION
                 or type(state.get('revision')) is not int):
             raise PermissionClosed('permission schema unknown; failing closed')
+        state.setdefault('question_profile', 'medium')
+        try:
+            self._validate(state)
+        except ValueError as error:
+            raise PermissionClosed(str(error)) from error
         return state
 
     def _write(self, state):
@@ -73,6 +80,8 @@ class BehaviorPermissions:
 
     @staticmethod
     def _validate(state):
+        if state.get('question_profile', 'medium') not in ('quiet', 'medium', 'active'):
+            raise ValueError('unknown question frequency profile')
         for key in _SWITCHES:
             if type(state.get(key)) is not bool:
                 raise ValueError(f'{key} must be boolean')
@@ -94,11 +103,23 @@ class BehaviorPermissions:
         active = (state['recording'] and not state['paused']
                   and not state['revoked'])
         return {'can_record': active,
-                'can_use_memory': (state['use_memory'] and active),
+                'can_use_memory': (state['use_memory'] and not state['paused']
+                                   and not state['revoked']),
                 'can_answer_questions': (state['questions'] and not state['paused']
                                          and not state['revoked']),
                 'startup_resume': state['startup_resume'] and active,
                 'paused': state['paused'], 'revoked': state['revoked']}
+
+    @contextmanager
+    def recording_lease(self, revision):
+        """Serialize a frame commit against permission save/pause/revoke."""
+        with _LOCK:
+            try:
+                state = self.load()
+                allowed = state['revision'] == revision and self.effective(state)['can_record']
+            except (PermissionClosed, OSError, ValueError):
+                allowed = False
+            yield allowed
 
     def save(self, mutations, *, revision):
         """Revision-guarded mutation; switches and pauses are exclusive."""
@@ -110,7 +131,7 @@ class BehaviorPermissions:
                 raise ValueError(f'revision conflict: stored {state["revision"]}, '
                                  f'requested {revision}')
             unknown = set(mutations) - set(_SWITCHES) - {'excluded_apps',
-                                                         'paused', 'revoked'}
+                                                         'paused', 'revoked', 'question_profile'}
             if unknown:
                 raise ValueError(f'unknown permission fields: {sorted(unknown)}')
             state.update(mutations)
@@ -191,6 +212,7 @@ def current_foreground():
     if os.name != 'nt':
         return None
     user32 = ctypes.WinDLL('user32', use_last_error=True)
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
     handle = user32.GetForegroundWindow()
     if not handle:
         return None
@@ -215,7 +237,11 @@ def _process_image(process_id):
     import ctypes
     from ctypes import wintypes
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    psapi = ctypes.WinDLL('psapi', use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+        wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
                                   False, process_id)
@@ -224,7 +250,7 @@ def _process_image(process_id):
     try:
         buffer = ctypes.create_unicode_buffer(260)
         size = wintypes.DWORD(260)
-        if psapi.GetModuleFileNameExW(handle, None, buffer, size):
+        if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
             from pathlib import Path as _Path
             return _Path(buffer.value).name.lower()
         return 'unknown'

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import hashlib
 import json
@@ -11,6 +12,11 @@ from tools.prepare_clean_windows import configuration, prepare
 
 
 class CleanWindowsBundleTests(unittest.TestCase):
+    def test_installer_accepts_the_browser_extension_release_root(self):
+        source = Path('packaging/install_sumika.ps1').read_text(encoding='utf8')
+        self.assertIn("'browser-extensions'", source)
+        self.assertIn('non-release root', source)
+
     def test_only_package_readonly_and_dedicated_results_writable(self):
         root = ET.fromstring(configuration(Path('D:/test & inputs'), Path('D:/results')))
         folders = root.findall('MappedFolders/MappedFolder')
@@ -24,6 +30,7 @@ class CleanWindowsBundleTests(unittest.TestCase):
     def test_bad_hash_no_output_and_existing_directory_preserved(self):
         base = Path('.sumika-next')/('clean-bundle-test-'+uuid.uuid4().hex)
         base.mkdir()
+        self.addCleanup(shutil.rmtree, base, True)
         source = base/'fixture.zip'
         source.write_bytes(b'synthetic archive identity fixture')
         destination = base/'bundle'
@@ -45,6 +52,7 @@ class CleanWindowsBundleTests(unittest.TestCase):
     def test_guest_start_failure_and_repeat_preserve_evidence(self):
         base = Path('.sumika-next') / ('guest-progress-test-' + uuid.uuid4().hex)
         base.mkdir()
+        self.addCleanup(shutil.rmtree, base, True)
         output = base / 'results'
         output.mkdir()
         command = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',

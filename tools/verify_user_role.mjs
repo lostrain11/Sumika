@@ -3,13 +3,10 @@
 //
 // Costs one small role-model call. Usage:
 //   node tools/verify_user_role.mjs [bridge] [roleId] [evidence.json] [shot.png]
-import { createRequire } from 'node:module';
+import { loadPlaywright } from './lib/playwright.mjs';
 import { writeFile } from 'node:fs/promises';
 
-const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
-);
-const { chromium } = require('playwright');
+const { chromium } = loadPlaywright();
 
 const bridge = process.argv[2] || 'http://127.0.0.1:8765';
 const roleId = process.argv[3] || 'ando-subaru';
@@ -33,7 +30,7 @@ if (assetResponse && assetResponse.status !== 200) {
 const assetBytes = assetResponse ? Number(assetResponse.headers.get('content-length') || 0) : 0;
 
 const browser = await chromium.launch({
-  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  channel: 'msedge',
   headless: true,
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });

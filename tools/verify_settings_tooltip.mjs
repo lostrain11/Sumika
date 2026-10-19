@@ -1,14 +1,15 @@
 /* 验证设置页说明文本走「悬停提示」且不在选项下方常驻。 */
-import {createRequire} from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import {mkdir, writeFile} from 'node:fs/promises';
-const require = createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
-const {chromium} = require('playwright');
+
+const {chromium}=loadPlaywright();
 const base = process.argv[2] || 'http://127.0.0.1:8765';
 const dir = '.sumika-next/evidence/ui-tooltip';
 await mkdir(dir, {recursive: true});
 
 const browser = await chromium.launch({
-  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  channel: 'msedge',
   headless: true,
 });
 const page = await browser.newPage({viewport: {width: 1440, height: 900}});

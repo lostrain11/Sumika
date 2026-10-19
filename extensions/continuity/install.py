@@ -11,7 +11,7 @@ def install(root, home, runtime, python=sys.executable):
     root, home, runtime = Path(root).resolve(), Path(home).resolve(), Path(runtime).resolve()
     entry = (runtime/'node_modules/@deepseek-ai/dsh/package.json').resolve(strict=True)
     version = json.loads(entry.read_text()).get('version')
-    if version not in {'0.1.5-rc.2', '0.2.0-rc.2'}:
+    if version not in {'0.1.5-rc.2', '0.2.0-rc.2', '0.2.1-rc.2'}:
         raise ValueError(f'DSH version {version!r} is outside the accepted adapter range')
     package = Path(__file__).resolve().parent
     patch = home/'cordis.patch.yml'

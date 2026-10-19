@@ -255,6 +255,9 @@ def main():
     from pywinauto import Desktop
     from PIL import Image
     from extensions.companion.windows_learning import WindowsLearningCollector
+    # Edge requires an absolute --user-data-dir; a relative output path made the
+    # launcher exit before a window appeared.
+    args.output = args.output.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
     pdf=args.pdf.resolve(strict=True)
     before = {w.handle for w in Desktop(backend='uia').windows()}

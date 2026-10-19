@@ -1,7 +1,6 @@
 import io
 import json
 from pathlib import Path
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -9,7 +8,7 @@ from ui.bridge_probe import probe
 
 
 class BridgeProbeTests(unittest.TestCase):
-    def check(self, *, identity='creation', owners='42', **overrides):
+    def check(self, *, identity='creation', owners='42', query_error=None, **overrides):
         root, settings = Path.cwd(), Path.cwd()/'personal/settings.json'
         data = dict(kind='sumika-ui-bridge', pid=42, creation='creation',
                     root=str(root.resolve()), settings=str(settings.resolve()))
@@ -19,7 +18,7 @@ class BridgeProbeTests(unittest.TestCase):
         with patch('ui.bridge_probe.socket.create_connection'), \
                 patch('ui.bridge_probe.urllib.request.build_opener', return_value=opener), \
                 patch('ui.bridge_probe.process_identity', return_value=identity), \
-                patch('ui.bridge_probe.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=owners)):
+                patch('ui.bridge_probe.listener_pids', return_value={int(x) for x in owners.split()}, side_effect=query_error):
             return probe(root, settings, 8765)
 
     def test_matching_instance(self):
@@ -31,6 +30,8 @@ class BridgeProbeTests(unittest.TestCase):
                          {'settings': 'another-profile'}, {'pid': True}):
             with self.subTest(mismatch=mismatch):
                 self.assertEqual(self.check(**mismatch), 3)
+        self.assertEqual(self.check(owners=''),3)
+        self.assertEqual(self.check(query_error=OSError('native query unavailable')),3)
 
     def test_only_refused_connection_means_available(self):
         with patch('ui.bridge_probe.socket.create_connection', side_effect=ConnectionRefusedError):

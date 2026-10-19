@@ -1,10 +1,11 @@
 // Browser-network outage only. Does not stop the user's server or send tasks.
-import {createRequire} from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import {writeFile,mkdir} from 'node:fs/promises';
 import {waitForNativeFrame} from './lib/native-frame.mjs';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
-const {chromium}=require('playwright');
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+
+const {chromium}=loadPlaywright();
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const context=await browser.newContext({viewport:{width:1280,height:720}});
 const page=await context.newPage();
 const checks=[],errors=[];

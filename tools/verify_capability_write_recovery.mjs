@@ -1,14 +1,14 @@
 // Actual capability form functions with shell bootstrap omitted; local API fixture only.
-import {createRequire} from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import {readFileSync,readdirSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 const root=process.cwd(),assets=path.join(root,'ui/app');
-const runtime=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/runtimes/cua_node');
-const pkg=readdirSync(runtime).map(n=>path.join(runtime,n,'bin/node_modules/playwright/package.json')).find(existsSync);
-const {chromium}=createRequire(pkg)('playwright');
+
+const {chromium}=loadPlaywright();
 const base=path.join(root,'.sumika-next','capability-recovery-'+randomUUID());mkdirSync(base,{recursive:true});
 let failRead=false,breakAfterWrite=false,writes=0;
 const registry={revision:'one',modules:['voice','asr','microphone'].map(id=>({id,enabled:true,options:{user_authorized:true}}))};
@@ -49,7 +49,7 @@ const server=http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','text/javascript');res.end(source);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const report={passed:false,scope:'isolated product capability form; no microphone, models or daily writes'};
 try{
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));

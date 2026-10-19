@@ -21,6 +21,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from .activity import ActivityQueries
 
 
 class CapacityPaused(Exception):
@@ -32,12 +33,16 @@ class MigrationActive(Exception):
     """A root migration owns the library; new records fail loudly."""
 
 
+class RecordingDisabled(Exception):
+    """The user disabled new behavior observation and learning."""
+
+
 DEFAULT_CAPACITY = {'remind_tier_bytes': 5 * 1024 ** 3,
                     'low_free_bytes': 10 * 1024 ** 3,
                     'low_free_ratio': 0.10,
                     'pause_free_bytes': 1 * 1024 ** 3}
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 FRAMES_SCHEMA = 'input-frame-v1'
 EVENT_KINDS = ('flip_burst', 'long_dwell', 'revisit', 'app_focus', 'note')
 PROMPT_STATES = ('pending', 'answered', 'dismissed', 'expired', 'superseded')
@@ -66,7 +71,7 @@ def _bounded_label(value, field):
     return value.strip()
 
 
-class BehaviorLibrary:
+class BehaviorLibrary(ActivityQueries):
     """SQLite behavior store; one short connection per operation."""
 
     def __init__(self, database, *, clock=time.time, capacity_overrides=None,
@@ -92,6 +97,18 @@ class BehaviorLibrary:
             connection.execute('PRAGMA foreign_keys=ON')
             yield connection
             connection.commit()
+        except sqlite3.OperationalError as error:
+            connection.rollback()
+            if 'database or disk is full' in str(error).lower():
+                try:
+                    connection.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                       ('capacity_paused', '1'))
+                    connection.commit()
+                except sqlite3.Error:
+                    pass
+                raise CapacityPaused('behavior recording paused: disk full') from error
+            raise
         except BaseException:
             connection.rollback()
             raise
@@ -99,8 +116,33 @@ class BehaviorLibrary:
             connection.close()
 
     def _prepare(self):
+        if self._locator is not None:
+            active = self._locator.resolve()
+            if active.resolve() != Path(self._database).parent.resolve():
+                raise ValueError('behavior database does not match the active locator')
         Path(self._database).parent.mkdir(parents=True, exist_ok=True)
+        database = Path(self._database).absolute()
+        if database.is_file():
+            old = sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)
+            try:
+                if old.execute("SELECT 1 FROM sqlite_master WHERE name='management'").fetchone():
+                    version = old.execute("SELECT value FROM management WHERE key='schema_version'").fetchone()
+                    if version and int(version[0]) < SCHEMA_VERSION:
+                        backup = database.with_name(database.name + f'.schema-v{version[0]}-backup.sqlite3')
+                        if not backup.exists():
+                            temporary = backup.with_name(backup.name + '.' + secrets.token_hex(6) + '.tmp')
+                            copied = sqlite3.connect(temporary)
+                            try:
+                                old.backup(copied)
+                                if copied.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                                    raise ValueError('schema migration backup failed integrity_check')
+                            finally:
+                                copied.close()
+                            temporary.replace(backup)
+            finally:
+                old.close()
         with self._connection() as db:
+            db.execute('BEGIN IMMEDIATE')
             db.execute('CREATE TABLE IF NOT EXISTS management ('
                        'key TEXT PRIMARY KEY, value TEXT NOT NULL)')
             row = db.execute('SELECT value FROM management WHERE key=?',
@@ -133,6 +175,34 @@ class BehaviorLibrary:
                                         'step': 'frames + episodes.session'})))
                 db.execute("UPDATE management SET value=? "
                            "WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+            self._create_schema(db)
+            additions = {
+                'prompts': ('kind', 'session', 'role_id'),
+                'feedback': ('label', 'kind', 'session', 'role_id', 'payload_hash'),
+                'episodes': ('event_ids', 'frame_refs', 'payload_hash'),
+                'progress': ('event_id', 'episode_id', 'kind'),
+            }
+            for table, required in additions.items():
+                columns = {item[1] for item in db.execute(f'PRAGMA table_info({table})')}
+                for column in required:
+                    if column not in columns:
+                        db.execute(f'ALTER TABLE {table} ADD COLUMN {column} TEXT')
+            db.execute("UPDATE management SET value=? WHERE key='schema_version'",
+                       (str(SCHEMA_VERSION),))
+            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       ('schema_migration_v5', json.dumps({'state': 'complete',
+                        'step': 'add feedback labels and source associations'})))
+            # Queries use persisted UTC received_at, never worker monotonic at.
+            # The normal migration backup above protects existing v5 data.
+            db.execute("CREATE INDEX IF NOT EXISTS frames_scope_received ON frames "
+                       "(scope_user,json_extract(frame,'$.received_at'))")
+            db.execute('CREATE INDEX IF NOT EXISTS events_scope_source_at '
+                       'ON events(scope_user,source,at DESC)')
+            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       ('schema_migration_v6', json.dumps({'state': 'complete',
+                        'step': 'activity source and input received-at indexes'})))
             # Migration journal: every schema change records prepare/complete
             # here before touching user tables (idempotent, per the plan).
             self._reconcile_migration(db)
@@ -156,6 +226,8 @@ class BehaviorLibrary:
                    'scope_user TEXT NOT NULL, prompt_id TEXT PRIMARY KEY, '
                    'event_id TEXT, episode_id TEXT, state TEXT NOT NULL, '
                    'at TEXT NOT NULL, reason TEXT)')
+        db.execute('CREATE INDEX IF NOT EXISTS episodes_scope_baseline '
+                   'ON episodes(scope_user,pattern,detector_version,ended_at DESC)')
         db.execute('CREATE TABLE IF NOT EXISTS feedback ('
                    'scope_user TEXT NOT NULL, feedback_id TEXT PRIMARY KEY, '
                    'user_event_id TEXT NOT NULL, prompt_id TEXT, '
@@ -214,7 +286,8 @@ class BehaviorLibrary:
                 raise CapacityPaused('behavior recording is paused; resume '
                                      'explicitly after freeing space')
         usage = self._usage_bytes()
-        free, total = shutil.disk_usage(Path(self._database).parent)[1:3]
+        disk = shutil.disk_usage(Path(self._database).parent)
+        free, total = disk.free, disk.total
         notices = []
         with self._connection() as db:
             tier = self._meta_int(db, 'capacity_tier_reminded', 0)
@@ -248,7 +321,7 @@ class BehaviorLibrary:
 
     def resume_recording(self):
         """Explicit user resume; refused while the byte floor still holds."""
-        free, _total = shutil.disk_usage(Path(self._database).parent)[1:3]
+        free = shutil.disk_usage(Path(self._database).parent).free
         if free < self._capacity['pause_free_bytes']:
             raise CapacityPaused('still below the pause floor; free space first')
         with self._lock, self._connection() as db:
@@ -259,11 +332,26 @@ class BehaviorLibrary:
         self._capacity_checked_at = None
         return {'status': 'resumed'}
 
-    def _guard_write(self):
+    def _guard_write(self, *, recording=True):
+        if recording:
+            with self._connection() as db:
+                if self._meta(db, _ENABLED) != '1':
+                    raise RecordingDisabled('behavior recording is disabled')
         self._capacity_allow(writing=True)
         with self._connection() as db:
+            if self._meta(db, 'capacity_paused') == '1':
+                raise CapacityPaused('behavior recording is paused; resume explicitly')
             if self._meta(db, 'migration_active') == '1':
                 raise MigrationActive('a behavior root migration is running')
+
+    @staticmethod
+    def _require_sources(db, user, event_id, episode_id):
+        for table, field, value in (('events', 'event_id', event_id),
+                                    ('episodes', 'episode_id', episode_id)):
+            if value is not None and db.execute(
+                    f'SELECT 1 FROM {table} WHERE scope_user=? AND {field}=?',
+                    (user, value)).fetchone() is None:
+                raise ValueError(f'{field} source not found in host scope')
 
     def _pause_on_full(self, error):
         if 'database or disk is full' in str(error).lower():
@@ -340,6 +428,36 @@ class BehaviorLibrary:
         return hmac.new(key.encode('ascii'), raw.strip().encode('utf8'),
                         hashlib.sha256).hexdigest()[:32]
 
+    def migrate_legacy_scope(self, legacy_user, *, scope):
+        """Host-bound adoption of old project-only records; never merge owners."""
+        legacy_user, _ = self._scope({'user': legacy_user})
+        user, _ = self._scope(scope)
+        if legacy_user == user:
+            return {'status': 'unchanged', 'records': 0}
+        claim = 'legacy_scope:' + hashlib.sha256(legacy_user.encode('utf8')).hexdigest()
+        self._guard_write(recording=False)
+        with self._lock, self._connection() as db:
+            previous = self._meta(db, claim)
+            if previous is not None:
+                if previous != user:
+                    raise ValueError('legacy scope was already claimed by another host binding')
+                return {'status': 'migrated', 'records': 0, 'idempotent': True}
+            tables = ('events', 'frames', 'episodes', 'prompts', 'feedback', 'patterns', 'progress')
+            if any(db.execute(f'SELECT 1 FROM {table} WHERE scope_user=? LIMIT 1',
+                              (user,)).fetchone() for table in tables) or self._meta(db, 'prompt_quota:' + user) is not None:
+                raise ValueError('target scope already contains records; explicit reconciliation required')
+            count = 0
+            for table in tables:
+                count += db.execute(f'UPDATE {table} SET scope_user=? WHERE scope_user=?',
+                                    (user, legacy_user)).rowcount
+            quota = self._meta(db, 'prompt_quota:' + legacy_user)
+            if quota is not None:
+                db.execute('UPDATE management SET key=? WHERE key=?',
+                           ('prompt_quota:' + user, 'prompt_quota:' + legacy_user))
+            db.execute('INSERT INTO management(key,value) VALUES(?,?)', (claim, user))
+            self._bump_revision(db)
+        return {'status': 'migrated', 'records': count}
+
     # -- writes ---------------------------------------------------------------
     def observe(self, event, *, scope):
         """Persist one host-identified behavior event, idempotently.
@@ -361,6 +479,8 @@ class BehaviorLibrary:
         if kind not in EVENT_KINDS:
             raise ValueError('unknown behavior kind')
         source = _bounded_label(event.get('source'), 'source')
+        from .activity import validate_activity
+        validate_activity(event)
         target = event.get('target')
         if target is not None:
             target = _bounded_label(target, 'target')
@@ -377,6 +497,9 @@ class BehaviorLibrary:
                     not isinstance(value, (str, int, float, bool))
                     for value in features.values()):
                 raise ValueError('features must be flat bounded values')
+            import math
+            if any(type(v) is float and not math.isfinite(v) for v in features.values()):
+                raise ValueError('feature numbers must be finite')
         payload = {key: event.get(key) for key in ('event_id', 'kind', 'source',
                                                    'app_category', 'target',
                                                    'material', 'features')}
@@ -406,45 +529,79 @@ class BehaviorLibrary:
             self._pause_on_full(error)
 
     def feedback(self, entry, *, scope):
-        """Persist one explicit user verdict; scope and ids are host-filled."""
-        if not isinstance(entry, dict):
-            raise ValueError('feedback entry required')
-        if set(entry) - {'feedback_id', 'user_event_id', 'prompt_id',
-                         'event_id', 'episode_id', 'original', 'verdict',
-                         'corrected'}:
+        """Bind an explicit host user reply to exactly one live prompt."""
+        if not isinstance(entry, dict) or set(entry) - {
+                'feedback_id', 'user_event_id', 'prompt_id', 'event_id',
+                'episode_id', 'original', 'verdict', 'corrected', 'label'}:
             raise ValueError('unknown feedback fields')
         feedback_id = _bounded_label(entry.get('feedback_id'), 'feedback_id')
         user_event_id = _bounded_label(entry.get('user_event_id'), 'user_event_id')
+        prompt_id = _bounded_label(entry.get('prompt_id'), 'prompt_id')
         verdict = entry.get('verdict')
         if verdict not in FEEDBACK_VERDICTS:
             raise ValueError('feedback verdict required')
-        corrected = entry.get('corrected')
-        if corrected is not None and (not isinstance(corrected, str)
-                                      or len(corrected) > 2000):
-            raise ValueError('corrected text must be user text within budget')
-        original = entry.get('original')
-        if original is not None and (not isinstance(original, str)
-                                     or len(original) > 2000):
-            raise ValueError('original text must stay within budget')
-        user, _ = self._scope(scope)
-        at = _utc_iso(self._clock)
-        self._guard_write()
-        try:
-            with self._lock, self._connection() as db:
-                exists = db.execute('SELECT 1 FROM feedback WHERE scope_user=? '
-                                    'AND feedback_id=?', (user, feedback_id)).fetchone()
-                if exists:
-                    return {'status': 'duplicate'}
-                db.execute('INSERT INTO feedback(scope_user,feedback_id,user_event_id,'
-                           'prompt_id,event_id,episode_id,original,verdict,corrected,'
-                           'at) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                           (user, feedback_id, user_event_id, entry.get('prompt_id'),
-                            entry.get('event_id'), entry.get('episode_id'), original,
-                            verdict, corrected, at))
+        for field in ('original', 'corrected', 'label'):
+            value = entry.get(field)
+            if value is not None and (not isinstance(value, str) or len(value) > 2000):
+                raise ValueError(f'{field} must be user text within budget')
+        label = (entry.get('corrected') or entry.get('label') or '').strip()
+        if verdict in ('confirm', 'correct') and not label:
+            raise ValueError('confirm/correct requires an explicit user label or corrected text')
+        user, session = self._scope(scope)
+        payload_hash = self._payload_hash(entry)
+        self._guard_write(recording=False)
+        with self._lock, self._connection() as db:
+            old = db.execute('SELECT payload_hash FROM feedback WHERE scope_user=? '
+                             'AND feedback_id=?', (user, feedback_id)).fetchone()
+            if old:
+                if old[0] != payload_hash:
+                    raise ValueError('feedback id reuse with a different payload')
+                return {'status': 'duplicate'}
+            if db.execute('SELECT 1 FROM feedback WHERE scope_user=? AND user_event_id=?',
+                          (user, user_event_id)).fetchone():
+                raise ValueError('host user event already bound to feedback')
+            prompt = db.execute('SELECT state,at,event_id,episode_id,kind,session,role_id '
+                                'FROM prompts WHERE scope_user=? AND prompt_id=?',
+                                (user, prompt_id)).fetchone()
+            if prompt is None or prompt[0] != 'pending':
+                raise ValueError('feedback requires a pending prompt')
+            from datetime import datetime
+            if self._clock() - datetime.fromisoformat(prompt[1]).timestamp() >= 120:
+                db.execute("UPDATE prompts SET state='expired' WHERE scope_user=? AND prompt_id=?",
+                           (user, prompt_id))
                 self._bump_revision(db)
-                return {'status': 'recorded', 'feedback_id': feedback_id, 'at': at}
-        except sqlite3.OperationalError as error:
-            self._pause_on_full(error)
+                db.commit()
+                raise ValueError('prompt expired')
+            if session is not None and prompt[5] != session:
+                raise ValueError('prompt belongs to another session')
+            for field, value in (('event_id', prompt[2]), ('episode_id', prompt[3])):
+                if entry.get(field) is not None and entry[field] != value:
+                    raise ValueError('feedback association differs from host prompt')
+            at = _utc_iso(self._clock)
+            db.execute('INSERT INTO feedback(scope_user,feedback_id,user_event_id,'
+                       'prompt_id,event_id,episode_id,original,verdict,corrected,at,'
+                       'label,kind,session,role_id,payload_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (user, feedback_id, user_event_id, prompt_id, prompt[2], prompt[3],
+                        entry.get('original'), verdict, entry.get('corrected'), at,
+                        label or None, prompt[4], prompt[5], prompt[6], payload_hash))
+            db.execute('UPDATE prompts SET state=? WHERE scope_user=? AND prompt_id=?',
+                       ('answered' if verdict in ('confirm', 'correct') else 'dismissed',
+                        user, prompt_id))
+            self._refresh_patterns(db, user)
+            self._bump_revision(db)
+        return {'status': 'recorded', 'feedback_id': feedback_id, 'at': at,
+                'kind': prompt[4], 'event_id': prompt[2], 'episode_id': prompt[3],
+                'role_id': prompt[6]}
+
+    def _refresh_patterns(self, db, user):
+        # Only explicit, currently valid user labels activate a candidate.
+        db.execute('UPDATE patterns SET active=0 WHERE scope_user=?', (user,))
+        db.execute("UPDATE patterns SET active=1 WHERE scope_user=? AND signature IN ("
+                   "SELECT e.pattern FROM episodes e JOIN feedback f ON "
+                   "e.scope_user=f.scope_user AND e.episode_id=f.episode_id "
+                   "WHERE f.scope_user=? AND "
+                   "f.verdict IN ('confirm','correct') AND length(trim(f.label))>0)",
+                   (user, user))
 
     def correct(self, feedback_id, corrected, *, scope, revision):
         """User correction on an existing verdict; the corrected reading is
@@ -454,103 +611,203 @@ class BehaviorLibrary:
                 or len(corrected) > 2000:
             raise ValueError('corrected user text required')
         user, _ = self._scope(scope)
+        self._guard_write(recording=False)
         with self._lock, self._connection() as db:
             self._require_revision(db, revision)
             row = db.execute('SELECT 1 FROM feedback WHERE scope_user=? AND '
                              'feedback_id=?', (user, feedback_id)).fetchone()
             if row is None:
                 raise ValueError('feedback record not found')
-            db.execute('UPDATE feedback SET corrected=?, verdict=? '
+            db.execute('UPDATE feedback SET corrected=?, label=?, verdict=? '
                        'WHERE scope_user=? AND feedback_id=?',
-                       (corrected.strip(), 'correct', user, feedback_id))
+                       (corrected.strip(), corrected.strip(), 'correct', user, feedback_id))
             self._bump_revision(db)
+            self._refresh_patterns(db, user)
             return {'status': 'corrected', 'feedback_id': feedback_id}
 
     def delete_records(self, *, scope, event_ids=(), kinds=(), before=None,
-                       confirmed=False, revision=None):
-        """Explicit, confirmed deletion of a stated selection.
-
-        The transaction covers the selected events, the feedback bound to
-        them, pending prompts and derived patterns; the behavior epoch
-        advances so no cache or in-flight consumer can resurrect the deleted
-        material. Nothing here claims to erase snapshots or SSD history.
-        """
+                       all_records=False, confirmed=False, revision=None):
+        """Delete the explicit selection and every derived dependent layer."""
         user, session = self._scope(scope)
-        if not confirmed:
+        if confirmed is not True or type(all_records) is not bool:
             raise ValueError('deletion requires explicit confirmation')
-        ids = [_bounded_label(value, 'event_id') for value in event_ids]
-        selected_kinds = [kind for kind in kinds if kind in EVENT_KINDS]
-        if kinds and len(selected_kinds) != len(kinds):
+        ids = {_bounded_label(value, 'event_id') for value in event_ids}
+        selected_kinds = set(kinds)
+        if selected_kinds - set(EVENT_KINDS):
             raise ValueError('unknown behavior kind in deletion')
-        if before is not None and not isinstance(before, str):
-            raise ValueError('deletion before-cursor must be an ISO time')
-        if not ids and not selected_kinds and before is None:
+        from datetime import datetime
+        if before is not None:
+            try:
+                cutoff = datetime.fromisoformat(before).timestamp()
+            except (TypeError, ValueError):
+                raise ValueError('deletion before-cursor must be an ISO time') from None
+        if all_records and (ids or selected_kinds or before is not None):
+            raise ValueError('all_records cannot be combined with filters')
+        if not all_records and not ids and not selected_kinds and before is None:
             raise ValueError('deletion needs an explicit selection')
         with self._lock, self._connection() as db:
             self._require_revision(db, revision)
-            query, args = 'scope_user=?', [user]
-            if ids:
-                query += f' AND event_id IN ({",".join("?" * len(ids))})'
-                args.extend(ids)
-            if selected_kinds:
-                query += f' AND kind IN ({",".join("?" * len(selected_kinds))})'
-                args.extend(selected_kinds)
-            if before is not None:
-                query += ' AND at<?'
-                args.append(before)
-            if session:
-                query += ' AND session=?'
-                args.append(session)
-            selected = [row[0] for row in db.execute(
-                f'SELECT event_id FROM events WHERE {query}', args).fetchall()]
-            if not selected:
+            # Deletion remains available at the capacity floor, but never during migration.
+            if self._meta(db, 'migration_active') == '1':
+                raise MigrationActive('a behavior root migration is running')
+            tables = ('events', 'episodes', 'frames', 'progress', 'prompts', 'feedback', 'patterns')
+            if all_records:
+                counts = {table: db.execute(f'DELETE FROM {table} WHERE scope_user=?',
+                                           (user,)).rowcount for table in tables}
+                db.execute('UPDATE management SET value=? WHERE key=?',
+                           (str(int(self._meta(db, _EPOCH)) + 1), _EPOCH))
+                self._bump_revision(db)
+                return {'status': 'deleted', **{'deleted_' + k: v for k, v in counts.items()},
+                        'behavior_epoch': int(self._meta(db, _EPOCH))}
+            rows = {}
+            for table in tables:
+                if table == 'frames':
+                    rows[table] = []
+                    continue
+                cur = db.execute(f'SELECT rowid,* FROM {table} WHERE scope_user=?', (user,))
+                names = [col[0] for col in cur.description]
+                rows[table] = [dict(zip(names, row)) for row in cur.fetchall()]
+            def older(value):
+                if before is None:
+                    return True
+                try:
+                    try:
+                        stamp = float(value)
+                    except (TypeError, ValueError):
+                        stamp = datetime.fromisoformat(value).timestamp()
+                    return stamp < cutoff
+                except (TypeError, ValueError):
+                    return False
+            def matches(row, kind=None, at=None):
+                return (not ids or row.get('event_id') in ids) and (not selected_kinds or kind in selected_kinds) and older(at)
+            selected_events = {r['event_id'] for r in rows['events'] if all_records or (
+                (not session or r['session'] == session) and matches(r, r['kind'], r['at']))}
+            selected_episodes = set()
+            selected_frames = set()
+            for r in rows['episodes']:
+                origins = set(json.loads(r['event_ids'] or '[]'))
+                if all_records or origins & selected_events or (not ids and
+                        (not session or r['session'] == session) and matches(r, r['pattern'], r['ended_at'])):
+                    selected_episodes.add(r['episode_id'])
+                    selected_frames.update(tuple(ref) for ref in json.loads(r['frame_refs'] or '[]'))
+            if all_records or (before is not None and not ids and not selected_kinds):
+                # Stream raw frame history instead of materializing it in RAM.
+                for epoch, sequence, at in db.execute('SELECT worker_epoch,sequence,at '
+                        'FROM frames WHERE scope_user=?', (user,)):
+                    if older(at): selected_frames.add((epoch, sequence))
+            # A shared frame can invalidate further episodes and their sources.
+            changed = True
+            while changed:
+                changed = False
+                for r in rows['episodes']:
+                    refs = set(tuple(ref) for ref in json.loads(r['frame_refs'] or '[]'))
+                    if r['episode_id'] not in selected_episodes and refs & selected_frames:
+                        selected_episodes.add(r['episode_id'])
+                        selected_frames.update(refs)
+                        changed = True
+            for epoch, sequence in selected_frames:
+                found = db.execute('SELECT rowid FROM frames WHERE scope_user=? AND '
+                                   'worker_epoch=? AND sequence=?', (user, epoch, sequence)).fetchone()
+                if found:
+                    rows['frames'].append({'rowid': found[0], 'worker_epoch': epoch, 'sequence': sequence})
+            selected_prompts = {r['prompt_id'] for r in rows['prompts'] if all_records or
+                r['event_id'] in selected_events or r['episode_id'] in selected_episodes or
+                (not ids and (not session or r['session'] == session) and matches(r, r['kind'], r['at']))}
+            signatures = {r['pattern'] for r in rows['episodes'] if r['episode_id'] in selected_episodes}
+            counts = {}
+            for table in tables:
+                chosen = []
+                for r in rows[table]:
+                    remove = all_records
+                    if table == 'events': remove |= r['event_id'] in selected_events
+                    elif table == 'episodes': remove |= r['episode_id'] in selected_episodes
+                    elif table == 'frames': remove |= (r['worker_epoch'], r['sequence']) in selected_frames
+                    elif table == 'prompts': remove |= r['prompt_id'] in selected_prompts
+                    elif table in ('feedback', 'progress'):
+                        remove |= r['event_id'] in selected_events or r['episode_id'] in selected_episodes
+                        if table == 'feedback': remove |= r['prompt_id'] in selected_prompts
+                        remove |= (not ids and matches(r, r.get('kind'), r['at']) and
+                                   (not session or r.get('session', session) == session))
+                    elif table == 'patterns':
+                        supports = json.loads(r['supports'] or '[]')
+                        remove |= r['signature'] in signatures or r['signature'] in selected_kinds
+                        remove |= any(isinstance(item, str) and item in (selected_events | selected_episodes) for item in supports)
+                    if remove: chosen.append(r['rowid'])
+                counts[table] = len(chosen)
+                for rowid in chosen:
+                    db.execute(f'DELETE FROM {table} WHERE rowid=?', (rowid,))
+            if not any(counts.values()):
                 return {'status': 'nothing_selected', 'deleted_events': 0}
-            marks = ','.join('?' * len(selected))
-            deleted = db.execute(f'DELETE FROM events WHERE scope_user=? AND '
-                                 f'event_id IN ({marks})', [user, *selected]).rowcount
-            feedback = db.execute(f'DELETE FROM feedback WHERE scope_user=? AND '
-                                  f'event_id IN ({marks})',
-                                  [user, *selected]).rowcount
-            db.execute(f'UPDATE prompts SET state=? WHERE scope_user=? AND '
-                       f'event_id IN ({marks}) AND state=?',
-                       ('expired', user, *selected, 'pending'))
-            db.execute('UPDATE patterns SET active=0 WHERE scope_user=?', (user,))
+            self._refresh_patterns(db, user)
             db.execute('UPDATE management SET value=? WHERE key=?',
                        (str(int(self._meta(db, _EPOCH)) + 1), _EPOCH))
             self._bump_revision(db)
-            return {'status': 'deleted', 'deleted_events': deleted,
-                    'deleted_feedback': feedback,
+            return {'status': 'deleted', **{'deleted_' + k: v for k, v in counts.items()},
                     'behavior_epoch': int(self._meta(db, _EPOCH))}
 
     # -- episodes and pattern candidates (P12) -------------------------------
-    def record_episode(self, episode, *, scope):
-        """Persist one finished detection episode, idempotent on episode_id."""
-        if not isinstance(episode, dict):
-            raise ValueError('episode required')
+    def record_episode(self, episode, *, scope, event_ids=None, frame_refs=None):
+        """Persist one closed episode; conflicting replays never overwrite it."""
+        if not isinstance(episode, dict) or set(episode) - {
+                'episode_id', 'pattern', 'started_at', 'ended_at', 'session',
+                'effective_seconds', 'features', 'detector_version', 'event_ids', 'frame_refs'}:
+            raise ValueError('bounded episode required')
+        user, session = self._scope(scope)
         for key in ('episode_id', 'pattern', 'started_at', 'ended_at'):
-            if not isinstance(episode.get(key), str) or not episode[key]:
-                raise ValueError(f'episode {key} required')
-        if 'session' not in episode:
+            _bounded_label(episode.get(key), key)
+        if 'session' not in episode or (session is not None and episode['session'] != session):
             raise ValueError('episode session required (host-assigned)')
-        features = json.dumps(episode.get('features') or {}, ensure_ascii=False)
+        self._scope({'user': user, 'session': episode['session']})
+        from datetime import datetime
+        import math
+        start = datetime.fromisoformat(episode['started_at']).timestamp()
+        end = datetime.fromisoformat(episode['ended_at']).timestamp()
+        seconds = episode.get('effective_seconds')
+        if end < start or (seconds is not None and (type(seconds) not in (int, float)
+                or not math.isfinite(seconds) or seconds < 0 or seconds > end - start)):
+            raise ValueError('episode must be closed with valid effective time')
+        features_obj = episode.get('features') or {}
+        if not isinstance(features_obj, dict) or len(features_obj) > 32 or any(
+                key in _FORBIDDEN for key in features_obj) or any(
+                not isinstance(value, (str, int, float, bool)) for value in features_obj.values()):
+            raise ValueError('flat bounded episode features required')
+        features = json.dumps(features_obj, ensure_ascii=False, sort_keys=True)
         if len(features) > 2048:
             raise ValueError('episode features exceed budget')
-        user, _ = self._scope(scope)
+        ids = event_ids if event_ids is not None else episode.get('event_ids', [])
+        refs = frame_refs if frame_refs is not None else episode.get('frame_refs', [])
+        if not isinstance(ids, (list, tuple)) or len(ids) > 256:
+            raise ValueError('bounded episode event sources required')
+        ids = sorted({_bounded_label(value, 'event_id') for value in ids})
+        if not isinstance(refs, (list, tuple)) or len(refs) > 256 or any(
+                not isinstance(ref, (list, tuple)) or len(ref) != 2 or
+                any(type(value) is not int or value < 0 for value in ref) for ref in refs):
+            raise ValueError('bounded episode frame references required')
+        refs = sorted(set(tuple(ref) for ref in refs))
+        payload = {**episode, 'event_ids': ids, 'frame_refs': refs, 'features': features_obj}
+        digest = self._payload_hash(payload)
+        self._guard_write()
         with self._lock, self._connection() as db:
-            exists = db.execute('SELECT 1 FROM episodes WHERE scope_user=? '
-                                'AND episode_id=?',
-                                (user, episode['episode_id'])).fetchone()
+            exists = db.execute('SELECT payload_hash FROM episodes WHERE scope_user=? '
+                                'AND episode_id=?', (user, episode['episode_id'])).fetchone()
             if exists:
+                if exists[0] != digest:
+                    raise ValueError('episode id reuse with a different payload')
                 return {'status': 'duplicate'}
-            db.execute('INSERT INTO episodes(scope_user,episode_id,session,'
-                       'started_at,ended_at,effective_seconds,pattern,'
-                       'features,detector_version) VALUES(?,?,?,?,?,?,?,?,?)',
-                       (user, episode['episode_id'], episode['session'],
-                        episode['started_at'], episode['ended_at'],
-                        episode.get('effective_seconds'), episode['pattern'],
-                        features, episode.get('detector_version')))
+            for event_id in ids:
+                if db.execute('SELECT 1 FROM events WHERE scope_user=? AND event_id=?', (user, event_id)).fetchone() is None:
+                    raise ValueError('episode source event not found')
+            for epoch, sequence in refs:
+                if db.execute('SELECT 1 FROM frames WHERE scope_user=? AND worker_epoch=? AND sequence=?', (user, epoch, sequence)).fetchone() is None:
+                    raise ValueError('episode source frame not found')
+            db.execute('INSERT INTO episodes(scope_user,episode_id,session,started_at,ended_at,'
+                       'effective_seconds,pattern,features,detector_version,event_ids,frame_refs,payload_hash) '
+                       'VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (user, episode['episode_id'], episode['session'], episode['started_at'],
+                        episode['ended_at'], seconds, episode['pattern'], features,
+                        episode.get('detector_version'), json.dumps(ids), json.dumps(refs), digest))
             self._bump_revision(db)
-            return {'status': 'recorded', 'episode_id': episode['episode_id']}
+        return {'status': 'recorded', 'episode_id': episode['episode_id']}
 
     def pattern_candidates(self, signature, *, scope):
         """Support counts for one signature: distinct episodes and distinct
@@ -561,24 +818,84 @@ class BehaviorLibrary:
                 'SELECT COUNT(*), COUNT(DISTINCT session) FROM episodes '
                 'WHERE scope_user=? AND pattern=?',
                 (user, signature)).fetchone()
-            confirmed = db.execute(
-                'SELECT active FROM patterns WHERE scope_user=? AND '
-                'signature=?', (user, signature)).fetchone()
         return {'episodes': row[0] or 0, 'sessions': row[1] or 0,
-                'confirmed': bool(confirmed and confirmed[0])}
+                'confirmed': signature in self.confirmed_patterns(scope=scope)}
+
+    def episode_baseline(self, signature, *, scope, detector_version, limit=200,
+                         exclude_episode_id=None):
+        """Read previous valid samples before recording the current episode.
+
+        Callers evaluating an already stored episode must explicitly exclude its
+        id. Only the host's actual session identity can contribute a baseline.
+        """
+        import sys
+        signature = _bounded_label(signature, 'signature')
+        detector_version = _bounded_label(detector_version, 'detector_version')
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError('episode baseline limit must be 1..200')
+        if exclude_episode_id is not None:
+            exclude_episode_id = _bounded_label(exclude_episode_id, 'episode_id')
+        user, _ = self._scope(scope)
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT effective_seconds,session FROM episodes WHERE scope_user=? "
+                "AND pattern=? AND detector_version=? AND typeof(effective_seconds) IN ('integer','real') "
+                "AND effective_seconds>=0 AND effective_seconds<=? "
+                "AND typeof(session)='text' AND length(trim(session)) BETWEEN 1 AND 256 "
+                "AND julianday(ended_at)>=julianday(started_at) "
+                "AND effective_seconds<=(julianday(ended_at)-julianday(started_at))*86400+.001 "
+                "AND (? IS NULL OR episode_id<>?) ORDER BY ended_at DESC,episode_id DESC LIMIT ?",
+                (user, signature, detector_version, sys.float_info.max,
+                 exclude_episode_id, exclude_episode_id, limit)).fetchall()
+        return [{'value': value, 'session': session} for value, session in rows]
+
+    def pattern_supports(self, signature, *, scope, limit=256):
+        """Bounded, matching episode source ids for candidate promotion."""
+        signature = _bounded_label(signature, 'signature')
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError('pattern support limit must be 1..256')
+        user, _ = self._scope(scope)
+        with self._connection() as db:
+            rows = db.execute('SELECT episode_id FROM episodes WHERE scope_user=? '
+                              'AND pattern=? ORDER BY ended_at DESC,episode_id DESC LIMIT ?',
+                              (user, signature, limit)).fetchall()
+        return [row[0] for row in rows]
 
     def promote_pattern(self, signature, *, scope, derived_version,
                         supports=None):
         """Record a candidate pattern (active=0 until a user confirms it)."""
         user, _ = self._scope(scope)
+        signature = _bounded_label(signature, 'signature')
+        derived_version = _bounded_label(derived_version, 'derived_version')
+        if supports is not None:
+            if not isinstance(supports, list) or len(supports) > 256:
+                raise ValueError('at most 256 episode source ids required')
+            supports = list(dict.fromkeys(_bounded_label(item, 'episode_id') for item in supports))
+        self._guard_write()
         pattern_id = hashlib.sha256(
             f'{user}|{signature}'.encode('utf8')).hexdigest()[:24]
         with self._lock, self._connection() as db:
-            exists = db.execute('SELECT 1 FROM patterns WHERE scope_user=? '
+            if supports is None:
+                supports = [row[0] for row in db.execute(
+                    'SELECT episode_id FROM episodes WHERE scope_user=? AND pattern=? '
+                    'ORDER BY ended_at DESC,episode_id DESC LIMIT 256', (user, signature))]
+            else:
+                for episode_id in supports:
+                    if db.execute('SELECT 1 FROM episodes WHERE scope_user=? AND pattern=? '
+                                  'AND episode_id=?', (user, signature, episode_id)).fetchone() is None:
+                        raise ValueError('pattern support must reference a matching host episode')
+            exists = db.execute('SELECT supports,derived_version FROM patterns WHERE scope_user=? '
                                 'AND pattern_id=?',
                                 (user, pattern_id)).fetchone()
             if exists:
-                return {'status': 'duplicate'}
+                if exists == (json.dumps(supports), derived_version):
+                    return {'status': 'duplicate'}
+                db.execute('UPDATE patterns SET supports=?,sample_count=?,derived_version=? '
+                           'WHERE scope_user=? AND pattern_id=?',
+                           (json.dumps(supports), len(supports), derived_version, user, pattern_id))
+                self._bump_revision(db)
+                self._refresh_patterns(db, user)
+                return {'status': 'updated', 'pattern_id': pattern_id}
             db.execute('INSERT INTO patterns(scope_user,pattern_id,signature,'
                        'active,supports,sample_count,derived_version) '
                        'VALUES(?,?,?,?,?,?,?)',
@@ -586,21 +903,27 @@ class BehaviorLibrary:
                         json.dumps(supports or []), len(supports or []),
                         derived_version))
             self._bump_revision(db)
+            self._refresh_patterns(db, user)
             return {'status': 'promoted', 'pattern_id': pattern_id}
 
-    def confirmed_patterns(self, *, scope):
+    def confirmed_patterns(self, *, scope, role_id=None):
         user, _ = self._scope(scope)
         with self._connection() as db:
-            rows = db.execute('SELECT signature FROM patterns WHERE '
-                              'scope_user=? AND active=1',
-                              (user,)).fetchall()
+            rows = db.execute("SELECT DISTINCT p.signature FROM patterns p JOIN episodes e "
+                              "ON p.scope_user=e.scope_user AND p.signature=e.pattern "
+                              "JOIN feedback f ON e.scope_user=f.scope_user AND e.episode_id=f.episode_id "
+                              "WHERE p.scope_user=? AND p.active=1 AND "
+                              "f.verdict IN ('confirm','correct') AND length(trim(f.label))>0 "
+                              "AND (f.role_id IS NULL OR f.role_id=?)",
+                              (user, role_id)).fetchall()
         return [row[0] for row in rows]
 
     # -- prompts, progress and habits (P13) -----------------------------------
     PROMPT_STATES = ('pending', 'answered', 'dismissed', 'expired',
                      'superseded')
 
-    def record_prompt(self, kind, *, scope, reason=None):
+    def record_prompt(self, kind, *, scope, reason=None, event_id=None,
+                      episode_id=None, role_id=None, quota=None):
         """Persist a prompt BEFORE it is displayed; pending, with an id.
 
         The id travels with every display and reply so the host can bind the
@@ -608,15 +931,54 @@ class BehaviorLibrary:
         """
         kind = _bounded_label(kind, 'prompt kind')
         user, session = self._scope(scope)
+        if event_id is not None: event_id = _bounded_label(event_id, 'event_id')
+        if episode_id is not None: episode_id = _bounded_label(episode_id, 'episode_id')
+        if role_id is not None: role_id = _bounded_label(role_id, 'role_id')
+        if reason is not None: reason = _bounded_label(reason, 'reason')
         prompt_id = secrets.token_hex(8)
         at = _utc_iso(self._clock)
+        self._guard_write()
         with self._lock, self._connection() as db:
+            self._require_sources(db, user, event_id, episode_id)
             db.execute('INSERT INTO prompts(scope_user,prompt_id,state,at,'
-                       'reason) VALUES(?,?,?,?,?)',
-                       (user, prompt_id, 'pending', at, reason))
+                       'reason,kind,event_id,episode_id,session,role_id) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                       (user, prompt_id, 'pending', at, reason, kind, event_id,
+                        episode_id, session, role_id))
+            if quota is not None:
+                key = 'prompt_quota:' + user
+                db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                           'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                           (key, json.dumps(quota)))
             self._bump_revision(db)
         return {'prompt_id': prompt_id, 'state': 'pending', 'at': at,
                 'kind': kind}
+
+    def prompt_states(self, prompt_ids, *, scope):
+        """Bounded delivery projection; old event text cannot resurrect a question."""
+        if not isinstance(prompt_ids, list) or len(prompt_ids) > 512:
+            raise ValueError('bounded prompt identities required')
+        ids = list(dict.fromkeys(_bounded_label(item, 'prompt_id') for item in prompt_ids))
+        if not ids:
+            return {}
+        user, session = self._scope(scope)
+        from datetime import datetime
+        result = dict.fromkeys(ids, 'unavailable')
+        marks = ','.join('?' for _ in ids)
+        with self._connection() as db:
+            rows = db.execute(f'SELECT prompt_id,state,at FROM prompts WHERE scope_user=? '
+                f'AND (? IS NULL OR session=?) AND prompt_id IN ({marks})',
+                (user, session, session, *ids)).fetchall()
+        for identity, state, at in rows:
+            if state == 'pending' and self._clock() - datetime.fromisoformat(at).timestamp() >= 120:
+                state = 'expired'
+            result[identity] = state
+        return result
+
+    def prompt_quota(self, *, scope):
+        user, _ = self._scope(scope)
+        from .prompts import PromptQuota
+        with self._connection() as db:
+            return PromptQuota.load_state(self._meta(db, 'prompt_quota:' + user))
 
     def set_prompt_state(self, prompt_id, state, *, scope):
         """pending -> answered/dismissed/expired/superseded; one-way."""
@@ -624,6 +986,7 @@ class BehaviorLibrary:
         if state not in self.PROMPT_STATES or state == 'pending':
             raise ValueError('invalid prompt target state')
         user, _ = self._scope(scope)
+        self._guard_write(recording=False)
         with self._lock, self._connection() as db:
             row = db.execute('SELECT state FROM prompts WHERE scope_user=? '
                              'AND prompt_id=?', (user, prompt_id)).fetchone()
@@ -642,6 +1005,7 @@ class BehaviorLibrary:
         if state not in ('expired', 'superseded'):
             raise ValueError('sweep target must be expired or superseded')
         user, _ = self._scope(scope)
+        self._guard_write(recording=False)
         with self._lock, self._connection() as db:
             count = db.execute(
                 "UPDATE prompts SET state=? WHERE scope_user=? AND "
@@ -660,18 +1024,19 @@ class BehaviorLibrary:
             _bounded_label(day, 'day key')
         user, _ = self._scope(scope)
         feedback_id = secrets.token_hex(8)
+        self._guard_write(recording=False)
         with self._lock, self._connection() as db:
             if mute:
                 db.execute('INSERT INTO feedback(scope_user,feedback_id,'
-                           'user_event_id,verdict,corrected,at) '
-                           'VALUES(?,?,?,?,?,?)',
-                           (user, feedback_id, 'host:'+day,
-                            'mute', 'kind:' + kind, _utc_iso(self._clock)))
+                           'user_event_id,verdict,corrected,at,kind) '
+                           'VALUES(?,?,?,?,?,?,?)',
+                           (user, feedback_id, 'host:'+(day or 'persistent'),
+                            'mute', 'kind:' + kind, _utc_iso(self._clock), kind))
             else:
                 if day is not None:
                     db.execute("DELETE FROM feedback WHERE scope_user=? AND "
-                               "verdict='mute' AND corrected=? AND at>=?",
-                               (user, 'kind:' + kind, day + 'T00:00:00'))
+                               "verdict='mute' AND corrected=? AND user_event_id=?",
+                               (user, 'kind:' + kind, 'host:' + day))
                 else:
                     db.execute("DELETE FROM feedback WHERE scope_user=? AND "
                                "verdict='mute' AND corrected=?",
@@ -684,31 +1049,47 @@ class BehaviorLibrary:
         with self._connection() as db:
             row = db.execute(
                 "SELECT COUNT(*) FROM feedback WHERE scope_user=? AND "
-                "verdict='mute' AND corrected=?", (user, 'kind:' + kind)).fetchone()
+                "verdict='mute' AND corrected=? AND user_event_id='host:persistent'",
+                (user, 'kind:' + kind)).fetchone()
             persistent = row[0] or 0
             row = db.execute(
                 "SELECT COUNT(*) FROM feedback WHERE scope_user=? AND "
-                "verdict='mute' AND corrected=? AND at>=?",
-                (user, 'kind:' + kind, day + 'T00:00:00')).fetchone()
+                "verdict='mute' AND corrected=? AND user_event_id=?",
+                (user, 'kind:' + kind, 'host:' + day)).fetchone()
         return persistent > 0 or (row[0] or 0) > 0
 
     def record_progress(self, material_identity, position, *,
-                        effective_seconds=None, source, scope):
+                        effective_seconds=None, source, scope, event_id=None,
+                        episode_id=None, kind=None):
         """Upsert one material's reliable progress: last visible page/video
         position plus effective observation time. Never a completion claim."""
         user, _ = self._scope(scope)
+        if event_id is not None: event_id = _bounded_label(event_id, 'event_id')
+        if episode_id is not None: episode_id = _bounded_label(episode_id, 'episode_id')
+        if kind is not None: kind = _bounded_label(kind, 'kind')
+        source = _bounded_label(source, 'source')
+        import math
+        if effective_seconds is not None and (type(effective_seconds) not in (int, float) or
+                not math.isfinite(effective_seconds) or effective_seconds < 0):
+            raise ValueError('progress effective time must be finite and nonnegative')
+        if position is not None and (type(position) not in (int, float) or
+                not math.isfinite(position) or position < 0):
+            raise ValueError('progress position must be a finite page/time value')
         record_id = self.material_identity(material_identity)
         at = _utc_iso(self._clock)
+        self._guard_write()
         with self._lock, self._connection() as db:
+            self._require_sources(db, user, event_id, episode_id)
             db.execute('INSERT INTO progress(scope_user,record_id,material,'
-                       'position,effective_seconds,source,at) VALUES(?,?,?,?,?,?,?) '
+                       'position,effective_seconds,source,at,event_id,episode_id,kind) VALUES(?,?,?,?,?,?,?,?,?,?) '
                        'ON CONFLICT(scope_user,record_id) DO UPDATE SET '
                        'position=excluded.position,'
                        'effective_seconds=excluded.effective_seconds,'
-                       'source=excluded.source,at=excluded.at',
-                       (user, record_id, material_identity[:128],
+                       'source=excluded.source,at=excluded.at,event_id=excluded.event_id,'
+                       'episode_id=excluded.episode_id,kind=excluded.kind',
+                       (user, record_id, record_id,
                         json.dumps(position) if position is not None else None,
-                        effective_seconds, source, at))
+                        effective_seconds, source, at, event_id, episode_id, kind))
             self._bump_revision(db)
         return {'status': 'recorded', 'material': record_id, 'position': position}
 
@@ -724,43 +1105,109 @@ class BehaviorLibrary:
                  'effective_seconds': row[1], 'source': row[2],
                  'at': row[3]})
 
-    def habit_summaries(self, kind, *, scope, limit=3, now=None,
-                        half_life_days=90.0):
-        """Up to 3 weighted behavior/feedback summaries for one kind.
+    def habit_summaries(self, kind=None, *, scope, role_id=None, limit=3, now=None,
+                        half_life_days=90.0, query=None):
+        """History is confirmed evidence; a current interpretation is inferred.
 
-        Time weight uses a 90-day half-life and only affects RANKING —
-        history is never deleted by it. Counter-evidence (correct) counts
-        immediately; model-derived entries never appear as confirmed.
+        Match only host-known context, keep legacy/partial evidence in separate
+        denominators, and count one physical episode once across n-grams.
         """
-        if type(limit) is not int or not 1 <= limit <= 10:
-            raise ValueError('habit limit must be 1..10')
+        import math
+        from datetime import datetime
+        if type(limit) is not int or not 1 <= limit <= 3:
+            raise ValueError('habit limit must be 1..3')
+        if type(half_life_days) not in (float, int) or not math.isfinite(half_life_days) or half_life_days <= 0:
+            raise ValueError('positive finite half life required')
+        if role_id is not None:
+            role_id = _bounded_label(role_id, 'role_id')
+        if query is not None and (not isinstance(query, dict) or set(query) - {
+                'kind', 'app_name', 'profile_id', 'app_category', 'detector_version'}):
+            raise ValueError('invalid activity query')
         user, _ = self._scope(scope)
         now_epoch = self._clock() if now is None else now
+        sql = ("SELECT f.label,f.kind,f.role_id,f.at,f.session,f.feedback_id,f.episode_id,"
+               "f.event_id,e.features,v.features,e.detector_version,e.pattern "
+               "FROM feedback f JOIN prompts p ON f.prompt_id=p.prompt_id AND f.scope_user=p.scope_user "
+               "LEFT JOIN episodes e ON e.episode_id=f.episode_id AND e.scope_user=f.scope_user "
+               "LEFT JOIN events v ON v.event_id=f.event_id AND v.scope_user=f.scope_user "
+               "WHERE f.scope_user=? AND f.verdict IN ('confirm','correct') "
+               "AND length(trim(f.label))>0 AND (f.role_id IS NULL OR f.role_id=?) "
+               "AND ((f.episode_id IS NOT NULL AND e.episode_id IS NOT NULL) OR "
+               "(f.event_id IS NOT NULL AND v.event_id IS NOT NULL) OR "
+               "(f.episode_id IS NULL AND f.event_id IS NULL))")
+        args = [user, role_id]
+        selected_kind = kind or (query or {}).get('kind')
+        if selected_kind is not None:
+            sql += ' AND f.kind=?'
+            args.append(selected_kind)
+        sql += ' ORDER BY f.at DESC,f.feedback_id DESC LIMIT 201'
         with self._connection() as db:
-            rows = db.execute(
-                'SELECT verdict,corrected,at FROM feedback WHERE scope_user=? '
-                'AND (corrected LIKE ? OR verdict=?) ORDER BY at DESC '
-                'LIMIT 200', (user, 'kind:' + kind, 'mute')).fetchall()
-        weighted = {}
-        for verdict, corrected, at in rows:
-            try:
-                from datetime import datetime
-                age_days = max(0.0, (now_epoch - datetime.fromisoformat(at)
-                                     .timestamp()) / 86400)
-            except ValueError:
+            rows = db.execute(sql, args).fetchall()
+        truncated = len(rows) > 200
+        weighted, seen = {}, set()
+        for label, item_kind, item_role, at, session, fid, episode, event, ef, vf, detector, signature in rows[:200]:
+            features = json.loads(ef or vf or '{}')
+            quality = 'exact'
+            # Unassociated old prompts are kept only in the management view.
+            if not ef and not vf:
+                quality = 'legacy'
+            if query is not None:
+                missing, known = 0, 0
+                conflict = False
+                for field in ('app_name', 'profile_id', 'app_category', 'detector_version'):
+                    wanted = query.get(field)
+                    if not wanted:
+                        continue
+                    actual = detector if field == 'detector_version' else features.get(field)
+                    if not actual:
+                        missing += 1
+                    elif actual != wanted:
+                        conflict = True
+                    else:
+                        known += 1
+                if conflict:
+                    continue
+                quality = ('legacy' if not known else 'partial') if missing else quality
+                if quality == 'legacy':
+                    continue  # No basis to predict the current scene.
+            base = features.get('base_episode_id') or episode or event or fid
+            evidence = (base, item_role)
+            if evidence in seen:
                 continue
-            weight = 0.5 ** (age_days / half_life_days)
-            if corrected and corrected.startswith('kind:'):
-                key = corrected.split(':', 1)[1]
-            else:
-                key = kind
-            entry = weighted.setdefault(key, {'confirm': 0.0, 'mute': 0.0})
-            entry[verdict if verdict in ('confirm', 'mute') else 'mute'] += weight
-        summaries = [{'kind': key, 'support': round(value['confirm'], 3),
-                      'muted': value['mute'] > 0}
-                     for key, value in weighted.items()]
-        summaries.sort(key=lambda item: item['support'], reverse=True)
-        return summaries[:limit]
+            seen.add(evidence)
+            try:
+                age = max(0., (now_epoch - datetime.fromisoformat(at).timestamp()) / 86400)
+            except (TypeError, ValueError):
+                continue
+            context = tuple(features.get(k, '') for k in ('profile_id', 'app_name', 'app_category'))
+            key = (item_kind, label, item_role, context, quality)
+            item = weighted.setdefault(key, {'kind': item_kind, 'label': label,
+                'role_id': item_role, 'source': 'user_confirmed', 'evidence_source': 'user_confirmed',
+                'current_status': 'inferred', 'support': 0., 'confirmed': True,
+                'inferred': True, 'sample_count': 0, 'source_ids': [], '_sessions': set(),
+                'match_quality': quality, 'profile_id': context[0], 'app_name': context[1],
+                'app_category': context[2], 'last_confirmed_at': at, 'window_limit': 200,
+                'truncated': truncated})
+            item['support'] += 0.5 ** (age / half_life_days)
+            item['sample_count'] += 1
+            item['source_ids'].append(fid)
+            if session:
+                item['_sessions'].add(session)
+        totals = {}
+        for key, item in weighted.items():
+            group = (key[0], key[2], key[3], key[4])
+            totals[group] = totals.get(group, 0.) + item['support']
+        for key, item in weighted.items():
+            group = (key[0], key[2], key[3], key[4])
+            item['support_ratio'] = round(item['support'] / totals[group], 3)
+            item['session_count'] = len(item.pop('_sessions'))
+            item['stable'] = (item['match_quality'] == 'exact' and item['sample_count'] >= 3
+                              and item['session_count'] >= 2 and item['support_ratio'] >= .8)
+            item['weighted_support'] = item['support'] = round(item['support'], 3)
+            item['source_total'] = len(item['source_ids'])
+            item['source_ids'] = item['source_ids'][:3]
+        return sorted(weighted.values(), key=lambda i: (
+            {'exact': 2, 'partial': 1, 'legacy': 0}[i['match_quality']], i['support']), reverse=True)[:limit]
 
     # -- input frames (P11) ---------------------------------------------------
     def record_frames(self, batch, *, scope):
@@ -770,10 +1217,13 @@ class BehaviorLibrary:
         if not isinstance(batch, list) or not batch or len(batch) > 256:
             raise ValueError('bounded frame batch required')
         user, _ = self._scope(scope)
+        self._guard_write()
         prepared = []
         for frame in batch:
             if not isinstance(frame, dict) or frame.get('schema') != FRAMES_SCHEMA:
                 raise ValueError('unknown frame schema')
+            from .input_features import validate_frame
+            validate_frame(frame, user_scope=user)
             for key in ('worker_epoch', 'sequence'):
                 if type(frame.get(key)) is not int or frame[key] < 0:
                     raise ValueError(f'frame {key} required')
@@ -859,70 +1309,70 @@ class BehaviorLibrary:
                     previous.get('destination') == str(Path(destination).resolve()):
                 return {'status': 'complete', 'idempotent': True,
                         'destination': previous['destination']}
-        destination = locator._validate_destination(
-            destination, current=Path(self._database).parent)
-        self._journal('prepare', destination)
-        with self._connection() as db:
-            db.execute('INSERT INTO management(key,value) VALUES(?,?) '
-                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-                       ('migration_active', '1'))
-        self._journal('paused', destination)
-        try:
-            source_lease = locator.lease(Path(self._database).parent).acquire()
+        source = Path(self._database).parent
+        if locator.resolve().resolve() != source.resolve():
+            raise ValueError('migration source differs from active locator')
+        destination = locator._validate_destination(destination, current=source)
+        if destination.exists() and any(destination.iterdir()):
+            raise ValueError('migration requires a new empty dedicated destination')
+        from contextlib import ExitStack
+        from tools.backup_personal_data import inventory
+        with self._lock, ExitStack() as stack:
+            held = locator.lease(source).acquire()
+            stack.callback(held.release)
+            # Acquire both writers before marking migration active. A failed
+            # lease leaves the existing active library and locator untouched.
+            target = locator.lease(destination).acquire()
+            stack.callback(target.release)
+            switched = False
             try:
-                destination_lease = locator.lease(destination).acquire()
+                self._journal('prepare', destination)
+                with self._connection() as db:
+                    db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                               'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                               ('migration_active', '1'))
+                self._journal('paused', destination)
+                with self._connection() as db:
+                    db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                before = inventory(source)
+                for relative in before:
+                    copied = destination/relative
+                    copied.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source/relative, copied)
+                if inventory(source) != before or inventory(destination) != before:
+                    raise ValueError('behavior migration copy changed or failed hash verification')
+                self._journal('copied', destination, manifest=before)
+                base = Path(self._database).name
+                copy_db = sqlite3.connect(str(destination/base))
                 try:
-                    self._journal('copied', destination)
-                    with self._connection() as db:
-                        db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-                    destination.mkdir(parents=True, exist_ok=True)
-                    manifest = {}
-                    base = Path(self._database).name
-                    for suffix in ('', '-wal', '-shm'):
-                        source_file = Path(self._database + suffix)
-                        if source_file.is_file():
-                            target = destination/(base + suffix)
-                            shutil.copyfile(source_file, target)
-                            manifest[target.name] = self._file_digest(target)
-                    self._journal('copied', destination, manifest=manifest)
-                    self._journal('verified', destination, manifest=manifest)
-                    copy_connection = sqlite3.connect(
-                        str(destination/base))
-                    try:
-                        check = copy_connection.execute(
-                            'PRAGMA integrity_check').fetchone()[0]
-                    finally:
-                        copy_connection.close()
-                    if check != 'ok':
+                    if copy_db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise ValueError('migrated database failed integrity_check')
-                    for name, expected in manifest.items():
-                        if self._file_digest(destination/name) != expected:
-                            raise ValueError('migrated file hash mismatch')
-                    # The destination journal already names its own root as
-                    # locator_committed: a crash after the switch reconciles
-                    # on the next open, and the source stays retained.
-                    copy_db = sqlite3.connect(str(destination/base))
-                    try:
-                        copy_db.execute(
-                            'INSERT INTO management(key,value) VALUES(?,?) '
-                            'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-                            ('migration_journal', json.dumps(
-                                {'state': 'locator_committed',
-                                 'destination': str(destination.resolve())})))
-                        copy_db.commit()
-                    finally:
-                        copy_db.close()
+                    copy_db.execute("DELETE FROM management WHERE key='migration_active'")
+                    copy_db.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                                    'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                    ('migration_journal', json.dumps({'state': 'locator_committed',
+                                     'destination': str(destination.resolve())})))
+                    copy_db.commit()
                 finally:
-                    destination_lease.release()
-            finally:
-                source_lease.release()
-        except BaseException:
-            with self._connection() as db:
-                db.execute("DELETE FROM management WHERE key='migration_active'")
-            raise
-        locator.select(destination, confirmed=True,
-                       current=Path(self._database).parent)
-        self._retired = True
+                    copy_db.close()
+                self._journal('verified', destination, manifest=before)
+                locator._commit_selection(destination)
+                switched = True
+                self._retired = True
+            except BaseException:
+                # Atomic replacement might have succeeded before an I/O error
+                # surfaced. Reconcile the actual locator before allowing writes.
+                try:
+                    switched = locator.resolve().resolve() == destination.resolve()
+                except (OSError, ValueError):
+                    self._retired = True
+                    raise
+                if switched:
+                    self._retired = True
+                else:
+                    with self._connection() as db:
+                        db.execute("DELETE FROM management WHERE key='migration_active'")
+                raise
         return {'status': 'complete', 'destination': str(destination.resolve()),
                 'source_retained': True,
                 'boundary': 'Rebuild the library instance from the locator; '
@@ -963,42 +1413,40 @@ class BehaviorLibrary:
                        if len(rows) > limit and page else None)
         return {'records': page, 'next_cursor': next_cursor}
 
-    def context(self, *, scope, limit=3):
-        """Bounded recent behavior facts for prompt building."""
-        if type(limit) is not int or not 1 <= limit <= 10:
-            raise ValueError('context limit must be 1..10')
+    def context(self, *, scope, limit=3, role_id=None, query=None):
+        """Confirmed label evidence; recent observations stay explicitly inferred."""
+        if type(limit) is not int or not 1 <= limit <= 3:
+            raise ValueError('context limit must be 1..3')
+        summaries = (self.habit_summaries(scope=scope, role_id=role_id, limit=limit, query=query)
+                     if query else [])
+        if len(summaries) == limit:
+            return summaries
         user, session = self._scope(scope)
         with self._connection() as db:
-            rows = db.execute('SELECT at, kind, target, material FROM events '
-                              'WHERE scope_user=? ORDER BY at DESC, event_id '
-                              'DESC LIMIT ?', (user, limit)).fetchall()
-        return [{'at': row[0], 'kind': row[1], 'target': row[2],
-                 'material': row[3]} for row in rows]
+            rows = db.execute('SELECT at,kind,target,material FROM events WHERE '
+                              'scope_user=? AND (? IS NULL OR session=?) '
+                              'ORDER BY at DESC,event_id DESC LIMIT ?',
+                              (user, session, session, limit - len(summaries))).fetchall()
+        return summaries + [{'at': r[0], 'kind': r[1], 'target': r[2], 'material': r[3],
+                             'source': 'observed', 'current_status': 'observed',
+                             'confirmed': False, 'inferred': False} for r in rows]
 
     def export(self, *, scope):
-        """Bounded JSON export of one scope's events and feedback.
-
-        The material HMAC key never leaves the library.
-        """
+        """Export every user-owned layer; management secrets never leave the store."""
         user, _ = self._scope(scope)
+        result = {'schema_version': SCHEMA_VERSION, 'scope_user': user}
         with self._connection() as db:
-            events = db.execute('SELECT event_id,session,epoch,at,kind,source,'
-                                'app_category,target,material,features FROM '
-                                'events WHERE scope_user=? ORDER BY at',
-                                (user,)).fetchall()
-            feedback = db.execute('SELECT feedback_id,user_event_id,prompt_id,'
-                                  'event_id,episode_id,original,verdict,'
-                                  'corrected,at FROM feedback WHERE '
-                                  'scope_user=? ORDER BY at', (user,)).fetchall()
-        return {'schema_version': SCHEMA_VERSION, 'scope_user': user,
-                'events': [dict(zip(('event_id', 'session', 'epoch', 'at',
-                                     'kind', 'source', 'app_category',
-                                     'target', 'material', 'features'), row))
-                           for row in events],
-                'feedback': [dict(zip(('feedback_id', 'user_event_id',
-                                       'prompt_id', 'event_id', 'episode_id',
-                                       'original', 'verdict', 'corrected',
-                                       'at'), row)) for row in feedback]}
+            for table in ('events', 'frames', 'episodes', 'prompts', 'feedback', 'patterns', 'progress'):
+                cur = db.execute(f'SELECT * FROM {table} WHERE scope_user=?', (user,))
+                names = [col[0] for col in cur.description]
+                result[table] = [dict(zip(names, row)) for row in cur.fetchall()]
+            result['behavior_epoch'] = int(self._meta(db, _EPOCH))
+            result['management'] = {key: self._meta(db, key) for key in
+                                    ('schema_version', _REVISION, _EPOCH, _ENABLED)}
+            quota = self._meta(db, 'prompt_quota:' + user)
+            if quota is not None:
+                result['management']['prompt_quota'] = json.loads(quota)
+        return result
 
     def configure(self, settings, *, revision):
         """Revision-guarded library settings (currently: enabled)."""
@@ -1021,7 +1469,8 @@ class BehaviorLibrary:
                                 'GROUP BY kind').fetchall()
             paused, notice = self._capacity_state(db)
         usage = self._usage_bytes()
-        free, total = shutil.disk_usage(Path(self._database).parent)[1:3]
+        disk = shutil.disk_usage(Path(self._database).parent)
+        free, total = disk.free, disk.total
         return {'schema_version': int(values.get('schema_version', '0')),
                 'revision': int(values.get(_REVISION, '0')),
                 'behavior_epoch': int(values.get(_EPOCH, '0')),

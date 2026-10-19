@@ -7,7 +7,7 @@ const {chromium} = loadPlaywright();
 const base = process.argv[2] || 'http://127.0.0.1:8765';
 const dir = '.sumika-next/evidence/ui-v2';
 await mkdir(dir, {recursive: true});
-const browser = await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless:true});
+const browser = await chromium.launch({channel:'msedge', headless:true});
 const context = await browser.newContext({viewport:{width:1440,height:900}});
 const page = await context.newPage();
 const errors = [];

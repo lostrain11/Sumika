@@ -18,7 +18,7 @@ const failures = [];
 const { url } = await (await fetch(`${bridge}/api/workbench/embed`)).json();
 
 const browser = await chromium.launch({
-  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  channel: 'msedge',
   headless: true,
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });

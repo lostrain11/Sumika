@@ -23,8 +23,13 @@ for index, device in enumerate(sd.query_devices()):
                     "hostapi": sd.query_hostapis(device["hostapi"])["name"],
                     "default_samplerate": int(round(device.get("default_samplerate") or 0))})
 default = sd.default.device
-print(json.dumps({"devices": devices,
-                  "default_input": default[0] if isinstance(default, (list, tuple)) else None}))
+try:
+    default_input = int(default[0])
+    if default_input < 0:
+        default_input = None
+except (IndexError, KeyError, TypeError, ValueError):
+    default_input = None
+print(json.dumps({"devices": devices, "default_input": default_input}))
 """
 
 

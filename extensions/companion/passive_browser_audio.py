@@ -40,13 +40,19 @@ class PassiveBrowserAudio:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._lifecycle = threading.RLock()
+        self._pipe_write_lock = threading.Lock()
         self._ready = threading.Event()
         self._process = self._reader = self._writer = self._job = None
         self._state, self._error = 'stopped', None
         self._epoch = 0
+        self._stream_epoch = 0
         self._target = self._identity = None
         self._audio_epoch = None
         self._next_sequence = None
+        # Launch inputs are assigned by start(). Keep explicit sentinels so
+        # lifecycle misuse fails with a useful configuration error instead of
+        # an incidental AttributeError/TypeError.
+        self._model = self._capabilities = self._asr = None
         self._queue = deque()
         self._consented = False
         self._received = 0
@@ -88,6 +94,7 @@ class PassiveBrowserAudio:
                 self._ready.clear()
                 self._epoch += 1
                 epoch = self._epoch
+                self._stream_epoch += 1
                 self._target, self._state, self._error = target, 'starting', None
                 self._identity = identity
                 self._audio_epoch = audio_epoch
@@ -113,13 +120,16 @@ class PassiveBrowserAudio:
         threads and the ready check against a concurrent rotation.
         """
         interpreter = capability_python('voice', root=self.root)
+        if self._model is None or self._capabilities is None or self._asr is None:
+            raise RuntimeError('browser audio worker configuration is incomplete; call start() first')
         model = Path(self._model).resolve()
         if interpreter is None or not model.is_dir():
             raise RuntimeError('study voice runtime or model unavailable')
         require_asr({'capabilities': str(self._capabilities), 'asr': self._asr})
         config = {'source': 'pipe', 'model': str(model), 'target': self._target,
                   'consent': True, 'capabilities': str(Path(self._capabilities).resolve()),
-                  'asr': self._asr, 'media_identity': identity}
+                  'asr': self._asr, 'media_identity': identity,
+                  'stream_epoch': self._stream_epoch}
         child_log = os.environ.get('SUMIKA_BROWSER_AUDIO_CHILD_LOG')
         child_stderr = open(child_log, 'a', encoding='utf8') if child_log else subprocess.DEVNULL
         if child_log:
@@ -234,7 +244,7 @@ class PassiveBrowserAudio:
             if len(self._queue) >= limit:
                 self._fail('browser audio queue overflow')
                 raise RuntimeError('browser audio queue overflow; track stopped')
-            self._queue.append(pcm)
+            self._queue.append((pcm, self._stream_epoch))
             self._next_sequence += 1
             self._received += 1
             self._audio_seconds += 0.1
@@ -247,10 +257,9 @@ class PassiveBrowserAudio:
         recognizer per epoch).
 
         Seek/rate/pause-resume rotate the epoch under standing consent. The
-        old worker is torn down with its in-flight buffers and a fresh worker
-        starts with the current full media identity; sequence 0 is accepted
-        again only after the new worker is ready. Old-epoch transcripts are
-        fenced by the epoch change and by their own identity.
+        active worker discards queued PCM and its partial recognizer stream,
+        while retaining the loaded model; sequence 0 is accepted again only
+        after the worker acknowledges the reset.
         """
         if not isinstance(audio_epoch, str) or not audio_epoch.strip() or len(audio_epoch) > 64:
             raise ValueError('bounded audio epoch required')
@@ -259,10 +268,10 @@ class PassiveBrowserAudio:
                 if self._state not in ('running', 'starting'):
                     return {'status': 'rejected',
                             'reason': 'browser audio session is not active'}
-                # Fence the old generation immediately: its reader/writer
-                # threads and any queued PCM belong to the dead epoch.
-                self._epoch += 1
-                epoch = self._epoch
+                # Keep the worker/model loaded; fence its partial stream and
+                # queued packets with a logical stream epoch.
+                self._stream_epoch += 1
+                stream_epoch = self._stream_epoch
                 self._audio_epoch = audio_epoch
                 self._next_sequence = 0
                 self._queue.clear()
@@ -275,31 +284,24 @@ class PassiveBrowserAudio:
                     snapshot = snapshot_media_identity(identity)
                     if snapshot is not None:
                         self._identity = snapshot
-                process, job = self._process, self._job
-                threads = (self._reader, self._writer)
-                self._process = self._reader = self._writer = None
-            if job is not None:
-                job.close()
-            if process is not None:
-                if process.poll() is None:
-                    process.kill()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
-                try:
-                    process.stdin.close()
-                    process.stdout.close()
-                except OSError:
-                    pass
-            for thread in threads:
-                if thread is not None and thread is not threading.current_thread():
-                    thread.join(timeout=3)
+                process = self._process
+                identity = snapshot_media_identity(self._identity)
+                if process is None or process.poll() is not None:
+                    raise RuntimeError('browser audio worker is unavailable for epoch reset')
             try:
-                self._spawn_worker(self._identity, epoch)
-            except BaseException:
-                self.stop()
-                raise
+                with self._pipe_write_lock:
+                    process.stdin.write(json.dumps({'action': 'reset',
+                        'media_identity': identity, 'stream_epoch': stream_epoch}) + '\n')
+                    process.stdin.flush()
+            except (OSError, BrokenPipeError) as error:
+                self._fail('browser audio epoch reset pipe failed')
+                raise RuntimeError('browser audio epoch reset failed') from error
+            if not self._ready.wait(5):
+                self._fail('browser audio epoch reset timed out')
+                raise RuntimeError('browser audio epoch reset timed out')
+            with self._lock:
+                if self._state != 'running' or self._stream_epoch != stream_epoch:
+                    raise RuntimeError('browser audio epoch reset was superseded')
             return self.status()
 
     def stop(self):
@@ -390,6 +392,9 @@ class PassiveBrowserAudio:
                     if epoch != self._epoch:
                         return
                     if packet.get('observation') is not None:
+                        if (self._state != 'running' or
+                                packet.get('stream_epoch') != self._stream_epoch):
+                            continue
                         observation = packet['observation']
                         # R3: the worker carries its launch identity, but the
                         # live one evolves with relayed packets (seek updates
@@ -407,9 +412,13 @@ class PassiveBrowserAudio:
                         self._transcripts += 1
                         self.on_observation(observation)
                         continue
-                    if packet.get('status') == 'running':
+                    if packet.get('status') in ('running', 'reset'):
+                        if (packet.get('status') == 'reset' and
+                                packet.get('stream_epoch') != self._stream_epoch):
+                            continue
                         self._state = 'running'
                         self._ready.set()
+                        self._condition.notify_all()
                         continue
                     if packet.get('error') is not None:
                         self._error = str(packet.get('reason') or packet['error'])[:128]
@@ -428,15 +437,21 @@ class PassiveBrowserAudio:
                 with self._condition:
                     if epoch != self._epoch:
                         return
-                    if not self._queue:
+                    if not self._queue or self._state != 'running':
                         self._condition.wait_for(
-                            lambda: epoch != self._epoch or self._queue, timeout=0.5)
-                        if epoch != self._epoch or not self._queue:
+                            lambda: epoch != self._epoch or
+                                (self._queue and self._state == 'running'), timeout=0.5)
+                        if epoch != self._epoch or not self._queue or self._state != 'running':
                             continue
-                    pcm = self._queue.popleft()
+                    pcm, stream_epoch = self._queue.popleft()
                 # Never hold the state lock during a possibly blocked pipe write.
-                process.stdin.write(json.dumps({'pcm': b64encode(pcm).decode('ascii')}) + '\n')
-                process.stdin.flush()
+                with self._pipe_write_lock:
+                    with self._lock:
+                        current = stream_epoch == self._stream_epoch and self._state == 'running'
+                    if not current:
+                        continue
+                    process.stdin.write(json.dumps({'pcm': b64encode(pcm).decode('ascii')}) + '\n')
+                    process.stdin.flush()
         except Exception as error:
             # R3: an old generation's writer death must never fail the new
             # track that replaced it.

@@ -48,6 +48,10 @@ class BehaviorLocator:
     def resolve(self):
         """The active behavior root (default: personal ``behavior`` child)."""
         locator = self.locator_path
+        if locator.is_symlink() or locator.is_junction():
+            raise ValueError('behavior locator must be a physical file')
+        if locator.exists() and not locator.is_file():
+            raise ValueError('behavior locator must be a physical file')
         if not locator.is_file():
             return self.personal_root/'behavior'
         if locator.is_symlink() or locator.is_junction():
@@ -57,7 +61,18 @@ class BehaviorLocator:
                 or not isinstance(state.get('root'), str)
                 or not isinstance(state.get('owner_id'), str)):
             raise ValueError('invalid behavior locator')
-        return Path(state['root'])
+        root = Path(state['root'])
+        if not root.is_absolute() or not root.is_dir():
+            raise ValueError('behavior root is unavailable; reconnect the selected directory')
+        for item in (root, *root.parents):
+            _physical(item)
+        marker = root/OWNER_NAME
+        if marker.is_symlink() or not marker.is_file():
+            raise ValueError('behavior root ownership is unavailable')
+        owner = json.loads(marker.read_text(encoding='utf8'))
+        if owner.get('schema_version') != 1 or owner.get('owner_id') != state['owner_id']:
+            raise ValueError('behavior root owner does not match the locator')
+        return root
 
     def owner_id(self):
         locator = self.locator_path
@@ -66,6 +81,8 @@ class BehaviorLocator:
         return json.loads(locator.read_text(encoding='utf8')).get('owner_id')
 
     def _validate_destination(self, destination, current):
+        if not Path(destination).is_absolute():
+            raise ValueError('behavior destination must be an absolute path')
         destination = _physical(Path(destination).absolute())
         if destination.exists():
             own = {OWNER_NAME, 'behavior.sqlite3', 'behavior.sqlite3-wal',
@@ -110,6 +127,11 @@ class BehaviorLocator:
                         marker.read_text(encoding='utf8'))['owner_id']}
         destination = self._validate_destination(destination, current)
         destination.mkdir(parents=True, exist_ok=True)
+        return self._commit_selection(destination)
+
+    def _commit_selection(self, destination):
+        """Commit a prevalidated dedicated root while its caller holds leases."""
+        destination = Path(destination)
         marker = destination/OWNER_NAME
         if marker.exists():
             state = json.loads(marker.read_text(encoding='utf8'))

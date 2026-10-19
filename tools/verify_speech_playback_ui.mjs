@@ -1,11 +1,12 @@
-import {createRequire} from 'node:module';
+import {loadPlaywright} from './lib/playwright.mjs';
+
 import {readFileSync,readdirSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
-const root=process.cwd(), runtime=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/runtimes/cua_node');
-const pkg=readdirSync(runtime).map(n=>path.join(runtime,n,'bin/node_modules/playwright/package.json')).find(existsSync);
-const {chromium}=createRequire(pkg)('playwright');
+const root=process.cwd();
+
+const {chromium}=loadPlaywright();
 const base=path.join(root,'.sumika-next','playback-ui-'+randomUUID());mkdirSync(base,{recursive:true});
 const html=readFileSync('ui/app/index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');
 const server=http.createServer((req,res)=>{
@@ -14,7 +15,7 @@ const server=http.createServer((req,res)=>{
  else {res.setHeader('Content-Type','text/html;charset=utf-8');res.end(html);}
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 const report={passed:false,hardware_used:false};

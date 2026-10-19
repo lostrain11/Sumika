@@ -18,6 +18,7 @@ def main():
     base=ROOT/'.sumika-next'/('web-review-native-'+uuid.uuid4().hex)
     home=base/'home';work=base/'work'
     home.mkdir(parents=True);work.mkdir()
+    (base/'auth.json').write_text(json.dumps({'schema_version':1,'enabled':True,'sites':{}}),encoding='utf8')
     report={'passed':False,'external_messages':0,'production_changed':False,'decision':decision,
             'boundary':'Native approval service test; synthetic answerer is not a browser click acceptance.'}
     # Even if the approval gate fails, this isolated worker cannot send externally.
@@ -76,11 +77,12 @@ def main():
             if decision=='cancel':
                 assert 'ABORTED_BEFORE_DISPATCH' in errors, 'tool body may have run'
             else:
-                blocks=[b for e in events if e['type']=='tool/result'
-                        for b in e['data'].get('message',{}).get('content',[])]
-                assert any(b.get('isError') is True for b in blocks), 'rejected tool must report isError'
+                messages=[e['data'].get('message',{}) for e in events if e['type']=='tool/result']
+                assert any(m.get('isError') is True or any(b.get('isError') is True
+                           for b in m.get('content',[])) for m in messages), 'rejected tool must report isError'
+            version=json.loads((ROOT/'runtime/dsh/release.json').read_text(encoding='utf8'))['version']
             projected=project_page({'hasMore':False,'records':[{'type':'event','event':e} for e in events]},
-                                   session=sid,version='0.1.5-rc.2',through_seq=events[-1]['seq'])
+                                   session=sid,version=version,through_seq=events[-1]['seq'])
             asked=next(e for e in projected['events'] if e['kind']=='approval/asked')
             decided=next(e for e in projected['events'] if e['kind']=='approval/decided')
             assert asked['approval_id']==decided['approval_id']

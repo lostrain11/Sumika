@@ -1,7 +1,8 @@
 import {createRequire} from 'node:module';
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
-const {chromium}=createRequire(import.meta.url)(process.argv[2]);
+import {loadPlaywright} from './lib/playwright.mjs';
+const {chromium}=process.argv[2] ? createRequire(import.meta.url)(process.argv[2]) : loadPlaywright();
 const script=await readFile('extensions/desktop/consultation_snapshot.js','utf8');
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try{

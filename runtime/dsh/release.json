@@ -1,17 +1,17 @@
 {
-  "version": "0.1.5-rc.2",
+  "version": "0.2.1-rc.2",
   "profile": ".sumika-next/profiles/<isolated-home>",
   "rollback": "Keep previous installation and profile, switch both together; never downgrade an in-place profile",
   "install": "pnpm install --frozen-lockfile --ignore-scripts",
   "files": {
-    "package.json": "7708ea3372ce07b3e5330056ecb9859b2f997f08dba55af15850b12669edcbf3",
-    "node_modules/@deepseek-ai/dsh/lib/bin.js": "0ff7f1d72c4e0cbe14001709c81e20a04b70464118a7f78568952988e28f2ac5",
-    "node_modules/@deepseek-ai/dsh/package.json": "0d9ea2f7a42e7bacf319abd57016e40d0351d07032c7eb709d7c54158300d4cb",
-    "pnpm-lock.yaml": "0be5c93321f89326dd0381aba8f2c9b8d7db67a862c176bf51208345c2d717c4"
+    "package.json": "034e2f99cee7dd3b1c8dc28d1d4f1fca9efd66703769177c0fc4d932a1523a12",
+    "node_modules/@deepseek-ai/dsh/lib/bin.js": "80112efe368efb1a39720c7ada0af00442e5131fb2744edaaff8a3e8bb499e6f",
+    "node_modules/@deepseek-ai/dsh/package.json": "bea4288aa88eb54efe829686553100a75fdf09d11c5e3bf6b329badb9a0368dd",
+    "pnpm-lock.yaml": "9b97e65b0cfe2d73663d6785c4c207a249bd8619c787c502f358c91abb0492a0"
   },
   "package": "@deepseek-ai/dsh",
   "schema_version": 1,
   "status": "verified",
-  "acceptance": "docs/project/phase-02-evidence.json",
-  "validation_scope": "Windows inherited-ACL workspace; native standard preset, Skills, subagents, stdio MCP; loopback model"
+  "acceptance": "docs/project/dsh-upgrade-20261017.md",
+  "validation_scope": "Windows inherited-ACL workspace; isolated candidate and daily runtime, native web/auth/session/cancel, plugin lifecycle, migration and rollback; no paid model calls"
 }

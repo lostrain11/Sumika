@@ -9,6 +9,36 @@ from extensions.roles.assets import inspect_vrm
 
 
 class AssetTests(unittest.TestCase):
+    def test_windows_publish_retries_only_when_original_source_and_absent_target(self):
+        from extensions.roles.roles import _publish_role_directory
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); source = root / 'staging'; source.mkdir()
+            (source / 'owned').write_bytes(b'original')
+            target = root / 'live'
+            real_rename = Path.rename
+            calls = []
+            def transient(path, destination):
+                calls.append(destination)
+                if len(calls) == 1:
+                    error = PermissionError('simulated transient Windows denial'); error.winerror = 5
+                    raise error
+                return real_rename(path, destination)
+            with patch.object(Path, 'rename', transient), patch('extensions.roles.roles.time.sleep'):
+                _publish_role_directory(source, target)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual((target / 'owned').read_bytes(), b'original')
+
+    def test_invalid_package_manifest_never_publishes_a_live_role(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for manifest in ([], {'schema_version': 1, 'id': 'bad', 'name': 'bad',
+                                   'assets': {'scene': 'scene/missing.glb'}}):
+                package = root / 'bad.zip'
+                with zipfile.ZipFile(package, 'w') as archive:
+                    archive.writestr('role.json', json.dumps(manifest))
+                with self.assertRaises(ValueError): import_package(package, root / 'store')
+                self.assertEqual(list((root / 'store').iterdir()), [])
+
     def test_publication_conflict_does_not_replace_concurrent_role(self):
         base=Path('.sumika-next/test-role-publication');base.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(dir=base) as d:

@@ -57,7 +57,9 @@ class ExtractionGate:
                 rejected.append({"text": text[:60], "reason": "too_long"})
                 continue
             if _SECRET.search(text):
-                rejected.append({"text": text[:60], "reason": "contains_credential"})
+                # Never echo the suspected credential back into an audit/UI
+                # rejection record; the reason alone is enough to explain it.
+                rejected.append({"text": "[redacted]", "reason": "contains_credential"})
                 continue
             if proposal.get("source") == "role_model" or proposal.get("kind") == "opinion":
                 rejected.append({"text": text[:60], "reason": "role_opinion_is_not_a_user_fact"})

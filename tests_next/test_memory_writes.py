@@ -17,7 +17,7 @@ class MemoryWriteTests(unittest.TestCase):
             MemoryWriter(m,dict(user_id='other',role_id='r')).record(origin='model',event_id='private',text='其他用户')
             p=Path(d)/'backup.json';m.export_json(p,**scope)
             data=json.loads(p.read_text(encoding='utf8'))
-            self.assertEqual(data['schema_version'],3)
+            self.assertEqual(data['schema_version'],5)
             self.assertEqual(len(data['proposals']),1)
             m.close()
             restored=EmbeddedMemory(Path(d)/'restored')
@@ -44,6 +44,7 @@ class MemoryWriteTests(unittest.TestCase):
             p=Path(d)/'backup.json';m.export_json(p)
             data=json.loads(p.read_text(encoding='utf8'))
             data['memories'][0]['active']=0
+            data['memories'][0]['status']='superseded'
             data['proposals'][0]['data']['text']='冲突猜测'
             p.write_text(json.dumps(data),encoding='utf8')
             with self.assertRaises(ValueError):m.restore_json(p,**scope)

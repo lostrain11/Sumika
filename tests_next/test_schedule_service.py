@@ -6,11 +6,21 @@ from types import SimpleNamespace
 from extensions.desktop.scheduler import Schedule
 from extensions.desktop.schedule_service import ScheduleService
 from extensions.desktop.schedule_dsh import DshScheduleBridge
-from extensions.desktop.schedule_runner import occurrence
+from extensions.desktop.schedule_runner import occurrence, next_occurrence
 from sumika_next.contracts import Trust
 
 
 class ServiceTests(unittest.TestCase):
+    def test_next_occurrence_skips_dst_gap_and_does_not_repeat_fall_fold(self):
+        spring=Schedule('s','daily','02:30','test',timezone_name='America/New_York')
+        self.assertEqual(next_occurrence(spring,datetime(2026,3,8,5,tzinfo=timezone.utc)),
+                         datetime(2026,3,9,6,30,tzinfo=timezone.utc))
+        fall=Schedule('f','daily','01:30','test',timezone_name='America/New_York')
+        self.assertEqual(next_occurrence(fall,datetime(2026,11,1,6,tzinfo=timezone.utc)),
+                         datetime(2026,11,2,6,30,tzinfo=timezone.utc))
+        weekly=Schedule('w','weekly','0 09:00','test',timezone_name='Asia/Shanghai')
+        self.assertEqual(next_occurrence(weekly,datetime(2026,1,5,2,tzinfo=timezone.utc)),
+                         datetime(2026,1,12,1,tzinfo=timezone.utc))
     def test_timezone_and_daylight_saving(self):
         s=Schedule('x','daily','09:00','test',timezone_name='Asia/Shanghai')
         due=occurrence(s,datetime(2026,1,2,2,tzinfo=timezone.utc))

@@ -34,9 +34,14 @@ function publishSettings() {
   const dest=target();
   if(dest)dest.frame.contentWindow.postMessage({type:'sumika:enhancement-settings',enabled:enhancementEnabled},dest.origin);
 }
+function enhancementUsable(data) {
+  return data?.prompt_enhancement?.enabled===true
+    && data?.auxiliary?.enabled===true
+    && (data.auxiliary.capabilities||[]).includes('prompt_enhancement');
+}
 window.addEventListener('sumika:workbench-settings',event=>{
   settingsRevision++;
-  enhancementEnabled=event.detail?.enabled===true;
+  enhancementEnabled=enhancementUsable(event.detail||{});
   publishSettings();
 });
 async function refreshSettings() {
@@ -44,7 +49,7 @@ async function refreshSettings() {
   let enabled=false;
   try {
     const response=await fetch('/api/manage/settings');
-    if(response.ok)enabled=(await response.json()).data.prompt_enhancement.enabled===true;
+    if(response.ok)enabled=enhancementUsable((await response.json()).data||{});
   } catch {}
   if(revision!==settingsRevision)return;
   enhancementEnabled=enabled;
@@ -55,6 +60,19 @@ function target() {
   if (!frame?.contentWindow) return null;
   return {frame, origin: new URL(frame.src, location.href).origin};
 }
+window.addEventListener('sumika:open-native-schedules',()=>{
+  const dest=target();
+  if(!dest){alert('请先启动工作台，再打开原生自动化任务。');return;}
+  const id=crypto.randomUUID();
+  const timer=setTimeout(()=>{window.removeEventListener('message',ack);alert('未确认打开成功，请在工作台侧栏点击“自动化任务”。');},5000);
+  const ack=event=>{
+    if(event.source!==dest.frame.contentWindow || event.origin!==dest.origin || event.data?.type!=='sumika:native-schedule-opened' || event.data.id!==id)return;
+    clearTimeout(timer);window.removeEventListener('message',ack);
+    document.querySelector('dialog.sumika-dialog')?.close();location.hash='board';
+  };
+  window.addEventListener('message',ack);
+  dest.frame.contentWindow.postMessage({type:'sumika:native-schedule-open',id},dest.origin);
+});
 function publish() {
   const dest = target();
   if (dest) dest.frame.contentWindow.postMessage({type:'sumika:task-draft', draft:pending}, dest.origin);
@@ -81,7 +99,7 @@ window.addEventListener('message', async event => {
     try {
       const response=await fetch('/api/manage/session');
       const csrf=(await response.json()).csrf;
-      const received=await fetch('/api/manage/task-draft',{method:'POST',headers:{'Content-Type':'application/json','X-Sumika-CSRF':csrf},body:JSON.stringify({action:'receive',id:pending.id,projects:event.data.projects||[],receipts:event.data.receipts||[]})});
+      const received=await fetch('/api/manage/task-draft',{method:'POST',headers:{'Content-Type':'application/json','X-Sumika-CSRF':csrf},body:JSON.stringify({action:'receive',id:pending.id,workspace_id:event.data.workspace_id,session_id:event.data.session_id})});
       const value=await received.json();
       if(!received.ok) throw new Error(value.error||'交接接收失败');
       pending={...pending,...(value.handoff||{}),state:'received'}; publish();
@@ -89,6 +107,31 @@ window.addEventListener('message', async event => {
     } catch(error) { event.source.postMessage({type:'sumika:task-receive-error',id:event.data.id,error:error.message},event.origin); }
   }
   if (event.data?.type === 'sumika:enhancement-ready') void refreshSettings();
+  if (event.data?.type === 'sumika:enhancement-request') {
+    const {id, text} = event.data;
+    if (typeof id !== 'string' || !id || typeof text !== 'string'
+        || !text.trim() || text.length > 6000) {
+      event.source.postMessage({type:'sumika:enhancement-error', id,
+        error:'草稿为空或超过 6000 字'}, event.origin);
+      return;
+    }
+    try {
+      const session = await fetch('/api/manage/session');
+      if (!session.ok) throw new Error('无法验证本地连接');
+      const csrf = (await session.json()).csrf;
+      const response = await fetch('/api/manage/auxiliary/enhance', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Sumika-CSRF': csrf},
+        body: JSON.stringify({original: text}),
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || '提示词优化失败');
+      event.source.postMessage({type:'sumika:enhancement-result', id, value}, event.origin);
+    } catch (error) {
+      event.source.postMessage({type:'sumika:enhancement-error', id,
+        error: String(error.message || error)}, event.origin);
+    }
+  }
   if (event.data?.type === 'sumika:task-consumed' && pending?.id === event.data.id) {
     const id=pending.id;
     try {const remaining=await draftRequest({action:'dismiss',id});if(pending?.id===id){pending=remaining;publish();}}

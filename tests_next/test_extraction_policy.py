@@ -47,6 +47,7 @@ class ExtractionGateTests(unittest.TestCase):
         secret = gate.review([self._proposal(text="我的 key 是 sk-abcdef1234567890")],
                              user_message_ids={"m1"})
         self.assertEqual(secret["rejected"][0]["reason"], "contains_credential")
+        self.assertNotIn("sk-abcdef", secret["rejected"][0]["text"])
         long_text = gate.review([self._proposal(text="用户" + "很" * 60)], user_message_ids={"m1"})
         self.assertEqual(long_text["rejected"][0]["reason"], "too_long")
 

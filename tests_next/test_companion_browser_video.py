@@ -31,6 +31,7 @@ class BrowserVideoTests(unittest.TestCase):
         command = self.bridge._run.call_args.args[0]
         self.assertEqual(command[0], 'evaluate')
         self.assertIn('textTracks', command[-1])
+        self.assertIn('.bili-subtitle-x-subtitle-panel-text', command[-1])
 
     def test_missing_cue_yields_invalid_observation(self):
         self.value['subtitles'] = ''

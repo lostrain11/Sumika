@@ -298,15 +298,7 @@ class CompanionProfileStore:
                         'profile_revision': state['revision']}
             return {'effective_profile_id': profile_id, 'reason': 'manual',
                     'profile_revision': state['revision']}
-        enabled = [item for item in state['profiles']
-                   if item['enabled_for_auto']]
-        if len(enabled) == 1:
-            return {'effective_profile_id': enabled[0]['id'],
-                    'reason': 'matched',
-                    'candidate_profile_id': enabled[0]['id'],
-                    'profile_revision': state['revision']}
-        if len(enabled) > 1:
-            return {'effective_profile_id': None, 'reason': 'ambiguous',
-                    'profile_revision': state['revision']}
+        # A store has no screen evidence. Only RoutingEngine can report a
+        # matched/ambiguous scene; the number of enabled profiles proves neither.
         return {'effective_profile_id': None, 'reason': 'unknown',
                 'profile_revision': state['revision']}

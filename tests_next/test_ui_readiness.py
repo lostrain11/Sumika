@@ -7,6 +7,30 @@ from ui import readiness
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_ocr_discovery_matches_selected_environment(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {}, clear=True), \
+                patch.object(readiness, '_module', return_value=False):
+            root = Path(folder)
+            site = root/'.sumika-next/desktop-env/Lib/site-packages'
+            (site/'rapidocr').mkdir(parents=True)
+            self.assertFalse(readiness._ocr_resolve(root)[0], 'package without interpreter is unusable')
+            python = root/'.sumika-next/desktop-env/Scripts/python.exe'
+            python.parent.mkdir(); python.touch()
+            self.assertEqual(readiness._ocr_resolve(root)[0], ['rapidocr'])
+            with patch.dict('os.environ', {'SUMIKA_OCR_PYTHON':str(root/'missing.exe')}), \
+                    patch.object(readiness, '_module', return_value=True):
+                self.assertEqual(readiness._ocr_resolve(root)[0], [])
+
+    def test_schedule_probe_uses_controller_directory_or_shared_default(self):
+        with tempfile.TemporaryDirectory() as folder:
+            expected=Path(folder)/'isolated-schedules'
+            with patch('ui.schedule.default_directory',return_value=expected):
+                row=next(r for r in readiness.probes(folder) if r['id']=='schedule')
+                self.assertIn(str(expected),row['detail'])
+                explicit=Path(folder)/'explicit'
+                row=next(r for r in readiness.probes(folder,schedule_directory=explicit) if r['id']=='schedule')
+                self.assertIn(str(explicit),row['detail'])
+
     def test_sensevoice_discovery_uses_selected_runtime_and_configured_model(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {}, clear=True):
             root = Path(folder)
@@ -78,7 +102,7 @@ class ReadinessTests(unittest.TestCase):
     def test_present_dependencies_flip_only_their_own_capability(self):
         with tempfile.TemporaryDirectory() as d:
             rows = self._probes(d, present_modules=("rapidocr_onnxruntime", "vosk", "sounddevice",
-                                                    "pywinauto", "docx", "cv2", "fastembed"))
+                                                    "pywinauto", "pywinctl", "docx", "openpyxl", "pptx", "pypdf", "reportlab", "cv2", "fastembed"))
             self.assertTrue(rows["ocr"]["ready"])
             self.assertFalse(rows["voice"]["ready"], "voice also needs a model directory")
             self.assertTrue(rows["desktop"]["ready"])
@@ -107,7 +131,7 @@ class ReadinessTests(unittest.TestCase):
     def test_isolated_extension_envs_count_as_ready(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            layout = {"office-env": ("docx", "openpyxl", "pptx", "pymupdf-1.9.dist-info"),
+            layout = {"office-env": ("docx", "openpyxl", "pptx", "pypdf", "reportlab"),
                       "desktop-env": ("pywinauto-0.6.9.dist-info", "pywinctl-0.4.1.dist-info", "cv2"),
                       "memory-env": ("fastembed-0.8.0.dist-info",)}
             for env, entries in layout.items():
@@ -120,12 +144,52 @@ class ReadinessTests(unittest.TestCase):
             (root / "runtime" / "browserskill" / "bsk.exe").write_bytes(b"stub")
             rows = self._probes(root)
             self.assertTrue(rows["office"]["ready"], rows["office"]["detail"])
-            self.assertEqual(rows["office"]["detail"], "隔离环境 office-env：docx, openpyxl, pptx, pymupdf")
+            self.assertEqual(rows["office"]["detail"], "隔离环境 office-env：docx, openpyxl, pptx, pypdf, reportlab")
             self.assertTrue(rows["desktop"]["ready"])
             self.assertTrue(rows["camera"]["ready"])
             self.assertTrue(rows["memory-semantic"]["ready"])
             self.assertFalse(rows["voice"]["ready"], "vosk still missing even though the model exists")
 
+
+    def test_partial_office_install_is_not_ready(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertFalse(self._probes(folder,present_modules=('docx',))['office']['ready'])
+
+    def test_partial_bridge_does_not_mask_complete_office_environment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            site = Path(folder)/'.sumika-next/office-env/Lib/site-packages'
+            for package in ('docx','openpyxl','pptx','pypdf','reportlab'):
+                (site/package).mkdir(parents=True)
+            row = self._probes(folder,present_modules=('pypdf',))['office']
+            self.assertTrue(row['ready'],row)
+            self.assertIn('office-env',row['detail'])
+            (site/'pypdf').rmdir()
+            self.assertFalse(self._probes(folder,present_modules=('pypdf',))['office']['ready'],
+                             'separate interpreters cannot pool their installed libraries')
+
+    def test_desktop_and_camera_follow_selected_runtime(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ',{},clear=True):
+            root = Path(folder)
+            runtime = root/'runtime/desktop'
+            site = runtime/'Lib/site-packages'
+            site.mkdir(parents=True)
+            (runtime/'python.exe').touch()
+            with patch('ui.readiness._module',return_value=True):
+                rows = {r['id']:r for r in readiness.probes(root,home=root)}
+                self.assertFalse(rows['desktop']['ready'])
+                self.assertFalse(rows['camera']['ready'])
+                entries = readiness.service_capabilities(root,home=root)
+                self.assertFalse({'desktop','camera'} & {r['id'] for r in entries})
+                for package in ('pywinauto','pywinctl','cv2'):
+                    (site/package).mkdir()
+                with patch('ui.readiness.platform.system',return_value='Windows'):
+                    rows = {r['id']:r for r in readiness.probes(root,home=root)}
+                    self.assertTrue(rows['desktop']['ready'])
+                    self.assertTrue(rows['camera']['ready'])
+                with patch.dict('os.environ',{'SUMIKA_DESKTOP_PYTHON':str(root/'missing.exe')}):
+                    rows = {r['id']:r for r in readiness.probes(root,home=root)}
+                    self.assertFalse(rows['desktop']['ready'])
+                    self.assertFalse(rows['camera']['ready'])
 
 if __name__ == "__main__":
     unittest.main()

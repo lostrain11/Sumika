@@ -14,11 +14,14 @@ class AudioLoopbackTests(unittest.TestCase):
             capture_loopback('x.wav', approved=True, process_id=42)
 
     def test_endpoint_capture_writes_wave(self):
+        # Import numpy before patch.dict(sys.modules): restoring that dict would
+        # drop the newly imported module while its C extension stays loaded,
+        # making a later import fail with "cannot load module more than once".
+        import numpy as np
         class Recorder:
             def __enter__(self): return self
             def __exit__(self, *args): pass
             def record(self, numframes):
-                import numpy as np
                 return np.zeros((numframes, 1), dtype='float32')
         class Loopback:
             isloopback = True

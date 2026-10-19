@@ -72,7 +72,17 @@
       } catch (_) {frame_status = 'video_frame_unreadable';}
     }
   }
-  const subtitles = [...new Set(cues.map(cue => cue.text.trim()).filter(Boolean))].join('\n').slice(0,12000);
+  // Bilibili renders its CC as a player-owned DOM overlay, not an HTML5
+  // text track. Read only the visible subtitle text node (not the control
+  // menu), scoped to bilibili.com; other sites stay text-track-only.
+  const domSubtitles = bilibili ? [...new Set(
+    [...document.querySelectorAll('.bili-subtitle-x-subtitle-panel-text,.bpx-player-subtitle-panel-text')]
+      .filter(visible)
+      .map(node => (node.textContent || '').replace(/\s+/g, ' ').trim())
+      .filter(text => text && text.length <= 12000))].slice(0, 8) : [];
+  const subtitles = [...new Set([
+    ...cues.map(cue => cue.text.trim()).filter(Boolean), ...domSubtitles,
+  ])].join('\n').slice(0,12000);
   // Danmaku is a community signal, not video content. Read only currently
   // visible text and keep it outside the primary subtitle/frame body so DOM
   // animation cannot make the visual observation look changed.
@@ -95,5 +105,5 @@
     paused:video.paused, ended:video.ended, playback_rate:video.playbackRate, ready_state:video.readyState,
     subtitles, image, frame_status, danmaku,
     cues, valid:!!subtitles || !!image,
-    reason:cues.length ? null : 'current_subtitles_unavailable'};
+    reason:subtitles ? null : 'current_subtitles_unavailable'};
 }

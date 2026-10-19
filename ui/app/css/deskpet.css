@@ -16,6 +16,8 @@
 .pet-host .deskpet.mini .dp-main,.pet-host .deskpet.mini .dp-chat,.pet-host .deskpet.mini .dp-bubble{display:none!important}
 .deskpet:active{cursor:grabbing}
 .deskpet.dragging{transition:none}
+.deskpet.opening{animation:deskpet-open .34s cubic-bezier(.2,.9,.25,1)}
+@keyframes deskpet-open{from{opacity:.35;transform:translateY(10px) scale(.84)}to{opacity:1;transform:none}}
 body.on-room .deskpet{display:none}
 
 /* ---- 聊天气泡 / 历史记录 ----
@@ -32,6 +34,10 @@ body.on-room .deskpet{display:none}
 .dp-bubble:hover{border-color:var(--rose-line);box-shadow:var(--shadow-pop-2)}
 .dp-bubble .st{display:flex;align-items:center;justify-content:space-between;font-size:9px;color:var(--chara);letter-spacing:1px;margin-bottom:4px}
 .dp-bubble .st i{font-style:normal;color:var(--muted-2);letter-spacing:0;font-size:8.5px}
+.dp-st-right{display:flex;align-items:center;gap:5px;min-width:0}
+.dp-collapse{display:grid;place-items:center;width:18px;height:18px;padding:0;border:0;border-radius:50%;
+  background:transparent;color:var(--muted-2);cursor:pointer;transition:background .15s,color .15s}
+.dp-collapse:hover{background:var(--hover-surface);color:var(--rose-deep)}
 /* 消息列表：收起态固定露出「最近三条」，展开态可滚到更早。
    用 :nth-last-child 而不是靠 max-height 去猜高度——消息一旦换行，
    按像素裁就会出现「只露两条 / 第二条被切一半」的不确定结果。 */
@@ -84,14 +90,48 @@ body.on-room .deskpet{display:none}
 #deskpet[data-vrm="off"] .dp-scene .chara-svg{display:none!important}
 
 /* 操作行：仅保留「收起」 */
-.dp-ops{display:flex;gap:4px}
-.dp-ops button{display:flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--paper);font-size:9.5px;color:var(--muted);border-radius:var(--radius-sm);padding:3px 10px;white-space:nowrap}
-.dp-ops button:hover{color:var(--rose-deep);border-color:var(--rose-line);background:var(--rose-soft)}
+.dp-ops{position:absolute;top:10px;right:10px;z-index:9;display:flex;gap:4px}
+.dp-ops button{display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;
+  border:1px solid var(--line);background:var(--surface-veil);backdrop-filter:blur(6px);
+  font-size:13px;line-height:1;color:var(--muted);border-radius:50%;white-space:nowrap;
+  box-shadow:0 2px 8px rgba(0,0,0,.12);cursor:pointer;opacity:.8;transition:opacity .15s,background .15s,color .15s}
+.dp-ops button:hover{opacity:1;color:var(--rose-deep);border-color:var(--rose-line);background:var(--rose-soft)}
 .dp-ops button svg{width:11px;height:11px}
-.dp-mini{display:none;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow);color:var(--chara);place-items:center}
-.dp-mini svg{width:18px;height:18px}
+
+/* Collapsed deskpet = a small living character orb, not a static letter badge. */
+.dp-mini{display:none;position:relative;width:54px;height:54px;-webkit-user-drag:none;border-radius:50%;border:1px solid var(--rose-line);
+  background:radial-gradient(circle at 34% 26%,var(--paper) 4%,var(--rose-soft) 58%,var(--paper) 100%);
+  box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),inset 0 0 0 5px rgba(180,73,106,.12),
+    0 7px 18px rgba(80,60,50,.18),0 0 0 4px rgba(180,73,106,.05);
+  color:var(--rose-deep);font:600 20px Georgia,"SimSun",serif;place-items:center;cursor:grab;padding:0;appearance:none;
+  isolation:isolate;overflow:visible;animation:deskpet-bob 3.8s ease-in-out infinite;
+  transition:box-shadow .2s,transform .2s}
+.dp-mini::before{content:"";position:absolute;inset:-6px;border-radius:50%;z-index:-1;
+  background:conic-gradient(from 20deg,transparent,var(--rose-soft),transparent 45%,var(--rose-line),transparent 78%);
+  opacity:.55;filter:blur(1px);animation:deskpet-orbit 9s linear infinite;pointer-events:none}
+.dp-mini::after{content:"";position:absolute;inset:6px;border-radius:50%;z-index:1;pointer-events:none;
+  background:repeating-conic-gradient(from -10deg,rgba(180,73,106,.3) 0deg 16deg,transparent 16deg 34deg);
+  -webkit-mask:radial-gradient(circle,transparent 0 46%,#000 47% 78%,transparent 79%);
+  mask:radial-gradient(circle,transparent 0 46%,#000 47% 78%,transparent 79%);
+  opacity:.75}
+.dp-mini:hover{transform:scale(1.08);box-shadow:0 9px 24px rgba(80,60,50,.24),0 0 0 6px rgba(180,73,106,.09);animation-play-state:paused}
+.dp-mini:active{transform:scale(.95);cursor:grabbing}
+.dp-mini-ava{position:relative;z-index:2;line-height:1;transform:translateY(-1px)}
+
+.dp-mini-spark{position:absolute;z-index:3;top:2px;right:3px;font:11px Georgia,serif;color:var(--rose);
+  animation:deskpet-twinkle 2.4s ease-in-out infinite;pointer-events:none}
+.dp-mini-tip{position:absolute;z-index:4;right:0;bottom:calc(100% + 7px);white-space:nowrap;
+  padding:4px 8px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--paper);
+  color:var(--muted);font:10px/1.4 sans-serif;box-shadow:var(--shadow);opacity:0;transform:translateY(3px);
+  transition:opacity .16s,transform .16s;pointer-events:none}
+.dp-mini:hover .dp-mini-tip,.dp-mini:focus-visible .dp-mini-tip{opacity:1;transform:translateY(0)}
+.deskpet.dragging .dp-mini{animation:none;transform:scale(.94);cursor:grabbing}
 .deskpet.mini .dp-main,.deskpet.mini .dp-chat,.deskpet.mini .dp-bubble{display:none}
 .deskpet.mini .dp-mini{display:grid}
+@keyframes deskpet-bob{0%,100%{translate:0 0}50%{translate:0 -4px}}
+@keyframes deskpet-orbit{to{rotate:360deg}}
+@keyframes deskpet-twinkle{0%,100%{opacity:.45;transform:scale(.9)}50%{opacity:1;transform:scale(1.15)}}
+@media (prefers-reduced-motion:reduce){.dp-mini,.dp-mini::before,.dp-mini-spark{animation:none}}
 
 /* 桌宠闲聊输入框 */
 .dp-chat{display:flex;align-items:center;gap:6px;width:300px;border:1px solid var(--line);border-radius:11px;background:var(--paper);box-shadow:var(--shadow);padding:5px 6px 5px 10px}

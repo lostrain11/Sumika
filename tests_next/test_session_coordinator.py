@@ -2,6 +2,7 @@
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
 from extensions.companion.contracts import ObservationBundle
@@ -33,7 +34,8 @@ class CoordinatorTests(unittest.TestCase):
         self.coordinator = StudySessionCoordinator(chat=chat,
             current=lambda: None, on_event=lambda name, detail:
             self.events.append({'event': name, **detail}),
-            include_images=lambda: False, scheduler_thread=False)
+            include_images=lambda: False, scheduler_thread=False,
+            monotonic=lambda: self.now[0])
         scheduler = ObservationScheduler(self.coordinator._perception,
             on_observation=self.coordinator.service.update,
             on_proactive=self.coordinator._dispatch_proactive,
@@ -77,6 +79,10 @@ class CoordinatorTests(unittest.TestCase):
         self.coordinator.voice_request_delivered(1)
         self.coordinator.voice_request_finished(1)
         self.assertEqual(self.coordinator.status()['active_requests'], 0)
+        # A finished voice turn must release the background gate; otherwise one
+        # spoken question silently disables proactive discussion, behavior
+        # prompts and danmaku summaries for the rest of the session.
+        self.assertFalse(self.coordinator._voice_busy)
         # The voice answer joined the same short-term history as text questions.
         third = self.coordinator.ask_text('第三问')
         self.assertEqual(third['context_turns'], 3)
@@ -392,6 +398,28 @@ class BehaviorNoteTests(unittest.TestCase):
         self.flip_to(9)
         self.assertEqual(len(seen), len(events))
 
+    def test_behavior_sink_failure_does_not_fall_back_to_note_or_block_question(self):
+        def broken_sink(event):
+            raise RuntimeError('private behavior directory unavailable')
+        self.coordinator._behavior_sink = broken_sink
+        current = self.page_bundle(1)
+        self.coordinator.publish_observation(current)
+        with patch.object(self.tracker,'feed',return_value={'kind':'flip_burst','flips':6}):
+            self.coordinator._behavior_feed(current)
+        worker = self.coordinator._proactive_thread
+        if worker is not None:
+            worker.join(2)
+        self.assertIsNone(worker)
+        self.assertEqual(self.chat_calls,[])
+        self.assertEqual(self.behavior_events(),[])
+        self.assertEqual([event for event in self.events if event['event']=='behavior_persist_error'],
+                         [{'event':'behavior_persist_error','error':'RuntimeError'}])
+        self.assertIsNone(self.coordinator.failed)
+        result=self.coordinator.ask_text('这页讲什么？')
+        self.assertTrue(result['text'])
+        self.assertEqual(len(self.chat_calls),1)
+        self.assertEqual(self.behavior_prompts(),[])
+
     def test_fast_flipping_triggers_one_behavior_note(self):
         self.coordinator.publish_observation(self.page_bundle(1))
         self.scheduler.notify_user_activity(0)
@@ -456,6 +484,48 @@ class BehaviorNoteTests(unittest.TestCase):
         self.flip_to(2, 3, 4, 5, 6, 7)
         self.assertFalse(self.flush(8, 1.0))
         self.assertEqual(self.behavior_events(), [])
+
+    def test_cancel_ignoring_note_finishes_after_question_span_without_emission_or_thread_error(self):
+        entered, release, returned = threading.Event(), threading.Event(), threading.Event()
+        spoken, thread_errors = [], []
+        def slow_provider(prompt, *, session_id, images=None, **kwargs):
+            self.chat_calls.append({'prompt':prompt,'images':images})
+            entered.set()
+            release.wait(3)  # Deliberately ignores the cancelled request token.
+            returned.set()
+            return {'text':'迟到的旧行为提示'}
+        self.coordinator.service._role_chat = slow_provider
+        self.coordinator.attach_speaker(spoken.append)
+        self.coordinator.publish_observation(self.page_bundle(1))
+        with patch('threading.excepthook', side_effect=thread_errors.append):
+            worker = None
+            try:
+                self.coordinator._maybe_behavior_note({'kind':'flip_burst','flips':6})
+                worker = self.coordinator._proactive_thread
+                self.assertIsNotNone(worker)
+                self.assertTrue(entered.wait(2))
+                self.assertTrue(self.behavior_prompts())
+                with self.coordinator.text_question_span():
+                    self.assertTrue(self.coordinator._text_busy)
+                # Busy-only suppression would now permit this stale result.
+                self.assertFalse(self.coordinator._text_busy)
+                self.assertTrue(self.coordinator._background_gate())
+                self.assertTrue(worker.is_alive())
+                self.assertFalse(returned.is_set())
+                release.set()
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
+                self.assertTrue(returned.is_set())
+            finally:
+                release.set()
+                if worker is not None:
+                    worker.join(2)
+        self.assertEqual(thread_errors,[])
+        self.assertEqual(self.behavior_events(),[])
+        self.assertEqual(spoken,[])
+        self.assertEqual([event for event in self.events if event['event']=='proactive_error'],[])
+        self.assertIsNone(self.coordinator._background_owner)
+        self.assertEqual(self.coordinator._background_tokens,set())
 
     def test_proactive_disabled_gates_behavior_notes(self):
         self.coordinator.set_proactive(enabled=False, interval_seconds=120)

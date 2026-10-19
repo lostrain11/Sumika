@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {realpathSync} from 'node:fs';
-import {identity,submissionIdentity,approvalGate,apply} from './review_dsh.mjs';
+import {realpathSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {identity,submissionIdentity,approvalGate,apply,scopedProjects} from './review_dsh.mjs';
 
 const root=realpathSync('.');
 const projects=new Set([root]),presets=new Set(['work']);
@@ -36,6 +38,36 @@ test('identity binds call/session/project and excludes roles or delegated agents
 test('disabled adapter registers nothing',async()=>{
   await apply(new Proxy({},{get(){throw Error('unexpected access')}}),{enabled:false});
   await assert.rejects(apply({},{enabled:'true'}),/explicit/);
+});
+test('native registry membership is rechecked and cannot admit unrelated sessions',()=>{
+  let members=['s'];
+  const registry={list:()=>[{path:root,sessionIds:members}]};
+  assert.equal(identity(exec,scopedProjects(exec,new Set(),registry),presets).owner,identity(exec,projects,presets).owner);
+  members=[];
+  assert.throws(()=>identity(exec,scopedProjects(exec,new Set(),registry),presets));
+  members=['other'];
+  assert.throws(()=>identity(exec,scopedProjects(exec,new Set(),registry),presets));
+});
+test('user switch checked live before approvals; status and local cancellation remain available',async()=>{
+  const temp=mkdtempSync(join(tmpdir(),'sumika-review-switch-'));
+  try{
+    const registry=join(temp,'authorizations.json');
+    const tools=new Map(),hooks=new Map();
+    const ctx={workspaceRegistry:{list:()=>[{path:root,sessionIds:['s']}]},
+      tools:{register(tool){tools.set(tool.name,tool)},get(name){return tools.get(name)}},on(n,fn){hooks.set(n,fn)}};
+    await apply(ctx,{enabled:true,projects:[],registeredWorkspaces:true,workPresets:['work'],root,python:'MUST_NOT_RUN',registry,
+      runtimeEntry:realpathSync('runtime/dsh/node_modules/@deepseek-ai/dsh/package.json')});
+    const gate=hooks.get('tools/pre-execute');
+    assert.equal((await gate(exec,async()=>({kind:'allow'}))).kind,'deny');
+    for(const action of ['status','cancel'])assert.equal((await gate({...exec,name:'web_review_result',arguments:{action}},async()=>({kind:'allow'}))).kind,'allow');
+    assert.equal((await gate({...exec,name:'web_review_result',arguments:{action:'collect'}},async()=>({kind:'allow'}))).kind,'deny');
+    writeFileSync(registry,JSON.stringify({schema_version:1,sites:{},enabled:true}));
+    assert.equal((await gate(exec,async()=>({kind:'allow'}))).kind,'ask');
+    writeFileSync(registry,JSON.stringify({schema_version:1,sites:{},enabled:false}));
+    assert.equal((await gate(exec,async()=>({kind:'allow'}))).kind,'deny');
+    writeFileSync(registry,'invalid');
+    assert.equal((await gate(exec,async()=>({kind:'allow'}))).kind,'deny');
+  }finally{rmSync(temp,{recursive:true,force:true});}
 });
 test('register with actual installed DSH schema; rejected scope never launches worker',async()=>{
   const tools=new Map(),hooks=new Map();

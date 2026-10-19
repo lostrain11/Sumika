@@ -74,9 +74,9 @@ class UsageStore:
     def totals(self, scope, session=None):
         """Aggregate one scope; per-metric unknowns stay unknown.
 
-        Token columns keep their historical zero fill: a recorded request with
-        missing token values stores NULL and rolls into ``unknown_rows``
-        instead. Audio seconds and vision calls only exist on rows that
+        Top-level token columns keep their historical zero fill. Category
+        sums preserve NULL when no row measured a metric, and unknown_count
+        counts each incomplete request once. Audio seconds and vision calls only exist on rows that
         measured them, so their sums are ``None`` (unknown) unless at least
         one row carries a real value — never silently zero.
 
@@ -96,7 +96,8 @@ class UsageStore:
         p,c,t,a,v,u,n=self.db.execute(sql,args).fetchone()
         group_sql=('SELECT COALESCE(category,\'unknown\'),COUNT(*),'
                    'SUM(prompt_tokens),SUM(completion_tokens),SUM(total_tokens),'
-                   'SUM(CASE WHEN prompt_tokens IS NULL THEN 1 ELSE 0 END),'
+                   'SUM(CASE WHEN prompt_tokens IS NULL OR completion_tokens IS NULL '
+                   'OR total_tokens IS NULL THEN 1 ELSE 0 END),'
                    'SUM(audio_seconds),SUM(CASE WHEN audio_seconds IS NULL THEN 1 ELSE 0 END),'
                    'SUM(vision_calls),SUM(CASE WHEN vision_calls IS NULL THEN 1 ELSE 0 END),'
                    'SUM(CASE WHEN status=\'estimated\' THEN 1 ELSE 0 END),'
@@ -120,9 +121,9 @@ class UsageStore:
                 known={}
                 unknown_count=0
                 if 'prompt_tokens' in metrics:
-                    known['prompt_tokens']=pt or 0
-                    known['completion_tokens']=ct or 0
-                    known['total_tokens']=tt or 0
+                    known['prompt_tokens']=pt
+                    known['completion_tokens']=ct
+                    known['total_tokens']=tt
                     unknown_count+=pt_unknown or 0
                 if 'audio_seconds' in metrics:
                     known['audio_seconds']=au

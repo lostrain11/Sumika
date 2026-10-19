@@ -403,9 +403,10 @@ class CompanionQuestionService:
         return result
 
     def proactive(self, *, session_id='companion', expected_observation=None,
-                  prompt='请结合当前内容，用一句话指出一个值得注意的学习点。'):
+                  prompt='请结合当前内容，用一句话指出一个值得注意的学习点。',
+                  cancellation_token=None):
         """Generate a bounded suggestion for the scheduler; never appends history."""
-        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 500:
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 2000:
             raise ValueError('invalid proactive prompt')
         with self._lock:
             observation = self._latest
@@ -429,7 +430,8 @@ class CompanionQuestionService:
             f'[图像输入] {"已附图" if self._include_images and observation.image else "未附图，不能声称看到画面"}\n'
             f'[参考内容]\n{text}\n[参考内容结束]\n{prompt.strip()}',
             session_id=session_id, images=[dict(observation.image)] if self._include_images and observation.image else None,
-            generation=generation, content_revision=content_revision)
+            generation=generation, content_revision=content_revision,
+            cancellation_token=cancellation_token)
         with self._lock:
             if self._generation != generation or self._content_revision != content_revision:
                 return {'status': 'stale_response', 'observation_at': observation.observed_at.isoformat()}
@@ -440,7 +442,7 @@ class CompanionQuestionService:
                        'observation_source': observation.source, 'observation_target': observation.target})
         return result
 
-    def behavior_note(self, behavior, *, session_id='companion'):
+    def behavior_note(self, behavior, *, session_id='companion', cancellation_token=None):
         """Ask the model to respond to a reading-behavior pattern itself.
 
         The behavior report is the only reference: no page text or image is
@@ -464,7 +466,11 @@ class CompanionQuestionService:
             "不要讨论或解释任何书页或屏幕内容。没有合适的话就只返回：暂不提示\n"
             "[图像输入] 未附图；不能声称看到了画面"
         )
-        result = self._role_chat(prompt, session_id=session_id, images=None)
+        token = cancellation_token or CancellationToken()
+        with token.activate():
+            token.check()
+            result = self._role_chat(prompt, session_id=session_id, images=None)
+            token.check()
         if not isinstance(result, dict):
             raise TypeError("role chat must return an object")
         return dict(result, status='behavior_note')

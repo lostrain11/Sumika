@@ -126,6 +126,23 @@ def directory_digest(directory):
     return {'files': count, 'sha256': accumulator.hexdigest()}
 
 
+def single_file_launcher(path):
+    """The package ships only the launcher EXE, so a plain .NET apphost is invalid.
+
+    .NET's published bundle contains a nonzero header pointer immediately
+    before its fixed bundle signature. This is a structural guard; actual
+    EXE startup remains a separate acceptance gate.
+    """
+    path = executable_asset(path)
+    data = path.read_bytes()
+    marker = bytes.fromhex('8b1202b96a612038727b930214d7a03213f5b9e6efae3318ee3b2dce24b36aae')
+    position = data.find(marker)
+    offset = int.from_bytes(data[position-8:position], 'little') if position >= 8 else 0
+    if not 0 < offset < len(data):
+        raise ValueError('launcher must be a published .NET single-file bundle; run dotnet publish, not dotnet build')
+    return path
+
+
 def source_state(root):
     """Source identity for the receipt: commit plus an honest dirty summary."""
     import subprocess
@@ -163,7 +180,8 @@ def build_receipt(args, destination):
     for name, path in (('pet_host', args.pet_host),
                        ('process_audio_helper', args.process_audio_helper),
                        ('desktop_runtime', args.desktop_runtime),
-                       ('voice_runtime', args.voice_runtime)):
+                       ('voice_runtime', args.voice_runtime),
+                       ('office_runtime', getattr(args,'office_runtime',None))):
         if path is not None:
             resolved = path.resolve(strict=True)
             inputs[name] = (digest(resolved) if resolved.is_file()
@@ -175,8 +193,8 @@ def build_receipt(args, destination):
             'sha256': digest(ROOT/'tools'/'build_companion_extension.mjs')}},
         'command': {'argv': list(sys.argv), 'destination': str(destination)},
         'acceptance': {
-            'command': 'python -B tools/verify_portable_staging.py --destination '
-                       + str(destination),
+            'command': 'python -B tools/verify_portable_staging.py "'
+                       + str(destination) + '"',
             'status': 'not_run_by_builder; inventory success is not release acceptance'},
         'resource_warnings': [],
         'resource_warning_policy': 'located in separate evidence with a cause; '
@@ -197,6 +215,8 @@ def main():
                         help='Optional physical standalone capability Python directory')
     parser.add_argument('--voice-runtime', type=Path,
                         help='Optional physical standalone continuous voice Python directory')
+    parser.add_argument('--office-runtime', type=Path,
+                        help='Optional official workspace-dependencies payload (runtime.json/dependencies)')
     args = parser.parse_args()
     destination = args.destination.absolute()
     if destination.exists():
@@ -206,7 +226,7 @@ def main():
                      'ui/vendor/icons/info.svg', 'tools/run_module.py'):
         if not (ROOT / relative).is_file():
             raise ValueError('required current UI/startup resource missing: ' + relative)
-    selected = [(executable_asset(args.launcher), Path('Sumika.exe'))]
+    selected = [(single_file_launcher(args.launcher), Path('Sumika.exe'))]
     selected.append(reference_registry_asset(ROOT))
     if args.pet_host:
         selected.append((executable_asset(args.pet_host), Path('SumikaPet.exe')))
@@ -230,6 +250,12 @@ def main():
             reject_runtime_dev_paths(runtime)
             selected.extend((p, Path('runtime')/name/rel) for p, rel in physical_files(runtime))
     browser = ROOT/'runtime/browserskill'
+    if args.office_runtime is not None:
+        runtime = args.office_runtime.resolve(strict=True)
+        if not (runtime/'runtime.json').is_file() or not (runtime/'dependencies/python/python.exe').is_file():
+            raise ValueError('Office runtime requires official payload layout')
+        reject_runtime_dev_paths(runtime/'dependencies/python')
+        selected.extend((p,Path('runtime/office')/rel) for p,rel in physical_files(runtime))
     if browser.is_dir():
         selected.extend((p, Path('runtime/browserskill')/rel) for p, rel in browser_runtime_files(browser))
     # R5/P05: the Bilibili companion MV3 extension ships inside the candidate

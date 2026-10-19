@@ -4,7 +4,7 @@
 // provenance markers (no paid model calls).
 import {spawn} from 'node:child_process';
 import {mkdir, writeFile, readFile} from 'node:fs/promises';
-import {readdirSync, writeFileSync} from 'node:fs';
+import {readdirSync, writeFileSync, existsSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {createInterface} from 'node:readline';
 import assert from 'node:assert/strict';
@@ -12,6 +12,11 @@ import {loadPlaywright} from './lib/playwright.mjs';
 import {buildCompanionExtension} from './build_companion_extension.mjs';
 
 const output = resolve(process.argv[2] || 'E:/SumikaBuild/companion-wiring-e2e');
+const productIndex=process.argv.indexOf('--product');
+const product=resolve(productIndex<0?'.':process.argv[productIndex+1]);
+const voicePython=process.env.SUMIKA_VOICE_PYTHON || join(product,'runtime/voice/python.exe');
+const siteVideoUrl=process.env.SUMIKA_BILIBILI_VIDEO_URL || 'https://www.bilibili.com/video/BV1QN4y1c7RQ/';
+assert(existsSync(voicePython),'--product must contain the packaged voice runtime');
 await mkdir(output, {recursive: true});
 await mkdir(join(output, 'bridge-data'), {recursive: true});
 // Global watchdog: run 58 hung >20 minutes (unbounded browser.close() once the
@@ -24,26 +29,27 @@ setTimeout(() => {
   process.exit(124);
 }, 8 * 60 * 1000).unref();
 const voskModel = 'E:/Models/Speech/sumika/vosk-model-small-cn-0.22';
-const voicePython = 'E:/SumikaBuild/p05-stage-check/runtime/voice/python.exe';
-const videoUrl = 'https://www.bilibili.com/video/BV1QN4y1c7RQ/';
+const videoUrl = siteVideoUrl;
 const markers = join(output, 'model-markers.jsonl');
 const report = {passed: false, scope: 'Real bridge + real extension + real product '
   + 'page; chat stub returns provenance markers (no paid model calls)',
-  checks: {}, phases: []};
+  product, checks: {}, phases: [], boundary:'Production UI/Bridge and extension; model answer is a provenance fixture, not model quality; popup worker offer is invoked directly, not a toolbar click.'};
 const log = message => {report.phases.push({at: new Date().toISOString(), message});
   console.log('[e2e]', message);};
 
 const bridgeCode = `
-import sys, threading, json
+import sys, threading, json, traceback
 from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
 data = Path(sys.argv[1]); markers = Path(sys.argv[2])
 _log = open(data/'bridge-log.txt', 'w', encoding='utf8')
 sys.stdout = _log; sys.stderr = _log
 try:
-    from extensions.models.settings import load, save
-    base = load(Path(sys.argv[3]))
+    from extensions.models.settings import example, save
+    base = example(Path.cwd()/"assets/roles", data/"role.db")
     base["role"]["database"] = str(data/"role.db"); base["role"]["memory_provider"]="embedded"
     base["memory"]["enabled"] = False; base["enabled"] = True
+    base["multimodal"]["enabled"] = True
     base.setdefault("voice", {}).update({"enabled": True, "input_device": None,
         "sample_rate": 16000, "asr_model": sys.argv[4]})
     save(base, data/"settings.json")
@@ -53,8 +59,10 @@ try:
     store.configure("asr", "vosk", options={})
     store.configure("voice", "windows-sapi", options={})
     store.close()
+    import ui.server as server_module
+    assert Path(server_module.__file__).resolve() == Path.cwd()/"ui/server.py", server_module.__file__
     from ui.server import serve
-    server = serve(data/"settings.json", port=0, workbench_root=data,
+    server = serve(data/"settings.json", port=0, workbench_root=Path.cwd(),
                    capability_database=data/"capabilities.sqlite3")
     def stub(prompt, **kwargs):
         marker = "E2E_TARGET_OK" if "browser-passive" in prompt else "E2E_NO_TAB_CONTEXT"
@@ -64,20 +72,21 @@ try:
     server.sumika_bridge._companion._role_chat = stub
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(json.dumps({"port": server.server_port}), flush=True)
-    sys.stdin.read()
+    try: sys.stdin.read()
+    finally: server.shutdown(); server.server_close()
 except BaseException:
     _log.write(traceback.format_exc()); _log.flush()
     raise
 `;
 
 const extension = await buildCompanionExtension(join(output, 'extension'));
-const settings = 'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/Sumika/role-model-settings.json';
+const settings = join(output,'unused-settings-placeholder');
 const logPath = join(output, 'bridge-data', 'bridge-log.txt');
 const bridge = spawn(process.env.SUMIKA_TEST_PYTHON || 'python',
   ['-u', '-X', 'utf8', '-B', '-c', bridgeCode,
    join(output, 'bridge-data'), markers, settings, voskModel],
-  {cwd: resolve('.'), stdio: ['pipe', 'ignore', 'pipe'],
-   env: {...process.env, SUMIKA_VOICE_PYTHON: voicePython,
+  {cwd: product, windowsHide:true, stdio: ['pipe', 'ignore', 'pipe'],
+   env: {...process.env, SUMIKA_DATA_DIR:join(output,"bridge-data"), SUMIKA_VOICE_PYTHON: voicePython,
          SUMIKA_BROWSER_AUDIO_CHILD_LOG: join(output, 'audio-child.log'),
          SUMIKA_PASSIVE_DIAG: join(output, 'passive-diag.log')}});
 bridge.on('error', error => console.log('[bridge spawn error]', error.message));
@@ -105,13 +114,16 @@ const {chromium} = loadPlaywright();
 const browser = await chromium.launchPersistentContext(join(output, 'profile'), {
   channel: 'msedge', headless: true,
   args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`]});
+let productPage;
 try {
   // 1. Real public video tab + product POPUP connect.
   const video = await browser.newPage();
   await video.goto(videoUrl, {waitUntil: 'domcontentloaded', timeout: 60000});
-  video.on('console', message => console.log('[content]', message.text()));
+  video.on('console', message => {if(message.text().includes('[sumika'))console.log('[content]',message.text());});
   await video.evaluate(() => {const v = document.querySelector('video');
     if (v) {v.muted = true; v.volume = 0; v.play().catch(() => {});}});
+  await video.waitForFunction(()=>{const v=document.querySelector('video');return v && v.readyState>=2;},null,{timeout:60000});
+  await video.evaluate(async()=>{const v=document.querySelector('video');v.muted=true;v.volume=0;await v.play();setInterval(()=>{if(v.paused&&!v.ended)v.play().catch(()=>{});},1000);});
   const worker = browser.serviceWorkers()[0]
     || await browser.waitForEvent('serviceworker', {timeout: 15000});
   worker.on('console', message => console.log('[sw]', message.text()));
@@ -137,18 +149,16 @@ try {
   log('authenticated pending: ' + JSON.stringify(pendingProbe));
 
   // 2. The REAL product page approves through the companion detail UI.
-  const page = await browser.newPage({viewport: {width: 900, height: 900}});
+  const page = productPage = await browser.newPage({viewport: {width: 1440, height: 1000}});
   const pageErrors = [];
+  report.page_errors=pageErrors;
   page.on('pageerror', error => pageErrors.push(error.message));
   await page.goto(base + '/', {waitUntil: 'domcontentloaded', timeout: 60000});
-  await page.evaluate(async () => {
-    const host = document.createElement('main');
-    host.style.width = '860px';
-    document.body.append(host);
-    const {mountCompanionSession} = await import('/app/companion-session.js');
-    mountCompanionSession(host);
-  });
-  const detail = page.locator('main section').filter({has: page.getByLabel('学习窗口')}).first();
+  await page.locator('button').filter({hasText:'管理角色与记忆'}).waitFor({state:'attached',timeout:60000});
+  await page.locator('#gnav [data-go="shelf"]').click();
+  await page.locator('.cap-card[data-capability-id="speech"]').click();
+  await page.getByLabel('学习窗口',{exact:true}).waitFor({timeout:90000});
+  const detail = page.locator('section').filter({has: page.getByLabel('学习窗口')}).first();
   // Two 刷新 buttons exist in the section (window list and status); the
   // window-list one carries the explanatory title.
   await detail.locator('button[title="刷新窗口列表"]').click();
@@ -227,8 +237,8 @@ try {
       await sendCompanionText('这节课在讲什么？', text => {window.__e2eAnswer = text;});
       return window.__e2eAnswer;
     }),
-    new Promise((_, reject) => setTimeout(() => reject(new Error(
-      'text question did not settle in 60s (bridge handler stuck?)')), 60000))]);
+    new Promise((_, reject) => {const timer=setTimeout(() => reject(new Error(
+      'text question did not settle in 60s (bridge handler stuck?)')), 60000);timer.unref();})]);
   assert(answer.includes('E2E_TARGET_OK'),
          'the answer must come from the tab context, got: ' + answer);
   report.checks.text_question_routed_to_tab_context = true;
@@ -273,10 +283,20 @@ try {
   report.checks.ui_stop_disconnects_tab = stopOk;
   assert(stopOk, 'the tab session must stop with the UI; requests: '
     + JSON.stringify(stopCalls));
+  report.checks.no_page_errors=pageErrors.length===0;
+  report.page_errors=pageErrors;
+  assert.equal(pageErrors.length,0,'unexpected page errors');
+  await page.screenshot({path:join(output,'stopped.png')});
   report.passed = true;
+} catch(error) {
+  report.error=error.message;
+  if(productPage){await productPage.screenshot({path:join(output,'failure.png')}).catch(()=>{});report.product_text=(await productPage.locator('body').innerText().catch(()=>'' )).slice(-8000);}
+  throw error;
 } finally {
   await browser.close();
-  bridge.kill();
+  bridge.stdin.end();
+  await Promise.race([new Promise(done=>{if(bridge.exitCode!==null)done();else bridge.once('exit',done);}),new Promise(done=>{const timer=setTimeout(()=>{bridge.kill();done();},10000);timer.unref();})]);
+  report.bridge_stopped=bridge.exitCode!==null;
   try {const diag = await readFile(join(output, 'passive-diag.log'), 'utf8');
     console.log('[e2e] passive-diag tail:\n' + diag.trim().split('\n').slice(-40).join('\n'));
   } catch { }

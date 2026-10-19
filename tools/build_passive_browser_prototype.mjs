@@ -26,6 +26,8 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   let tick=0;
   let previousState=null;
   let previousContent=null;
+  let needsFull=false;
+  let networkRetries=0;
   const poll=async()=>{
     if(owner!==epoch)return;
     try {
@@ -35,14 +37,20 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       const signature=JSON.stringify({identity:state.media_identity,subtitles:state.subtitles,
         paused:state.paused,ended:state.ended,seeking:state.seeking,rate:state.playback_rate});
       const changed=signature!==previousState;
-      const full=changed || tick===1 || (message.capture_frame && tick%5===0);
+      const full=needsFull || changed || tick===1 || (message.capture_frame && tick%5===0);
       const snapshot=full ? (message.capture_frame ? collect({origin:message.origin,capture_frame:true}) : state) : null;
       if(full && !snapshot.ok) {epoch++;return;}
       const content=snapshot ? JSON.stringify({state:signature,image:snapshot.image,
         frame_status:snapshot.frame_status,danmaku:(snapshot.danmaku||[]).map(item=>item.text)}) : previousContent;
       const upload=full && content!==previousContent;
       const result=await chrome.runtime.sendMessage(upload ? {type:'snapshot',snapshot} : {type:'heartbeat'});
-      if(!result?.accepted) {epoch++;return;}
+      if(!result?.accepted) {
+        if(result?.retry && owner===epoch && networkRetries<30) {
+          networkRetries++;needsFull=true;setTimeout(poll,1000);return;
+        }
+        epoch++;return;
+      }
+      networkRetries=0;needsFull=false;
       previousState=signature;
       if(upload)previousContent=content;
     } catch {epoch++;return;}
@@ -201,7 +209,10 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       if(accepted){owner.accepted++;if(message.type==='heartbeat')owner.heartbeats++;else owner.frames++;}
       if(!accepted)connection=null;
       respond({accepted});
-    } catch {if(connection===owner){connection=null;lastStatus='network_failed';}respond({accepted:false});}
+    } catch {
+      if(connection===owner){lastStatus='network_failed';}
+      respond({accepted:false,retry:true});
+    }
     finally {owner.busy=false;}
   })();
   return true;

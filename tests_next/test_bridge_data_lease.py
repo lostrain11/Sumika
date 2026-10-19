@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ class BridgeDataLeaseTests(unittest.TestCase):
         base = Path('.sumika-next/bridge-lease-tests')
         base.mkdir(parents=True, exist_ok=True)
         self.root = Path(tempfile.mkdtemp(dir=base)).resolve()
+        self.addCleanup(shutil.rmtree, self.root, True)
 
     def test_second_bridge_cannot_write_same_data_on_another_port(self):
         settings = self.root/'role-model-settings.json'

@@ -18,6 +18,8 @@ class Conversations:
             db.execute('CREATE TABLE IF NOT EXISTS role_handoffs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, source TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS role_handoff_events (id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS role_scope_bindings (owner TEXT NOT NULL, project TEXT NOT NULL, location TEXT NOT NULL, scope TEXT NOT NULL, retired INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(owner, project, location))')
+            db.execute('CREATE TABLE IF NOT EXISTS role_purged_turns '
+                       '(scope TEXT, identity_hash TEXT, PRIMARY KEY(scope,identity_hash))')
 
     @staticmethod
     def _location(path):
@@ -110,6 +112,9 @@ class Conversations:
             for index, (at, original, reply) in enumerate(turns):
                 identity = json.dumps([scope, session, index, at, original, reply], ensure_ascii=False)
                 turn_id = 'legacy-' + hashlib.sha256(identity.encode()).hexdigest()
+                if db.execute('SELECT 1 FROM role_purged_turns WHERE scope=? AND identity_hash=?',
+                              (scope, self._turn_hash(turn_id))).fetchone():
+                    continue
                 state = 'completed' if reply and reply.strip() else 'unknown'
                 inserted += db.execute('INSERT OR IGNORE INTO role_turns VALUES (?,?,?,?,?,?,?,NULL)',
                     (turn_id, scope, session, at, original, state, reply)).rowcount
@@ -233,3 +238,60 @@ class Conversations:
             db.execute("UPDATE role_handoffs SET state='dismissed' WHERE state='pending' AND source IN (SELECT id||':user' FROM role_turns WHERE scope=? AND session=?)",(scope,session))
             count=db.execute('DELETE FROM role_turns WHERE scope=? AND session=?',(scope,session)).rowcount
         return count
+
+    @staticmethod
+    def _turn_hash(turn_id):
+        return hashlib.sha256(turn_id.encode('utf8')).hexdigest()
+
+    @classmethod
+    def _purge_rows(cls, db, scope, turn_ids, *, schema='main', erase=False):
+        """Used by the offline coordinator inside its attached-DB transaction.
+
+        No commit, file deletion, model call or task replay. Clear keeps its
+        existing recovery semantics. Erasure never recreates a missing turn.
+        """
+        if schema not in ('main', 'materials'):
+            raise ValueError('invalid journal schema')
+        if (not isinstance(scope, str) or not scope or not isinstance(turn_ids, list)
+                or not 1 <= len(turn_ids) <= 100
+                or any(not isinstance(t, str) or not t or len(t) > 128 for t in turn_ids)
+                or len(set(turn_ids)) != len(turn_ids)):
+            raise ValueError('1-100 distinct turn identities required')
+        tables = ['role_turns']
+        if db.execute(f"SELECT 1 FROM {schema}.sqlite_master WHERE type='table' "
+                      "AND name='cleared_role_turns'").fetchone():
+            tables.append('cleared_role_turns')
+        rows = []
+        sources = [turn + ':user' for turn in turn_ids]
+        for turn in turn_ids:
+            found = []
+            for table in tables:
+                current = db.execute(f'SELECT * FROM {schema}.{table} WHERE id=?', (turn,)).fetchall()
+                if any(row[1] != scope for row in current):
+                    raise ValueError('message unavailable in selected role scope')
+                found.extend((table, row) for row in current)
+            if not found and not db.execute(
+                    f'SELECT 1 FROM {schema}.role_purged_turns WHERE scope=? AND identity_hash=?',
+                    (scope, cls._turn_hash(turn))).fetchone():
+                raise ValueError('message unavailable in selected role scope')
+            rows.extend(found)
+        marks = ','.join('?' for _ in sources)
+        handoffs = db.execute(f'SELECT * FROM {schema}.role_handoffs WHERE source IN ({marks})', sources).fetchall()
+        events = []
+        for handoff in handoffs:
+            events.extend(db.execute(f'SELECT * FROM {schema}.role_handoff_events WHERE handoff_id=?',
+                                     (handoff[0],)).fetchall())
+        revision = hashlib.sha256(json.dumps([rows, handoffs, events], ensure_ascii=False,
+                                            sort_keys=True).encode('utf8')).hexdigest()
+        result = dict(turn_rows=len(rows), handoffs=len(handoffs), handoff_events=len(events), revision=revision)
+        if not erase:
+            return result
+        for turn in turn_ids:
+            db.execute(f'INSERT OR IGNORE INTO {schema}.role_purged_turns VALUES (?,?)',
+                       (scope, cls._turn_hash(turn)))
+        for handoff in handoffs:
+            db.execute(f'DELETE FROM {schema}.role_handoff_events WHERE handoff_id=?', (handoff[0],))
+        db.execute(f'DELETE FROM {schema}.role_handoffs WHERE source IN ({marks})', sources)
+        for table in tables:
+            db.execute(f'DELETE FROM {schema}.{table} WHERE scope=? AND id IN ({marks})', [scope, *turn_ids])
+        return result

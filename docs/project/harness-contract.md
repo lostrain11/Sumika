@@ -4,7 +4,7 @@
 
 ## 可信宿主与原生 DSH
 
-DSH 启动器先核验发行文件摘要和已安装 CLI 元数据，再启动自己的 Node 子进程。只从该子进程 stdout 获取一次性启动 URL，换取 DSH 原生签名 cookie；通过 Windows 监听端口的 OwningProcess 核对 PID，调用前再次检查实例存活与端口归属。外部 URL 和用户填写的 managed 标记都不是适配器的接管方式。
+DSH 启动器先核验发行文件摘要和已安装 CLI 元数据，再启动自己的 Node 子进程。只从该子进程 stdout 获取一次性启动 URL，换取 DSH 原生签名 cookie；通过 Windows GetExtendedTcpTable 查询 IPv4/IPv6 监听表核对唯一 PID，调用前再次检查实例存活与端口归属。外部 URL 和用户填写的 managed 标记都不是适配器的接管方式。
 
 Python 进程内部属于可信宿主；Authority 不是抵御同进程恶意代码的沙箱。调用方不能将 approve、DSH Cookie、私有 RPC 或 SQLite 写入暴露为模型工具/普通 HTTP 服务。DSH 原生 Web 使用其已有认证、同源检查与权限策略，不另造一套 UI 登录。
 
@@ -27,3 +27,5 @@ P3 新增 `workspace.create`，经过同一授权入口；原生返回的工作�
 ## 可验证范围
 
 阶段 1 验收证明新增核心与受管生命周期的契约/授权边界。没有宣称同用户恶意进程隔离、完整 OS 沙箱、活跃模型任务取消、硬费用上限、全部 DSH 工具均已验收。这些与完整日用闭环分别记录于 P2/P3，不以本轮空闲会话验收替代。
+
+2026-10-18：连续两轮真实调度实测遇到原 PowerShell Get-NetTCPConnection 15秒超时，已改为原生TCP表查询，不缓存授权或跳过检查。缺失/多个PID/查询失败仍拒绝。真实IPv4/IPv6与受管拒绝边界测试通过；查询前仍检查所持Popen子进程存活。

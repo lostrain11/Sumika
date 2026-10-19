@@ -85,6 +85,28 @@ class LanguageGuardTests(unittest.TestCase):
         self.assertIn("maa", result["text"])
         self.assertFalse(result["language_guard"]["changed"])
 
+    def test_usage_write_failure_keeps_the_generated_reply(self):
+        chat = _chat(["嗯，我在。"], self.usage_dir)
+        def broken(*args, **kwargs):
+            raise OSError('usage db unavailable')
+        chat._record_usage = broken
+        result = chat.reply("在吗")
+        self.assertEqual(result["text"], "嗯，我在。")
+        self.assertEqual(result["usage_write_error"], "OSError")
+
+    def test_memory_extraction_failure_keeps_the_generated_reply(self):
+        chat = _chat(["嗯，我在。"], self.usage_dir)
+        chat._record_usage = lambda *args, **kwargs: None
+        chat.settings["memory"] = {"enabled": True, "auto_extract": True,
+                                   "extract_threshold": 0.8, "max_extracts_per_turn": 3}
+        def broken(*args, **kwargs):
+            raise RuntimeError('memory db unavailable')
+        chat._auto_extract = broken
+        result = chat.reply("在吗")
+        self.assertEqual(result["text"], "嗯，我在。")
+        self.assertEqual(result["memory_extract_error"], "RuntimeError")
+        self.assertEqual(result["auto_extracted"], [])
+
     def test_uncovered_kana_is_reported_not_invented(self):
         # ゐ is outside the conversion tables: the result says so instead of guessing,
         # and the model is never asked twice for a language slip.

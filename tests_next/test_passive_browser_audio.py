@@ -133,6 +133,12 @@ class PassiveBrowserAudioTests(unittest.TestCase):
             idle.receive(GRANT['token'], 'chrome-extension://'+GRANT['extension_id'],
                          packet(0), grant=dict(GRANT))
 
+    def test_worker_without_start_has_explicit_configuration_error(self):
+        idle = PassiveBrowserAudio(root=Path('.'), on_observation=lambda value: None,
+                                   on_clear=lambda: None)
+        with self.assertRaisesRegex(RuntimeError, 'configuration is incomplete'):
+            idle._spawn_worker(IDENTITY, 1)
+
 
 class WorkerPipeModeTests(unittest.TestCase):
     """The relayed tab audio reaches a real interpreter via the pipe source."""
@@ -164,7 +170,8 @@ class WorkerPipeModeTests(unittest.TestCase):
             '    if packets==3:\n'
             '        print(json.dumps({"observation":{"observed_at":"2026-10-09T12:00:00+00:00",'
             '"source":"application-audio-transcript","target":config["target"],"valid":True,'
-            '"text":"学习点","packets":packets}}),flush=True)\n')
+            '"text":"学习点","packets":packets},'
+            '"stream_epoch":config["stream_epoch"]}),flush=True)\n')
         interpreter = sys.executable
         observations = []
         ready = threading.Event()

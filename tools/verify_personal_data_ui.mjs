@@ -1,11 +1,10 @@
 // Read-only UI acceptance against an isolated packaged bridge.
-import {createRequire} from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import {readdirSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-const runtime=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/runtimes/cua_node');
-const pkg=readdirSync(runtime).map(n=>path.join(runtime,n,'bin/node_modules/playwright/package.json')).find(existsSync);
-const {chromium}=createRequire(pkg)('playwright');
+const {chromium}=loadPlaywright();
 const origin=process.argv[2];
 const output=process.argv[3];mkdirSync(output,{recursive:true});
 const browser=await chromium.launch({channel:'msedge',headless:true});
@@ -15,6 +14,10 @@ try {
   const writes=[];page.on('request',r=>{if(r.method()==='POST')writes.push(r.url());});
   await page.goto(origin+'/#settings');
   await page.locator('.set-nav [data-section="data"]').click();
+  // Settings hydration may persist existing behavior/microphone defaults.
+  // Reset the baseline so this check covers migration/restore controls only.
+  await page.waitForTimeout(500);
+  writes.length=0;
   const field=page.getByLabel('个人数据目录',{exact:true});
   await field.waitFor();assert.equal(await field.getAttribute('readonly'),'');
   await page.screenshot({path:path.join(output,'data-settings.png')});

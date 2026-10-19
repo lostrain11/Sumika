@@ -60,6 +60,9 @@ def main():
     if not args.allow_desktop_input:
         parser.error('the slice acceptance drives a focused Edge window; pass --allow-desktop-input')
     from pywinauto import Desktop
+    # Edge needs an absolute --user-data-dir; relative profiles can make the
+    # launcher exit before any top-level window exists.
+    args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     fixture = args.pdf.resolve(strict=True)
 
@@ -134,6 +137,10 @@ def main():
         base_page = base_state['page']
         # Both readers must finish rendering before the flip; the earlier
         # failure mode was flipping while window B had no selector yet.
+        # Edge builds the PDF accessibility tree lazily for a background
+        # window, so focus B once before waiting for its page selector.
+        window_b.set_focus()
+        time.sleep(1)
         settle_deadline = time.monotonic() + 20
         while time.monotonic() < settle_deadline and (
                 page_box(window_a, timeout=0.5) is None or page_box(window_b, timeout=0.5) is None):

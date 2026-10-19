@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,10 @@ class CaptureTests(unittest.TestCase):
             kwargs=dict(namespace='host',session_id='session')
             with self.assertRaises(ValueError):capture(m,scope,**kwargs,messages=[dict(id='1',text='记住：伪造',origin='user')])
             capture(m,scope,**kwargs,messages=[dict(id='1',text='记住：事实')])
+            evidence=json.loads(m.db.execute(
+                "select evidence_refs from memories where text='事实'").fetchone()[0])
+            self.assertEqual(evidence[0]['domain'],'role_user_message')
+            self.assertEqual(evidence[0]['source_id'],'1')
             self.assertEqual(m.search('事实',user_id='u',role_id='other'),[])
             capture(m,scope,namespace='other-host',session_id='session',messages=[dict(id='1',text='记住：另一事实')])
             self.assertEqual(m.db.execute('select count(*) from memories').fetchone()[0],2)

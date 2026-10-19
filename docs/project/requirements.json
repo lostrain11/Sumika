@@ -1379,6 +1379,166 @@
       "status": "active",
       "kind": "user_original",
       "sha256": "40cd6d41a36d49d77a3a3fd63d2191303f34937aca94e0dc758a0da5520abc91"
+    },
+    {
+      "id": "R-132",
+      "sequence": 132,
+      "original": "那个详细记录用户使用电脑数据。用于用户行为、爱好等分析的功能，现在做到什么程度了？把这个功能好好做一下，我觉得是作为虚拟助手的重点",
+      "source": "visible-conversation: current behavior strengthening and model-source request; UI answer refers to approved existing behavior data region",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "113e2b33eb2d5df03bc09825f17f803b7e3f758b25ec2a6adb3c98361ddcfaf0"
+    },
+    {
+      "id": "R-133",
+      "sequence": 133,
+      "original": "在现有区域补充（推荐）",
+      "source": "visible-conversation: current behavior strengthening and model-source request; UI answer refers to approved existing behavior data region",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "c3d8cad629adec9f0f57d3c10c0d23c528e6034aa9515e3969a36fc783d9ebe8"
+    },
+    {
+      "id": "R-134",
+      "sequence": 134,
+      "original": "这个可以做通用些 ，记录的数据类型也可以丰富点，我觉得这个对理解用户很有价值？",
+      "source": "visible-conversation: current behavior strengthening and model-source request; UI answer refers to approved existing behavior data region",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "9c6d0388dbc823d8bc2e05292e141c6c8e4e501a5fc8c74e14ac9c6cc7582f8e"
+    },
+    {
+      "id": "R-135",
+      "sequence": 135,
+      "original": "这个跟之前说的子记忆需求是不是有耦合，或者说这个就有子记忆的思想在里面？就是说记忆不是全放在一起存储，有专门分类的记忆，用于专门的任务或需求",
+      "source": "visible-conversation: current behavior strengthening and model-source request; UI answer refers to approved existing behavior data region",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "1ed05ecb23494ee76db21238a45f7c19976dc34ec6d41fa525e0ed262c8e27b8"
+    },
+    {
+      "id": "R-136",
+      "sequence": 136,
+      "original": "现在Sumika的长期记忆又是如何实现的？需不需要考虑或者先实现？是用DSH现成的记忆插件，还是用社区成熟的记忆库？我希望设计上能解耦合，以后有更好的长期记忆库，可以更换现在的，也就是说要把记忆的素材单独保存？",
+      "source": "visible-conversation: current behavior strengthening and model-source request; UI answer refers to approved existing behavior data region",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "940654a3b85188840d63919b1f5fa6e550ff18cc5c0c7b3245b22976a7aade9b"
+    },
+    {
+      "id": "R-137",
+      "sequence": 137,
+      "original": "[https://aihot.news/agent](https://aihot.news/agent) 接入这个源，可以参考这个源的资讯。你可以按发布时间从新到旧测测有无更适合的端侧模型。可以边做你手头的主线任务，边让笔记本测模型，来节约时间",
+      "source": "visible-conversation: current behavior strengthening and model-source request; UI answer refers to approved existing behavior data region",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "be2b9fc886ef95932cc53525f234ef5ec89e4b3e1b22b57f43e1d871c836ffb3"
+    },
+    {
+      "id": "R-138",
+      "sequence": 138,
+      "original": "让管笔记本的那个子agent也测下有没有提升模型能力的办法",
+      "source": "visible-conversation: exact opening excerpt of latest user request; remainder names AirLLM, Strata, MoE4All, vllm-xtu-moe as examples and asks to try more approaches; quoted claims are reference material, not verified facts",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "1ab803d16efdb27980795f98b431489ff569f59f386aa52a6610fe81e6842408"
+    },
+    {
+      "id": "R-139",
+      "sequence": 139,
+      "original": "不止我贴出的项目，子agent自己也可以找找别的。你自己的主线任务现在进度如何",
+      "source": "visible-conversation: user expands independent low-VRAM project research and asks mainline status",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "a1d358cadfc821fd1b8ea245f00461090a1a3e36d30ec65f85abc320fac478e5"
+    },
+    {
+      "id": "R-140",
+      "sequence": 140,
+      "original": "现在DSH内核升级了，看看DSH插件市场，有无可以补充现在功能缝隙的，或者有更成熟的方案可以直接替换Sumika某个功能模块的，毕竟DSH插件会更新， 比一直自己维护要方便。\n这个需求很重要，可以多花些时间看看",
+      "source": "visible-conversation: current DSH market and module replacement review request",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "9915c2d57c896f796d075629379eb23233775068b9cced474a1c6ab979cf1e9a"
+    },
+    {
+      "id": "R-141",
+      "sequence": 141,
+      "original": "继续让子agent做笔记本端的模型增强，包括但不限于选新模型和使用各类工具",
+      "source": "visible-conversation: user explicitly continues laptop subagent model and tool enhancement",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "8312eee67839a60bbf105835dc42f019bf87954c77dce0be30973a89b4e9b84a"
+    },
+    {
+      "id": "R-142",
+      "sequence": 142,
+      "original": "长期愿景先不做。目前重点是长期记忆、DSH插件复用/开源社区项目复用",
+      "source": "visible-conversation: user latest scope prioritization",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "65c47c9527aead516399d418d057895f6fb01f849d771b682879034d8ce5f57c"
+    },
+    {
+      "id": "R-143",
+      "sequence": 143,
+      "original": "增加纠正控件（推荐）",
+      "source": "visible-conversation: answer to adding per-fact correction button/text confirmation in existing role-memory dialog, no new page/navigation; request_user_input_async call_86qnA5r2TUNn8FWnTz11GTcg:0",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "575d16625554bc07b2c82de4aaa95e3d5f80c08bb4d3b569452d8d9ef4ee4ca7"
+    },
+    {
+      "id": "R-144",
+      "sequence": 144,
+      "original": "在现有角色资源弹窗补齐（推荐）",
+      "source": "visible-conversation: answer to add background/worldbook entry editing and role colors in existing role-resource dialog, capability card opens same dialog, no new navigation/editor; request_user_input_async call_e95bebcab4704599a51593fcf31d3379:0",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "b6a1ace4a51efee1e94d3080b2f4f590c92f6ea04af6b9c9492ca0b0c439b839"
+    },
+    {
+      "id": "R-145",
+      "sequence": 145,
+      "original": "在现有弹窗补齐（推荐）",
+      "source": "visible-conversation: answer to add explicit project/session selectors, creation confirmation and link to existing DSH automation manager in existing schedule execute form; preserve reminders, old definitions/history, no parallel native task list; request_user_input_async call_1ec73b68fa2c446685a44eee23a60b2b:0",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "876d079cb489cfb1d4e56a75c8fb5a34caed30ffcd26abebebb44b53af0ea151"
+    },
+    {
+      "id": "R-146",
+      "sequence": 146,
+      "original": "这个可以加进来？用笔记本端部署的模型完成？",
+      "source": "visible-conversation: user reactivates prompt optimization and asks to use the laptop-hosted model",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "53aca5f9e9bcec3a04291b8cf70f2b28521375a35b6358d9822ecd500b5880d3"
+    },
+    {
+      "id": "R-147",
+      "sequence": 147,
+      "original": "坚持 35B 单模型常驻。在当前项目单开一个任务做“LES + 定制 llama.cpp-omni + 特殊量化”尝试",
+      "source": "visible-conversation: user insists on resident 35B and requests a separate LES/custom llama.cpp-omni/special-quantization attempt",
+      "source_timestamp": null,
+      "status": "active",
+      "kind": "user_original",
+      "sha256": "a0f093327c3da7fff2de7150f08492acc95e3c4666ac75096b1799c4a944c374"
     }
   ]
 }

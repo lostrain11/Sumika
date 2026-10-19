@@ -8,10 +8,23 @@ import unittest
 from unittest.mock import patch
 
 from tools.verify_portable_staging import REQUIRED, verify, safe_path
-from tools.build_portable_staging import browser_runtime_files, verify_reviewed_assets, physical_files, reference_registry_asset, executable_asset, reject_runtime_dev_paths
+from tools.build_portable_staging import browser_runtime_files, verify_reviewed_assets, physical_files, reference_registry_asset, executable_asset, reject_runtime_dev_paths, single_file_launcher
 
 
 class PortableInventoryTests(unittest.TestCase):
+    def test_launcher_rejects_plain_apphost_and_invalid_bundle_pointer(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'Sumika.exe'
+            header = b'MZ'+bytes(58)+(64).to_bytes(4,'little')+b'PE\x00\x00'
+            marker = bytes.fromhex('8b1202b96a612038727b930214d7a03213f5b9e6efae3318ee3b2dce24b36aae')
+            for contents in (header, header+bytes(8)+marker,
+                             header+(999999).to_bytes(8,'little')+marker):
+                path.write_bytes(contents)
+                with self.assertRaisesRegex(ValueError, 'single-file bundle'):
+                    single_file_launcher(path)
+            path.write_bytes(header+(len(header)+8+len(marker)).to_bytes(8,'little')+marker+b'bundle fixture')
+            self.assertEqual(single_file_launcher(path), path.resolve())
+
     def test_launcher_requires_real_pe_header_not_renamed_script(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'Sumika.exe'
@@ -63,7 +76,7 @@ class PortableInventoryTests(unittest.TestCase):
             source.write_text('{}')
             with self.assertRaises(ValueError): reference_registry_asset(root)
     def test_certifi_public_bundle_is_only_pem_exception(self):
-        for runtime in ('python', 'desktop', 'voice'):
+        for runtime in ('python', 'desktop', 'voice', 'office/dependencies/python'):
             name = f'runtime/{runtime}/Lib/site-packages/certifi/cacert.pem'
             self.assertEqual(safe_path(name), name)
         for invalid in ('ui/cacert.pem', 'runtime/python/Lib/site-packages/certifi/private.key',

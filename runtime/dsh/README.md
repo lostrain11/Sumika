@@ -1,21 +1,25 @@
 # 固定 DSH 运行环境
 
-初始版本：`@deepseek-ai/dsh@0.1.5-rc.2`。npm 的 `latest` 仍为 rc.1，用户选择包含 RC 的最新发布版，因此采用 `next` 标签指向的固定 rc.2；运行时不追随标签。
+当前版本：`@deepseek-ai/dsh@0.2.1-rc.2`。版本固定到已隔离验收通过的候选，不追随 npm 标签。该版本支持 DeepSeek-V4.1-Flash-1017，并包含 0.2.1 系列的会话恢复、插件同步和 Search/Fetch 相关能力。
+
+## 官方Office扩展（r8候选）
+
+工作台通过公开profile挂载官方Office技能与workspace-dependencies，返回`runtime/office/dependencies/python/python.exe`及17项锁定库。引擎使用已随DSH依赖提供的LibreOfficeKit0.1.5/Windows平台程序，向技能提供包内Node和CLI绝对路径；不修改上游、不搜索系统soffice。缺少引擎文件时明确标记禁用，无静默安装或fallback。当前Windows已通过真实原生技能/终端和渲染重算验证；干净机器仍须核验VC++v14运行时、字体和安装。构建与实际证据见[办公验收](../../docs/project/phase-05-office-acceptance.md)首节。
 
 ## 安装与启动
 
-在项目根执行 `pnpm --dir runtime/dsh install --frozen-lockfile --ignore-scripts`。
+在项目根执行 `pnpm --dir runtime/dsh install --frozen-lockfile --ignore-scripts`。升级时必须保留旧运行时和匹配的旧 profile，不能对同一个 profile 原地降级。
 `package.json` 固定直接版本，`pnpm-lock.yaml` 固定全部解析结果和包完整性摘要。
 `release.json` 绑定这两个文件及实际 CLI 入口/package 元数据，启动前核验；不修改 `node_modules` 修补上游。
 
 安装目录为 `runtime/dsh/node_modules`；用户数据为仓库外或被忽略的独立 `DSH_HOME`。
 自动验收使用 `.sumika-next/acceptance-*/home`，结束后停止自己创建的进程并清理自己的临时目录。
-持久使用可采用 `.sumika-next/home-0.1.5-rc.2`，不要指向旧日用目录。
+持久使用可采用 `.sumika-next/home-0.2.1-rc.2`，不要指向旧日用目录。
 
 `python -B tools/probe_dsh_next.py` 是不调用模型的真实生命周期验收。普通原生 Web 启动方式：
 
 ```powershell
-$env:DSH_HOME = Join-Path (Get-Location) '.sumika-next/home-0.1.5-rc.2'
+$env:DSH_HOME = Join-Path (Get-Location) '.sumika-next/home-0.2.1-rc.2'
 node runtime/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js web --host 127.0.0.1 --port 0 --no-open
 ```
 
@@ -70,3 +74,7 @@ Windows 测试工作区使用普通 `mkdir` 继承项目 ACL。Python 3.14 的 `
 ```
 
 这项检查验证页面实际发送与显示；真实模型开发、审查与重启恢复证据见 [P3 验收](../../docs/project/phase-03-acceptance.md)。
+
+### 2026-10-18 原生定时任务接线
+
+Sumika原任务弹窗使用既有workbench host插件注册human command，确认目标后调用ctx.schedule.create，不调用模型；DSH管理时钟、目录和投递。旧提醒不迁移，未知请求不自动重试。归属检查使用Windows GetExtendedTcpTable同时查询IPv4/IPv6，要求唯一监听PID为仍存活的受管子进程；错误仍拒绝。r14包内三规则、重启、响应丢失、原生页跳转通过。操作及证据见docs/project/feature-usage-and-acceptance.md当前r14节。

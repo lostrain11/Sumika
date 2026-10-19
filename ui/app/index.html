@@ -19,7 +19,7 @@
 <header class="topbar">
   <div class="brand">
     <div class="jp">晴日<em>部室</em></div>
-    <span class="ver">NEXT · P4-UI</span>
+    <span class="ver">NEXT</span>
   </div>
   <nav class="gnav" id="gnav">
     <button data-go="room" class="active"><i data-icon="nav-room" data-icon-size="15"></i>活动室</button>
@@ -41,7 +41,7 @@
 
     <!-- 舞台 = 看向「她的房间」的镜头窗口 -->
     <main class="stage">
-      <div class="d-caption"><b id="roomOwner">澄花的房间</b> · 镜头画面<br><span class="act" id="actText">当前活动：房间待机</span></div>
+      <div class="room-caption"><i></i><b id="roomOwner">澄花的房间</b></div>
       <div class="vf"><i></i><i></i><i></i><i></i></div>
       <div class="cam-chip"><i></i>镜头 · <b id="camModeText">跟随</b></div>
       <div class="d-ctrls">
@@ -49,18 +49,6 @@
           <button data-cam="follow" class="active">跟随</button>
           <button data-cam="fixed">固定</button>
           <button data-cam="closeup">特写</button>
-        </div>
-        <span class="d-ctrl">视线跟随 <span class="on">未接入</span></span>
-        <span class="d-ctrl">桌宠小窗 <span class="on">可拖动 · 跨页常驻</span></span>
-        <span class="d-ctrl rsv">独立桌宠窗口 <span class="on">预留 · P7</span></span>
-        <span class="d-ctrl rsv">全屏壁纸陪伴 <span class="on">预留 · P7</span></span>
-        <div class="act-demos">
-          <span class="lab">活动</span>
-          <div class="row">
-            <button data-act="idle" class="active">待机</button>
-            <button data-act="work">工作</button>
-            <button data-act="rest">休息</button>
-          </div>
         </div>
       </div>
 
@@ -173,19 +161,18 @@
 
     <!-- ---- 部员名册条：默认收起；鼠标靠近并停留 ≈420ms 后上浮展开 ---- -->
     <div class="roster-dock" id="rosterDock">
-      <button type="button" class="roster-bar" id="rosterBar" aria-expanded="false" aria-controls="rosterPanel">
+      <button type="button" class="roster-bar" id="rosterBar" aria-expanded="false" aria-controls="rosterPanel" title="悬停展开名册">
         <span class="handle"></span>
         <span class="title">部员名册 <b id="memberCount">2</b></span>
         <span class="peek" id="rosterPeek"></span>
-        <span class="hint"><span class="lbl-closed">悬停展开</span><span class="lbl-open">移开即收起</span></span>
+        <span class="hint" aria-hidden="true"><i data-icon="act-chevron-up" data-icon-size="14"></i></span>
       </button>
 
       <div class="roster-panel" id="rosterPanel" role="region" aria-label="部员名册">
         <div class="roster-head">
           <h3>部员名册 <b>点名字切换在场角色 · 不打断工作台任务</b></h3>
           <div class="roster-foot">
-            <span class="coop">多人同屏 <span class="tag">预留 · P6</span></span>
-            <span class="import-btn"><i data-icon="act-plus" data-icon-size="13"></i>导入角色卡 · 预留 P6</span>
+            <span class="import-btn"><i data-icon="act-plus" data-icon-size="13"></i>导入角色卡 / 模型</span>
           </div>
         </div>
 
@@ -200,10 +187,6 @@
             <span class="ava" style="background:linear-gradient(135deg,#9dbfd8,#7aa8c7)">昴</span>
             <span><span class="nm">昴</span><span class="st">示例角色卡 · 元气</span></span>
             <span class="bind">VRM</span>
-          </button>
-          <button class="member rsv" disabled>
-            <span class="ava">＋</span>
-            <span><span class="nm">角色卡 C</span><span class="st">预留 · P6 导入后列于此</span></span>
           </button>
         </div>
       </div>
@@ -445,7 +428,7 @@
         <h2><b>连接与权限</b> PERMISSIONS</h2>
         <div class="set-card">
           <div class="set-row"><div class="lbl">MCP 服务器<span class="sumika-field-help" data-help="按来源与作用域显式授权"></span></div>
-            <div class="val"><b>2 项已授权</b><button class="mini-btn">管理…</button></div>
+            <div class="val"><span class="sumika-form-note">由 DSH 原生工作台管理</span></div>
           </div>
           <div class="set-row"><div class="lbl">高危操作<span class="sumika-field-help" data-help="写盘、删改、外发统一进入待确认入口"></span></div>
             <div class="val"><b class="ok">始终确认</b></div>
@@ -504,6 +487,7 @@
     document.querySelectorAll('.screen').forEach(s => s.classList.toggle('show', s.id === target));
     document.querySelectorAll('#gnav button').forEach(b => b.classList.toggle('active', b.dataset.go === (screens[key] ? key : 'room')));
     document.body.classList.toggle('on-room', target === 'screen-room'); /* 陪伴页显示镜头窗口，桌宠小窗自动隐藏 */
+    document.body.classList.toggle('on-board', target === 'screen-board');
   }
   document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => location.hash = b.dataset.go));
   window.addEventListener('hashchange', applyHash);
@@ -556,19 +540,16 @@
       '<div class="dp-stage">' +
       /* 气泡挂在「取景框行」内部并绝对定位，展开时向上生长、不推挤下方取景框 */
       '<div class="dp-bubble" data-dp-bubble>' +
-      '<div class="st"><span data-dp-st></span><i data-dp-hint>悬停展开 · 最近 3 条</i></div>' +
+      '<div class="st"><span data-dp-st></span><span class="dp-st-right"><i data-dp-hint>悬停展开 · 最近 3 条</i><button class="dp-collapse" data-dp-min title="收起桌宠" aria-label="收起桌宠"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></span></div>' +
       '<div class="dp-log" data-dp-log></div>' +
       '<span class="more"><span class="lbl-closed">点击展开更多记录</span><span class="lbl-open">收起记录</span></span>' +
       '</div>' +
-      '<div class="dp-chara"></div>' +
-      '<div class="dp-ops">' +
-      '<button data-dp-min title="收起小窗">收起</button>' +
-      '</div></div></div>' +
+      '<div class="dp-chara"></div></div></div>' +
       '<div class="dp-chat">' +
       '<input data-dp-input placeholder="和她聊两句…（回车发送）">' +
       '<button data-dp-send title="发送">➤</button>' +
       '</div>' +
-      '<button class="dp-mini" data-dp-restore title="展开桌宠小窗"></button>';
+      '<button class="dp-mini" data-dp-restore title="展开桌宠小窗" aria-label="展开桌宠小窗"><span class="dp-mini-ava"></span><span class="dp-mini-spark" aria-hidden="true">✿</span><span class="dp-mini-tip" aria-hidden="true">桌宠</span></button>';
     const c = svg.cloneNode(true);
     c.removeAttribute('class');
     c.setAttribute('width', '200');
@@ -601,14 +582,31 @@
       scene.appendChild(clone);
     }
     el.querySelector('.dp-chara').appendChild(scene);
-    el.querySelector('.dp-chara').appendChild(svg);   /* 占位立绘层（澄花等未绑定 VRM 的角色） */
+    /* The deskpet already owns the cloned SVG; keep the original in #vport
+       so card-only roles still show the documented illustration placeholder. */
     document.body.appendChild(el);
+    const keepDeskpetCenter = (mutate) => {
+      if (document.documentElement.classList.contains('pet-host')) { mutate(); return; }
+      const before = el.getBoundingClientRect();
+      const cx = before.left + before.width / 2, cy = before.top + before.height / 2;
+      mutate();
+      const after = el.getBoundingClientRect();
+      const left = Math.min(Math.max(8, cx - after.width / 2), innerWidth - after.width - 8);
+      const top = Math.min(Math.max(8, cy - after.height / 2), innerHeight - after.height - 8);
+      el.style.left = left + 'px'; el.style.top = top + 'px';
+      el.style.right = 'auto'; el.style.bottom = 'auto';
+    };
     el.querySelector('[data-dp-min]').addEventListener('click', () => {
-      el.classList.add('mini');
+      keepDeskpetCenter(() => el.classList.add('mini'));
       if (document.documentElement.classList.contains('pet-host')) window.chrome?.webview?.postMessage('sumika:compact');
     });
     el.querySelector('[data-dp-restore]').addEventListener('click', () => {
-      el.classList.remove('mini');
+      if (el.dataset.justDragged === '1') { delete el.dataset.justDragged; return; }
+      keepDeskpetCenter(() => el.classList.remove('mini'));
+      el.classList.remove('opening');
+      void el.offsetWidth;
+      el.classList.add('opening');
+      setTimeout(() => el.classList.remove('opening'), 360);
       if (document.documentElement.classList.contains('pet-host')) window.chrome?.webview?.postMessage('sumika:expand');
     });
     layoutDeskpet();
@@ -717,31 +715,41 @@
     };
     el.querySelector('[data-dp-send]').addEventListener('click', say);
     el.querySelector('[data-dp-input]').addEventListener('keydown', e => { if (e.key === 'Enter') say(); });
-    /* 自由拖动：首次拖动后切换为 left/top 定位并一直保持 */
+    /* 自由拖动：首次拖动后切换为 left/top 定位并一直保持。
+       只有真正移动超过 3px 才进入拖动态；否则保留原生 click，
+       这样收起态的圆形按钮既能拖动也能单击展开。 */
     el.addEventListener('pointerdown', e => {
-      /* 可交互区不参与拖动：按钮、输入框、聊天记录面板（要能点开翻历史、滚动） */
-      if (e.target.closest('button,input,[data-dp-log]')) return;
+      /* 可交互区不参与拖动：按钮（收起态圆钮除外）、输入框、聊天记录面板 */
+      if (e.target.closest('button:not(.dp-mini),input,[data-dp-log]')) return;
       if (document.documentElement.classList.contains('pet-host') && window.chrome?.webview) {
         if (e.button === 0) window.chrome.webview.postMessage('sumika:drag');
         return;
       }
       const r = el.getBoundingClientRect();
       const ox = e.clientX - r.left, oy = e.clientY - r.top;
-      el.classList.add('dragging');
-      el.setPointerCapture(e.pointerId);
+      const startX = e.clientX, startY = e.clientY;
+      let dragging = false, moved = false;
       const move = ev => {
+        if (!dragging && Math.abs(ev.clientX - startX) <= 3 && Math.abs(ev.clientY - startY) <= 3) return;
+        if (!dragging) { dragging = true; el.classList.add('dragging'); }
+        moved = true;
         el.style.left = Math.min(Math.max(0, ev.clientX - ox), innerWidth - r.width) + 'px';
         el.style.top = Math.min(Math.max(0, ev.clientY - oy), innerHeight - r.height) + 'px';
         el.style.right = 'auto'; el.style.bottom = 'auto';
       };
       const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
         el.classList.remove('dragging');
-        el.removeEventListener('pointermove', move);
-        el.removeEventListener('pointerup', up);
+        if (dragging && moved) {
+          el.dataset.justDragged = '1';
+          setTimeout(() => { delete el.dataset.justDragged; }, 80);
+        }
       };
-      el.addEventListener('pointermove', move);
-      el.addEventListener('pointerup', up);
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
     });
+    el.addEventListener('dragstart', event => event.preventDefault());
     dpEl = el;
     addEventListener('resize', layoutDeskpet);
     /* VRM 实例异步挂载后会改变角色本体尺寸，需重算取景（跨脚本解耦） */
@@ -854,6 +862,18 @@
   /* 把主持屏当前的「活动状态类 + 镜头缩放」同步到小窗克隆体：
      .vport 的位置由 .pos-work / .pos-rest 决定，克隆体只复制了一次初始 DOM，
      不同步的话小窗里角色永远待在初始位置，看不到她换地方活动 */
+  /* The collapsed orb uses the active role's local thumbnail when one exists.
+     It is an avatar crop, not a new asset or an upload; card-only roles fall
+     back to the role's first character. */
+  window.sumikaSyncDeskpetAvatar = ({name} = {}) => {
+    const mini = document.querySelector('#deskpet .dp-mini');
+    if (!mini) return;
+    const label = (name || '').trim();
+    mini.querySelector('.dp-mini-ava').textContent = label.slice(0, 1) || '✦';
+    mini.title = `展开 ${label || '桌宠'} 小窗`;
+    mini.setAttribute('aria-label', mini.title);
+  };
+
   function syncDeskpetScene(clone){
     if (!clone) return;
     const liveVport = document.querySelector('#camView .vport');
@@ -875,7 +895,10 @@
     if (dpLastAct !== act) dpLastAct = act;
     /* 记录活动档位：小窗取景按活动选取世界机位（见 layoutDeskpet 的 ANCHOR） */
     dpActKey = act;
-    el.querySelector('[data-dp-restore]').textContent = name.slice(-1);
+    const miniButton = el.querySelector('[data-dp-restore]');
+    miniButton.querySelector('.dp-mini-ava').textContent = name.trim().slice(0, 1) || '✦';
+    miniButton.title = `展开 ${name || '桌宠'} 小窗`;
+    miniButton.setAttribute('aria-label', miniButton.title);
     syncDeskpetScene(el.querySelector('.dp-scene > *'));
     /* 是否绑定 VRM 决定小窗里显示实机渲染还是占位立绘（SVGElement 无 hidden 属性，用 style.display） */
     const dpSvg = el.querySelector('.dp-chara > svg');
@@ -919,7 +942,7 @@
     document.querySelectorAll('[data-act]').forEach(x => x.classList.toggle('active', x.dataset.act === key));
     vport.classList.remove('pos-work', 'pos-rest');
     if (ACT[key].cls) vport.classList.add(ACT[key].cls);
-    actText.textContent = ACT[key].label;
+    if (actText) actText.textContent = ACT[key].label;
     applyCam();
     syncDeskpet();
     /* 角色换位置是 1s 的 CSS transition；立即重算取景只会读到过渡中间态，

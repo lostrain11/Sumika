@@ -13,7 +13,7 @@ from extensions.roles.roles import load_role
 
 
 class RoleSession:
-    def __init__(self, role_dir, database, *, user_id, project_id, work_model, role_model, enabled=True, memory_provider='embedded', embedding_cache=None, embedding_python=None, memory_enabled=True, card_context_enabled=False, card_context_budget_chars=8000, target_language='zh-Hans', language_policy=None, allow_card_policy=True):
+    def __init__(self, role_dir, database, *, user_id, project_id, work_model, role_model, enabled=True, memory_provider='embedded', embedding_cache=None, embedding_python=None, memory_enabled=True, card_context_enabled=False, card_context_budget_chars=8000, target_language='zh-Hans', language_policy=None, allow_card_policy=True, retrieval_provider=None):
         if type(enabled) is not bool: raise ValueError('invalid enabled')
         if type(card_context_enabled) is not bool: raise ValueError('invalid card context switch')
         if type(allow_card_policy) is not bool: raise ValueError('invalid card policy switch')
@@ -44,6 +44,11 @@ class RoleSession:
             else:
                 try:
                     self.compiled_card=compile_card(card)
+                    edits=self.role.get('context_edits',{})
+                    if 'background' in edits:self.compiled_card['scenario']=edits['background']
+                    if 'worldbook' in edits:
+                        self.compiled_card['worldbook']=[dict(entry,index=i,keys=entry.get('keys',[]),
+                            secondary_keys=entry.get('secondary_keys',[])) for i,entry in enumerate(edits['worldbook'])]
                     self.card_context_status='on'
                 except (ValueError,OSError) as error:
                     self.compiled_card=None
@@ -58,6 +63,8 @@ class RoleSession:
             if embedding_cache is None:raise ValueError('embedding_cache required')
             self.memory=SemanticMemory(database,cache_dir=embedding_cache,embedding_python=embedding_python)
         else:raise ValueError('unsupported memory provider; no fallback')
+        from extensions.memory.retrieval import MemoryRetrieval, LocalRetrievalProvider
+        self.retrieval=MemoryRetrieval(self.memory,retrieval_provider if retrieval_provider is not None else LocalRetrievalProvider(self.memory))
         self.work_model=work_model;self.role_model=role_model
 
     def request(self, operation, data):
@@ -70,7 +77,7 @@ class RoleSession:
             if self.compiled_card is not None:
                 from extensions.roles.card_context import select_context
                 selected=select_context(self.compiled_card,user,budget_chars=self.card_context_budget_chars,
-                    memory=self.memory.search(data.get('query',user),**self.scope),
+                    memory=self.retrieval.search(data.get('query',user),**self.scope),
                     target_language=self.target_language,language_policy=self.language_policy,
                     allow_card_policy=self.allow_card_policy)
                 role_block=dict(selected['role_context'])
@@ -79,36 +86,44 @@ class RoleSession:
                 return dict(context=context,selection=selected['selection'],role_context=selected['role_context'],model=self.work_model if mode=='work' else self.role_model,mode=mode)
             words=user.casefold()
             worldbook=[]
-            for item in self.role.get('worldbook',[]):
+            for item in self.role.get('context_edits',{}).get('worldbook',self.role.get('worldbook',[])):
                 if isinstance(item,str):worldbook.append(item)
                 elif isinstance(item,dict) and item.get('enabled',True):
                     keys=item.get('keys',[])
-                    if item.get('constant') or any(isinstance(k,str) and k and k.casefold() in words for k in keys):
+                    corpus=user if item.get('case_sensitive') else words
+                    matches=lambda values:any(k and (k if item.get('case_sensitive') else k.casefold()) in corpus for k in values if isinstance(k,str))
+                    if item.get('constant') or (matches(keys) and (not item.get('selective') or matches(item.get('secondary_keys',[])))):
                         worldbook.append(item.get('content',''))
-            memories=self.memory.search(data.get('query',user),**self.scope)
+            memories=self.retrieval.search(data.get('query',user),**self.scope)
             role_block=dict(name=self.role['name'],persona=self.role['persona'],worldbook=worldbook)
+            if self.role.get('context_edits',{}).get('background'):
+                role_block['scenario']=self.role['context_edits']['background']
             context=build(user_content=user,role_block=role_block,memory_records=memories,task_context=data.get('task_context'))
             return dict(context=context,role_context={**role_block,'memory':memories,'recent':[]},
                         model=self.work_model if mode=='work' else self.role_model,mode=mode)
-        if operation=='remember':return self.memory.add(data['text'],source=data.get('source','user'),fact_key=data.get('fact_key'),event_id=data.get('event_id'),**self.scope)
+        if operation=='remember':return self.memory.add(data['text'],source=data.get('source','user'),fact_key=data.get('fact_key'),event_id=data.get('event_id'),evidence=data.get('evidence_refs'),**self.scope)
         if operation=='localize_names':
             from extensions.roles.card_context import localize_names
             if not isinstance(data.get('text'),str):raise ValueError('text required')
             if self.compiled_card is None:
                 raise ValueError('card context required')
             return localize_names(data['text'],self.compiled_card.get('name_map',{}))
-        if operation=='search':return self.memory.search(data['query'],**self.scope)
+        if operation=='search':return self.retrieval.search(data['query'],**self.scope)
         if operation=='relations_all':return self.memory.list_relations(**self.scope,limit=data.get('limit',100))
         if operation=='sources':return self.memory.source_counts(**self.scope)
         if operation=='relate':return self.memory.relate(data['subject'],data['predicate'],data['object'],**self.scope)
         if operation=='relations':return self.memory.related(data['subject'],**self.scope)
-        if operation=='edit_relation':return self.memory.edit_relation(data['subject'],data['predicate'],data['object'],data['new_object'],**self.scope)
-        if operation=='delete_relation':return self.memory.delete_relation(data['subject'],data['predicate'],data['object'],**self.scope)
+        if operation in ('edit_relation','delete_relation'):
+            if 'record_id' in data:
+                return self.memory.mutate_relation(data['record_id'],expected_revision=data.get('expected_revision'),
+                    new_object=data.get('new_object'),delete=operation=='delete_relation',**self.scope)
+            # Legacy CLI contract remains explicitly bulk-by-text. UI uses IDs.
+            if operation=='edit_relation':return self.memory.edit_relation(data['subject'],data['predicate'],data['object'],data['new_object'],**self.scope)
+            return self.memory.delete_relation(data['subject'],data['predicate'],data['object'],**self.scope)
         if operation=='forget':
-            scope=self.memory._scope(**dict(user=self.scope['user_id'],role=self.scope['role_id'],project=self.scope['project_id']))
-            with self.memory.db:
-                count=self.memory.db.execute('UPDATE memories SET active=0 WHERE id=? AND scope=?',(data['id'],scope)).rowcount
-            return {'forgotten':count}
+            return self.memory.forget_record(data.get('record_id',data.get('id')),expected_revision=data.get('expected_revision'),**self.scope)
+        if operation=='correct':
+            return self.memory.correct_record(data.get('record_id'),data.get('text'),expected_revision=data.get('expected_revision'),event_id=data.get('event_id'),**self.scope)
         if operation=='reset_to_card':
             facts=[self.role['persona']] if self.role['persona'].strip() else []
             facts.extend(x if isinstance(x,str) else x.get('content','') for x in self.role.get('worldbook',[]) if isinstance(x,(dict,str)))

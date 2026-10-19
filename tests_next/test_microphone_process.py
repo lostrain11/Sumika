@@ -136,7 +136,10 @@ for line in sys.stdin:
             return child
         with tempfile.TemporaryDirectory() as folder:
             events = []
-            owner = MicrophoneProcess(root=folder, on_event=events.append)
+            # Production launches from the stable product root. Keep the model
+            # fixture temporary without making it the Windows child cwd: process
+            # termination can leave a transient directory handle after wait().
+            owner = MicrophoneProcess(root=Path(__file__).resolve().parents[1], on_event=events.append)
             value = {'observed_at':'2026-10-08T00:00:00+00:00', 'source':'window-visual',
                      'target':'lesson', 'valid':True, 'text':'diagram'}
             config = {'observation':value, 'model':folder}

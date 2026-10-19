@@ -1,7 +1,7 @@
 // P16: verify PDF paste fallback UI in companion detail.
-// Real bridge + real companion page; no model calls, no capture.
+// Isolated bridge plus stubbed ask stream: real UI send path, zero model/capture calls.
 import {spawn} from 'node:child_process';
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, writeFile} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 import {createInterface} from 'node:readline';
 import {once} from 'node:events';
@@ -9,9 +9,11 @@ import assert from 'node:assert/strict';
 import {loadPlaywright} from './lib/playwright.mjs';
 
 const output = resolve(process.argv[2] || 'E:/SumikaBuild/p16-paste-ui');
+const candidate = process.argv[3] ? resolve(process.argv[3]) : null;
 await mkdir(output, {recursive: true});
-await mkdir(join(output, 'bridge-data'), {recursive: true});
-const report = {passed: false, checks: {}, phases: []};
+const bridgeData = await mkdtemp(join(output, 'isolated-'));
+const report = {passed: false, checks: {}, phases: [], runtime_root: candidate || resolve('.'),
+  scope: 'Real bridge/UI, stubbed ask stream; no device capture or model quality claim'};
 const log = (message) => {
   report.phases.push({at: new Date().toISOString(), message: message});
   console.log('[paste-ui]', message);
@@ -34,13 +36,14 @@ server = serve(data/'settings.json', port=0, workbench_root=data,
                capability_database=data/'capabilities.sqlite3')
 threading.Thread(target=server.serve_forever, daemon=True).start()
 print(json.dumps({'port': server.server_port}), flush=True)
-sys.stdin.read()
+try: sys.stdin.read()
+finally: server.shutdown(); server.server_close()
 `;
 
-const bridge = spawn('python', ['-u', '-X', 'utf8', '-B', '-c', bridgeCode,
-  join(output, 'bridge-data')],
-  {cwd: resolve('.'), stdio: ['pipe', 'pipe', 'pipe'],
-   env: {...process.env, CODEBUDDY_SAFE_DELETE_ENABLED: '0'}});
+const bridge = spawn(candidate ? join(candidate,'runtime/python/python.exe') : 'python', ['-u', '-X', 'utf8', '-B', '-c', bridgeCode,
+  bridgeData],
+  {cwd: candidate || resolve('.'), stdio: ['pipe', 'pipe', 'pipe'],
+   env: {...process.env}});
 
 const lines = createInterface({input: bridge.stdout});
 const ready = await Promise.race([
@@ -61,59 +64,54 @@ const pageErrors = [];
 page.on('pageerror', error => pageErrors.push(error.message));
 
 try {
-  await page.goto(base + '/', {waitUntil: 'domcontentloaded', timeout: 30000});
-  await page.evaluate(async () => {
-    const host = document.createElement('main');
-    host.style.width = '860px';
-    document.body.append(host);
-    const {mountCompanionSession} = await import('/app/companion-session.js');
-    mountCompanionSession(host);
+  let asks=0, ordinaryChat=0;
+  const pasted='导数的几何意义是切线斜率。链式法则用于复合函数求导。';
+  await page.route('**/api/companion/ask-stream',async route=>{
+    const body=route.request().postDataJSON();assert.equal(body.expected_target,'user-paste');assert.equal(body.session,'companion');
+    assert.equal(body.question,'选区讲了什么？');asks++;
+    await route.fulfill({status:200,contentType:'application/x-ndjson',body:JSON.stringify({event:'delta',text:'粘贴材料说明导数与链式法则。'})+'\n'+JSON.stringify({event:'complete',status:'completed',text:'粘贴材料说明导数与链式法则。'})+'\n'});
   });
-  await page.waitForTimeout(1000);
-
-  // 1. Paste UI visible
-  const pasteDetails = page.locator('details.companion-paste');
-  assert(await pasteDetails.count() > 0, 'paste details block visible');
-  report.checks.paste_ui_visible = true;
-  log('paste UI visible');
-
-  // 2. Open and paste text
-  await pasteDetails.locator('summary').click();
-  const pasteArea = page.locator('textarea.companion-paste-input');
-  await pasteArea.fill('导数的几何意义是切线斜率。链式法则用于复合函数求导。');
-  const pasteBtn = page.locator('button[aria-label="将粘贴的选区文字作为上下文发送"]');
-  await pasteBtn.click();
-  await page.waitForTimeout(3000);
-  report.checks.paste_context_sent = true;
-  log('paste context sent');
-
-  // 3. Ask a question using the pasted context
-  const session = await (await fetch(base + '/api/manage/session')).json();
-  const askResp = await fetch(base + '/api/companion/ask', {method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-Sumika-CSRF': session.csrf},
-    body: JSON.stringify({question: '刚才的选区文字说了什么？关于导数的什么？'})});
-  const askResult = await askResp.json();
-  // In a test env without an API key, the model call may fail but the
-  // context injection is verified by the ABSENCE of "no observation" error.
-  report.checks.paste_context_usable_in_qa = askResult &&
-    !JSON.stringify(askResult).includes('no observation is available');
-  log('QA response: ' + JSON.stringify(askResult).slice(0, 120));
-
-  // 4. Zero pageerror
-  report.checks.zero_pageerror = pageErrors.length === 0;
-  if (pageErrors.length) report.pageErrors = pageErrors.slice(0, 3);
-
-  report.passed = report.checks.paste_ui_visible
-    && report.checks.paste_context_sent
-    && report.checks.paste_context_usable_in_qa
-    && report.checks.zero_pageerror;
+  await page.route('**/api/role/chat',async route=>{ordinaryChat++;await route.fulfill({json:{text:'unexpected fallback'}});});
+  await page.goto(base+'/',{waitUntil:'domcontentloaded'});
+  await page.waitForSelector('[data-room-input]');
+  await page.evaluate(async()=>{
+    const host=document.createElement('main');host.style.width='800px';document.body.append(host);
+    const {mountCompanionSession}=await import('/app/companion-session.js');mountCompanionSession(host);
+  });
+  const details=page.locator('details.companion-paste');await details.locator('summary').click();
+  await page.locator('textarea.companion-paste-input').fill(pasted);
+  const pasteResponse=page.waitForResponse(response=>response.url()===base+'/api/companion/paste-context');
+  await page.getByRole('button',{name:'将粘贴的选区文字作为上下文发送',exact:true}).click();
+  const response=await pasteResponse;
+  assert.ok(response.ok());
+  const accepted=await response.json();
+  assert.equal(accepted.target,'user-paste');assert.equal(accepted.chars,pasted.length);
+  assert.equal(accepted.context_active,true);
+  await page.waitForFunction(()=>document.querySelector('[data-companion-session] [role=status]')?.textContent.includes('已生效'));
+  report.checks.real_bridge_paste_acknowledged=true;
+  await page.locator('[data-room-input]').fill('选区讲了什么？');
+  await page.locator('#sendBtn').click();
+  await page.waitForFunction(()=>document.querySelector('#screen-room .chat-msgs')?.textContent.includes('粘贴材料说明导数与链式法则。'));
+  report.checks.actual_send_uses_paste=asks===1&&ordinaryChat===0;
+  report.checks.zero_pageerror=pageErrors.length===0;
+  await page.screenshot({path:join(output,'paste-response.png')});
+  report.passed=Object.values(report.checks).every(Boolean);
 
 } catch (error) {
   report.error = error.message;
   log('ERROR: ' + error.message);
 } finally {
   await browser.close();
-  bridge.kill();
+  bridge.stdin.end();
+  await Promise.race([once(bridge,'exit'),new Promise(resolve=>{
+    const timer=setTimeout(resolve,20000);timer.unref();
+  })]);
+  if(bridge.exitCode===null) {
+    bridge.kill();
+    await once(bridge,'exit');
+  }
+  report.checks.bridge_stopped=bridge.exitCode!==null || bridge.signalCode!==null;
+  report.passed=report.passed && report.checks.bridge_stopped;
   await writeFile(join(output, 'report.json'),
                   JSON.stringify(report, null, 2));
   console.log(JSON.stringify({passed: report.passed, checks: report.checks,

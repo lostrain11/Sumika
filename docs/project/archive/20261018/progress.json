@@ -1,0 +1,2590 @@
+{
+  "schema_version": 1,
+  "current_phase": "P6",
+  "phase_status": "in_progress",
+  "implemented": [
+    "P0：原文、完整八阶段计划、状态、交接、Git恢复规则、rc.2固定运行布局",
+    "P1：中立契约、受管DSH实例、薄适配器、完整参数审批、持久化未知结果与只读恢复",
+    "P2：锁定原生 DSH 组合；可重复真实工具、Plan、取消与恢复验收门槛",
+    "P3：受管原生 Web 日用入口、绑定工作区、显式任务成果记录及压缩/重启交接闭环",
+    "P4：独立连续性存储、DSH薄适配、Skill、自动捕获/交接、专用报告查询工具及 enabled 开关预留",
+    "P4精简：复用原生助手/工具日志，跳过空同步；历史数据不迁移",
+    "P5-1基线：复用五个开源文件库的独立Skill、环境入口与enabled开关；未修改DSH上游或UI",
+    "P6-1/P6-2/P6-4首批：角色配置契约、角色上下文隔离块、角色资源包安全导入/导出；无UI、无DSH耦合",
+    "P6-3调整：新增完全内置 EmbeddedMemory（SQLite FTS5，标准库，无Docker/外部服务），作用域、来源、遗忘、导出已验证；MemMachine降为可选高效果provider候选。",
+    "P6-2正式接线：独立上下文构造器隔离用户原文、角色、记忆和任务块，深拷贝防下游污染；测试通过",
+    "UI 壳层接入：DSH 客户端 UI 插件接管品牌槽与侧栏底部列表槽；皮肤令牌与结构覆盖同步设计稿；验收脚本 tools/verify_workbench_ui.mjs",
+    "UI 壳层第二轮：欢迎页品牌标记接管；会话区/输入区/工具卡槽位清单与 conversationPhase 状态来源写入方案文档",
+    "UI 壳层第三轮：折叠态悬停不再回退图标；会话级槽位 props 契约与探针方法写入方案文档",
+    "工作台会话头状态：独立插件 extensions/ui/sumika-workbench（执行中/等待审批/计划审阅/等待回答），由 ensure_skin 登记；会话头三槽 props 契约写入方案文档",
+    "扩展开关底座：ui/readiness.service_capabilities() 播种 + Bridge.capability_bootstrap() 只补缺；CapabilityStore 成为设备/桌面能力的执行门禁；新增 5 项测试",
+    "R-107/R-108：能力页三组视图与逐项真实开关、设置页能力模块区接线、卡片详情栏真实化、模型与连接改为真实或交由 DSH、未接线分区标注并禁用",
+    "工作台会话面包屑：lineage 槽用于工作区归属与上级会话链接；修复组件渲染崩溃；验收脚本覆盖 console error",
+    "客户端形态：工作台屏内嵌受管 DSH（含回链、去重品牌、隐藏模拟浮窗）；能力屏作为 DSH 主面板原型；桥接本机来源 CORS + 预检",
+    "活动室对话接线：真输入框+每角色会话+记录接口；桥接复用 RoleChat 实例并保留会话记录；修复示例角色无效 card 导致对话必失败；card context 无卡时降级并记录 card_context_status",
+    "用户角色独立库与 kind 标注；安和昴卡+VRM 以用户身份导入；舞台按角色资产渲染（无 VRM 则立绘占位、切换重建实例）；图层图例数据化",
+    "角色导入入口：名册底部表单 + POST /api/roles/import（卡文本 + 本机模型路径）+ /api/roles/remove；attach_asset 校验路径/大小并刷新 checksums，新增 4 项单测",
+    "名册完整性规则（名字取角色卡、可选覆盖、未完整列明）、活动角色自动切到完整角色、回答假名兜底、sampleA 补自带示例卡",
+    "kana→罗马音本地转写（默认路径，不重发）；重发改由 language.retry_on_kana 显式开启",
+    "naturalize_reply（假名/罗马音语气词→中文，残余假名→罗马音）+ 策略文本与安和昴卡同步更新",
+    "卡内 interjection_policy（编译+校验+白名单保护）；hah 移出默认罗马音映射；安和昴新卡重导入",
+    "DSH 主面板之二：项目进度（/api/tree 阶段与任务计数、当前任务、下一步）",
+    "防走岔约束：AGENTS.md 强制条款 + docs/project/ui-design-coverage.md 逐屏覆盖表（含已否决的实现方式）",
+    "侧栏皮肤第一批：行距/圆角/字号/悬停 + 搜索框样式（设计稿令牌）",
+    "侧栏皮肤上限收口：项目行/任务行圆角与字重、状态点形状、搜索框样式；未达项逐条记录原因",
+    "时间线皮肤：用户气泡按设计稿生效；工具卡/diff/终端/状态行规则已写待真实工具调用验证",
+    "时间线工具卡皮肤实测生效；新增“设计稿不授权删功能”规则与原生额外能力保留清单",
+    "输入区皮肤：真实 DOM 定位后改正选择器，输入卡/控件行/占位符/外边距按设计稿生效，原生控件保留",
+    "外壳自适应布局（不再依赖 calc(100% - 64px)）；品牌不再按框架状态跳过",
+    "侧栏隐藏品牌标识与压缩 logoRow 行高；新增待核查项：DSH 沙箱内 tests_next 113 errors",
+    "隐藏 hero 标题与侧栏页脚块；删除 footer 宿主注入与 shell_url 管线；修复回链把 iframe 导航到外壳的 bug",
+    "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数",
+    "2026-10-16：独立验收后的行为/模式/权限/输入/数据治理与UI修复，自动化验证通过；硬件和候选仍待验"
+  ],
+  "verified": [
+    "33 项自动化测试通过",
+    "真实DSH rc.2认证、PID归属、创建、历史读取、空闲取消、跨域拒绝通过；0模型调用",
+    "冻结依赖重复安装通过",
+    "独立wheel安装和仅项目记录的交接重建通过",
+    "a464af6 Git bundle验证、隔离恢复及发行文件摘要校验通过",
+    "P2 完整组合门槛通过；冻结安装通过；Web HTML 与脚本资源通过",
+    "真实文件读改写、终端测试/退出码/超时/活动取消、Skills/子Agent/MCP、Plan审阅、断线重连、重启历史与无自动重放通过；外部模型调用 0",
+    "P3 整合测试运行70项：69通过、1项符号链接权限跳过；DSH沙箱内复验通过",
+    "真实 DeepSeek 完成规划、实现、两轮审查、修复、压缩239条历史和重启后继续任务并生成成果记录",
+    "原生 Edge 实际发送和显示结果通过；P2完整回归门槛与wheel构建通过；测试凭据临时副本已删除",
+    "P4：85项Python测试（84通过、1权限跳过）、4项适配器测试；15轮并发写入复验通过",
+    "P4真实DSH六组验收通过：原文与Skill/工具、新旧计划、压缩和双本地端点接手、原会话重启、项目隔离、禁用保留数据；外部模型调用0",
+    "P4精简回归：85项Python测试（1权限跳过）、4项适配器测试、真实DSH六组验收通过",
+    "办公基线：7项边界测试、Skill格式校验、11项依赖哈希锁安装和pip check通过；真实DSH Skill/终端、四类文件读写修改与禁用验证通过，0外部模型调用",
+    "角色扩展：配置/上下文边界、ZIP路径穿越拒绝、资源包往返测试通过",
+    "用户安和昴 V2 角色卡作为外部导入资源测试通过：V2格式、9项世界书、原始卡保留、SHA-256、导入/导出往返与路径安全；未激活为内置角色",
+    "角色上下文边界测试：来源块顺序、原文不可改写、对象隔离、非法输入拒绝通过",
+    "EmbeddedMemory中文评测夹具5/5通过：事实召回、作用域隔离、事实更新、两跳关系和角色隔离；本地无外部模型调用",
+    "完整 tests_next 测试集 115 项通过，1 项权限相关跳过",
+    "工作台壳层真实 UI 验收：无客户端报错；侧栏品牌=晴日部室、底部状态与 DSH 0.1.5-rc.2 来自宿主注入；frame=#fffdf8、sidebarCol=#faf8f0、新会话按钮=#b4496a/白字/8px（Edge 实测计算值）",
+    "工作台壳层第二轮真实验收：欢迎页品牌标记为设计稿渐变（rgb(86,127,108)→rgb(180,73,106)）；验收脚本新增该断言并保持 0 客户端报错",
+    "折叠侧栏真实悬停验收：railMark 计算 display=flex 且为设计稿渐变，上游 panelIcon display=none；同一脚本仍保持 0 客户端报错",
+    "工作台会话头状态药丸实时验收：新建会话发一条短消息，头部采样 idle→running 且文案为「执行中」，0 客户端报错；同一轮真实验证确认受管 profile 已可用真实模型（用户填入 key 后）",
+    "能力注册表真实验收通过：7 项可服务能力全部登记；开关往返生效；停用后 desktop service 退出码2且含 disabled；启用后经同一入口对生成图片跑通 OCR（内容校验通过，不截屏）；脚本结束时恢复原 enabled",
+    "能力页/设置页界面验收通过：开关 aria 与注册表一致；DOM 点击 camera 开关→注册表 false→点回 true；设置总览与注册表一致；占位分区按钮全部 disabled 且示例哈希/MCP 计数消失；0 客户端报错",
+    "工作台会话头验收：面包屑文本为「工作区 · Sumika」且无标题重复；状态入口仍为 idle；验收脚本新增 console error 收集后依旧 0 错误",
+    "工作台内嵌验收通过：该屏 frame 撑满、src 指向 5175、模拟标记移除、桌宠隐藏、无 pageerror/console error；DSH 主面板验收通过：侧栏出现「能力」行、面板渲染 7+4 行、面板开关写入注册表并恢复原值",
+    "活动室真实对话验收：空态无编造消息；发送后得到真实角色回答（Sumika 示例助手），无 pageerror/console error；记录经 /api/role/chat/history 跨页面加载保持",
+    "用户导入角色验收：ando-subaru 标记为 user；模型资产 200（16.5MB）被页面请求；舞台 show-vrm + canvas 挂载；名册/标题/舞台名为安和昴；真实回答符合角色卡且第二轮引用第一轮",
+    "角色导入界面验收：表单提交后角色立刻以「用户导入 · 角色卡 · 立绘占位」出现在名册，桥接 kind=user，测试角色经 /api/roles/remove 清理且不再列出；0 pageerror / console error",
+    "完整角色规则验收：卡+模型导入后进入名册；仅卡导入被标 complete=false、missing=[model_3d] 并出现在名册「未完整」提示里；两个测试角色均已清理，0 pageerror/console error",
+    "语言兜底验收：安和昴真实回答为中文+罗马音语气词（ah/maa），无假名；单测覆盖干净/纠正成功/纠正失败三情形",
+    "语言兜底省 token 验收：有假名的回答仍只调用模型 1 次，假名被本地转写为罗马音且结果无假名（单测断言调用次数）",
+    "语气词中文化验收：安和昴真实回答为「诶，你好。……嘛，今天先这样」，无假名也无罗马音语气词；单测断言仍只调用模型 1 次",
+    "安和昴 v1.4 重新导入验收：kind=user、complete=true、verified=ok、模型 200；实测回答无假名且语气词为中文，hah 白名单生效",
+    "项目面板验收：sidebar 出现「能力」「项目」两行，项目面板渲染全部阶段（P0-P4 完成 / P4-UI、P5、P6 进行中 / P7 计划中）且无 console error",
+    "时间线工具卡皮肤经真实工具调用确认生效；审批卡/diff 正文/终端容器在两次真实操作中均未出现，保持未验证并记录触达方式",
+    "外壳布局修复验收：1160x800 与 1440x900 下 frame 底边=视口高度、scrollable=false；工作台验收脚本（品牌/回链/轨道/无报错）与内嵌验收脚本均通过",
+    "侧栏去品牌验收：`_brand` display:none、无晴日部室/HARNESS 字样、折叠按钮可见且轨道态仍显示品牌标记；验收脚本改为反向断言后通过",
+    "验收脚本改为反向断言：侧栏不得出现品牌字样、hero 标题必须隐藏；两项均为 true 且无报错"
+  ],
+  "partial": [
+    "P5-1：基础文件操作可用；视觉渲染、公式重算、复杂特性与真实模型任务质量未验收",
+    "P5-2 OCR：独立可替换 provider 适配层已实现；当前机器无 Tesseract/RapidOCR，识别能力待安装 provider 后验收",
+    "P6-1/P6-2/P6-4基础契约完成；UI接入、真实角色模型/语音加载和长期记忆provider仍未实现",
+    "P6-3长期记忆：完成Mem0/Graphiti/claude-mem/Letta/DSH候选评估，首选Mem0 OSS基线；真实中文效果、成本和隔离评测尚未运行",
+    "P6-3：按效果优先评估M3-Agent（ByteDance-Seed/m3-agent）与MemMachine；已安装客户端适配并完成边界测试，尚未宣称最终中文效果最佳。",
+    "MemMachine实测受阻：仅安装客户端，本机8080无服务，未安装server；未发送角色数据。P5定时任务基础存储已实现并通过测试。",
+    "工作台会话头待确认药丸：分支已实现，尚未在真实审批/计划审阅/提问场景出现",
+    "设置页外观分区（主题/背景/界面密度）与数据与存储的清除数据仍为未接入占位，已标注禁用",
+    "时间线终端/diff 样式：规则已写，展开态未出现，仍待验证"
+  ],
+  "blocked": [],
+  "not_implemented": [
+    "P4-UI：UI设计、原型与接入清单（旧版源码已初步查看，设计尚未交付）",
+    "P5剩余桌面/OCR/定时/浏览器/模块能力，P6-P7角色和长期愿景",
+    "R-107/R-108：功能开关设置 UI，后续 UI 设计时接入；P4 enabled 配置已预留并验证",
+    "F-001：Agent专用诊断日志查询与故障证据扩展（仅计划，尚未实施）"
+  ],
+  "next": "Continue actual device/dependency acceptance and mainline feature coverage; keep full goal active.",
+  "evidence": [
+    "docs/project/phase-01-acceptance.md",
+    "docs/project/phase-02-acceptance.md",
+    "docs/project/phase-03-acceptance.md",
+    "docs/project/phase-03-evidence.json",
+    "docs/project/phase-04-acceptance.md",
+    "docs/project/phase-04-evidence.json",
+    "docs/project/workspace-cleanup.md",
+    "docs/project/phase-05-office-acceptance.md",
+    "docs/project/phase-05-office-evidence.json"
+  ],
+  "parallel_work": {
+    "phase": "P5",
+    "task": "P5-1",
+    "status": "baseline_verified",
+    "evidence": "docs/project/phase-05-office-acceptance.md"
+  },
+  "updated_at": "2026-10-18",
+  "active_scope": {
+    "goal": "完成P5、P6和长期记忆所有不依赖UI的剩余任务",
+    "status": "in_progress",
+    "done_this_run": [
+      "记忆恢复预校验与事务、关系备份恢复、literal查询、fact_key迁移",
+      "能力模块启停/排序/移除/provider选择",
+      "定时任务tick、持久化去重和UNKNOWN不重放",
+      "真实OCR/隐藏窗口编辑/12页浏览器/文件语音闭环",
+      "LibreOffice转换和公式重算",
+      "混合中文检索13/14与真实DSH角色服务接线",
+      "记忆v3备份保留event_id与不可检索模型proposal；兼容v2/旧列表；普通导入不复活遗忘事件，显式恢复可恢复备份状态",
+      "独立角色模型原生preset接入完成：角色/工作会话分离、角色无工具、开关与不可用失败关闭；真实DSH本地模型验收通过",
+      "明确用户记忆指令已通过原生已准入RPC消息自动写入：独立开关、来源/事件绑定、同键更新、跨会话及重启召回通过；普通聊天自动提炼仍未实现",
+      "长期记忆本地质量评测完成：EmbeddedMemory关键词8/14，SemanticMemory混合检索13/14；作用域隔离与fact_key更新均通过，语义provider暂定默认但非AML结论",
+      "SemanticMemory恢复一致性补强：restore/reset按作用域清理embedding缓存，避免事实文本更新后命中旧向量；147项测试146通过1跳过",
+      "桌面UIA授权闭环补强：执行前可绑定窗口树快照哈希，状态变化即拒绝；执行后返回新的验证哈希，避免静默操作错误窗口",
+      "网页咨询响应状态机补强：每次提交生成request_id，区分submitted/completed/unknown/cancelled；超时保留UNKNOWN且禁止自动重试，取消明确仅为本地请求",
+      "实时语音会话协调层完成：统一 listening/transcribing/responding/playing/cancelled/error 状态，拒绝非法跃迁，取消不自动重试，独立于录音/识别/播放 provider",
+      "桌面操作OCR结果核验层完成：对指定截图识别期望文字，返回verified/unknown；识别失败或不匹配不伪称成功，独立于UIA与DSH",
+      "网页咨询流式完成判定补强：新增响应需连续稳定观察后才标记completed，文本仍变化则unknown且禁止重试；本地Chromium 12页验收通过",
+      "桌面授权操作编排完成：执行前快照哈希、UIA动作、可选截图OCR后验串联；OCR不确定则整体结果标记unknown并保留边界说明",
+      "BrowserSkill独立适配边界完成：健康检查、命名Profile、站点读写授权记录与权限查询；无自动启动、无网页内容转发、不可用时失败关闭",
+      "BrowserSkill默认安装策略明确：固定版本随客户端提供，适配器可替换；站点登录/read/send授权分开，未登录/未连接/验证码失败关闭，不自动启动或付费回退",
+      "复用本机已下载并校验的 BrowserSkill 0.1.11：适配器默认发现 D:/Tools/BrowserSkill/0.1.11/bsk.exe；status真实返回协议1.1及Edge扩展连接，无需重复下载",
+      "BrowserSkill 0.1.11已复制到Sumika运行目录 runtime/browserskill/bsk.exe，版本与SHA-256复核通过；发布时用户无需自行下载或指定路径",
+      "项目结构整理完成：清理测试临时文件，补充docs/project/README.md目录职责与放置规则；保留现有引用路径，BrowserSkill固定运行时归入runtime/browserskill",
+      "BrowserSkill会话适配补强：独立客户端支持显式session start/list/stop，失败关闭且不自动启动；真实daemon状态可探测，命名Profile/登录仍需用户首次授权",
+      "BrowserSkill咨询桥接层完成：导航要求站点read授权，发送要求send授权，复用命名session并调用真实CLI；无授权或CLI失败即停止，不自动切换后端",
+      "BrowserSkill咨询读取侧补齐：受read授权保护的observe调用、可配置输出预算和invalid observation未知边界；不持久化页面原文",
+      "BrowserSkill桥接修正：授权站点与实际origin匹配，显式Agent tab_id绑定，操作前后查tab来源；send明确只fill，未提交；CLI原子来源检查尚缺",
+      "UI首批接入完成：复制D方案方向D晴日部室静态原型及所需图片到ui/prototype-d，新增UI目录规范；未连接后端，原设计项目未修改",
+      "UI参考边界确认：D方案仅作为视觉/布局/交互参考，当前新版能力、DSH原生流程和独立扩展契约优先；设计目录中的功能假设不自动视为需求",
+      "UI状态快照投影完成：提供session/role/memory/modules/approvals的脱敏状态契约，拒绝未知状态、凭据和原始提示/页面内容；可交给DeepSeek做渲染接线",
+      "长期记忆治理评测扩展完成：关键词8/14、语义13/14；新增遗忘后拒绝召回和跨作用域清洁检查，两种provider均通过",
+      "BrowserSkill授权数据边界完成：默认写入本机LOCALAPPDATA/Sumika/browser-authorizations.json，原子替换保存，支持站点撤销；不写入项目源文件或Git"
+    ],
+    "pending": [
+      "角色与记忆调用入口/世界书接线",
+      "桌面输入/窗口控制/OCR翻译闭环",
+      "语音/授权感知真实工具验收",
+      "网页咨询浏览器接入",
+      "办公复杂文件验收",
+      "统一记忆效果评测及真实DSH接线"
+    ],
+    "acceptance": "各项实现+自动化+真实工具；缺少依赖或质量证据保持未完成",
+    "evidence": "docs/project/phase-05-06-backend-acceptance.md",
+    "verification": "170 Python tests: 169 passed, 1 skipped; authorization registry atomic/revoke tests passed",
+    "current_task": "BrowserSkill授权数据边界完成：默认写入本机LOCALAPPDATA/Sumika/browser-authorizations.json，原子替换保存，支持站点撤销；不写入项目源文件或Git",
+    "schedule_implemented": [
+      "时区与夏令时",
+      "持久化提醒及已读",
+      "受管DSH执行桥接",
+      "取消/禁用/UNKNOWN核对",
+      "CLI与宿主前台循环"
+    ],
+    "game_translation_design": "docs/project/game-translation-plan.md",
+    "schedule_evidence": "docs/project/schedule-dsh-evidence.json",
+    "game_translation_status": "deferred; 用户明确先不做",
+    "lifecycle_evidence": "docs/project/extension-host-evidence.json",
+    "handoff_design": "docs/project/extension-lifecycle.md",
+    "role_plugin_evidence": "docs/project/role-plugin-evidence.json",
+    "role_model_evidence": "docs/project/role-model-evidence.json"
+  },
+  "next_action": "Integrate existing schedule execute entry with native DSH scheduling without duplicate catalog/navigation or auto-migrating reminders; continue remaining original requirement acceptance and complete frontend guide.",
+  "local_model_evaluation": {
+    "status": "in_progress",
+    "evidence": "docs/project/local-model-comparison-evidence.json",
+    "verification": "190 tests run, 189 passed, 1 skipped",
+    "current_task": "Brand plugin narrowed to one remaining difference, with several causes ruled out by evidence. Verified: our module materialises, apply runs, both slots.inject callbacks fire (materialised/applied/slotFired all true); our apply is byte-for-byte the same shape as brand-official (nested slots.inject + generator yielding register calls, inject=[\"slots\"]); adding immediately:true to our dsh.client changed nothing; and with the official brand enabled the sidebar logo row (hHd-Xa_logoRow) renders 3 SVGs while our text never appears, while with the official row disabled the same row is empty. So the slot renders, but only the official occupant is accepted. Two remaining explanations, both cheap to test: (a) the slot accepts a single occupant and the official registration wins, or (b) our component is never accepted because the React element we build does not belong to the app renderer (react/jsx-runtime resolved differently in our bundle), which would fail silently. Also removed the earlier guessed disable row for dsh-client-ui-brand-official from both the code path and the profile patch, since disabling a plugin by a guessed id is exactly the kind of unverified guess this project forbids; the official brand is back on.",
+    "next_action": "UI 继续：工作台内嵌任务时间线（读取受管会话事件）与能力页剩余接线；随后继续剩余 pending 项（语音真实工具验收、办公复杂文件、记忆 DSH 真实接线）。",
+    "historical_record_notice": "Earlier stage/UI notes preserved; current local-model selection and evaluation: phase-07-local-model-plan.md, lan_daily_evaluation_20261016"
+  },
+  "ui_v2": {
+    "status": "in_progress",
+    "record": "docs/project/ui-v2-execution.md",
+    "tests": "21 backend tests;18 browser checks;12 viewport cases passed",
+    "next": "Actual browser zoom and server disconnect; real pending approval integration remains unverified",
+    "resource_management": "rename/bind/export/archive/package restore implemented; personal resource operations tested with fixtures",
+    "enhancement_switch": "persisted and browser verified; host unknown fails closed",
+    "latest_validation": "第二轮收口复验：UI 主套件 9/12 稳定通过（verify_ui_v2 与 verify_ui_task_intent 已由失败转通过，verify_workbench_ui / verify_model_settings_ui / verify_capability_settings_ui / verify_ui_matrix 等通过）；矩阵 8 分辨率 × 2 缩放（含 125%）× 2 主题 × 4 屏 = 128 格通过；Python 单测 572 项 OK（0 失败 0 错误，1 skip）——关闭沙箱 safe-delete 垫片后取得有效判据。",
+    "windows_publication": "replace:2/40 failed;rename:0/40 failed;new-only publication now rename, no retries;internal OS cause unproven",
+    "horizontal_clipping": "fixed in outer frame skin using overflow:clip; 9 native UI checks passed and screenshot reviewed",
+    "preview_url": "http://127.0.0.1:8765/#board",
+    "delivery": "Every completion response must include a clickable local preview link",
+    "offline_validation": "3 browser offline checks passed: HTTP blocked, iframe/draft preserved across navigation, HTTP recovered; server crash and interrupted task recovery not verified",
+    "background": "Browser-local PNG/JPEG/WebP background and reset implemented;4 browser checks passed;not bundled or uploaded",
+    "theme": "Fixed reentrant theme/change override ordering in skin via queued microtask; 3 theme checks passed; no upstream edits",
+    "copy_cleanup": "User-authorized prototype explanatory copy removed; operational hints/status retained;24 interaction checks passed",
+    "latest_visual": "Dark room controls contrast fixed; prototype object labels and dummy role removed;3 theme and24 management checks passed before final static placeholder removal",
+    "approval_fixture": "6 isolated checks passed: scrolling/actions/failure plus light-dark-light computed palette and reject contrast >=4.5; screenshots reviewed; no real authority or transport exercised",
+    "task_entry": "Same-generation advisory metadata plus verbatim current-message evidence and conservative local filter;26 backend tests and browser fixtures passed;zero model requests;backend restart pending to preserve volatile active chat;real model compliance unverified",
+    "settings_capabilities": "用户授权移除设置能力模块分区及重复列表，保留能力页唯一管理入口；23项浏览器回归通过，0页面错误。",
+    "sidebar_repair": "借鉴shadcn ghost面板按钮，移至顶部；移除top45%及渐变替代图标，修复浅色tooltip；1280/810各3轮折叠展开通过，提示对比度11.12，证据.sumika-next/sidebar-verification",
+    "prompt_optimization": "用户要求仅UI预留；星光按钮已接原生conversation.input.right，aria-disabled无操作；模板改写撤下，模型接入F-003 deferred。20项浏览器管理检查通过。",
+    "narrow_header": "360/480/810宽度顶栏检查通过，480截图核对；导航不竖排，状态另行排列。",
+    "room_history": "新版日用后端已上线：3条消息分页/当前角色清空可用，长期记忆不清；20界面检查、HTTP隔离和浏览器夹具通过，用户聊天未删除。",
+    "room_history_role_binding": "分页/非分页历史均绑定当前角色；清空保持严格会话匹配；新增2项隔离测试，整体41项后端回归和20项浏览器检查通过",
+    "ui_redesign_phase_4": {
+      "plan": "docs/project/ui-redesign-plan.md",
+      "execution_record": "docs/project/ui-redesign-execution.md",
+      "coverage_table": "docs/project/ui-design-coverage.md",
+      "suite": "第二轮：主套件 9/12 稳定通过 + 矩阵 128 格通过 + Python 572 项 OK(skipped=1) exit=0；verify_ui_v2 与 verify_ui_task_intent 由失败转通过",
+      "harness_fixes": "本轮修复的验收基座缺陷（均非产品问题）：① 硬编码工作台端口 :5175（新增 tools/lib/native-frame.mjs 按结构特征定位 frame）；② 主题泄漏——验收会把用户工作台主题改成 dark 且不还原（改为按偏好走界面原路写回并复验）；③ 名册默认收起导致面板入口点不到；④ 桌宠断言未跟上「工作台屏恢复显示」决策；⑤ 只读角色上强求导出按钮；⑥ 配色断言抢在重绘前读（实测滞后约 7ms，改为轮询终态）；⑦ 清理动作漏 CSRF 导致测试角色留在用户档案；⑧ 预留功能断言只认 aria-disabled；⑨ 已批准的「工作区→项目」更名未同步；⑩ 侧栏折叠按钮选择器过宽选错元素",
+      "real_product_fix_this_round": "字面色收编补齐：tokens.css 的 --paper/--danger/--danger-line/--growth/--muted-2/--amber-soft-2/--amber/--plain 此前只有定义、没有调用点；本轮把 bind.js 与 index.html 的 7 处调用点实际迁到令牌（命中数逐条断言），改后 grep 无残留",
+      "user_state_restored": "工作台主题保持 light。测试角色 ui-import-card-only / ui-import-full 已于 2026-09-21 经用户批准删除（回收站），桥接角色列表恢复为 sampleA + sumika-guide。注意：verify_role_import_ui 的脚本内清理与该沙箱批量删除守卫不兼容（其导入+清理单回合删除数超过守卫阈值 50），在本沙箱运行必然残留，需在非沙箱环境运行或跑完后手工清除。",
+      "known_blocked": "仍未通过（环境/前置，非产品回归）：verify_ui_offline / verify_ui_management / verify_ui_native_history 都停在依赖 DSH 会话态的元素上（工作台输入区、会话内槽位 [data-sumika-enhancement]、既有历史会话），当前无活跃会话（session.status=unknown，工作台自述 no_non_blank_session），需正常客户端开一个真实会话后复跑；verify_role_import_ui 的角色清理被沙箱 safe-delete 批量守卫拒绝（SAFE_DELETE_BULK_CONFIRM_REQUIRED），桥接删除角色目录时抛 SystemExit 并断连（HTTP=000），测试角色会留在用户档案，需用户侧确认后清除；verify_user_role 需要用户导入的角色 ando-subaru 并启用角色模型。",
+      "evidence": [
+        "docs/project/ui-redesign-execution.md",
+        "docs/project/ui-design-coverage.md"
+      ],
+      "second_closing_round": "第二轮收口（关闭垫片拿到真实判据后）：① 真实产品缺陷——extensions/roles/speech_playback.py 用了不存在的 winsound.SND_SYNC，Windows 上任何真实语音播放都会 AttributeError，已改为 SND_FILENAME|SND_NODEFAULT；② verify_ui_v2 真因是 DSH 首次配置弹窗的遮罩拦截指针事件（旧结论「折叠钮 not-stable」是误读 Playwright 日志），补上弹窗关闭后通过；③ verify_ui_task_intent 真因是夹具一次性返回未分页历史、与 limit=3 分页渲染冲突（旧结论「角色模型未启用」已证伪），改为遵守 limit/before/has_more 并翻页后通过；④ Python 套件 92 error 全部是垫片产物，用 CODEBUDDY_SAFE_DELETE_ENABLED=0 关闭后 572 项 0 失败；⑤ 修 tests_next/test_desktop_authorization.py 漏关文件（ResourceWarning 污染别的用例 stderr）；⑥ 悬空链接用例补 no-op 守卫；⑦ tzdata 是测试解释器缺依赖、项目已正确声明与打包。"
+    }
+  },
+  "desktop_integration": {
+    "status": "in_progress",
+    "record": "docs/project/desktop-integration-execution.md",
+    "implemented": [
+      "统一新旧 Bridge Host/Origin/CSRF 写入口",
+      "无角色模型配置首启，生成默认关闭",
+      "受管工作台 Profile 单写者锁及 PID 创建身份",
+      "角色会话和交接草稿 SQLite 持久化",
+      "退出与 HTTP 写操作串行化；失败保留未知状态",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "verified": "30 targeted tests passed; isolated bridge restart and stale token rejection passed; native layout isolated probe passed (not product migration)",
+    "daily_rollout": "已切换新版Bridge及受管DSH；已知角色聊天备份/恢复2条，分页/清空API已上线，20界面检查通过；自定义旧session枚举限制仍保留",
+    "remaining": [
+      "原生布局产品迁入和准确来源通信",
+      "可信项目选择、接收状态及完成证据回传",
+      "定时任务执行桥和三站 BrowserSkill 实际接线",
+      "安全模式、备份恢复、安装和诊断",
+      "异常启动记录的显式恢复流程，日用旧进程历史导出与安全版本切换"
+    ],
+    "next_action": "完成 BrowserSkill 三站绑定与端到端验收；保留当前 iframe 方案",
+    "shared_ownership": "UI和CLI共享sumika_next.runtime_ownership；19项测试通过；真实两轮UI/CLI竞争写者被拒绝，零模型调用",
+    "ownership_evidence": ".sumika-next/ownership-probe-54ec971bdb794c7788f9b8f00f68feec/report.json",
+    "legacy_chat": "已知UI会话个人快照SHA256校验；安和昴2条消息导入1轮；旧接口不能枚举自定义会话，旧服务继续运行。4项会话测试通过。",
+    "native_transport": "当前受管DSH准确origin与实例绑定令牌；隔离真实浏览器CORS/写保护/切页草稿保留通过，无模型调用，未部署日用",
+    "native_transport_evidence": ".sumika-next/layout-probe-dcfc0fc5c00a42689b7f501a9ea1d69e",
+    "role_card_refresh": "最新用户交付原样导入；source/target SHA256 b2d7578633c5181072aaf162f048f0a8e101e8f8f0a104dc86b91699f797bf4e；个人备份校验，模型绑定及2条聊天保留",
+    "shared_page_transport": "bind/management/handoff复用模块来源绑定的Bridge请求层；旧页面20项检查及原生动态导入/写保护实测通过",
+    "cleanup_blocker": "失败备份backend-switch-fe98f622d7a14d14885ecda06d14812f递归清理被自动审核拒绝，未绕过，正式备份backend-data-830dc5652a5844dca33a758a0046d27b已校验",
+    "native_regression": "近期切换后原生布局隔离探针通过：f8a3d5e4ad634e2bbad0d764bd019a45；历史夹具通过；仍未产品迁移",
+    "workbench_load_feedback": "受管DSH iframe加载/错误状态与同URL重试已接线；20项浏览器回归通过，不重启/重放"
+  },
+  "browser_consultation_execution": {
+    "status": "complete",
+    "updated_at": "2026-09-17T06:48:47.946217+00:00",
+    "scope": "BrowserSkill 三站会话绑定、授权与失效恢复",
+    "implemented": [
+      "授权注册表内持久化网站/浏览器实例/Agent窗口/session/tab绑定，不改变read/send授权",
+      "绑定查询及按绑定创建咨询桥；操作前检查身份，跨站/移窗/撤权/失效时拒绝，不自动重绑",
+      "管理接口 browsers/bind 与 browsers/status；session inventory错误标unknown",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "verified": [
+      "25 targeted Python tests passed",
+      "通过 bound_bridge.observe 对 DeepSeek/Kimi/GPT 实际只读调用均 observed，未提交消息；个人证据 browser-binding-verification.json"
+    ],
+    "remaining": [
+      "前端绑定/显式重新绑定与失效提示接线",
+      "原生网页提交/响应采集与持久化未知状态链路",
+      "需要明确发送测试许可后做三站端到端验收"
+    ],
+    "layout_decision": "按用户最新决定保留当前 iframe + 独立适配层；原生四页迁入暂缓，不是完成事实",
+    "submission_journal": {
+      "status": "implemented_fixture_tested",
+      "tests": "23 targeted tests passed; wider 32-test run had 1 unrelated role import WinError 5",
+      "boundary": "Explicit host approval plus read/send and current binding checks; UNKNOWN committed before fill/click; same request ID never dispatches twice; submitted is not completed",
+      "remaining": [
+        "Real site selectors and draft-preservation preflight",
+        "Browser-side origin race mitigation",
+        "Response correlation and completion evidence",
+        "Real send approval and three-site acceptance"
+      ],
+      "external_messages_sent": 0
+    },
+    "submission_guard": {
+      "status": "implemented_local_browser_verified",
+      "tests": "20 targeted Python tests pass; real headless Edge guard fixture passes with zero external requests",
+      "scope": "page-local origin + exact draft guard before fill/click; textarea and contenteditable supported",
+      "remaining": "Real site selector verification and response correlation/completion; explicit test-send approval; production integration not accepted"
+    },
+    "next_action": "第2项验收完成；后续按批准计划进入下一项。新咨询继续逐次原生审批，已使用测试不重放。",
+    "send_approval_pending": {
+      "artifact": ".sumika-next/web-review-acceptance/pending.json",
+      "sites": 3,
+      "messages_per_site": 1,
+      "status": "approved_and_consumed"
+    },
+    "send_acceptance": {
+      "three_sites": "SUMIKA_OK observed in actual answer regions",
+      "kimi": "first adapter attempt UNKNOWN; screenshot-guided one-shot existing draft submission succeeded",
+      "cause": "first failure unproven; earlier journal lacked stage information",
+      "automatic_replays": 0
+    },
+    "readiness_guard": {
+      "implemented": "read-only readiness polling, one fill/one click, durable stage metadata",
+      "verified": "21 targeted tests and real Edge local fixture passed",
+      "live_fixed_kimi": "not_verified"
+    },
+    "purpose": "主Agent完成计划或复杂成果后的交叉审查；网页模型仅提建议，由主Agent核验，不主导规划或授权。",
+    "binding_ui": {
+      "status": "implemented_fixture_verified",
+      "test": "tools/verify_browser_authorization_ui.mjs",
+      "live_binding_state": "three_sites_ready_revalidated",
+      "daily_backend_restarted": false
+    },
+    "response_correlation": {
+      "status": "three_site_native_readback_verified",
+      "python_tests": 37,
+      "collectors": "live_three_site_completed",
+      "no_new_submission": false,
+      "legacy_baseline_backfill": false,
+      "daily_backend_restarted": true
+    },
+    "native_review_tools": {
+      "status": "daily_registered_and_isolated_live_native_execution_verified",
+      "python_tests": 43,
+      "node_tests": 5,
+      "native_result": "ABORTED_BEFORE_DISPATCH",
+      "daily_installed": true,
+      "new_messages_sent": 5,
+      "evidence": ".sumika-next/web-review-native-ee58179d2a794dcfadbd3e74b0beab8c",
+      "daily_tool_discovery": "native_registry_verified"
+    },
+    "complex_draft_guard": {
+      "status": "implemented_edge_fixture_verified",
+      "uploaded_preview_cards": "not_fully_verified"
+    },
+    "live_review_acceptance": {
+      "evidence": ".sumika-next/web-review-acceptance/live/report.json",
+      "sites": {
+        "chat.deepseek.com": {
+          "state": "completed",
+          "native_readback": true
+        },
+        "www.kimi.com": {
+          "state": "completed",
+          "native_readback": true
+        },
+        "chatgpt.com": {
+          "state": "completed",
+          "native_readback": true
+        }
+      },
+      "restart_no_replay": true,
+      "paid_api_calls": 0,
+      "kimi": "快速模式；清旧稿后同一获准消息经一次受控续提交；未验收修复后全新请求全自动流程",
+      "chatgpt": "用户授权后选择左侧回复1；思考模式在原测试发送后开启，未重发",
+      "remaining": [
+        "日用工具发现验证",
+        "受管浏览器恢复产品入口",
+        "站点已上传附件预览卡保护完整验收"
+      ]
+    },
+    "daily_install": {
+      "evidence": ".sumika-next/web-review-acceptance/install.json",
+      "profile_backup_verified": true,
+      "running": true,
+      "embed_ready": true,
+      "settings_rpc_verified": true,
+      "reloaded_with_recovery_and_step_identity": true
+    },
+    "request_identity": {
+      "status": "implemented_tested",
+      "identity": "project/session/native turn/native step/callId",
+      "node_tests": 5,
+      "legacy_query_ownership_preserved": true
+    },
+    "recovery_entry": {
+      "status": "daily_live_restore_verified",
+      "assets": "existing connection permissions dialog, BrowserSkill session_start/session_list/bind_session",
+      "tests": "13 Python tests plus real headless Edge UI fixture passed",
+      "remaining": "重新打开页面只保证传输绑定可用；各站生成模式仍须检查",
+      "evidence": ".sumika-next/web-review-acceptance/daily-recovery.json"
+    },
+    "final_send_proposal": ".sumika-next/web-review-acceptance/final-send-proposal.json",
+    "final_acceptance": {
+      "status": "passed",
+      "original_three_site_evidence": ".sumika-next/web-review-acceptance/live/report.json",
+      "kimi_fast_gpt_thinking_evidence": ".sumika-next/web-review-acceptance/final-live/report.json",
+      "daily_registry_evidence": ".sumika-next/web-review-acceptance/daily-registration.json",
+      "recovery_evidence": ".sumika-next/web-review-acceptance/daily-recovery.json",
+      "paid_api_calls": 0,
+      "native_approval_cancel": "ABORTED_BEFORE_DISPATCH",
+      "automatic_replays": 0,
+      "python_tests": 43,
+      "node_tests": 5,
+      "scope": "第2项网页交叉审查授权、绑定、提交、完成回读、未知/取消、重启恢复及日用接线；非整个P5完成"
+    },
+    "limitations": [
+      "仅三站固定文本入口；已上传附件预览并非全形态覆盖，不将带附件草稿列为支持范围",
+      "GPT本次思考回答曾空白，重载同一线程后读回；未重新发送，不承诺站点始终自动恢复",
+      "网站DOM或模式变化失败关闭；重新绑定不自动重发历史请求",
+      "取消仅本地跟踪，不保证停止网站生成；未知通道不自动释放",
+      "日用原生注册与恢复实测，发送执行使用真实隔离DSH+确定性本地模型，不冒称日用付费模型已调用"
+    ],
+    "master_switch": {
+      "status": "implemented_tested_daily_loaded",
+      "default": false,
+      "legacy_without_flag": false,
+      "current_personal_state": false,
+      "source": "personal browser-authorizations.json enabled field",
+      "ui": "设置→连接与权限→网页咨询授权→启用网页咨询",
+      "tests": "26 targeted Python tests; real Edge dialog fixture; daily GET confirms disabled and POST start rejected",
+      "boundary": "关闭保留授权、绑定、历史；禁止新网页操作。已到达网站的请求不承诺远端终止；本地状态查询/取消保留。"
+    }
+  },
+  "memory_integration_execution": {
+    "status": "complete",
+    "goal": "完成第3项长期记忆及角色能力实际接线验收",
+    "current_verified_settings": {
+      "memory_provider": "embedded",
+      "auto_extract": false,
+      "enabled": true,
+      "model_proposals": false
+    },
+    "assets": "existing RoleSession/EmbeddedMemory/SemanticMemory/ExtractionGate and persisted conversations; reuse, no parallel memory engine",
+    "implemented": "chat extraction uses persisted user message identity; standalone calls get unique identity instead of process-randomized hash",
+    "tests": "57 relevant Python tests passed; shipped UI exercised in real Edge with synthetic data; real local Qwen3 8B final 3-case acceptance passed; semantic multi-turn 13/13; retrieval comparison embedded 8/14 and semantic 13/14",
+    "next_action": "Item3 functional integration complete. Keep personal settings unchanged; broader P6-3 provider research/long-range benchmarking remains in long-term-memory-plan.md.",
+    "verified_this_pass": [
+      "memory reaches real RoleChat provider boundary with compiled card enabled and disabled",
+      "user and project scopes isolated; forgotten fact absent from injection",
+      "new Python process restores existing SQLite facts",
+      "12 targeted tests passed"
+    ],
+    "discovered_gaps": [],
+    "semantic_runtime": {
+      "status": "implemented_real_offline_verified_bridge_reloaded_provider_unchanged",
+      "implementation": "existing memory-env and bge-small-zh-v1.5 offline worker; one subprocess per nonempty retrieval; no download/fallback",
+      "evidence": ".sumika-next/memory-chat-runtime-6e9afca723d54b7285848aea60236893/report.json",
+      "checks": [
+        "paraphrase recalled into model reference",
+        "updated fact supersedes previous value after reopen",
+        "other user isolated"
+      ],
+      "elapsed_seconds": 2.86,
+      "tests": "15 targeted tests + settings preflight failure preservation"
+    },
+    "switch_verification": {
+      "status": "passed",
+      "ui": "settings / data / 使用长期记忆",
+      "enabled": true,
+      "auto_extract": false,
+      "provider": "embedded",
+      "tests": "42 targeted unittest tests passed; real headless Edge checkbox visible and checked; auto_extract unchecked",
+      "semantics": "disabled chat skips recall/injection/extraction and semantic runtime; explicit local management remains available"
+    },
+    "extraction_hardening": "whole-message conservative matching; skip quoted/hypothetical/ambiguous update statements; independent stable preference keys; reject bool/nonfinite/out-of-range confidence",
+    "model_proposer": {
+      "status": "implemented_tested_live_verified_daily_reloaded",
+      "implementation": "single response JSON envelope carries intent and memories; no second generation; obvious hypothetical/quoted source rejected; explicit user confirmation before recall",
+      "tests": "55 relevant Python tests passed; real Edge shipped UI with synthetic API responses passed; one unrelated Windows role package rename PermissionError in broad suite",
+      "runtime": "daily Bridge reloaded; workbench running; embedded/enabled=true/auto_extract=false/model_proposals=false unchanged",
+      "failed_live_evidence": ".sumika-next/memory-model-live-3bd6b89970b94f5a88e419e368b3d784/report.json",
+      "last_failure": ".sumika-next/memory-model-live-78cf6ebe1d774f8985dc757109c88ba9/report.json",
+      "live_evidence": ".sumika-next/memory-model-live-d88a6ca86a544290adf283573a004f41/report.json"
+    },
+    "semantic_consistency": {
+      "evidence": ".sumika-next/memory-final-consistency.json",
+      "passed": 13,
+      "total": 13,
+      "elapsed_seconds": 2
+    },
+    "limitations": [
+      "Small synthetic local-model acceptance is not a general model-quality guarantee; malformed or missing metadata is discarded without retry",
+      "Model suggestions require user confirmation; no automatic contradiction resolution or model-selected fact-key overwrite",
+      "Semantic regression misses one paraphrase out of 14; this task does not claim AML or best-provider certification",
+      "Separate existing Windows role-package rename flakiness not fixed in this memory package"
+    ]
+  },
+  "capability_settings_ui": {
+    "status": "complete",
+    "scope": "Capability configuration migration and UI design-reference documentation R-117/R-118/R-119",
+    "assets": "ui/prototype-d/index.html capability cards/detail and settings forms adapted; existing Management settings/modules APIs retained",
+    "implemented": [
+      "speech groups ASR/TTS; microphone separate consent in details",
+      "memory controls migrated from settings to capability details",
+      "usage stays in general data settings; help supports hover/focus/click",
+      "microphone module enabled does not imply permission; backend denies without explicit consent and still requires per-call approval",
+      "requirements captured as design reference, alternative designs allowed",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "verification": [
+      "10 targeted Python tests passed",
+      "verify_capability_settings_ui.mjs real Edge with synthetic writes passed",
+      "verify_capability_ui.mjs real Edge + isolated Bridge passed: 15 cards, 6 registry cards, camera toggle round-trip, settings has zero duplicate capability switches, DSH 0.2.1-rc.2, 0 page errors; evidence .sumika-next/acceptance-20261017/capability-ui-current/report.json",
+      "verify_memory_proposals_ui.mjs passed after migration",
+      "1440 and 1024 pixel screenshots reviewed; panel indexing fixed"
+    ],
+    "personal_data": "No personal settings, module grants or memories changed; daily Bridge reloaded and workbench restored",
+    "next_action": "Future frontend work can redesign grouping/layout; preserve functioning controls, data and authorization semantics."
+  },
+  "model_library_migration": {
+    "status": "complete",
+    "root": "E:/Models",
+    "scope": "9 identified standalone LLM/embedding/speech asset roots; runtime package bundled OCR excluded",
+    "strategy": "copy, SHA256 compare target and source, exact source removal, compatibility junction; no overwrite, no model download",
+    "next_action": "Implement settings work/role/helper usage sections and shared selectable-folder model inventory; evaluate Qwen3 1.7B/4B helper, then wire prompt optimization and project/intent suggestions. These product features remain pending.",
+    "manifest": "E:/Models/migration-records/20260917-181427/manifest.json",
+    "verification": "8 Ollama models discovered from 3 relocated libraries; semantic RoleChat offline integration passed; all 9 junctions, file counts and sizes checked after migration",
+    "summary": {
+      "roots": 9,
+      "files": 160,
+      "GiB": 48.921,
+      "freed_C_GiB": 2.908,
+      "freed_D_GiB": 3.238
+    }
+  },
+  "model_library_ui": {
+    "status": "partial",
+    "implemented": "settings model section reuses existing form; configurable absolute roots and opt-in startup scan; read-only bounded GGUF/safetensors/ONNX/Ollama manifest discovery; registered Ollama name can populate role fields without auto enable",
+    "verified": "4 targeted tests; E:/Models 18 assets no issues; actual Edge scan displays 18 models; no inference/download",
+    "remaining": "three usage subpanels, independent helper configuration and actual helper inference; endpoint compatibility verification before selection; work model native adapter",
+    "personal_change": "only initialized empty model_library.roots to E:/Models; auto_scan false; existing model choices unchanged"
+  },
+  "history": [
+    {
+      "version": 4,
+      "change": "模型设置分为工作/角色/辅助用途；新增独立辅助模型契约与共享本地模型库选择入口。",
+      "reason": "用户要求统一模型管理并保留DSH工作模型权威。"
+    }
+  ],
+  "minicpm_prompt_preview": {
+    "status": "integration_paused_by_user",
+    "evidence": "docs/project/minicpm-prompt-preview-evidence.json",
+    "tests": "20 Python tests; browser fixture preview checks passed",
+    "personal_enabled": false,
+    "remaining": "No further integration without user instruction; toolbar restored to disabled placeholder, helper config disabled.",
+    "boundary": "No classification or dispatch; explicit preview confirmation only"
+  },
+  "minicpm_task_survey": {
+    "status": "research_complete_limited_samples",
+    "requests": 64,
+    "evidence": "docs/project/minicpm-task-survey.md",
+    "product_integrated": false
+  },
+  "role_location_migration": {
+    "status": "implemented_isolated_verified_daily_deployed",
+    "scope": "Active imported role copy-and-cutover via single Bridge admission lock; original retained",
+    "implementation": [
+      "SHA256 resource inventory and valid role checks",
+      "Exact settings backup and SQLite online backup plus integrity check",
+      "Durable prepared/rolling_back/completed/cancelled journal",
+      "Explicit resume or rollback; no model/task replay; independent changes refuse recovery",
+      "Persistent roster path projection for repeated migrations and role switching",
+      "Protected HTTP operations and tools/relocate_user_role.py; default read-only"
+    ],
+    "verification": [
+      "43 targeted regression tests passed",
+      "6 relocation tests passed including real isolated HTTP authorization, pending write fence and explicit resume"
+    ],
+    "limitations": [
+      "No settings GUI migration dialog added",
+      "Single managed Bridge assumption; direct file/database writes by other programs unsupported",
+      "General application backup/installer/update recovery remain pending"
+    ],
+    "cleanup": "Four explicitly named failed-test directories removed after approval and verified absent.",
+    "deployment_evidence": "docs/project/role-relocation-deployment-evidence.json"
+  },
+  "diagnostics": {
+    "status": "partial_query_hardened",
+    "assets": [
+      "extensions/diagnostics/query.py",
+      "sumika_next/cli.py",
+      "existing continuity records"
+    ],
+    "implemented": [
+      "read-only SQLite access; task/session predicates before result limit; seq cursor",
+      "structured status/error fields only; no keyword inference from user text",
+      "opaque redaction of non-token identifiers; raw payload and project docs excluded from exports",
+      "document hashes preserve source identity; export refuses overwriting existing files",
+      "CLI local json import shadowing fixed after actual subprocess export failure",
+      "F-001部分：DSH session/page 原生事件只读适配与脱敏投影；保留游标、工具调用关联、isError/错误码，不导出正文或参数"
+    ],
+    "tests": "6 unit tests passed plus actual subprocess CLI query and ZIP export in synthetic workspace",
+    "evidence": ".sumika-next/diagnostic-cli-7b0f452d0ec64ad8926d1bb76944ab45",
+    "remaining": [
+      "DSH-native event adapter and real native failure/approval denial/continuity-write-failure acceptance",
+      "query switch and broader diagnostics product integration",
+      "general personal-data backup/restore remains next package"
+    ],
+    "personal_data_changed": false
+  },
+  "current_remaining_audit": {
+    "status": "incomplete_current_integration_and_release",
+    "count_boundary": "A/B/C internal-use evidence reviewed; D explicitly deferred by user choosing internal use. Voice hardware remains deferred; broad future features not claimed complete.",
+    "active_packages": [
+      {
+        "id": "A",
+        "name": "Current integrated daily-development regression",
+        "status": "completed_with_main_agent_corrections",
+        "remaining": "Autonomous acceptance not claimed; one isolated Pro task finished with main-Agent fixes; no further paid model run started.",
+        "existing": "pro_development_checkpoint: 18 requests; code/tests/docs completed, report-writing race corrected by main Agent."
+      },
+      {
+        "id": "B",
+        "name": "Daily main-Agent web cross-review E2E",
+        "status": "completed",
+        "remaining": "None for this approved actual-work cross-review",
+        "existing": "One approved draft recovery, website response, native readback/restart, main-Agent adjudication and two verified fixes; see current-work-cross-review.json"
+      },
+      {
+        "id": "C",
+        "name": "Final installation and recovery acceptance",
+        "status": "internal_current_source_delivery_verified",
+        "remaining": "K has host acceptance plus byte-identical business/runtime to guest-tested J; no claim K was separately guest tested. Public release remains separate.",
+        "existing": "K archive/install/EXE passed with 26229 files; installer provided beside archive. J clean guest installation/lifecycle passed."
+      },
+      {
+        "id": "D",
+        "name": "Redistribution obligations",
+        "status": "deferred_public_distribution",
+        "remaining": "Preserve native audit findings for later public-release scope; no full rebuild or WSL in this internal-use delivery.",
+        "existing": "Exact supplemental notice bindings and component mismatch audit implemented; no public clearance. AWS exact-version source/notice association now verified and full copyright license retained."
+      }
+    ],
+    "deferred": [
+      {
+        "name": "Microphone/audibility/continuous voice hardware acceptance",
+        "reason": "User explicitly deferred audio verification; no further playback/capture now."
+      }
+    ],
+    "corrections": [
+      "Historical P3 is complete per phase-03-acceptance.md and phase-03-evidence.json; 9/9 artifact hashes matched in current inspection. Logs contain 157 tool calls/results, 6 completed turn events and compaction start/summary/end.",
+      "Recent narrow restore-preflight model attempt remains incomplete; it does not invalidate prior P3 acceptance.",
+      "Playback button approved and implemented; no pending placement decision.",
+      "Current release candidate predates latest UI/notices/installer updates; no claim current source is deployed.",
+      "Unsent native attachment drafts are runtime-only; retain limitation in final product regression.",
+      "Always-on screen, visual polish, auxiliary model adoption and automatic update UI remain outside immediate work per user choices."
+    ],
+    "verification": "Current receipts/continuity/execution/daily regression: 51 run, 50 passed, 1 symbolic-link privilege skip.",
+    "evidence": ".sumika-next/p3-evidence-recheck.json",
+    "next_action": "Internal J1 delivery is available. Public/native redistribution obligations remain open; do not install WSL or claim public clearance."
+  },
+  "restart_handoff": {
+    "at": "2026-09-19T20:41:38.796595+08:00",
+    "authorization": "User explicitly requested help restarting computer",
+    "download_session": 32530,
+    "download_state": "Interrupted for restart; inspect retained toolchain-download directories and hashes before any retry; partial files are not verified sources.",
+    "next": [
+      "Verify Sandbox enabled and run existing clean-windows-candidate-j/acceptance.wsb",
+      "Resume native source review from docs/project/native-component-review.json; inspect toolchain downloads first",
+      "Pro acceptance ended at 18 calls; reviewed adoption required main-agent fixes; no active Pro call"
+    ]
+  },
+  "internal_use_acceptance": "docs/project/internal-use-acceptance.json",
+  "installer_data_ux_checkpoint": {
+    "status": "implemented_host_installed_and_migration_verified",
+    "request": "Normal installation has no personal-data page; manage location/restore in Settings; uninstall keeps data by default with explicit optional deletion.",
+    "assets_reused": {
+      "packaging/Sumika.iss": "adapt existing Inno wizard",
+      "ui/prototype-d/index.html:1063": "adapt existing data/storage card, no new navigation",
+      "tools/backup_personal_data.py": "reuse snapshot verification, restore and path rebinding",
+      "ui/data_lease.py": "reuse writer exclusion"
+    },
+    "installer": "E:/SumikaBuild/wizard-l2/Sumika-Setup-2026.09.20-l.exe",
+    "sha256": "a1550c14d375d5334c0a465a6c3baa831640f7d16fb71ff59eb55706af424280",
+    "implemented": [
+      "Removed mandatory data-location wizard page and shortcut-specific data binding",
+      "Global personal-data locator; Settings directory/open/migrate/restore actions reuse existing storage section",
+      "Offline migration retains source/snapshot and switches locator only after verification; no automatic retry",
+      "Uninstall unchecked deletion with second confirmation; silent uninstall keeps data; known-data cleanup rejects live writers and links"
+    ],
+    "validation": [
+      "63 focused personal-data/snapshot/management/server/startup tests passed",
+      "L2 installed payload 26233 file hashes match candidate",
+      "Actual installed EXE startup/reuse/foreign port protection/authenticated stop passed",
+      "Real isolated migration rejects unauthenticated and unconfirmed writes, retains source and snapshot, restarts on same port",
+      "Headless Edge storage and both dialogs passed without writes; screenshots inspected",
+      "Actual uninstall UI deletion unchecked; Cancel invoked, no uninstall/deletion executed"
+    ],
+    "evidence": [
+      "E:/SumikaBuild/wizard-l2/installer-report.json",
+      "E:/SumikaBuild/wizard-l2/install.log",
+      "E:/SumikaBuild/wizard-l2/uninstall-dialog-report.json",
+      "E:/SumikaBuild/data-migration-c49b49089d2f45158904369b111ab18c/report.json",
+      "E:/SumikaBuild/exe-startup-a2a82e19e3f744d3a7739919c786ece9/report.json",
+      "E:/SumikaBuild/ui-l2-evidence/report.json"
+    ],
+    "failure_recovered": "First L candidate lost UTF-8 BOM on start_ui_bridge.ps1 and failed Windows PowerShell startup; restored BOM and rebuilt L2. First candidates retained, not deliverables.",
+    "boundaries": [
+      "User personal data not migrated or deleted; daily service not restarted",
+      "Actual deletion intentionally not executed; cleanup verified with mocked unlink",
+      "No fresh Windows Sandbox run",
+      "GitHub draft still has K asset; L2 is local, not publicly released",
+      "Old development DSH profile still requires explicit import as documented"
+    ],
+    "next": "Install L2 into a fresh program directory and launch normally to reuse existing personal data."
+  },
+  "learning_scenarios_priority_checkpoint": {
+    "status": "prioritized_implementation_pending",
+    "user_direction": "B站看视频、微信读书、PDF阅读是主要学习陪伴场景，优先优化。",
+    "order": [
+      "bilibili",
+      "weread",
+      "pdf"
+    ],
+    "shared_requirements": [
+      "保留现有学习软件和唯一能力入口；复用ObservationBundle与ContextFusion",
+      "获取当前可见内容和明确位置，切换视频/分P、快进、翻页后拒绝旧片段回复",
+      "优先文本，图像补充图表公式；本地变化检测与模型调用分离",
+      "本地去重与有界上下文；原始画面/音频不自动进入长期记忆",
+      "省token以真实provider用量比较验收，不把字符减少当token节省"
+    ],
+    "scenarios": {
+      "bilibili": {
+        "assets": {
+          "extensions/companion/browser_video_snapshot.js": "改造后使用：现有只读时间/字幕采集器",
+          "extensions/companion/browser_video.py": "直接使用：授权与来源绑定",
+          "extensions/companion/context_fusion.py": "改造后使用：时间附近字幕/音轨融合",
+          "tools/inspect_companion_bilibili.mjs": "改造后使用：真实播放器验证",
+          "tools/verify_bilibili_audio_live.mjs": "改造后使用：音轨与候选ASR验证"
+        },
+        "next": [
+          "补B站自定义字幕与播放器区域/暂停/分P身份适配",
+          "有可用字幕则减少重复ASR；无字幕接候选SenseVoice独立推理线程",
+          "核验账号下官方总结，作为可选分P概览缓存",
+          "弹幕按时间筛选与本地去重，保留社区来源；用户阅读评论时才扩展关注"
+        ],
+        "acceptance": [
+          "真实B站播放、暂停、快进、分P切换与无字幕教程",
+          "播放器外变化不触发重复画面分析；不因移动弹幕持续调用模型",
+          "无字幕时音轨采集不被解码阻塞；旧片段回复失效"
+        ]
+      },
+      "weread": {
+        "assets": {
+          "extensions/companion/windows_text.py": "改造后使用：识别当前文档及reader-navigation，避免把导航当正文",
+          "extensions/companion/windows_learning.py": "改造后使用：现有UIA/WGC/OCR组合",
+          "extensions/companion/windows_ocr.py": "改造后使用：精确像素缓存和区域证据",
+          "tools/verify_companion_reader_window.py": "改造后使用：已有真实翻页与旧页回复失效探针"
+        },
+        "next": [
+          "从已授权当前阅读窗口可靠定位可见阅读区域，剔除工具栏/目录噪声",
+          "可获得可见正文或选择则优先使用；无正文时区域OCR",
+          "结合章节与当前页面证据，保留图表补充；不能凭不稳定标题推断页码"
+        ],
+        "acceptance": [
+          "当前已打开书籍的真实下一页/上一页、滚动及章节跳转",
+          "字体/缩放变化、公式或单字变化不能误命中缓存",
+          "同页不重复模型分析；翻页拒绝旧回答；没有正文时明确失败或图像回退"
+        ]
+      },
+      "pdf": {
+        "assets": {
+          "tools/verify_companion_pdf.py": "改造后使用：既有两页PDF与Edge阅读器探针",
+          "extensions/companion/windows_learning.py": "改造后使用：可见文本/画面回退",
+          "extensions/companion/windows_text.py": "改造后使用：当前可见文本与选中片段",
+          "sumika-office / installed pypdf": "条件复用：仅明确绑定可访问文件和可靠当前页时抽取正文，不能读取整文件代替当前视野"
+        },
+        "next": [
+          "优先补可靠当前页/可见页定位；未知页码明确标记未知",
+          "文本PDF提取当前可见页/选中段落；扫描PDF区域OCR",
+          "双页/连续滚动支持多可见页与坐标来源，图表公式保留画面"
+        ],
+        "acceptance": [
+          "文本PDF、扫描PDF、双页/连续滚动、缩放与跨页",
+          "不读取不可见页作为当前内容；文件/页身份不明不能猜测",
+          "当前页定位、片段问答、旧页回复失效与未改变页面去重"
+        ]
+      }
+    },
+    "limits": [
+      "此检查点确定优先级和验收，没有宣称上述专项优化已实现",
+      "候选ASR接线、语音打断、真实视觉及最终打包验收继续保留在总体计划中"
+    ],
+    "next": "先完成B站时间/字幕与候选ASR接线，再完成微信读书阅读区域和PDF定位/正文；共同验证内容去重与真实用量。"
+  },
+  "learning_scope_latest": {
+    "priority": [
+      "bilibili",
+      "pdf"
+    ],
+    "deferred": [
+      "weread"
+    ],
+    "direction": "用户明确先只做好B站和PDF，微信读书暂缓；总体批准计划仍未完成。"
+  },
+  "browser_connection_ui_proposal": {
+    "status": "approved_for_frozen_execution",
+    "existing_asset": "ui/prototype-d/index.html capability card; ui/app/companion-session.js existing learning-target selector; docs/project/ui-design-coverage.md lines 196-199",
+    "proposal": "Reuse existing companion detail. Extend learning-window selector into learning-target selector for PDF windows or connected Bilibili tabs. Extension popup provides Connect current Bilibili tab / Disconnect only; final capture consent stays in existing Sumika start confirmation. No new main page or navigation.",
+    "reason": "AGENTS.md: 新增项必须先问，不许先做。",
+    "authorization": "User selected the recommended scheme in the preceding freeze discussion: reuse companion detail for Bilibili/PDF targets and separate capture permissions; extension popup only Connect current tab / Disconnect / status. Record of confirmed choice, not a verbatim requirement."
+  },
+  "execution_handoff": {
+    "document": "docs/project/repair-and-acceptance-plan.md",
+    "supporting_documents": [
+      "docs/project/behavior-memory-plan.md",
+      "docs/project/companion-profiles-plan.md"
+    ],
+    "version": "2026-10-12 v1",
+    "executor": {
+      "tool": "ZCode",
+      "model": "GLM5.3flash"
+    },
+    "status": "independent_acceptance_automation_passed_hardware_pending",
+    "current_delivery_package": "2026-10-16: integration, cancellation, Windows input privacy, behavior governance, automatic profiles and approved UI repairs",
+    "package_order": [
+      "P00 归档与现场核对",
+      "P01 观察入口/新鲜度",
+      "P02 取消/busy/文字记录",
+      "P03 音轨代次worker",
+      "P04 音轨启动/错误/回收",
+      "P05 B站UI/扩展交付",
+      "P06 PDF/弹幕/笔记/用量",
+      "P07 修复验收/工具",
+      "P08 行为库",
+      "P09 目录/空间/多根备份",
+      "P10 许可/前台跟随",
+      "P11 Raw Input聚合",
+      "P12 行为规则/序列",
+      "P13 询问/习惯/进度",
+      "P14 profile配置",
+      "P15 自动路由",
+      "P16 产品界面",
+      "P17 最终候选/回退"
+    ],
+    "numbering": "本轮P00～P17独立于旧phase，保留历史P6",
+    "next_action": "自动化修复验收已完成；硬件与日用安装仍待用户明确安排。",
+    "scope": "当前缺陷修复+前台行为子记忆+用户自定义模式；本轮产品代码、既有批准UI及自动化验收完成。B站专属规则不推广其他站；微信读书仍暂缓。",
+    "authorization_boundary": "用户已授权优化、修复、必要重写及批准计划内UI接线；未覆盖推送、发布、安装切换或未经告知的真实采集。",
+    "acceptance_report": "docs/project/acceptance-20261016.md",
+    "verified_this_turn": "1243 tests OK, 23 skipped, 116.057s; late Windows listener-close/availability changes: 43 tests OK, 1 optional Pillow skip; auxiliary wire format: 11 tests OK; profiles UI16, paste UI3, source matrix128 passed. No current candidate rebuild, live input/device acceptance or daily install switch."
+  },
+  "checkpoint_archive": "2026-10-09 记录整理：241 个历史 *_checkpoint 键已从本文件移除；全文保留在快照提交 a20548a 的本文件版本（git show a20548a:docs/project/progress.json），逐轮叙述与证据见 docs/project/companion-implementation.md 历史执行证据章节。本文件只保留当前状态字段及仍被引用的 learning_scenarios_priority_checkpoint / installer_data_ux_checkpoint。",
+  "independent_acceptance": {
+    "date": "2026-10-16",
+    "report": "docs/project/acceptance-20261016.md",
+    "source_commit": "d530c4b",
+    "status": "automation_verified_hardware_pending",
+    "tests": {
+      "run": 1150,
+      "skipped": 21,
+      "result": "OK with uncaught background NameError"
+    },
+    "evidence_directory": ".sumika-next/acceptance-20261016",
+    "scope": "用户现授权基于原代码优化/修复，必要处重写；补既有批准计划的UI，不授权发布或日用切换。",
+    "repair_verification": {
+      "unit_run": 1243,
+      "unit_skipped": 23,
+      "unit_result": "OK",
+      "late_targeted_run": 43,
+      "late_targeted_skipped": 1,
+      "auxiliary_wire_tests": 11,
+      "ui_profiles_checks": 16,
+      "ui_paste_checks": 3,
+      "source_matrix_cells": 128,
+      "candidate_rebuilt": false,
+      "hardware_tested": false,
+      "report": "docs/project/acceptance-20261016.md",
+      "late_targeted_evidence": ".sumika-next/acceptance-20261016/availability-final.log"
+    }
+  },
+  "execution_handoff_previous_20261009": {
+    "document": "docs/project/companion-implementation.md",
+    "section": "当前冻结执行稿：Sumika 阶段归档与 B站／PDF 陪学交付",
+    "version": "2026-10-09 v1",
+    "executor": {
+      "tool": "ZCode",
+      "model": "GLM5.3flash"
+    },
+    "status": "independent_acceptance_not_passed",
+    "current_delivery_package": "P2/P3/P5 integration and lifecycle defects; see independent acceptance report",
+    "package_order": [
+      "P0 阶段快照提交上传",
+      "P1 可恢复基线及DSH依赖",
+      "P2 共享会话与现有UI",
+      "P3 B站生产扩展音轨",
+      "P4 PDF当前页区域",
+      "P5 成本异步笔记用量",
+      "P6 连续语音实测",
+      "P7 插件调研UI回归",
+      "P8 最终候选安装切换"
+    ],
+    "numbering": "Delivery packages are independent of legacy plan phases; preserve current_phase P6.",
+    "scope": "Bilibili and PDF first; WeRead deferred. This archival turn does not start implementation.",
+    "stage_upload": "Source and sanitized handoff documents only; no new installer or binary release in P0.",
+    "verified_this_turn": "2026-10-12: clean-Windows leg CLOSED via Windows Sandbox (no user machine needed). First sandbox run exposed a real packaging defect: bundled runtimes lacked VC++ redistributable DLLs (onnxruntime and win32ui DLL load failed on clean Windows) — fixed by shipping the six redistributable DLLs app-locally in both runtimes, candidate rebuilt (42,368 files, capability probe passed), sandbox re-run ALL GREEN (install/voice imports/desktop imports/bridge/companion status). Daily install upgraded to the DLL-fixed build at E:/Work/Sumika (user request; bridge python child must be killed alongside Sumika processes — recorded). Installer silent-mode MsgBox bug fixed (WizardSilent guard), installer SHA 043507d85754bf3e2a9a798a1a3472860b42ac05fe458720a0bc9756760f2d0e. Harness: E:/SumikaBuild/cleanvm-input/.",
+    "limitations": [
+      "P4 selection/dual-window/zoom PDF scenarios not exercised in this round (zoom mechanism indirectly covered by require-region crop)",
+      "P3 real-site 30 minutes, P6 voice hardware, P8 install/clean machine remain user-gated",
+      "Notes UI entry and danmaku summary auto-trigger policy need design confirmation",
+      "Daily DSH 0.1.5-rc.2 has no plugin-manager surface; lifecycle acceptance binds to 0.2.0-rc.2",
+      "E:/SumikaBuild desktop/voice runtime inputs must be rebuilt clean for P8 (staging builder rejects dev-path _pth)"
+    ],
+    "user_notice": "Notify the user before real browser/device acceptance; do not seize mouse/keyboard during games.",
+    "p0_snapshot_commit": "a20548a",
+    "next_action": "Read docs/project/acceptance-20261012.md for the independent acceptance findings. Overall acceptance has not passed. Await the user's next optimization/new-requirement instruction; this audit does not authorize product fixes or new UI features.",
+    "previous_zcode_status": "p8_complete_all_packages_done",
+    "acceptance_report": "docs/project/acceptance-20261012.md"
+  },
+  "planning_delivery": {
+    "status": "implementation_repairs_automation_verified_hardware_pending",
+    "date": "2026-10-12",
+    "executor": {
+      "tool": "ZCode",
+      "model": "GLM5.3flash"
+    },
+    "documents": [
+      "docs/project/repair-and-acceptance-plan.md",
+      "docs/project/behavior-memory-plan.md",
+      "docs/project/companion-profiles-plan.md"
+    ],
+    "verification": "源码自动化修复验收通过；详细记录见acceptance-20261016.md，不代表真实设备与日用安装已切换",
+    "P00": "documented; executor must verify current workspace",
+    "P01_P17": "repaired integration and approved UI; hardware/quality/final candidate acceptance pending"
+  },
+  "independent_acceptance_previous_20261012": {
+    "date": "2026-10-12",
+    "report": "docs/project/acceptance-20261012.md",
+    "source_commit": "6bbecd6f766285dd88cb1029be77d7c632e0a157",
+    "status": "not_passed_functional_gaps_reproduced",
+    "scope": "Independent overall review only; no product fixes, device capture, paid model calls or installation changes.",
+    "tests": {
+      "unit": {
+        "run": 996,
+        "skipped": 21,
+        "result": "OK"
+      },
+      "voice_optional": {
+        "run": 58,
+        "result": "OK"
+      },
+      "installed_ui_matrix": {
+        "cells": 128,
+        "result": "passed"
+      },
+      "packaged_inventory": 42368,
+      "packaged_capabilities": "passed",
+      "continuity_role_plugin_lifecycle": "passed in isolated profiles using installed DSH"
+    },
+    "confirmed_findings": [
+      "F-01 Bilibili UI pairing/target/QA and extension package incomplete",
+      "F-02 audio epoch rotation retains old ASR media identity; fusion rejects after seek",
+      "F-03 stop does not clear audio context; sequence gap stays running; automatic recovery violates unknown failure boundary",
+      "F-04 failed audio start reported as running",
+      "F-05 text-mode proactive toggle not applied and replies immediately cleared",
+      "F-06 user text questions do not cancel proactive generation",
+      "F-07 danmaku snapshot returns timestamps instead of text"
+    ],
+    "limitations": [
+      "PDF selected prose unavailable despite selected flag",
+      "Live voice waiver R-126 respected; stop-speech latency and latest SenseVoice performance unverified",
+      "Live Bilibili subtitle 30-minute and final visual model QA lack evidence",
+      "Installed config multimodal and auxiliary disabled",
+      "Detailed native UI interaction verifier blocked by initial config modal after loader adaptation"
+    ],
+    "evidence_directory": ".sumika-next/acceptance-20261012",
+    "user_direction": "First inspect defects and incomplete functionality; user will then use a more capable model for optimization and new requirements."
+  },
+  "model_routing_preference": {
+    "date": "2026-10-16",
+    "main": "GPT-6.1 Sol medium; user selects main model",
+    "implementation": "Sol handles implementation, fixes, tests and UI",
+    "astra": "For complex architecture, broad coordination or high-risk direction, autonomously delegate planning/review only to Astra; Sol implements the resulting plan",
+    "status": "active",
+    "cost_goal": "avoid Astra implementation subtasks"
+  },
+  "repair_checkpoint_20261016": {
+    "status": "automation_verified_hardware_pending",
+    "implemented": [
+      "permission-guarded input commit",
+      "real behavior runtime and profile routing",
+      "episode candidate/pattern/confirmation wiring",
+      "reliable material progress and anomaly baseline",
+      "permission and all-layer data UI",
+      "bounded classifier image and video caption deduplication"
+    ],
+    "validated": {
+      "runtime_auxiliary": "34 tests OK, 1 optional Pillow skip",
+      "thumbnail_desktop": "1 real desktop-dependency test OK; no capture",
+      "changed_targeted": "209 tests OK, 1 real input skip",
+      "profiles_ui": "16 checks OK; final run profiles-ui-final-complete/report.json",
+      "paste_ui": "3 checks OK",
+      "source_matrix": "128/128, zero overflow and pageerror",
+      "late_availability": "43 tests run, 1 optional Pillow skip, OK; availability-final.log"
+    },
+    "full_suite": "1243 tests OK, 23 skipped, 116.057s; late Windows listener-close/availability changes: 43 tests OK, 1 optional Pillow skip; auxiliary wire format: 11 tests OK",
+    "limits": [
+      "real Raw Input/COM/hardware performance unverified",
+      "model classification quality not rerun",
+      "candidate and daily installation unchanged"
+    ],
+    "evidence": ".sumika-next/acceptance-20261016",
+    "windows_listener_teardown": "P04 fixture shutdown ordering fixed; OwnedServer only suppresses Windows listener-closed 10038, other OSError still raises; 43-test late suite passed",
+    "preview": {
+      "url": "http://127.0.0.1:57211/",
+      "status": "HTTP 200 checked 2026-10-16; process-local preview",
+      "isolated_data": ".sumika-next/acceptance-20261016/source-preview-data",
+      "capture_enabled": false,
+      "daily_install_changed": false
+    },
+    "record_checks": "2026-10-16: CLI check OK; changed Python syntax 38 files OK; git diff --check OK; CLI handoff generated as final step"
+  },
+  "lan_daily_evaluation_20261016": {
+    "status": "completed_conditional_simple_tasks_role_quality_not_passed",
+    "user_request": "实测局域网笔记本当前默认主力模型能否承担角色扮演与日常简单任务",
+    "assets": {
+      "tools/evaluate_role_models.py": "保留：多轮历史测试设计可复用；原max_tokens=256不适用当前thinking模型，non-empty不等于质量通过",
+      "tools/verify_local_model_tasks.py": "保留：任务类别复用；仅Ollama API且弱关键词检查，不能验证当前llama-server严格JSON和空正文",
+      "tools/evaluate_lan_daily.py": "本轮新增可复用串行SSE评测器：记录可见首字延迟、reasoning独立字段、严格结构检查和人工复核样本"
+    },
+    "findings": [
+      "旧推荐LFM2.5的8084不可达；当前8082为Qwen3-4B-Thinking-2507 Q4_K_M，上下文2048",
+      "日用Sumika auxiliary disabled且仍指向本机旧模型，未修改设置",
+      "用户再次确认LFM2.5为已选主力，Qwen常驻状态不改变选型",
+      "原参数LFM冷请求147秒输出工具样式文本，第二条含推理正文，均未通过严格JSON；正在单独测关闭思考和schema约束，不执行模型输出命令"
+    ],
+    "evidence_directory": ".sumika-next/laptop-model-bench",
+    "next": "按phase-07-local-model-plan.md先做调用契约与事实来源修复，再验完整角色卡和产品接线；本轮没有产品改动或日用切换",
+    "selected_main_model": "LFM2.5-24B-A2B-Q4_K_M; user reconfirmed, Qwen resident state does not change selection",
+    "record": "docs/project/phase-07-local-model-plan.md",
+    "updated_at": "2026-10-17",
+    "results": {
+      "original_standard_call": {
+        "completed": 2,
+        "strict_pass": 0,
+        "cold_seconds": 147.055
+      },
+      "adapted": {
+        "cases": 19,
+        "nonempty": 19,
+        "strict_json_semantic_pass": 5,
+        "strict_json_total": 6,
+        "median_total_seconds": 5.409,
+        "median_visible_ttft_seconds": 2.473
+      },
+      "thinking_off_without_schema": {
+        "cases": 3,
+        "strict_pass": 1
+      },
+      "role": {
+        "cases": 7,
+        "inference_leak_or_duplicate": 2,
+        "over_100_chars": 5,
+        "user_fact_pollution": true,
+        "fresh_session_identity_confusion": true
+      },
+      "daily_auxiliary_enabled": false,
+      "production_compatibility_verified": false
+    },
+    "verification": "CLI check OK; evaluation runner syntax OK; evidence19+3 no transport errors; git diff --check OK; final CLI handoff exported",
+    "cleanup": "Temporary LFM PID5800 stopped after exact model/port check; 8084 unreachable and original 8082 open verified; no persistent deployment/daily config changes"
+  },
+  "behavior_strengthening_20261017": {
+    "status": "software_verified_hardware_pending",
+    "goal": "强化通用用户活动与行为记忆：丰富类型、情境召回、可纠正偏好和既有区域概览",
+    "assets": {
+      "extensions/behavior/": "改造后使用：现有权限、SQLite事件/反馈/片段与runtime",
+      "extensions/companion/reading_behavior.py": "改造后使用：修正回访误判",
+      "ui/app/management.js": "改造后使用：既有行为子记忆区域",
+      "ui/prototype-d/index.html": "直接使用：数据/权限布局参照，不增加导航"
+    },
+    "ui_authorization": "用户已批准在设置→数据与存储→行为子记忆补充统计、习惯/兴趣及逐条纠正",
+    "acceptance": [
+      "通用事件与声明复用现库，事实/推测/确认分离",
+      "前台时段及切换统计有质量边界，跨日不串计",
+      "情境匹配召回；纠正/删除影响后续",
+      "有界查询与既有区域真实UI验收",
+      "自动回归、项目check与handoff完成；不冒充真实设备验收"
+    ],
+    "next": "进入真实Raw Input/密码场景/长时间运行和新候选包验收；长期记忆解耦是独立待实施包。",
+    "evidence": "docs/project/acceptance-20261017-behavior.md",
+    "verification": [
+      "1259 full regression OK / 23 skipped (test set at full run)",
+      "82 final related regressions OK / 1 skipped",
+      "11 activity regressions passed after latest-first pagination change",
+      "25 isolated UI checks passed"
+    ],
+    "record_checks": "Final CLI check passed; CLI handoff exported to .sumika-next/acceptance-20261017/handoff.txt; git diff --check passed"
+  },
+  "edge_news_evaluation_20261017": {
+    "status": "bounded_research_and_experiments_completed",
+    "source": "https://aihot.news/agent",
+    "record": "docs/project/edge-model-news-20261017.md",
+    "policy": "Sol独立筛选与笔记本串行评测，保留原共享服务与模型选择",
+    "scope": "AIHOT recent releases; Bonsai2 2B/4B daily evaluation; user requested AirLLM/Strata/MoE4All/vllm-xtu-moe and practical low-VRAM experiments",
+    "results": {
+      "bonsai2_2b": {
+        "cases": 19,
+        "strict_semantics": "3/6",
+        "cpu_hot_median_s": 2.326
+      },
+      "bonsai2_4b": {
+        "cases": 19,
+        "strict_semantics": "5/6",
+        "cpu_hot_median_s": 5.33
+      },
+      "role_quality": "fresh-session identity confusion; not approved replacement",
+      "bonsai2_4b_gpu": {
+        "cases": 19,
+        "strict_semantics": "5/6",
+        "hot_median_s": 0.931,
+        "visible_ttft_median_s": 0.464,
+        "additional_vram_mib_approx": 1461,
+        "quality": "identity confusion remains; not capability improvement proof"
+      },
+      "moe4all": "Official v1.0.3 runtime; two existing 35B GGUF loads failed before generation due to expert arena space at 2GiB and 2.75GiB budgets; no quality claim"
+    },
+    "expanded_scope": "用户明确允许子Agent自行寻找未列出的其他项目；按硬件核验、有限实验和资源恢复收尾",
+    "optimization_record": "docs/project/edge-inference-optimization-20261017.md",
+    "findings": [
+      "Strata now documents experimental sm61 support; old absolute exclusion corrected, current recommended model/RAM budget remains unsuitable",
+      "AirLLM streams disk-to-GPU via CPU staging; full-weight RAM residence is not mandatory; architecture constraints remain",
+      "Also reviewed ExLlamaV3, KTransformers AVX2, native llama.cpp speculation, IPEX-LLM and ZLUDA; not all installed or benchmarked"
+    ],
+    "cleanup": "Temporary experiments and verified SSH tunnel stopped; original PID1252/8082 healthy; GPU returned to 2871MiB, 0% utilization; no default/startup/firewall change",
+    "next": "No replacement proven. Preserve LFM selection; future controlled LFM parameter comparisons or alternate weight formats require separate scoped work.",
+    "verification": "Parent reviewed optimization report, GPU result and cleanup evidence; project check, handoff and diff checks passed"
+  },
+  "long_term_decoupling_20261017": {
+    "status": "persistent_scope_fence_and_embedding_race_full_verified",
+    "record": "docs/project/long-term-memory-plan.md",
+    "decision": "保留独立素材owner、规范记忆与可重建索引；先封装repo/provider与删除防复活，再评测替换引擎，不阻塞行为主线",
+    "assets": {
+      "extensions/memory/embedded_memory.py": "adapt existing canonical SQLite; no parallel database",
+      "extensions/memory/semantic_memory.py": "adapt existing offline retrieval; no new embedding engine",
+      "extensions/memory/write_policy.py": "retain provenance policy; remove SQL coupling",
+      "extensions/memory/model_proposer.py": "adapt proposal lifecycle into repository transaction",
+      "extensions/roles/service.py": "adapt scoped forget and retrieval hydration",
+      "ui/management.py": "adapt backend memory reads; no UI markup change",
+      "extensions/roles/conversations.py": "use existing material owner unchanged; no history copy"
+    },
+    "scope": "First executable repository/retrieval boundary, stable canonical IDs/revisions, scoped forget and source suppression, backward-compatible imports; existing material stores retained",
+    "acceptance": [
+      "No SQL in MemoryWriter/model_proposer/RoleSession memory actions or UI memory reads",
+      "Old DB migration backs up and preserves existing data",
+      "Stable IDs/revisions export-import; stale retrieval hits rejected",
+      "Same forgotten evidence cannot re-enter by auto extraction/proposal/merge; new explicit event allowed",
+      "Related regressions and project record checks pass"
+    ],
+    "next": "Formal isolated Mnemon read-only Source host integration; material purge/dependency governance; then overall acceptance and complete per-feature UI usage guide. Long-term vision excluded.",
+    "verification": [
+      "Full regression: 1271 tests OK, 23 skipped before final compatibility patches",
+      ".sumika-next/memory-repository-regression-20261017.log",
+      "Final targeted regression: 65 tests OK, including 11 new repository boundaries",
+      "Embedded quality 8/14; scope/update/forget gates pass; semantic fake-embedder integration only"
+    ],
+    "limitations": [
+      "Logical forgetting retains historical text/materials/backups",
+      "Conservative source-wide suppression; multi-evidence reconciliation pending",
+      "Fact correction API implemented; relation CAS, physical purge, external generation and new engine deployment pending"
+    ],
+    "acceptance_record": "docs/project/acceptance-20261017-memory.md",
+    "latest_verification": [
+      "1283 full tests OK / 23 skipped, 108.235s, including management correction/forget CAS and state fence",
+      "43 companion/pet browser checks OK, zero pageerror",
+      "24 isolated real Bridge behavior/mode UI checks OK",
+      "Mnemon 10 public SDK persistent fence checks passed previously; no full host installation yet"
+    ],
+    "correction": "Atomic expected_revision, host-event retries, old-source suppression and cache invalidation; RoleSession correct action; no new UI control",
+    "persistent_fence": {
+      "implementation": "SQLite transactional triggers; scoped opaque persistent revision; in-flight retrieval discard and semantic cache commit fence",
+      "verification": "44 targeted tests OK; 1281 full tests OK / 23 skipped, 105.880s; .sumika-next/acceptance-20261017-memory-fence-python.log",
+      "mnemon_evidence": ".sumika-next/mnemon-contract-fb83ec19dfac4159a8b9e4b46bc2556e/report.json",
+      "limits": "Whole-file historical restore must restart consumers; no formal DSH Source installation"
+    },
+    "management_wiring": {
+      "status": "backend_verified",
+      "changes": "Host-scoped correct API, per-record forget CAS, consistent state fence",
+      "verification": "1283 full tests OK / 23 skipped, 108.235s; .sumika-next/acceptance-20261017-memory-management-python.log",
+      "ui_correction": "not_added_pending_user_choice"
+    }
+  },
+  "dsh_market_review_20261017": {
+    "status": "review_and_mnemon_public_sdk_contract_verified_not_deployed",
+    "scope": "只读市场/官方升级/插件源码考察与隔离无凭据验证；不升级日用、不安装到共享profile、不替换产品模块",
+    "assets": {
+      "docs/project/dsh-plugin-compatibility.json": "改造后使用：保留旧版本实测边界，追加当前市场判断",
+      "docs/project/reference-projects.json": "直接使用：唯一参考清单及旧市场发现",
+      "docs/project/long-term-memory-evaluation.md": "直接使用：既有候选/隔离实验，核查版本后复用",
+      "tools/evaluate_edge_news.py": "改造后使用：有界只读来源抓取思路与现缓存",
+      "tools/verify_dsh_plugin_lifecycle.py": "直接使用：未来候选生命周期验收资产，本轮不把它当能力验收"
+    },
+    "plan": [
+      "核对仓库/独立CLI/市场最新版本",
+      "发现市场全分类候选，与现有模块及真实缺口对应",
+      "源码核查高价值候选的兼容/权限/数据/维护成本",
+      "必要时隔离无模型验证，产出替换优先级和可执行迁移验收步骤"
+    ],
+    "record": "docs/project/dsh-market-review-20261017.md",
+    "next": "Complete material physical-purge coordination across existing owners and compare community retrieval candidates on the same Chinese/governance baseline; daily opt-in and overall candidate acceptance remain pending. Long-term vision excluded.",
+    "snapshot": ".sumika-next/dsh-market-20261017/",
+    "catalog_counts": {
+      "awesome": 4782,
+      "hub": 4636,
+      "overlapping_not_additive": true
+    },
+    "third_party_packages": 28,
+    "third_party_source_snapshots": 26,
+    "verification": [
+      "28 manifests x 3 versions: alpha5 published compatibility pure-function gate only",
+      "Windows MCP initialize/tools-list; no desktop actions",
+      "PDF synthetic pure backend; no parse/render/cloud/UI",
+      "Both old community catalogs rejected by official new index schema"
+    ],
+    "runtime_unchanged": true,
+    "additional_source_review": "Windows PS backend snapshot includes Value readback/clipboard/SendInput; no IsPassword gate found; host sensitivity adapter required",
+    "mnemon_public_sdk_probe": {
+      "command": "python -B tools/verify_mnemon_memory_contract.py",
+      "result": "10 checks passed",
+      "evidence": ".sumika-next/mnemon-contract-fb83ec19dfac4159a8b9e4b46bc2556e/report.json",
+      "scope": "Public SDK real Cordis and synthetic canonical SQLite; no full DSH host/UI acceptance or new retrieval quality claim",
+      "daily_profile_changed": false
+    },
+    "engram_source_correction": "0.8.12 bundle sets ingest light; apply prewarms Transformers embedding even ingest off, potential remote model download; no direct isolated install yet"
+  },
+  "laptop_enhancement_continuation_20261017": {
+    "status": "bounded_round3_complete_not_deployed",
+    "agent": "edge_model_news_eval",
+    "record": "docs/project/edge-inference-optimization-20261017.md",
+    "scope": "Existing LFM call contracts, bounded inference parameters, new small models and local tool assistance; shared service/default retained",
+    "next": "Choose next bounded experiment from recorded failures; do not repeat schema/prefill conflict or deploy defaults",
+    "verified": [
+      "Parent reviewed round3 summary and cleanup receipts",
+      "JSON schema + closed-think prefill deterministically HTTP400; dispatch separated",
+      "8/8 nonempty stop; JSON semantics 3/5; scene study/game misclassified unknown",
+      "6 live role turns + fresh: recall/isolation works; factual expansion and tone deviations remain",
+      "Retrieval-assisted strict contract 1 case passes; offline deterministic gate 8/8 separately",
+      "Experiment 8086 and tunnel stopped; original PID1252/8082 retained healthy, GPU2871MiB"
+    ],
+    "previous_round_status": "bounded_round2_complete_not_deployed"
+  },
+  "current_priority_20261017": {
+    "user_original": "长期愿景先不做。目前重点是长期记忆、DSH插件复用/开源社区项目复用",
+    "status": "in_progress",
+    "assets": "Reuse canonical SQLite, domain material owners, existing retrieval, market source snapshots and evaluation tools.",
+    "scope": [
+      "long-term memory governance",
+      "DSH/community reuse isolated evaluation"
+    ],
+    "excluded_for_now": [
+      "long-term hardware vision"
+    ],
+    "next": "Compare community retrieval candidates against canonical Chinese/governance baseline; inspect laptop round4 evidence when available; final candidate overall UI/hardware acceptance and full usage checklist remain pending. Long-term vision excluded.",
+    "records": [
+      "docs/project/long-term-memory-plan.md",
+      "docs/project/acceptance-20261017-memory.md",
+      "docs/project/dsh-market-review-20261017.md"
+    ]
+  },
+  "feature_usage_20261017": {
+    "record": "docs/project/feature-usage-and-acceptance.md",
+    "status": "source_checked_draft_final_candidate_walkthrough_pending",
+    "coverage": "Role/chat/memory, behavior, companion/profiles/pet, DSH workbench and settings; distinguishes backend-only and real hardware gaps",
+    "pending_question": null,
+    "correction_control": "User approved; implemented in existing dialog, real Bridge browser checks passed"
+  },
+  "companion_notes_fix_20261017": {
+    "changes": "Replace recent note rows, reject stale async result, clear stopped transient transcript and playback state",
+    "verification": "43 browser checks OK, zero pageerror; 24 real Bridge behavior/mode checks OK",
+    "evidence": ".sumika-next/acceptance-20261017-final/companion-notes-ui/report.json",
+    "hardware_verified": false
+  },
+  "memory_source_and_host_20261017": {
+    "status": "isolated_host_verified_not_product_deployed",
+    "assets": {
+      "extensions/memory/repository.py": "adapt existing transactions/suppression; no parallel store",
+      "tools/verify_mnemon_memory_contract.py": "reuse bridge and synthetic canonical database",
+      "tools/lib/mnemon-canonical-fixture.mjs": "extract shared test Source/strategy",
+      "sumika_next/dsh.py": "reuse owned isolated host lifecycle"
+    },
+    "source_retraction": "Backend API with scope CAS, atomic dependency invalidation and late-extraction suppression; 45 targeted tests OK; no material deletion coordinator",
+    "mnemon_host": {
+      "evidence": ".sumika-next/mnemon-host-e3fcbd585d814f108716017cd7e164b5/report.json",
+      "checks": 5,
+      "sdk_checks": 10,
+      "sdk_evidence": ".sumika-next/mnemon-contract-f927631294f649e89987b5e2c90300e4/report.json",
+      "external_model_calls": 0,
+      "daily_profile_changed": false,
+      "limitations": [
+        "Fixed synthetic scope, no production role binding",
+        "No real Agent turn, UI or retrieval quality acceptance"
+      ]
+    },
+    "next": "Complete material physical-purge coordination across existing owners and compare community retrieval candidates on the same Chinese/governance baseline; daily opt-in and overall candidate acceptance remain pending. Long-term vision excluded.",
+    "full_regression": {
+      "result": "1285 tests OK, 23 skipped",
+      "seconds": 109.697,
+      "evidence": ".sumika-next/acceptance-20261017-memory-source-python.log"
+    },
+    "reusable_adapter": {
+      "path": "extensions/memory/mnemon-source.mjs",
+      "contract": "extensions/memory/README.md",
+      "assets": "Adapt reviewed Mnemon SDK and canonical repository contracts; fixture remains testing only",
+      "status": "Real settings-bound wrapper and synthetic native Agent route/cancel verified; daily opt-in pending",
+      "evidence": ".sumika-next/mnemon-contract-0a14dedb11f84b02b890681f9f8fed6f/report.json",
+      "coverage": [
+        "role switch old grant rejection",
+        "disabled no search",
+        "inflight disable discards hits",
+        "inflight cancellation discards hits",
+        "binding identity and epoch digest"
+      ]
+    }
+  },
+  "memory_settings_host_20261017": {
+    "status": "isolated_real_agent_verified_not_daily_deployed",
+    "assets": {
+      "extensions/memory/mnemon-source.mjs": "adapt existing read-only SDK Source",
+      "extensions/roles/chat.py": "reuse open_session and MemoryRetrieval",
+      "extensions/models/settings.py": "reuse validation and defaults",
+      "tools/verify_mnemon_host.py": "adapt existing isolated DSH lifecycle probe"
+    },
+    "scope": "Trusted explicit workspace -> current role settings; native optional Mnemon wrapper; no daily deployment or new UI",
+    "verification": [
+      "1294 full tests OK / 23 skipped, 108.921s; .sumika-next/acceptance-20261017-memory-relations-python.log",
+      "10 real DSH Agent/lifecycle checks OK; .sumika-next/mnemon-host-06f6afeeaeb443a4bab12f2320de1b17/report.json",
+      "4 real Bridge browser relationship checks OK; .sumika-next/acceptance-20261017-final/memory-relations-ui/report.json"
+    ],
+    "remaining": [
+      "Daily deployment not performed",
+      "Retrieval quality comparison and overall candidate acceptance pending; offline selected-message purge implemented, no purge UI"
+    ],
+    "next": "Compare community retrieval candidates against canonical Chinese/governance baseline; inspect laptop round4 evidence when available; final candidate overall UI/hardware acceptance and full usage checklist remain pending. Long-term vision excluded."
+  },
+  "memory_relation_cas_20261017": {
+    "status": "implemented_and_verified_existing_ui",
+    "assets": {
+      "extensions/memory/repository.py": "adapt canonical SQLite transaction and scope fence",
+      "ui/app/management.js": "reuse existing dialog/row controls; ui/prototype-d/index.html is existing visual reference",
+      "tools/verify_companion_profiles_ui.mjs": "reuse isolated real Bridge/browser test pattern"
+    },
+    "implementation": "Stable record_id and expected_revision; atomic single-row edit/delete; duplicate rows preserved; stale/foreign/deleted rows rejected. Legacy text-only RoleSession API retains explicit batch semantics.",
+    "verification": [
+      "47 targeted tests OK, 2.336s",
+      "1294 full tests OK / 23 skipped, 108.921s",
+      ".sumika-next/acceptance-20261017-final/memory-relations-ui/report.json"
+    ],
+    "new_ui_controls": false,
+    "material_physically_deleted": false,
+    "next": "Complete material physical-purge coordination across existing owners and compare community retrieval candidates on the same Chinese/governance baseline; daily opt-in and overall candidate acceptance remain pending. Long-term vision excluded."
+  },
+  "memory_material_purge_20261017": {
+    "status": "offline_selected_message_coordinator_verified_not_daily_executed",
+    "assets": {
+      "extensions/roles/conversations.py": "adapt existing material owner and clear-recovery tables",
+      "extensions/memory/repository.py": "adapt canonical suppression, scope fence and transaction",
+      "tools/manage_personal_data.py": "extend existing offline maintenance CLI; reuse ui/data_lease.py ownership lock"
+    },
+    "scope": "Configured active role/user/project, 1-100 explicit persisted user message IDs; active/cleared turns, linked handoffs/events, all tracked dependent canonical/proposal history, FTS and vector cache. Single attached rollback-journal transaction.",
+    "verification": [
+      "1302 full tests OK / 23 skipped, 114.889s; .sumika-next/acceptance-20261017-memory-purge-final-python.log",
+      "75 related tests OK, 4.674s; .sumika-next/acceptance-20261017-memory-purge-targeted.log",
+      "Final 9 purge tests OK, 1.354s (adds in-flight retrieval test after full-suite discovery); .sumika-next/acceptance-20261017-material-purge-tests.log",
+      "3 real CLI checks OK; .sumika-next/acceptance-20261017-final/material-purge-cli.json"
+    ],
+    "limitations": [
+      "No new purge UI",
+      "Backups, prior exports and copies already handed to external DSH/other recipients retained",
+      "No forensic disk-erasure claim",
+      "Unknown-provenance legacy facts/manual relations preserved; no semantic matching deletion",
+      "Managed Bridge must be offline; separate unmanaged clients must also quiesce. WAL/memory journal rejected.",
+      "No real user material was deleted during verification"
+    ],
+    "format": "Memory export v5 carries hashed purge guards; reads v2-v4; old programs reject v5. JSON restore does not clear purge guards, whole-file old backup restores historical database state.",
+    "next": "Compare community retrieval candidates against canonical Chinese/governance baseline; inspect laptop round4 evidence when available; final candidate overall UI/hardware acceptance and full usage checklist remain pending. Long-term vision excluded."
+  },
+  "memory_correction_ui_20261017": {
+    "status": "user_approved_implemented_real_bridge_verified",
+    "approval": "Visible async answer: 增加纠正控件（推荐）",
+    "design": "ui/prototype-d/index.html lines ~716/933 only imply role memory/card; no correction control drawn. Added by explicit user approval, reuse existing dialog and mini-btn.",
+    "entry": "活动室 → 展开部员名册 → 管理角色与记忆 → 选择角色 → 事实旁纠正 → 输入文本 → 确认",
+    "verification": "8 browser checks OK; .sumika-next/acceptance-20261017-final/memory-correction-ui/report.json",
+    "coverage": [
+      "cancel without write",
+      "confirmed correction creates new active identity",
+      "stale dialog conflict preserves current fact",
+      "reload persistence",
+      "single relation edit/delete",
+      "zero pageerror"
+    ],
+    "new_navigation": false
+  },
+  "laptop_round4_20261017": {
+    "status": "bounded_round4_raw_evidence_reviewed_not_deployed",
+    "agent": "edge_model_round4",
+    "scope": "LFM fixed-prefix cache, 12 actual-history turns, sourced facts; Bonsai9B isolated comparison. No daily deployment.",
+    "record": "docs/project/edge-inference-optimization-20261017.md",
+    "verification": [
+      "Parent inspected all 60 raw responses: LFM26, Bonsai9B26, representative8; all nonempty/stop.",
+      "LFM cache fixed identical output: off median10.234s, hit1.155s; prefill benefit only, not decoding or memory quality.",
+      "LFM actual turn9 reverts old preference, turn8 invents completed study, fresh confuses identity; long-term role acceptance remains failed.",
+      "Bonsai9B representative strict JSON5/5; 12-turn case avoids observed LFM stale preference, but fresh identity still inadequate; not a general ranking.",
+      "Reviewed cleanup and subsequent final-node receipt: original1252 only; shared health preserved; no default change."
+    ],
+    "evidence": [
+      ".sumika-next/laptop-model-bench/round4-lfm.json",
+      ".sumika-next/laptop-model-bench/round4-bonsai9.json",
+      ".sumika-next/laptop-model-bench/round4-bonsai9-representative.json",
+      ".sumika-next/laptop-model-bench/round4-final-node.txt"
+    ],
+    "next": "Continue bounded full-role-card/fresh-identity/history-perturbation comparison and stable-prefix cache integration assessment; preserve LFM selected main model until broader acceptance. No optimum claim."
+  },
+  "community_memory_comparison_20261017": {
+    "status": "public_cli_retrieval_and_basic_governance_verified_not_adopted",
+    "assets": {
+      "tools/evaluate_memory_quality.py": "reuse FACTS/CASES and evaluate; identical 14-case baseline",
+      ".sumika-next/dsh-memory-eval/eval_ltm.py": "adapt public CLI import/search/edit/forget/export pattern; do not rerun destructive fixed-directory harness",
+      "D:/DeepSeek/dsh-home/profiles/memtest-ltm/node_modules/@tr1v3r/dsh-ltm": "reuse installed 0.3.1 public CLI; no private store extraction or installation",
+      "extensions/memory/embedding_runtime.py": "reuse installed offline Python and embedding cache"
+    },
+    "evidence": ".sumika-next/community-memory/7f319ed8658b47999e85de7fb1a193d8/report.json",
+    "scores": {
+      "dsh_ltm": "11/14",
+      "embedded": "8/14",
+      "semantic": "13/14"
+    },
+    "governance": "Correction and stale-revision rejection verified; forget removes list entry; importing pre-forget export reintroduces fact. This is ordinary restore semantics, not by itself a plugin bug.",
+    "decision": "Retain canonical SQLite and current embedded/semantic providers. LTM does not improve this retrieval baseline and public search has no scope argument; not a drop-in governance replacement.",
+    "limitations": [
+      "Synthetic small regression set, no answer model or overall quality ranking",
+      "CLI startup included in latency, unlike in-process retrieval",
+      "No native cross-role authorization proof; synthetic DB contains one scope",
+      "No daily runtime/default change"
+    ],
+    "next": "Community same-set comparison completed; retain canonical default; final candidate functional acceptance and laptop round5 pending."
+  },
+  "candidate_current_20261017": {
+    "status": "historical_pre_upgrade_candidate_bounded_acceptance_only",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-final/candidate",
+    "scope": "Internal isolated candidate only; no daily deployment, release or clean-machine claim.",
+    "assets": "Reuse current builder and physical p17 runtimes; self-contained launcher-p8 Sumika.exe; existing UI and verifier scripts.",
+    "verification": [
+      "Inventory 42418 files; 523 delivered source files SHA identical.",
+      "Bundled Python startup passed; actual EXE startup/reuse/foreign-server refusal/authenticated shutdown 4 checks passed.",
+      "128-cell screen matrix passed; memory correction/relations 8 real-Bridge checks passed.",
+      "Companion UI 43 fixture checks; profiles 24 mixed real-Bridge/fixture checks; PDF paste 3 real-Bridge with stub response checks passed.",
+      "Python suite 1304 tests, skipped23, OK; ResourceWarning and deprecation warnings remain."
+    ],
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-final/source-identity.json",
+      "E:/SumikaBuild/acceptance-20261017-final/matrix/report.json",
+      "E:/SumikaBuild/acceptance-20261017-final/memory-ui/report.json",
+      "E:/SumikaBuild/acceptance-20261017-final/companion-ui/report.json",
+      "E:/SumikaBuild/acceptance-20261017-final/profiles-ui/report.json",
+      "E:/SumikaBuild/acceptance-20261017-final/pdf-paste-ui/report.json",
+      "E:/SumikaBuild/acceptance-20261017-final/exe-startup-4d0cb34eaee344798c61b353cd69e2fe/report.json",
+      "E:/SumikaBuild/acceptance-20261017-final/startup-e6ac5ff3f908466f9fd790df53238633/report.json",
+      ".sumika-next/acceptance-20261017-final-python.log"
+    ],
+    "resolved_failure": "First candidate used framework-dependent apphost without Sumika.dll. Reused verified self-contained dotnet publish asset; builder now rejects plain apphost; inventory tests19 passed; receipt verifier CLI fixed.",
+    "remaining": [
+      "Complete per-feature real-dependency acceptance and usage guide source-to-UI coverage.",
+      "Interactive RawInput/password/COM/game soak/CPU, actual audio and Bilibili/PDF selection, clean-machine installation remain separate gates."
+    ],
+    "superseded_by": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2"
+  },
+  "laptop_round5_20261017": {
+    "status": "partial_results_parent_retest_in_progress",
+    "agent": "edge_model_round4",
+    "scope": "Reuse LFM and Bonsai9B for role identity, preference correction, longer history and variable-prefix cache comparison; preserve shared services and defaults.",
+    "record": "docs/project/edge-inference-optimization-20261017.md",
+    "assets": "Reuse round4 weights, runtime and evaluate_lan_long_contract.py; locate real role card before full-card acceptance.",
+    "limitation": "Bonsai three-seed identity failures; generated10 latest facts correct but repetitive style. LFM retry fresh invents previous visit; long recall invents book title. No replacement/default change; full comparison not complete.",
+    "current": "Agent stopped with provider 403 insufficient quota. Parent read Bonsai full-card and generated10 results; LFM original warmup timed out150s; bounded retry now using existing144/8086 and SSH tunnel27480, process session67179.",
+    "evidence": [
+      ".sumika-next/laptop-model-bench/round5-bonsai9.json",
+      ".sumika-next/laptop-model-bench/round5-bonsai9-generated.json",
+      ".sumika-next/laptop-model-bench/round5-lfm.json",
+      ".sumika-next/laptop-model-bench/round5-lfm-retry.json"
+    ]
+  },
+  "supplementary_acceptance_20261017": {
+    "status": "bounded_checks_passed_overall_incomplete",
+    "settings_extra": "E:\\SumikaBuild\\acceptance-20261017-final\\settings-extra\\report.json",
+    "settings_checks": 6,
+    "installer_fixture": "E:\\SumikaBuild\\acceptance-20261017-final\\installer-check-0c50c66ddcd043f6835bd14f473101fa",
+    "dsh_relocation_retry": "E:/SumikaBuild/acceptance-20261017-final/dsh-relocation/.sumika-next/package/runtime-relocation-0f778561fde24bac864cb5c1b1c79d1f/profile-acl-retry-970fc0255b2f4646a7647efd88159401/report.json",
+    "dsh_scope": "Physical relocation native write/edit/read/pwsh passed after approved upstream work-only ACL repair; owned process stopped; not clean-machine acceptance.",
+    "cleanup": "Failed D product copy removed after user approval, parent evidence preserved.",
+    "ui_gaps": [
+      "Workbench prompt enhancement control disabled/unconnected.",
+      "Capability role-card/worldbook editor remains reserved; JSON import and backend card context are separate implemented abilities."
+    ]
+  },
+  "dsh_upgrade_20261017": {
+    "status": "runtime_upgraded_verified",
+    "request": "尽量升级dsh到最新",
+    "record": "docs/project/dsh-upgrade-20261017.md",
+    "from": "0.1.5-rc.2",
+    "to": "0.2.1-rc.2",
+    "registry_tags": {
+      "latest": "0.2.0-rc.2",
+      "next": "0.2.1-rc.2",
+      "alpha": "0.2.1-alpha.5",
+      "checked": "2026-10-17"
+    },
+    "assets": "Adapt pinned runtime, existing Dsh/WorkbenchController and native plugins; reuse release/P2/lifecycle/migration/continuity/browser verifiers. No upstream source edits.",
+    "verification": [
+      "Native web/auth/session/cancel probe passed; no model calls.",
+      "Full P2 gate passed; Python 1304 tests OK / 23 skipped; loopback fixtures only.",
+      "Plugin lifecycle, migration success/failure and paired rollback passed.",
+      "Role plugin cross-session/restart/disable checks passed.",
+      "Continuity failure/restart/reconciliation passed; zero external calls; .sumika-next/continuity-failure-0bded1d5f8a44348a66e626c8abb2a75/report.json",
+      "Workbench skin/brand/sidebar browser checks passed, no page/console errors; .sumika-next/dsh-upgrade/workbench-ui.json",
+      "Current and rollback runtime release hashes match.",
+      "Alpha.5 isolated probe, P2 and plugin lifecycle passed; retained as experimental candidate, daily runtime unchanged.",
+      "Latest recheck: frozen pnpm install, native Web/auth/session/cancel probe (0 model calls), project check and handoff passed."
+    ],
+    "compatibility_fixes": [
+      "P2 settled child results",
+      "Continuity installer accepted version",
+      "Continuity admission-time RPC rejection evidence",
+      "Native preview/onboarding modal actions in UI verifier"
+    ],
+    "limitations": [
+      "Fresh-profile UI has no nonblank session, so active status pill not reverified in this browser run.",
+      "No paid model quality test or gift eligibility verification.",
+      "RC.2 candidate rebuilt; bounded EXE/UI checks passed, workbench/role/full source identity and clean-machine gates remain incomplete."
+    ],
+    "rollback_runtime": ".sumika-next/dsh-rollback/0.1.5-rc.2",
+    "next": "Runtime already at newest published RC. Keep matching versioned profiles and rollback pair; complete outstanding candidate functional acceptance before distribution. Windows role-package staging ACL fix verified in source tests.",
+    "registry_versions_rechecked": "2026-10-17: full versions/time confirm 0.2.1-rc.2 is newest published version; released 2026-10-17T08:36:31.655Z"
+  },
+  "candidate_rc2_revalidation": {
+    "status": "partial",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2",
+    "record": "docs/project/dsh-upgrade-20261017.md",
+    "passed": [
+      "inventory 55447 files",
+      "bundled Python startup",
+      "128 UI matrix cells",
+      "memory correction and relations",
+      "profiles and behavior management 24 checks",
+      "source unittest 1304 OK skipped23",
+      "actual EXE startup/reuse/foreign-server refusal/authenticated shutdown (4 checks)",
+      "role import UI with/without model, incomplete notice and cleanup; page/console errors0",
+      "workbench native skin/sidebar browser checks after entering shell board; page/console errors0",
+      "live/legacy model settings read-only navigation; capability settings synthetic-write controls"
+    ],
+    "remaining": [
+      "user role real VRM/model chat checks",
+      "full source identity",
+      "remaining feature/dependency acceptance",
+      "real-device and clean-machine gates"
+    ],
+    "fix": "verify_companion_profiles_ui waits for confirmed game/manual state instead of fixed800ms; rerun passed",
+    "exe_evidence": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-331901d89e164da5bdaf79e6020853fc/report.json",
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-current/role-import-rc2.json",
+      "E:/SumikaBuild/acceptance-20261017-current/workbench-rc2.json",
+      "E:/SumikaBuild/acceptance-20261017-current/settings-rc2.json"
+    ],
+    "workbench_finding": "Lazy start: entering #board starts owned DSH; querying embed before entering board returns not-running by design. Candidate UI start succeeded; no runtime fix required.",
+    "verifier_repairs": "Role verifiers now reuse tools/lib/playwright.mjs; settings verifiers reuse loader and SUMIKA_VERIFY_BRIDGE instead of hardcoded8765."
+  },
+  "usage_accounting_repair_20261017": {
+    "status": "source_and_candidate_verified",
+    "assets": "Reuse extensions/models/usage.py, existing role-memory dialog in ui/app/management.js and tools/verify_memory_relations_ui.mjs; adapt existing statistics only, no new controls or navigation.",
+    "changes": [
+      "Count a token request as incomplete if any applicable token field is NULL; category sums preserve unmeasured values as null.",
+      "Label input/output/total separately, remove misleading plus sign, clarify role versus project scope."
+    ],
+    "verification": [
+      "36 targeted Python tests passed",
+      "node --check ui/app/management.js passed",
+      "Isolated real Bridge/SQLite/Edge verifier: 9 checks passed, 0 page errors, 0 external model calls; .sumika-next/acceptance-20261017/usage-and-memory-current/report.json"
+    ],
+    "remaining": [
+      "Continue full feature, real-dependency and clean-machine acceptance; no daily deployment"
+    ]
+  },
+  "schedule_acceptance_repair_20261017": {
+    "status": "source_and_candidate_verified",
+    "assets": [
+      "extensions/desktop/schedule_runner.py",
+      "ui/schedule.py",
+      "ui/readiness.py",
+      "ui/app/management.js",
+      "existing schedule tests and isolated Bridge/Edge verifier pattern"
+    ],
+    "changes": [
+      "Separate next planned time from most recent due occurrence; future once no longer breaks listing; disabled/past once have no next time.",
+      "Skip DST gaps and use first repeated-hour occurrence consistently with dispatcher.",
+      "Show blocked execution beside affected definition; readiness uses actual schedule directory."
+    ],
+    "verification": [
+      "39 targeted tests passed",
+      "tools/verify_schedule_ui.mjs: 7 checks passed; real isolated Bridge/SQLite/Edge, zero page errors or model calls",
+      ".sumika-next/acceptance-20261017/schedule-ui/report.json",
+      "Full source regression: 1309 tests / 126.616s / OK skipped23; expected revoked-audio tracebacks, ResourceWarning and DeprecationWarning remain"
+    ],
+    "remaining": [
+      "Continue full feature, real-dependency and clean-machine acceptance; no daily deployment"
+    ]
+  },
+  "candidate_rc2_r2": {
+    "status": "partial_acceptance",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r2",
+    "inventory_files": 55448,
+    "source_identity": "526 selected product source/registry files, zero differences; source-identity-rc2-r2.json",
+    "verification": [
+      "source full regression1309 OK skipped23",
+      "bundled Python real Bridge/SQLite/Edge schedule7 and memory/usage9 passed, zero pageerrors/external model calls",
+      "Actual EXE lifecycle4 passed: first/reuse/foreign-port refusal/authenticated shutdown and exit; current Windows host only"
+    ],
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-current/build-rc2-r2.log",
+      "E:/SumikaBuild/acceptance-20261017-current/schedule-ui-rc2-r2/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/memory-usage-ui-rc2-r2/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/exe-startup-03d359e8a176447cb65ef2e19ab5af5c/report.json"
+    ],
+    "remaining": [
+      "Full current-candidate feature/real dependency and clean-machine gates remain; previous candidate narrow checks not inherited"
+    ]
+  },
+  "input_soak_verifier_repair_20261017": {
+    "status": "verifier_repaired_device_acceptance_pending",
+    "assets": [
+      "tools/verify_input_keystroke_soak.py",
+      "extensions/behavior/input_process.py",
+      "extensions/behavior/input_features.py"
+    ],
+    "changes": "Reuse explicit worker permission and closed frame validator; require isolated CLI capture consent; report startup failure/interruption; reject all-zero key counts, sequence gaps and failed worker even with valid frames.",
+    "verification": "75 targeted tests OK, skipped=2; 5 new verifier regressions. No real input capture or daily settings changes.",
+    "command": "python -X utf8 -B -m unittest tests_next.test_input_soak_verifier tests_next.test_input_process tests_next.test_behavior_runtime tests_next.test_behavior_evidence_lifecycle -q",
+    "remaining": "Interactive desktop RawInput, password controls, COM, game/load and long-duration device acceptance remain. Maintenance verifier update is not bundled in candidate-rc2-r2; prior identity report is build-time evidence.",
+    "record": "docs/project/acceptance-20261017-behavior.md"
+  },
+  "behavior_ui_and_mnemon_rc2_acceptance_20261017": {
+    "status": "bounded_source_and_candidate_browser_and_current_dsh_host_verified",
+    "assets": [
+      "tools/verify_companion_profiles_ui.mjs",
+      "tools/verify_mnemon_host.py",
+      "existing behavior Bridge/SQLite/UI and Mnemon read-only adapter"
+    ],
+    "changes": "UI verifier now honors candidate root, isolates schedules and gracefully closes Bridge; real feedback correction/deletion survives reload and all seven layers clear. Mnemon verifier accepts --runtime, defaults to current runtime and reports actual version.",
+    "verification": [
+      "Workspace and candidate-rc2-r2 each 27 browser checks passed, zero pageerrors; mixed real Bridge/synthetic persisted data and explicitly retained API fixture checks.",
+      "Mnemon0.5.29 actual DSH0.2.1-rc.2 host10 checks passed; 6 loopback fixture model calls, zero external calls, daily profile unchanged.",
+      "560px overflow assertion passed and screenshot inspected; existing settings data area, no product UI additions."
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/behavior-real-lifecycle-rerun/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/behavior-real-lifecycle-r2/report.json",
+      ".sumika-next/mnemon-host-b46f292675154b30b286cbe375b80a90/report.json"
+    ],
+    "limitations": "Maintenance script updates not bundled into r2; fresh external verifiers tested r2 product. Real capture, model quality, full feature and clean-machine gates remain. Mnemon not enabled in daily profile."
+  },
+  "semantic_vector_repair_20261017": {
+    "status": "source_and_bounded_candidate_verified",
+    "assets": [
+      "extensions/memory/semantic_memory.py",
+      "extensions/memory/embedding_runtime.py",
+      "tests_next/test_semantic_memory.py"
+    ],
+    "changes": "Shared closed vector validation for subprocess, in-process and cached embeddings; reject count/dimension/nonfinite/zero-norm errors before cache writes, stable cosine normalization; no threshold or provider changes.",
+    "verification": [
+      "30 targeted tests passed",
+      "Real offline Chinese regression embedded8/14 semantic13/14; scope/update/forget checks passed",
+      "Full source1319 tests OK skipped23,126.968s; ResourceWarning/DeprecationWarning remain"
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/semantic-vector-quality.json",
+      ".sumika-next/acceptance-20261017/semantic-vector-full-python.log"
+    ],
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r3",
+    "remaining": "Full current-candidate feature/design matrix, real devices/model quality and clean-machine acceptance remain. No daily deployment/publication."
+  },
+  "candidate_rc2_r3": {
+    "status": "partial_acceptance",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r3",
+    "inventory_files": 55448,
+    "source_identity": "526 selected product source/registry SHA matches, zero differences; source-identity-rc2-r3.json",
+    "verification": [
+      "Source full1319 tests OK skipped23,126.968s",
+      "Bundled Python30 memory tests passed with product import path asserted",
+      "Bundled Python+real isolated Bridge/Edge memory9 schedule7 behavior27 passed (behavior suite includes API fixtures), zero pageerrors",
+      "Actual EXE lifecycle4 passed, authenticated test Bridge shutdown confirmed"
+    ],
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-current/build-rc2-r3.log",
+      "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r3.json",
+      "E:/SumikaBuild/acceptance-20261017-current/semantic-vector-tests-r3.log",
+      "E:/SumikaBuild/acceptance-20261017-current/memory-ui-r3/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/schedule-ui-r3/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/behavior-ui-r3/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/exe-startup-1919234f98414080b299b32c0cdb54ec/report.json"
+    ],
+    "remaining": [
+      "Full feature/design matrix and real device/model/clean-machine gates not complete; no daily deployment; old candidate narrow evidence not inherited"
+    ]
+  },
+  "r3_matrix_native_ui_20261017": {
+    "status": "bounded_candidate_checks_passed",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r3",
+    "assets": "Reuse existing matrix/workbench/role-import verifiers and candidate native Bridge/DSH; only maintenance verifier edits, no product UI changes.",
+    "verification": [
+      "128/128 four-screen responsive matrix, zero overflow/pageerror",
+      "Actual candidate native project and nonblank session completed one loopback model turn; zero external model calls",
+      "Role card+placeholderVRM/card-only import and cleanup passed",
+      "Native workbench idle status marker and project lineage rendered; skin/sidebar/rail passed, zero page/console errors, screenshot inspected; owned DSH stopped"
+    ],
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-current/matrix-r3/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/native-ui-r3-093cefeca4114c8a81239e210efc3f15/report.json"
+    ],
+    "limitations": "Running/approval status browser checks, real VRM/model/device/clean-machine and remaining feature gates incomplete. Post-build maintenance verifier changes not in r3; prior source SHA is build-time evidence."
+  },
+  "native_pending_status_repair_20261017": {
+    "status": "packaged_r4_bounded_checks_passed",
+    "assets": [
+      "extensions/ui/sumika-workbench/lib/client.js",
+      "upstream public dsh-client-ui-session selector types",
+      "existing native status pill"
+    ],
+    "bug": "DSH0.2 no longer supplies old pending hook; native plan review visible but Sumika header omits waiting label.",
+    "fix": "Prefer useSessionStatus snapshot.get(sessionId).pendingInteraction.kind, retain old hook fallback.",
+    "verification": "Packaged contracts and real native iframe/status browser passed with source_skin=false; E:/SumikaBuild/acceptance-20261017-current/native-ui-r3-8f181fd9dcf847bda2e51247fe3972ee/report.json",
+    "evidence": "E:/SumikaBuild/acceptance-20261017-current/native-ui-r3-2d8201d378664ef6b0822c9818c998ae/report.json",
+    "limitations": "source_skin=true: r3 runtime plus current workspace extension, not unmodified r3 package. New candidate must include fix and be reverified. Permission approval/question kinds have contract tests only.",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r4",
+    "remaining": "Overall feature/real-device/model-quality/clean-machine acceptance incomplete. Synthetic draft display does not prove actual source-message acceptance/send; approval/question kinds have component tests only. No daily installation replacement or publication."
+  },
+  "native_parent_origin_repair_20261017": {
+    "status": "packaged_r4_bounded_checks_passed",
+    "assets": [
+      "existing RoleTaskDraft and SumikaShellOverlay",
+      "ui/app/handoff.js strict iframe source/origin checks",
+      "tools/verify_workbench_parent_contract.mjs"
+    ],
+    "bug": "Hardcoded8765 parent origin breaks task handoff and host-route on custom bridge port. Authentication redirect clears document.referrer.",
+    "fix": "Resolve immediate ancestorOrigins (browser supplied), fallback to referrer; allow only http127.0.0.1 without credentials; strict parent source/exact origin, no wildcard or8765 fallback.",
+    "verification": "Packaged contracts and real native iframe/status browser passed with source_skin=false; E:/SumikaBuild/acceptance-20261017-current/native-ui-r3-8f181fd9dcf847bda2e51247fe3972ee/report.json",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r4",
+    "remaining": "Overall feature/real-device/model-quality/clean-machine acceptance incomplete. Synthetic draft display does not prove actual source-message acceptance/send; approval/question kinds have component tests only. No daily installation replacement or publication."
+  },
+  "candidate_rc2_r4": {
+    "status": "bounded_packaged_acceptance_passed",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r4",
+    "dsh_version": "0.2.1-rc.2",
+    "latest_registry_check": "2026-10-17: newest published version 0.2.1-rc.2; next=0.2.1-rc.2, latest=0.2.0-rc.2; do not downgrade by tag",
+    "assets": "Adapt existing pinned runtime, workbench components and acceptance tools; no new UI or upstream source edits.",
+    "source_identity": "528 product source/registry files match; inventory55450 files passed. Two owned staging files finalized with before/after hashes and original manifest retained; upstream runtime unchanged.",
+    "verification": [
+      "Bundled workbench status and exact parent-origin contracts passed",
+      "Unmodified packaged native UI source_skin=false: nonblank session, role import, running/cancel/idle, native plan-review/cancel/idle, synthetic iframe draft and route passed; 3 loopback fixture calls, 0 external calls, owned DSH stopped",
+      "Actual EXE first/reuse/foreign port refusal/authenticated shutdown4 passed; test Bridge stopped",
+      "Packaged responsive matrix128/128; zero horizontal overflow and pageerror"
+    ],
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r4.json",
+      "E:/SumikaBuild/acceptance-20261017-current/native-ui-r3-8f181fd9dcf847bda2e51247fe3972ee/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/native-ui-r3-8f181fd9dcf847bda2e51247fe3972ee/parent-origin.json",
+      "E:/SumikaBuild/acceptance-20261017-current/matrix-r4/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/exe-startup-26dc2d4a62de450c88c2a368215781a1/report.json"
+    ],
+    "remaining": "Overall feature/real-device/model-quality/clean-machine acceptance incomplete. Synthetic draft display does not prove actual source-message acceptance/send; approval/question kinds have component tests only. No daily installation replacement or publication."
+  },
+  "task_handoff_repair_20261017": {
+    "status": "source_real_handoff_positive_and_negative_checks_passed",
+    "assets": [
+      "extensions/ui/sumika-workbench/lib/client.js RoleTaskDraft",
+      "ui/app/handoff.js",
+      "ui/management.py task-draft",
+      "ui/workbench.py managed DSH owner",
+      "DSH public workspace/follow WorkspaceView",
+      "extensions/roles/conversations.py journal"
+    ],
+    "asset_decision": "Adapt existing handoff flow and managed adapter; no new UI navigation or controls, errors use existing explanatory paragraph.",
+    "defects": [
+      "Prepared draft has no project_id but receive previously demanded one, making join fail",
+      "Current WorkspaceView uses workspaceId while dock read owner.id",
+      "Receive previously trusted browser project metadata as host-verified"
+    ],
+    "fix": "Transmit native workspaceId/sessionId; read live public workspace/follow baseline using owned DSH adapter; verify membership and construct context on host; composer uses returned host context. Preserve explicit send and occupied-composer guard; show receive errors in existing paragraph.",
+    "verification": [
+      "36 targeted Python tests passed",
+      "1321 full Python tests OK skipped23,133.161s; resource/deprecation warnings remain",
+      "Node handoff, parent and status contracts passed",
+      "Real source browser persisted synthetic user turn -> room button -> native target -> receive -> composer -> consumed journal passed; no send click",
+      "Maintained verifier final source run7 browser checks passed: forged target refused without consuming, occupied composer retained, actual persisted source/host target to composer, consumed journal removed, cancel preserves composer; 1 setup loopback model call, zero calls from handoff, no external calls; owned DSH stopped; screenshot viewed."
+    ],
+    "evidence": [
+      "D:/Code/native-ui-r3-4bd732622b3b4825ac5d2d9b8d8fc1d5/report.json",
+      "D:/Code/native-ui-r3-4bd732622b3b4825ac5d2d9b8d8fc1d5/handoff-browser.json",
+      ".sumika-next/acceptance-20261017/handoff-full-python.log",
+      ".sumika-next/acceptance-20261017/task-handoff-5ab8e3c1cc134c788ab156daacbcfcb0/report.json",
+      ".sumika-next/acceptance-20261017/task-handoff-5ab8e3c1cc134c788ab156daacbcfcb0/handoff-browser.json"
+    ],
+    "candidate_boundary": "r4 is unchanged and does not contain handoff receive fix; its previous synthetic draft display evidence did not test receive. Source and next final candidate must remain distinguished.",
+    "next": "Continue remaining mainline feature/real-dependency acceptance and exact UI coverage; include source handoff repair in next final candidate and rerun maintained native verifier there. Overall goal remains active."
+  },
+  "memory_policy_ui_20261017": {
+    "status": "source_and_packaged_r4_ui_chat_chain_passed",
+    "assets": [
+      "tools/verify_memory_relations_ui.mjs isolated Bridge/SQLite/Edge scaffolding",
+      "ui/app/management.js capabilitySettings(memory)",
+      "ui/app/bind.js real room send",
+      "extensions/roles/chat.py",
+      "extensions/memory/model_proposer.py"
+    ],
+    "asset_decision": "Reuse existing UI and adapters unchanged; new focused verifier adapts existing acceptance scaffolding, adds local Ollama-compatible synthetic HTTP model; no product/UI changes.",
+    "verification": [
+      "Five actual frontend save/chat cycles passed: off prevents retrieval/rule extraction/model proposals while management data remains; reenabled retrieval without enabling extraction; rule-only write; model-only pending proposal with hidden metadata; disable after prior chat refreshes cached settings.",
+      "DOM clicks save existing capability controls and send existing room input; reads are real Bridge/SQLite and model payloads captured over local HTTP. Only role discovery is synthetic. Five loopback model calls, zero external calls, pageerrors0; screenshot viewed.",
+      "Same five cycles passed using candidate-rc2-r4 bundled Python and product imports, pageerrors0, five loopback synthetic calls, zero external calls. External maintained verifier not yet included in r4 inventory."
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/memory-policy-final3/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/memory-policy-r4/report.json"
+    ],
+    "tool": "node tools/verify_memory_policy_ui.mjs <new-output-directory>; SUMIKA_TEST_CANDIDATE and SUMIKA_TEST_PYTHON select package imports/runtime",
+    "limitations": "Does not prove real-model proposal quality, semantic model recall quality, or cancellation of already-started model requests. Prior failed attempts were test fixture HTTPS/protocol, transport token and selector/readiness errors; production validation was not bypassed.",
+    "next": "Continue approved remaining feature/real-device acceptance; next final candidate must include source task-handoff repair and maintained verifiers. Overall goal active."
+  },
+  "behavior_reference_ui_20261017": {
+    "status": "source_and_packaged_r4_ui_model_reference_chain_passed",
+    "assets": [
+      "tools/verify_memory_policy_ui.mjs real Bridge/SQLite/Edge and loopback model scaffolding",
+      "ui/app/management.js behavior permissions and declarations",
+      "ui/app/bind.js room composer",
+      "ui/server.py _behavior_reference",
+      "extensions/behavior/activity.py declaration lifecycle"
+    ],
+    "asset_decision": "Reuse existing approved controls and reference pipeline unchanged; adapt existing acceptance scaffold to inspect actual local model requests. No product code/UI change.",
+    "verification": [
+      "Source and r4 bundled Python/product imports each passed6 actual UI/model-payload assertions: manage while recording off, no reference without use permission, explicit reference with independent permission, correction removes old text and preserves negative polarity, pause/resume/disable controls injection, deletion absent from next request.",
+      "Seven loopback synthetic model calls per run, zero external calls, zero pageerrors. Only fixture role discovery mocked; settings/declarations/chat pass real HTTP and SQLite. Source screenshot viewed. Recording remained disabled."
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/behavior-reference-final/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/behavior-reference-r4/report.json"
+    ],
+    "tool": "node tools/verify_behavior_reference_ui.mjs <new-output>; SUMIKA_TEST_CANDIDATE and SUMIKA_TEST_PYTHON choose candidate and bundled Python",
+    "limitations": "No real input capture, uncommon-operation prompt end-to-end, roleplay quality, or in-flight request cancellation proof. r4 does not include maintained new verifier or later task-handoff receive repair.",
+    "next": "Continue remaining mainline dependency/feature acceptance. Rebuild final candidate after source repairs; retain hardware and clean-machine gates. Overall goal active."
+  },
+  "behavior_prompt_ui_20261017": {
+    "status": "source_and_packaged_r5_passed",
+    "assets": [
+      "extensions/behavior/library.py prompts table",
+      "ui/server.py companion_microphone status",
+      "ui/app/bind.js existing room prompts",
+      "tools/verify_behavior_reference_ui.mjs acceptance scaffold"
+    ],
+    "asset_decision": "Adapt existing repository, polling and approved room UI; no new control or navigation, no upstream edits.",
+    "fix": "Project current prompt state by user/session before replay; answered, expired, missing or unavailable prompts cannot be replayed; remove old displayed prompts on next poll.",
+    "verification": [
+      "Source real runtime synthetic host event -> persisted prompt -> actual room poll -> explicit answer -> actual next loopback model reference -> reload suppression: 6 checks passed; 0 external calls, 1 loopback call, no real capture.",
+      "Library/server targeted81 tests passed before additional server regression; new server regression separately passed. Full suite currently running.",
+      "Full source Python regression: 1323 tests in121.396s, OK skipped23; existing ResourceWarning/DeprecationWarning remain. JS syntax checks passed."
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/behavior-prompt-fixed/report.json",
+      ".sumika-next/acceptance-20261017/behavior-prompt-targeted.log",
+      ".sumika-next/acceptance-20261017/behavior-prompt-full-python.log",
+      "E:/SumikaBuild/acceptance-20261017-current/behavior-prompt-r5/report.json"
+    ],
+    "candidate_boundary": "r4 lacks fix; r5 includes it and passed six real UI checks with bundled Python.",
+    "next": "Use r5 for manual checklist; continue outstanding mainline device/dependency checks. Overall goal remains in_progress."
+  },
+  "dsh_registry_recheck_20261017": {
+    "package": "@deepseek-ai/dsh",
+    "newest_published": "0.2.1-rc.2",
+    "published_at": "2026-10-17T08:36:31.655Z",
+    "latest_tag": "0.2.0-rc.2",
+    "next_tag": "0.2.1-rc.2",
+    "action": "Keep exact pin; no newer published release at recheck."
+  },
+  "candidate_r5_20261017": {
+    "status": "built_and_bounded_acceptance_passed",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r5",
+    "dsh_version": "0.2.1-rc.2",
+    "registry": "Official npm dist-tags/time rechecked: newest published0.2.1-rc.2; next points there, latest remains older0.2.0-rc.2. Runtime release four SHA checks passed.",
+    "includes": [
+      "Task-handoff host membership verification and native workspaceId fix",
+      "Behavior prompt replay current repository state and UI removal fix",
+      "Maintained focused UI acceptance verifiers"
+    ],
+    "verification": [
+      "Full source1323 tests/121.396s OK skipped23; existing warnings remain",
+      "534 product source/reference files identical bySHA;55456 inventory files verified by builder",
+      "Packaged real runtime prompt->room->answer->reference->reload6 checks passed;1 loopback call,0 external calls,0pageerrors",
+      "Packaged native DSH handoff7 browser checks passed,source_skin=false,1 setup loopback call,0 external calls,owned DSH stopped",
+      "Actual EXE4 lifecycle checks passed,isolated test Bridge stopped",
+      "Packaged responsive128 cells passed,0 overflow,0pageerrors; screenshot of prompt reload and native composer reviewed"
+    ],
+    "evidence": [
+      "E:/SumikaBuild/acceptance-20261017-current/build-rc2-r5.log",
+      "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r5.json",
+      "E:/SumikaBuild/acceptance-20261017-current/behavior-prompt-r5/report.json",
+      ".sumika-next/acceptance-20261017/task-handoff-87a1e485112e40f290533d09259b3be3/report.json",
+      ".sumika-next/acceptance-20261017/task-handoff-87a1e485112e40f290533d09259b3be3/handoff-browser.json",
+      "E:/SumikaBuild/acceptance-20261017-current/exe-startup-0827a0a229b642f7a142e9c8d03614b2/report.json",
+      "E:/SumikaBuild/acceptance-20261017-current/matrix-r5/report.json"
+    ],
+    "boundary": "Internal candidate only, not deployed/published. r4 retained; old acceptance evidence retains original scope. No real capture or paid models. Hardware, real model quality, clean machine and remaining mainline gates remain open.",
+    "next": "Use r5 for manual checklist; continue outstanding mainline device/dependency checks. Overall goal remains in_progress.",
+    "record_checks": "Project check, handoff export and git diff --check passed after documentation update."
+  },
+  "native_interaction_acceptance_20261017": {
+    "status": "packaged_r5_native_approval_and_questions_passed",
+    "assets": [
+      "tools/verify_native_approval_ui.py",
+      "tools/verify_native_approval_ui.mjs",
+      "tests_next/p2_fixture.py",
+      "extensions/desktop/review_dsh.mjs",
+      "existing DSH public questions and approvals"
+    ],
+    "asset_decision": "Adapt existing actual-host verifier for candidate imports, current message result schema and isolated host-Python sentinel; keep all product/upstream code and UI unchanged.",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r5",
+    "verification": [
+      "Approval reject/cancel/allow-once with real native UI and correlated events passed; no sentinel before approval; reject/cancel never run; allow runs exactly once. Pending/idle, shell navigation persistence and cancelled reload verified.",
+      "Question option/custom/cancel through real ask_user_question tool and UI passed; exact answer IDs/text or cancellation error verified, pending/idle and reload suppression checked.",
+      "Each run5 loopback model calls,0 external calls; actual bundled Bridge module asserted. Worker is isolated host Python sentinel, not actual site submission. All final per-case browser reports have no browserErrors; screenshots reviewed (reject pending, allow finished, custom pending).",
+      "Only external maintenance verifier/docs changed; r5 products unchanged. r5 inventory source identity refers to build snapshot; two verifier files subsequently advanced in checkout."
+    ],
+    "evidence": [
+      ".sumika-next/native-approval-ui-3341aaf9ceb44c7998c012823f2518cd/report.json",
+      ".sumika-next/native-approval-ui-0fb81bdc99904a83a40ed3ffc14c0ead/report.json",
+      ".sumika-next/acceptance-20261017/native-approval-r5-owned.log",
+      ".sumika-next/acceptance-20261017/native-question-r5.log"
+    ],
+    "failures_resolved": [
+      "0.2 message-level isError/text replaced old nested result schema; verified standard and retained legacy fallback.",
+      "Bundled Python _pth pins product modules, preventing isolated sentinel override; use normal host interpreter with isolated regular package.",
+      "Historical recovery helper prepends source checkout; restore product import precedence and assert actual Bridge module under candidate. Earlier mixed-source attempts not promoted to package proof."
+    ],
+    "limits": [
+      "No actual BrowserSkill external submit or live site quality; no paid requests or daily capture.",
+      "ConnectionAbortedError logged on some browser reloads; bounded lifecycle assertions passed, not a zero-warning claim.",
+      "Full attachment submit/durable file compatibility is outside approvals-only/questions-only scope."
+    ],
+    "tool": "SUMIKA_TEST_CANDIDATE=<candidate>, bundled Python tools/verify_native_approval_ui.py --sumika-shell --approvals-only (or --questions-only); SUMIKA_FIXTURE_PYTHON may select normal host Python for sentinel.",
+    "next": "Continue actual device/dependency acceptance and mainline feature coverage; keep full goal active."
+  },
+  "office_complex_acceptance_20261017": {
+    "status": "structured_files_visual_and_native_r5_passed",
+    "assets": [
+      "extensions/office/verify_files.py",
+      "extensions/office/render.py",
+      "tools/verify_office_visual.py",
+      "tools/verify_phase5_office.py",
+      ".agents/skills/sumika-office"
+    ],
+    "asset_decision": "Reuse enabled independent file libraries, existing converter/native test; new focused structured fixture in tools; no product editor/parser or UI change.",
+    "verification": [
+      "Synthetic DOCX preserves bold/italic runs,header/footer,table,page break; XLSX preserves chart/freeze/formulas,real LibreOffice SUMIF/SUM/IF/date caches90,105,超预算; PPTX retains table/chart/notes and second slide after editing.",
+      "All3 formats converted to2-page PDFs; all6 PNGs manually reviewed, no clipping/overlap/blank pages. Original source hashes unchanged. Chinese PDF heading text order is imperfect, actual pixels verified through OCR and manual review.",
+      "r5 real DSH/native Skill and terminal four-format read/create/edit/reopen passed; disabled launcher refuses sentinel/no-write;5 loopback calls,0 external calls; explicit host Office environment, not proof of bundled dependency completeness.",
+      "Office extension7 tests passed. Existing product unchanged; three maintenance verifiers and new complex fixture are ahead of r5 build snapshot."
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/office-complex-final/report.json",
+      ".sumika-next/p5-office-e53a72506b0543bc88df9f2656b5777c/report.json",
+      ".sumika-next/acceptance-20261017/office-native-r5-physical.log"
+    ],
+    "failures_resolved": [
+      "Native fixture workspace Win32 5 grantWrite fixed with official bundled ACL diagnosis script scoped to generated work only; physical flat package script location supported.",
+      "0.2 standard message-level errors/text replaced historical nested tool result assertion.",
+      "LibreOffice Chinese heading PDF glyph extraction is out of reading order; retain extraction evidence and verify pixels with existing RapidOCR."
+    ],
+    "limits": [
+      "Natural-language model task quality not evaluated.",
+      "No general arbitrary OOXML fidelity,macros,signatures,legacy binaries or secure PDF redaction guarantee.",
+      "Current host LibreOffice26.2.6 and enabled Office env used; clean machine runtime completeness remains open."
+    ],
+    "next": "Continue outstanding mainline real dependency/device checks; current manual guide now includes concrete Office UI path and sample prompt."
+  },
+  "native_office_reuse_20261017": {
+    "status": "authoring_verified_render_engines_pending",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r6",
+    "dsh": "0.2.1-rc.2",
+    "existing_assets": [
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-skill-office",
+        "decision": "direct_use",
+        "use": "official seven progressive skills via public plugin config; cli:false"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-tool-workspace-dependencies",
+        "decision": "direct_use",
+        "use": "read-only bundled Python discovery; no root/install"
+      },
+      {
+        "path": "extensions/office/requirements.lock",
+        "decision": "adapt",
+        "use": "existing locked wheels reused in standalone relocatable payload"
+      },
+      {
+        "path": "ui/workbench.py",
+        "decision": "adapt",
+        "use": "existing profile registration; no new UI or upstream edits"
+      }
+    ],
+    "verification": {
+      "full_python": "1326 tests /126.857s OK skipped=23; existing warnings",
+      "focused_python": "42 tests OK",
+      "inventory_files": 58139,
+      "source_identity": "536 files compared; only tools/verify_phase5_office.py maintenance verifier differs after build",
+      "native_report": ".sumika-next/p5-office-2d26d5685e274eebac59fbcc3087fba1/report.json",
+      "native_checks": [
+        "automatic profile registration",
+        "seven official skills",
+        "native dependency tool returns candidate Python",
+        "DOCX XLSX PPTX PDF read/create/edit/reopen"
+      ],
+      "loopback_model_calls": 12,
+      "external_model_calls": 0,
+      "actual_exe": {
+        "passed": true,
+        "checks": 4,
+        "report": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-3b8f6dc2d6c84ad6a18c68d4b718e858/report.json",
+        "test_bridge_stopped": true
+      }
+    },
+    "limits": [
+      "Official LibreOfficeKit render/recalculate/export engines disabled, not validated.",
+      "Payload contains locked Office library baseline, not every library mentioned in official generic tool description (numpy/pandas absent).",
+      "Existing custom sumika-office enabled switch governs only its own runner, not upstream skills or terminal execution.",
+      "Office readiness is presence preflight, not comprehensive native-load validation; partial bridge installation may mask a complete legacy office-env.",
+      "No clean-machine acceptance or user deployment; r5 feature checks do not automatically certify r6."
+    ],
+    "next": "DSH latest RC upgrade and bounded Office reuse verified; continue overall feature/device/clean-machine acceptance. No deployment or overall-complete claim."
+  },
+  "runtime_readiness_and_official_engine_20261017": {
+    "status": "r8_bounded_acceptance_passed_overall_active",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r8",
+    "assets": [
+      {
+        "path": "ui/readiness.py",
+        "decision": "adapt",
+        "purpose": "complete-environment lookup and selected worker runtime parity"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/libreoffice-kit",
+        "decision": "direct_use",
+        "purpose": "official CLI/native Windows engine/notices; no host soffice fallback"
+      },
+      {
+        "path": "extensions/office/requirements.lock",
+        "decision": "adapt",
+        "purpose": "17 hash-locked Office/data-analysis dependencies"
+      },
+      {
+        "path": "tools/verify_office_complex.py",
+        "decision": "reuse_fixtures",
+        "purpose": "same Chinese structured files and exact formula expectations"
+      }
+    ],
+    "repairs": [
+      "partial bridge no longer masks complete Office env; never union packages across interpreters",
+      "desktop/camera readiness and candidates follow selected runtime; invalid explicit runtime unavailable",
+      "official skills receive bundled Node/CLI when engine layout is present; missing engine remains explicitly disabled",
+      "Office layer starts with empty site-packages; inherited duplicate metadata eliminated and duplicates rejected"
+    ],
+    "verification": {
+      "python_full": "1329 tests /129.549s OK skipped=23; existing warnings",
+      "final_focused": "19 office/readiness/seed tests passed after final wording change",
+      "inventory_files": 60468,
+      "source_identity": "537 compared; only tools/verify_capability_package.py advanced after build; product matches",
+      "source_identity_report": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r8.json",
+      "native_host_report": ".sumika-next/p5-office-ca98a52081bf4388b365e9a9e53848ec/report.json",
+      "loopback_model_calls": 14,
+      "external_model_calls": 0,
+      "native_host_checks": [
+        "automatic profile wiring",
+        "seven official skills with installed engine paths",
+        "dependency tool returns bundled Python",
+        "four-format roundtrips",
+        "native terminal PDF conversion and formula cache7"
+      ],
+      "engine_fixture_report": ".sumika-next/acceptance-20261017/official-kit-r8/681024087a834a1eb78ee662ec6e0c6d/report.json",
+      "engine_fixture_checks": [
+        "DOCX/XLSX/PPTX to two-page PDFs",
+        "formula caches90/105/超预算 with formulas retained",
+        "two DOCX PNG pages match manually reviewed pixels exactly",
+        "invalid document rejected without output",
+        "source hashes unchanged"
+      ],
+      "dependency_report": "E:/SumikaBuild/acceptance-20261017-current/capabilities-r8.json",
+      "dependency_scope": "Bridge/desktop/voice/Office imports, Chinese OCR creation, VAD loading and process-audio capability only; no device capture/playback",
+      "office_distributions": 17,
+      "numpy": "2.5.3",
+      "pandas": "3.0.6",
+      "tzdata": "2026.5",
+      "data_library_report": ".sumika-next/acceptance-20261017/office-data-libraries-clean.json",
+      "matrix": "128/128, no horizontal overflow/pageerror; E:/SumikaBuild/acceptance-20261017-current/matrix-r8/report.json",
+      "exe": "4 passed; E:/SumikaBuild/acceptance-20261017-current/exe-startup-e62aca81d2d843e9b98aa55eca43ebb1/report.json; test Bridge stopped"
+    },
+    "findings_resolved": [
+      "initial full suite failure was old seed fixture mocking only voice resolver and leaking real camera environment; generalized runtime fixture isolated, full suite passed",
+      "r7 copied old tzdata2025.2 dist-info beside new files; r8 uses clean payload-r4 and unique metadata verification; r7 not promoted"
+    ],
+    "limits": [
+      "Courier font substitution reported; real arbitrary files may render differently",
+      "Windows VC++v14 runtime required by official native engine; clean machine not tested",
+      "legacy sumika-office enabled flag governs its own runner, not upstream Office skills or terminal",
+      "No natural-language model-quality or overall device/site/clean-machine completion claim; no user deployment or publication"
+    ],
+    "next": "Continue remaining mainline feature walk-through and actual device/site/model-quality/clean-machine acceptance; use r8, keep earlier feature evidence version-specific. Full goal active."
+  },
+  "native_file_ocr_20261017": {
+    "status": "verified_internal_candidate",
+    "scope": "R-061/R-064 shipped Windows OCR reuse and provider discovery correctness; no new UI",
+    "assets": [
+      {
+        "path": "extensions/companion/windows_ocr.py",
+        "decision": "adapt_and_reuse",
+        "use": "existing native bitmap OCR, add optional explicit language"
+      },
+      {
+        "path": "extensions/desktop/ocr/ocr.py",
+        "decision": "adapt",
+        "use": "file OCR dispatch, environment validation and external response parsing"
+      },
+      {
+        "path": "ui/readiness.py",
+        "decision": "adapt",
+        "use": "expose existing shipped runtime/provider in existing module controls"
+      },
+      {
+        "path": "ui/server.py capability_bootstrap",
+        "decision": "adapt",
+        "use": "preserve first preferred provider while exposing alternatives"
+      }
+    ],
+    "completion": "real generated bilingual image through native file OCR; failure cases and provider switching/seed tests; current module UI validation; documents updated; overall goal active",
+    "latest_20261018": {
+      "status": "verified_in_r9_internal_candidate",
+      "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r9",
+      "source_tests": "1336 tests in 304.704s OK, 23 skipped; existing resource/deprecation warnings remain",
+      "source_suite_evidence": ".sumika-next/acceptance-20261018/full-suite-e-temp.log",
+      "initial_failure": "76 capacity errors with C: temp below 1GiB; retained full-suite.log, rerun with E: TEMP/TMP succeeded; product protection unchanged",
+      "targeted_tests": "33 passed",
+      "source_file_ocr": ".sumika-next/acceptance-20261018/windows-file-ocr/b2e5418edba84a8eaf713ff8aa37e575/report.json",
+      "candidate_file_ocr": ".sumika-next/acceptance-20261018/windows-file-ocr-r9/0488aac752b74668858d0fc94f2e7fcd/report.json",
+      "source_ui": ".sumika-next/acceptance-20261018/ocr-provider-ui/report.json",
+      "candidate_ui": ".sumika-next/acceptance-20261018/ocr-provider-ui-r9/report.json",
+      "ui_scope": "Existing module dialog, real Bridge/SQLite. Windows and real alternative available; same-provider options preserved, disabled remains disabled, cross-provider options reset, refresh persists; no page errors. Screenshots reviewed. No new UI.",
+      "inventory": "E:/SumikaBuild/acceptance-20261017-current/inventory-r9-final.json; 60470 files",
+      "source_identity": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r9.json; 540 files, zero differences including mapped reference registry",
+      "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-45187dac9a1942b2bc29ff78d9fc784e/report.json; 4 checks passed, test Bridge stopped",
+      "matrix": "E:/SumikaBuild/acceptance-20261017-current/matrix-r9/report.json; 128/128, no overflow/pageerror",
+      "documentation_sync": "Only OCR README advanced during build; copied into candidate, original manifest retained as r9-build-original-manifest.json, before/after SHA recorded, final full inventory verified",
+      "limits": [
+        "No user device capture or external model call",
+        "No standalone upload OCR control; file operations via native workbench tool/terminal",
+        "No completed realtime translation overlay claim",
+        "Older Office/approval/behavior evidence retains original candidate scope; not automatically r9 acceptance",
+        "No deployment or publication; clean machine/device/site/model quality and full-goal audit remain incomplete"
+      ],
+      "next": "Fix authorized_action preflight/argument forwarding using existing adapter; continue remaining mainline functional and actual device/site/model-quality/clean-machine gates."
+    }
+  },
+  "dsh_latest_recheck_20261018": {
+    "status": "already_on_latest_published_version",
+    "version": "0.2.1-rc.2",
+    "evidence": ".sumika-next/acceptance-20261018/dsh-latest-recheck.json",
+    "assets": [
+      {
+        "path": "runtime/dsh/release.json",
+        "decision": "direct_use"
+      },
+      {
+        "path": "runtime/dsh/pnpm-lock.yaml",
+        "decision": "direct_use"
+      },
+      {
+        "path": "docs/project/dsh-upgrade-20261017.md",
+        "decision": "update_existing_record"
+      }
+    ],
+    "verified": "Official npm next=0.2.1-rc.2; latest tag remains older 0.2.0-rc.2. Source and r11 release manifests each match all four file hashes. No reinstall or product changes needed.",
+    "limits": "GitHub releases API returned rate-limit 403; raw README URL returned 404. npm registry succeeded. Account promotional eligibility not verified. r11 remains internal candidate, no installed-client replacement. Overall mainline still active."
+  },
+  "desktop_action_repair_20261018": {
+    "status": "verified_in_r10_internal_candidate",
+    "scope": "R-062 authorized desktop action prevalidation, argument forwarding, post-action uncertainty and existing service wiring; no new UI",
+    "assets": [
+      {
+        "path": "extensions/desktop/control/authorized_action.py",
+        "decision": "adapt",
+        "use": "existing action/postcheck orchestrator"
+      },
+      {
+        "path": "extensions/desktop/control/uia.py",
+        "decision": "adapt",
+        "use": "existing UIA exact target and snapshot guard"
+      },
+      {
+        "path": "extensions/desktop/control/verification.py",
+        "decision": "direct_use",
+        "use": "OCR lexical evidence with explicit limits"
+      },
+      {
+        "path": "extensions/desktop/service.py",
+        "decision": "adapt",
+        "use": "wire existing desktop act operation, no new entry"
+      },
+      {
+        "path": "tools/verify_desktop_owned_window.py",
+        "decision": "adapt",
+        "use": "hidden owned-window test, no user application input"
+      }
+    ],
+    "completion": "invalid request produces zero controller mutations; exact parameters forwarded; post-action errors return unknown/no retry; real hidden owned window through configured service; documents updated",
+    "source_report": ".sumika-next/acceptance-20261018/owned-uia/199a7397339e4a7e90e87ddde1ad9535/report.json",
+    "targeted": "16 passed",
+    "scope_notes": "real hidden owned-window through configured service; no user app input/capture; foreground end not owned test process; static image freshness not established",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r10",
+    "full_suite": "1345 tests in 262.983s OK, 23 skipped; existing resource/deprecation warnings remain",
+    "full_suite_log": ".sumika-next/acceptance-20261018/full-suite-desktop.log",
+    "candidate_report": ".sumika-next/acceptance-20261018/owned-uia-r10-final/bee6fa3b843e417cbb055d38f55e50c2/report.json",
+    "checks": [
+      "disabled/no approval/missing verification params/stale snapshot: no mutation",
+      "configured service forwards text and executes real UIA set_text with snapshot guard",
+      "static OCR match freshness not established: overall unknown, executed, no retry",
+      "real OCR language failure after action: executed unknown, no retry",
+      "unit coverage for native mutation/post-inspection uncertainty and trusted fresh callback ordering"
+    ],
+    "fixture_issue": "Initial owned-window checks passed but foreground assertion failed. Test parent lacked NOACTIVATE; add WS_EX_NOACTIVATE/TOOLWINDOW and hidden interpreter subprocesses, retain failed reports. Final candidate-owned tool and interpreter pass with foreground unchanged and worker stopped.",
+    "inventory": "E:/SumikaBuild/acceptance-20261017-current/inventory-r10-final.json;60470 files verified",
+    "source_identity": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r10.json;540 files zero differences",
+    "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-fdf605b6b07948f3b4de5e428c96073a/report.json;4 checks passed, test Bridge stopped",
+    "matrix": "E:/SumikaBuild/acceptance-20261017-current/matrix-r10/report.json;128/128, zero overflow/pageerror",
+    "maintenance_sync": "Only tools/verify_desktop_owned_window.py advanced after build; exact before/after SHA in package-manifest, original r10-build-original-manifest.json retained, final full inventory passed. Product/runtime unchanged.",
+    "limits": [
+      "No user app mutation, screen capture, global keys or coordinates in these tests",
+      "Fresh capture callback is trusted-host-only and requires separate capture authorization; not exposed in JSON or new UI",
+      "Static screenshot cannot prove fresh post-action state",
+      "No application business-semantic success claim or automatic retry",
+      "No deployment/publication; remaining mainline flows, real devices/sites/models/clean machine and whole-goal acceptance still incomplete"
+    ],
+    "next": "Use current mainline audit table in repair-and-acceptance-plan.md to check translation and browser consultation actual product wiring, then complete remaining feature-by-feature candidate acceptance; do not reduce remaining scope to device tests."
+  },
+  "screenshot_translation_and_review_20261018": {
+    "status": "verified_in_r11_internal_candidate",
+    "scope": "R-061 one-shot screenshot-file translation using existing DSH skill filesystem, OCR capability service and current work model; R-115/R-116 realtime game translation explicitly deferred. R-066/R-067 native web review reacceptance using local fixtures only.",
+    "assets": [
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-skill-filesystem/lib/index.js",
+        "decision": "direct_use",
+        "use": "native profile skills discovery, no upstream edits/new provider"
+      },
+      {
+        "path": "extensions/desktop/service.py",
+        "decision": "direct_use",
+        "use": "configured OCR recognizes explicit image file and honors disabled registry"
+      },
+      {
+        "path": "tools/run_module.py",
+        "decision": "direct_use",
+        "use": "packaged interpreter module entry independent of workspace cwd"
+      },
+      {
+        "path": "ui/workbench.py",
+        "decision": "adapt",
+        "use": "publish owned skill in managed profile, bind actual capability database"
+      },
+      {
+        "path": "extensions/desktop/review_dsh.mjs",
+        "decision": "direct_use",
+        "use": "already registered native submit/result approval workflow"
+      },
+      {
+        "path": "tools/verify_web_review_dsh.py",
+        "decision": "adapt_if_needed",
+        "use": "native host local fixture reacceptance without external sends"
+      },
+      {
+        "path": "extensions/diagnostics/dsh.py",
+        "decision": "adapt",
+        "use": "real rc2 message-level tool result status/call correlation; current legacy-only decoder loses cancellation error metadata"
+      }
+    ],
+    "completion": "skill discovered by real DSH, OCR tool respects disabled capability and actual provided image, native work-model response receives OCR evidence; existing review guard/snapshot/native local tests pass; UI click instructions and limits updated",
+    "native_screenshot_source_report": ".sumika-next/acceptance-20261018/screenshot-skill/e0a11494777240188216de6be6b453aa/report.json",
+    "targeted": "114 passed (E: temporary directory)",
+    "latest_dsh_check": ".sumika-next/acceptance-20261018/dsh-latest-check.json; latest release and next 0.2.1-rc.2, four runtime/lock SHA checks match",
+    "native_cancel_report": ".sumika-next/web-review-native-a8bcd255ca664ad88f112f2ae3e9b109/report.json",
+    "native_reject_report": ".sumika-next/web-review-native-dc4f302bf04f46ccab504a9e3fc268c8/report.json",
+    "browser_fixtures": ".sumika-next/acceptance-20261018/consultation-guard.log;consultation-snapshot.log;both PASS with no external requests",
+    "candidate_build": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r11;60473 inventory verified;543 source/registry SHA zero differences",
+    "model_quality_limit": "LFM endpoint 192.168.31.227:8084 unavailable. Port 8082 identifies Qwen3-4B-Thinking-2507, not current LFM primary. Read-only health checks only; no inference, model switch or startup.",
+    "native_screenshot_candidate_report": ".sumika-next/acceptance-20261018/screenshot-skill-r11-default-temp/c8b1e283d9b548c39dfb702a0de8d806/report.json;3 checks PASS,6 local fixture calls,0 external model calls",
+    "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-2dab462f46a34719a73708c00eb3c5cf/report.json;4 PASS,owned bridge stopped",
+    "matrix": "E:/SumikaBuild/acceptance-20261017-current/matrix-r11/report.json;128/128 zero overflow/pageerror",
+    "initial_full_suite": "1349 tests,367.986s,one WinError5 error in runtime ownership atomic replace;23 skipped. .sumika-next/acceptance-20261018/full-suite-screenshot-review.log",
+    "full_suite_recheck": "Detailed/failfast run stopped at751 with WinError32 microphone fixture cleanup. Ownership standalone3 passed;microphone standalone11 had directory cleanup failure. Final fresh E temp full run alone passed. Failure logs retained;precise root cause unconfirmed;no product/sandbox changes to suppress failures.",
+    "native_temp_limit": "E: alternate temp triggered upstream windows-acl temp grant materialization/cleanup failure. Default TEMP native probe passed; first failure retained. No upstream or sandbox changes.",
+    "full_suite_final": ".sumika-next/acceptance-20261018/full-suite-screenshot-review-isolated.log;1349 tests,199.815s,OK(skipped=23),exit0;existing resource/deprecation warnings retained",
+    "next": "Continue remaining approved mainline requirement-by-requirement product acceptance;real model translation quality,LFM availability,devices/sites/clean-machine and full goal remain incomplete. No deployment/publication."
+  },
+  "candidate_governance_acceptance_20261018": {
+    "status": "verified_selected_candidate_flows_remaining_mainline_active",
+    "scope": "r11 actual packaged Bridge/UI memory policy,correction/relations,behavior/profile lifecycle and schedule acceptance;compare original mainline requirements and current usage guide",
+    "assets": [
+      {
+        "path": "tools/verify_memory_policy_ui.mjs",
+        "decision": "direct_use"
+      },
+      {
+        "path": "tools/verify_memory_relations_ui.mjs",
+        "decision": "direct_use"
+      },
+      {
+        "path": "tools/verify_companion_profiles_ui.mjs",
+        "decision": "direct_use"
+      },
+      {
+        "path": "tools/verify_schedule_ui.mjs",
+        "decision": "direct_use"
+      },
+      {
+        "path": "docs/project/feature-usage-and-acceptance.md",
+        "decision": "adapt_to_actual_evidence"
+      },
+      {
+        "path": "docs/project/plan.json",
+        "decision": "correct_stale_phase_details_using_implementation_evidence"
+      }
+    ],
+    "completion": "actual candidate-root recorded, real isolated Bridge/SQLite/UI assertions pass, no user data changes/capture/external calls, guide and phase records match evidence;bugs fixed if found",
+    "evidence": {
+      "memory_policy": {
+        "report": "E:\\SumikaBuild\\acceptance-20261017-current\\r11-verify_memory_policy_ui\\report.json",
+        "checks": 5,
+        "candidate": "E:\\SumikaBuild\\acceptance-20261017-current\\candidate-rc2-r11"
+      },
+      "memory_governance": {
+        "report": "E:\\SumikaBuild\\acceptance-20261017-current\\r11-memory-governance-expanded-r4\\report.json",
+        "checks": 17,
+        "candidate": "E:\\SumikaBuild\\acceptance-20261017-current\\candidate-rc2-r11"
+      },
+      "behavior_profiles": {
+        "report": "E:\\SumikaBuild\\acceptance-20261017-current\\r11-verify_companion_profiles_ui\\report.json",
+        "checks": 27,
+        "candidate": "E:\\SumikaBuild\\acceptance-20261017-current\\candidate-rc2-r11"
+      },
+      "schedule": {
+        "report": "E:\\SumikaBuild\\acceptance-20261017-current\\r11-verify_schedule_ui\\report.json",
+        "checks": 7,
+        "candidate": "E:\\SumikaBuild\\acceptance-20261017-current\\candidate-rc2-r11"
+      },
+      "modules": {
+        "report": "E:\\SumikaBuild\\acceptance-20261017-current\\r11-module-lifecycle\\report.json",
+        "checks": 8,
+        "candidate": "E:\\SumikaBuild\\acceptance-20261017-current\\candidate-rc2-r11"
+      }
+    },
+    "migration_report": "E:\\SumikaBuild\\acceptance-20261017-current\\data-migration-6f5fcd8c5711473b94411c706ad5e74e\\report.json",
+    "changes": "Only existing acceptance tools expanded;no product/UI/runtime change. Package retains original tool snapshot;external verifiers target r11 imports and actual Bridge. Initial fixture signature/evidence and reset-baseline assertion errors corrected in test only;failure reports retained.",
+    "ui_gap": "R072 background/worldbook/theme editor absent;prototype only card. Asked user whether to extend existing resource dialog. Dependent UI implementation waits;other mainline work continues.",
+    "next": "Current-candidate role resources and native web-review registration/recovery;actual model/device/site/clean-machine gates;R072 UI scope pending."
+  },
+  "native_schedule_and_review_20261018": {
+    "status": "native_scheduler_verified_product_integration_remaining",
+    "scope": "Evaluate shipped native schedule before adapting execution wiring; inspect managed-profile web review registration. No new UI authorized in this step.",
+    "assets": [
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-web-app/cordis.patch.yml",
+        "decision": "direct_use",
+        "reason": "shipped schedule host and browser management enabled"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml",
+        "decision": "direct_use",
+        "reason": "native four schedule tools already mounted"
+      },
+      {
+        "path": "tools/verify_schedule_dsh.py",
+        "decision": "reference_existing_fixture",
+        "reason": "old probe verifies Sumika dispatch bridge, not native scheduler; keep its historical contract"
+      },
+      {
+        "path": "ui/schedule.py",
+        "decision": "evaluate_adaptation",
+        "reason": "execute still blocked; do not silently change existing reminders into agent tasks"
+      },
+      {
+        "path": "extensions/desktop/review_dsh.mjs",
+        "decision": "reuse",
+        "reason": "existing native approval-bound tool, inspect missing product registration"
+      }
+    ],
+    "completion": "native runtime evidence and integration decision recorded, then necessary implementation and candidate acceptance; full mainline remains active",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r11",
+    "report": ".sumika-next/acceptance-20261018/native-schedule/4b3c1b45b23b4247a58b28860020a596/report.json",
+    "browser_report": ".sumika-next/acceptance-20261018/native-schedule/4b3c1b45b23b4247a58b28860020a596/browser-report.json",
+    "checks": "8 groups passed; 5 loopback model calls, zero external calls; packaged DSH/skin; existing native task entry/list visible, API edits/conflict/scoped deletion, persisted due delivery in original session, two restarts without completed-task replay during observation. Screenshot visually reviewed.",
+    "tools": [
+      "tools/verify_native_schedule.py",
+      "tools/verify_native_schedule_ui.mjs"
+    ],
+    "reuse_decision": "Use shipped native scheduling for Agent tasks rather than extend a second execution scheduler. Existing local reminders are different: no model activation. Do not auto-migrate or enable blocked execution definitions.",
+    "remaining": [
+      "Decide and implement existing Sumika execute-task workflow integration without duplicate task catalog/navigation; preserve local reminders, explicit original-session binding and authorization.",
+      "Managed Workbench profile setup does not register review_dsh.mjs; new source/candidate default profiles absent. Shipped plugin/worker and historical manual profile evidence do not prove new-install registration. Implement portable registration with actual personal registry, explicit workspace/preset scope and user switch; do not send externally.",
+      "Worldbook/role theme UI additions still awaiting prior user choice; do not repeat question or infer consent.",
+      "Overall feature-by-feature acceptance, current candidate updates and complete UI guide remain active."
+    ],
+    "limitations": [
+      "Native task delivery history defaults 30 days/200 entries; not behavior-memory retention and not permanent task audit.",
+      "Browser verified entry/list only; API mutations not claimed as UI clicks.",
+      "First two probe failures were verifier RPC format issues; preserved failed reports; no upstream/product patch.",
+      "Only maintenance verification tools/documents changed; r11 product and runtime unchanged; no rebuild/deployment."
+    ]
+  },
+  "role_resources_editor_approval_20261018": {
+    "status": "implemented_source_and_r13_verified",
+    "choice": "Add background, worldbook entries and role theme in existing role-resource dialog; existing capability card opens same dialog; no new navigation or parallel editor.",
+    "source": "User answered prior async question call_e95bebcab4704599a51593fcf31d3379 on 2026-10-18."
+  },
+  "web_review_registration_repair_20261018": {
+    "status": "r12_native_pass_final_full_one_fixture_cleanup_error",
+    "assets": [
+      {
+        "path": "extensions/desktop/review_install.py",
+        "decision": "adapt",
+        "reason": "existing backed-up atomic profile installer"
+      },
+      {
+        "path": "extensions/desktop/review_dsh.mjs",
+        "decision": "adapt",
+        "reason": "existing native approval and ownership boundary"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-workspace/lib/types/index.d.ts",
+        "decision": "direct_use",
+        "reason": "native registry provides validated session membership, avoid parallel project whitelist database"
+      },
+      {
+        "path": "tools/run_module.py",
+        "decision": "direct_use",
+        "reason": "bundled isolated Python must receive product import path"
+      },
+      {
+        "path": "ui/workbench.py",
+        "decision": "adapt",
+        "reason": "install under existing inactive profile lease with actual browser registry supplied by Bridge"
+      }
+    ],
+    "scope": "No UI changes. New profiles allow only standard main sessions in explicitly registered native workspace membership, plus native per-send approval and existing user/website switches. Preserve existing explicit plugin disabled/scope choices. No external sends.",
+    "source_report": ".sumika-next/acceptance-20261018/managed-review/939c19d35fd243918d4e659da0fae6f2/report.json",
+    "verification": "21 Python tests and 7 Node tests pass; actual managed Workbench 5 groups pass, 7 loopback model calls and zero website sends. Native approval answerer fixture, not browser clicks.",
+    "changes": [
+      "Bridge passes actual personal browser authorization registry into Workbench; installs existing backed-up atomic plugin under inactive profile lease.",
+      "New profiles use native registered workspace/session membership and standard main preset; existing explicit plugin disabled/scope choices preserved on relocation.",
+      "Before send/collect user registry switch read live and fails closed; local status/cancel retained. Per-site permission and native per-send approval remain required.",
+      "Managed plugin passes tools/run_module.py to isolated packaged Python so product imports resolve without PYTHONPATH."
+    ],
+    "candidate_build": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r12",
+    "running_evidence": [
+      ".sumika-next/acceptance-20261018/full-suite-review-registration.log",
+      "E:/SumikaBuild/acceptance-20261017-current/build-rc2-r12-physical.log"
+    ],
+    "build_note": "Initial source DSH runtime rejected due pnpm links; no destination written. Reuse r11 physical runtime after same version and all release hashes verified; keep failed build log.",
+    "next": "Implement approved role resource editor and actual context/theme consumption;integrate existing schedule execute entry with native service without duplicating catalog/navigation;then complete remaining whole acceptance and UI use guide.",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r12",
+    "candidate_report": "E:/SumikaBuild/acceptance-20261017-current/managed-review-r12/7604bc367eb340fc852949a541245c5a/report.json",
+    "inventory": "E:/SumikaBuild/acceptance-20261017-current/inventory-r12-final.json;60476 files verified",
+    "source_identity": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r12.json;545 source files zero differences",
+    "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-3676b3d91cbc4d7d80637e7a5c849b66/report.json;4 checks pass;test Bridge stopped",
+    "matrix": "E:/SumikaBuild/acceptance-20261017-current/matrix-r12/report.json;128/128 zero overflow/pageerror",
+    "first_full_suite": "1351 tests in304.603s;3 errors/23 skipped:2 microphone fixture temp-directory WinError32 and1 profile atomic replace WinError5. Unchanged3 focused tests pass in0.279s. No cause claimed, no product/test weakening.",
+    "full_suite_rerun": ".sumika-next/acceptance-20261018/full-suite-review-registration-clean.log;fresh E temp after build completed",
+    "maintenance_sync": "Only WEB_REVIEW.md and verifier import guard copied after build;original manifest retained and before/after SHA recorded;final inventory passed. Product/runtime unchanged.",
+    "full_suite": "1351 tests in202.376s OK,23 skipped;existing warnings remain",
+    "full_suite_log": ".sumika-next/acceptance-20261018/full-suite-review-registration-clean.log",
+    "final_review_fix": "Final diff review found native entry disabled=true and top-level native override rows also need preservation;fixed installer and22 targeted tests pass. Prior1351 full pass covers before this final installer change;do not claim final1352 full yet.",
+    "final_candidate_report": "E:/SumikaBuild/acceptance-20261017-current/managed-review-r12-final/fb4d4be9f47140e7b504a37950533edf/report.json",
+    "final_targeted": "22 Python tests pass;7 Node tests pass before final Python-only installer adjustment",
+    "final_full_log": ".sumika-next/acceptance-20261018/full-suite-review-registration-final.log",
+    "product_sync": "review_install.py final native disabled/override preservation fix synchronized with before/after SHA in manifest. Prior EXE/layout checks unchanged scope;final native managed5 checks pass.",
+    "final_full_suite": "1352 tests,202.684s,1 microphone fixture TemporaryDirectory cleanup WinError32,23 skipped; do not claim final full pass."
+  },
+  "role_resources_editor_20261018": {
+    "status": "implemented_source_and_r13_verified",
+    "assets": [
+      {
+        "path": "ui/app/management.js:openRoleResources",
+        "decision": "adapt existing dialog; approved controls only"
+      },
+      {
+        "path": "extensions/roles/card_context.py:select_context",
+        "decision": "direct use existing budget/trigger selector"
+      },
+      {
+        "path": "extensions/roles/roles.py:export_package and checksum helpers",
+        "decision": "reuse backup and integrity format"
+      },
+      {
+        "path": "ui/prototype-d/index.html capability card",
+        "decision": "restore same capability card linking same editor"
+      }
+    ],
+    "implementation": "Manifest context_edits preserves original card, manifest and advanced entry fields; compiled scenario/worldbook consume edits before selection. Builtin readonly and revision CAS; invalid changes rejected before backup. Existing role presentation variables consume accent/soft and restore defaults on clearing. Each reply opens fresh role session; no cached context invalidation required.",
+    "verification": "r13 verified:1354 full suite OK23 skipped;20 management contracts;7 review Node tests;4 browser groups;EXE4/layout128/source546SHA/inventory60477 pass.",
+    "remaining": "Actual model style quality, interactive devices and wider mainline acceptance remain; editor source and r13 package acceptance complete.",
+    "full_suite": "1354 tests in301.614s OK,23 skipped; existing warnings retained",
+    "full_suite_log": ".sumika-next/acceptance-20261018/full-suite-role-editor.log",
+    "browser_report": "E:/SumikaBuild/acceptance-20261017-current/role-resources-r13-final/report.json",
+    "node_review": "7/7 tests pass",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r13",
+    "candidate_browser": "4 groups pass,0 page errors,0 external calls; real bundled Bridge/Python; synthetic discovery list",
+    "source_identity": "546 files SHA match",
+    "matrix": "128/128 cells,zero overflow/pageerror",
+    "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-a8051cfe4e544c168510b5586fc81a4b/report.json",
+    "candidate_inventory": "60477 files final inventory verified after maintenance sync",
+    "limitations": "No actual role-model response-quality claim; no interactive device/clean machine acceptance; not deployed. Other whole-mainline requirements remain.",
+    "maintenance_sync": "Only cleaned maintenance fixture script copied after build; original manifest and before/after SHA preserved; final identity/inventory verified."
+  },
+  "native_schedule_integration_20261018": {
+    "status": "implemented_and_r14_verified_whole_mainline_active",
+    "approval": "User confirmed existing schedule dialog project/session selectors, explicit create confirmation and link to existing native automation page. Preserve local reminders and old definitions/history; no parallel native list.",
+    "assets": [
+      {
+        "path": "ui/app/management.js:openSchedules",
+        "decision": "adapt existing editor, approved controls only"
+      },
+      {
+        "path": "ui/prototype-d/index.html:定时任务 capability card",
+        "decision": "reuse entry, no new navigation"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-schedule",
+        "decision": "direct use ctx.schedule.create and original native catalog/history/manager; never patch upstream"
+      },
+      {
+        "path": "extensions/ui/sumika-workbench",
+        "decision": "adapt existing native extension registration and origin-checked parent bridge"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/dsh-commands",
+        "decision": "direct use native human command handler, no model needed for schedule creation"
+      },
+      {
+        "path": "ui/workbench.py:handoff_context",
+        "decision": "reuse live native workspace membership verification"
+      }
+    ],
+    "acceptance": "Explicit target and exact confirmed content/rule; once/daily/weekly native persisted creation; no model during management/create; native manager is authoritative; invalid/archived/subagent/wrong workspace refuse; durable per-request fence and unknown no replay; reminder/old definition/history unchanged; real loopback delivery/restart and existing UI clicks.",
+    "implementation": "Existing schedule dialog has explicit project/session selection and confirmation; host human command invokes native ctx.schedule.create without LLM. Durable request fence prevents duplicate/restart replay; unknown never retried. Local reminders and old definitions/history preserved; origin-checked bridge selects existing schedules panel.",
+    "verification": "38 related Python tests and 2 Node boundary tests pass; existing schedule UI 7 checks pass; full suite1356 tests271.736s OK23 skipped, existing warnings retained.",
+    "full_suite_log": ".sumika-next/acceptance-20261018/full-suite-native-owner-final2.log",
+    "remaining": "Continue original R060-R073 whole-mainline audit;final-candidate Office/OCR/UIA/native approval and remaining integrations;actual devices,model quality,clean-machine;finish complete click-by-click guide. Not deployed.",
+    "probe_note": "First probe accepted command turn/end before due event; verifier now waits task-specific durable history, matching model request and final turn. Previous failures retained; not product pass.",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r15",
+    "dsh": "0.2.1-rc.2",
+    "native_report": "E:/SumikaBuild/acceptance-20261017-current/schedule-integration-r14-visual2/32949a6d6e674f0bb1998a1a00407d80/report.json",
+    "browser_report": "E:/SumikaBuild/acceptance-20261017-current/schedule-integration-r14-visual2/32949a6d6e674f0bb1998a1a00407d80/browser-report.json",
+    "checks": "6 native groups and4 browser groups pass;1 loopback model only at due;0external/pageerror; real persisted response lost to browser becomes unknown without retry. Original reminder/legacy UI7 pass.",
+    "ownership_repair": "Native GetExtendedTcpTable IPv4+IPv6;exact uniquePID and failure refusal retained.33related tests pass.Final1359 suite passes;earlier9 obsolete subprocess mock errors retained in prior log.",
+    "node_contracts": "2 schedule boundary tests and10 parent/handoff/status/review tests pass;parent fixture now renders nested React wrapper;forged source/origin cannot navigate.",
+    "current_candidate_governance": {
+      "memory_policy": "E:/SumikaBuild/acceptance-20261017-current/memory-policy-r14/report.json",
+      "memory_governance": "E:/SumikaBuild/acceptance-20261017-current/memory-governance-r14/report.json",
+      "behavior": "E:/SumikaBuild/acceptance-20261017-current/behavior-profiles-r14/report.json",
+      "roles": "E:/SumikaBuild/acceptance-20261017-current/role-resources-r14/report.json",
+      "checks": "5/17/27/4 pass;0pageerror;memory policy uses5loopback calls;behavior includes syntheticAPI fixtures;does not prove real devices/model quality"
+    },
+    "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-36dcacbc508645ceaaa5e061b9b19e93/report.json",
+    "matrix": "E:/SumikaBuild/acceptance-20261017-current/matrix-r14/report.json",
+    "source_identity": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r14.json",
+    "inventory": "E:/SumikaBuild/acceptance-20261017-current/inventory-r14-final.json",
+    "package": "550sourceSHA identical;60481inventory;original build manifest and before/after ownership+maintenance synchronization receipts retained. Not deployed.",
+    "full_suite": "1362 tests134.309s OK23 skipped;existing warnings retained",
+    "r15_package": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r15/package-manifest.json",
+    "r15_repairs": "ui/server.py response disconnect closes once without redispatch; ui/management.py role import uses authorized random staging directory to avoid Windows/Python3.14 WinError5"
+  }
+}

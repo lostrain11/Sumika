@@ -67,7 +67,17 @@ def handoff(root: Path) -> str:
     data = validate(root)
     current = data["handoff"]
     text = ["# Sumika 接手上下文", data["plan"]["goal"],
-            "当前阶段: " + current["current_phase"], "## 已完成"]
+            "当前阶段: " + current["current_phase"]]
+    acceptance = current.get("current_acceptance") or {}
+    if isinstance(acceptance, dict) and acceptance:
+        text.append("## 当前候选")
+        text.append(f"- {acceptance.get('candidate')} · DSH {acceptance.get('dsh')} · "
+                    f"状态 {acceptance.get('overall_status')} · deployed={acceptance.get('deployed')}")
+        suite = acceptance.get("full_suite") or {}
+        if isinstance(suite, dict) and suite:
+            text.append(f"- 全量 {suite.get('tests')} 项，{suite.get('result')}，"
+                        f"跳过 {suite.get('skipped')}，日志 {suite.get('log')}")
+    text.append("## 已完成")
     text.extend("- " + item for item in current["completed"])
     text.append("## 剩余与限制")
     text.extend("- " + item for item in current["remaining"] + current["constraints"])

@@ -19,6 +19,23 @@ def event(event_id, kind='flip_burst', **overrides):
 
 
 class BehaviorLibraryTests(unittest.TestCase):
+    def test_prompt_delivery_projection_checks_scope_answer_expiry_and_deletion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            now = [1000.0]
+            library = BehaviorLibrary(Path(directory)/'prompt.sqlite3', clock=lambda: now[0])
+            library.observe(event('source'), scope=SCOPE_A)
+            prompt = library.record_prompt('flip_burst', event_id='source', scope=SCOPE_A)['prompt_id']
+            self.assertEqual(library.prompt_states([prompt], scope=SCOPE_A), {prompt: 'pending'})
+            self.assertEqual(library.prompt_states([prompt], scope=SCOPE_B), {prompt: 'unavailable'})
+            self.assertEqual(library.prompt_states([prompt], scope={**SCOPE_A, 'session':'other'}), {prompt:'unavailable'})
+            now[0] += 120
+            self.assertEqual(library.prompt_states([prompt], scope=SCOPE_A), {prompt:'expired'})
+            library.set_prompt_state(prompt, 'answered', scope=SCOPE_A)
+            self.assertEqual(library.prompt_states([prompt], scope=SCOPE_A), {prompt:'answered'})
+            with library._connection() as db: db.execute('DELETE FROM prompts')
+            self.assertEqual(library.prompt_states([prompt], scope=SCOPE_A), {prompt:'unavailable'})
+            with self.assertRaises(ValueError):library.prompt_states([prompt]*513, scope=SCOPE_A)
+
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
@@ -90,8 +107,10 @@ class BehaviorLibraryTests(unittest.TestCase):
     def test_confirmed_deletion_covers_feedback_prompts_patterns_and_epoch(self):
         self.library.observe(event('e1'), scope=SCOPE_A)
         self.library.observe(event('e2', kind='long_dwell'), scope=SCOPE_A)
+        prompt = self.library.record_prompt('flip_burst', scope=SCOPE_A, event_id='e1')
         self.library.feedback({'feedback_id': 'f1', 'user_event_id': 'host-1',
-                               'event_id': 'e1', 'verdict': 'confirm'},
+                               'event_id': 'e1', 'verdict': 'confirm', 'label': '找公式',
+                               'prompt_id': prompt['prompt_id']},
                               scope=SCOPE_A)
         revision = int(self.library.status()['revision'])
         # Revision guard: a stale revision mutates nothing.
@@ -136,6 +155,8 @@ class BehaviorLibraryTests(unittest.TestCase):
         entry = {'feedback_id': 'f1', 'user_event_id': 'host-1',
                  'event_id': 'e1', 'verdict': 'confirm'}
         self.library.observe(event('e1'), scope=SCOPE_A)
+        prompt = self.library.record_prompt('flip_burst', scope=SCOPE_A, event_id='e1')
+        entry.update(prompt_id=prompt['prompt_id'], label='找公式')
         first = self.library.feedback(entry, scope=SCOPE_A)
         self.assertEqual(first['status'], 'recorded')
         self.assertEqual(self.library.feedback(entry, scope=SCOPE_A)['status'],

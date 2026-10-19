@@ -7,13 +7,10 @@
 //
 // Usage:
 //   node tools/verify_workbench_ui.mjs [bridge] [evidence.json] [sidebar.png] [page.png] [rail.png]
-import { createRequire } from 'node:module';
+import { loadPlaywright } from './lib/playwright.mjs';
 import { writeFile } from 'node:fs/promises';
 
-const require = createRequire(
-  'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/',
-);
-const { chromium } = require('playwright');
+const { chromium } = loadPlaywright();
 
 const bridge = process.argv[2] || 'http://127.0.0.1:8765';
 const evidencePath = process.argv[3] || null;
@@ -27,7 +24,7 @@ const { url } = await embed.json();
 if (typeof url !== 'string' || !url) throw new Error('embed URL missing');
 
 const browser = await chromium.launch({
-  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  channel: 'msedge',
   headless: true,
 });
 const page = await browser.newPage();
@@ -42,6 +39,13 @@ page.on('console', (message) => {
 await page.goto(url, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(9000);
 
+// DSH 0.2 has a separate preview notice before the credential dialog. Use its
+// native action; never bypass modal masks or force the sidebar interaction.
+if (await page.getByText('预览版说明', { exact: true }).isVisible().catch(() => false)) {
+  await page.getByRole('button', { name: '继续', exact: true }).click();
+  await page.waitForTimeout(800);
+}
+
 // DSH's own first-run credential dialog covers the workbench in a fresh browser
 // profile; dismiss it through its own "configure later" action when present.
 for (const label of ['稍后配置', 'Later', 'Skip']) {
@@ -51,6 +55,11 @@ for (const label of ['稍后配置', 'Later', 'Skip']) {
     await page.waitForTimeout(800);
     break;
   }
+}
+const onboarding = page.getByRole('dialog', { name: '开始使用', exact: true });
+if (await onboarding.isVisible().catch(() => false)) {
+  await onboarding.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.waitForTimeout(300);
 }
 
 const probe = await page.evaluate(() => {
@@ -139,7 +148,27 @@ if (await toggle.count().catch(() => 0)) {
 // "wired but idle" against "not mounted".
 let sessionStatus = { state: 'no_non_blank_session' };
 let sessionStatusFailure = null;
-const treeRows = page.locator("[class*='_root_1b2ny_3']");
+// Optional isolated fixture text selects the native registered project/session
+// by visible content, rather than relying on a hashed build-specific row class.
+const expectedSessionText = process.env.SUMIKA_VERIFY_SESSION_TEXT;
+if(expectedSessionText){
+  const row=page.getByText(expectedSessionText,{exact:true});
+  await row.first().waitFor({timeout:15000});
+  const sessionText=process.env.SUMIKA_VERIFY_SESSION_PREVIEW;
+  if(sessionText){
+    const sessionRow=page.getByText(sessionText,{exact:false}).first();
+    if(!await sessionRow.isVisible()){
+      await row.first().click();
+      await sessionRow.waitFor({timeout:15000});
+    }
+    await sessionRow.click();
+    await page.locator('[data-sumika-session-status]').first().waitFor({state:'attached',timeout:15000});
+  }else{
+    await row.first().click();
+    await page.waitForTimeout(800);
+  }
+}
+const treeRows = page.locator("[class*='sessionItem'], [class*='sessionRow'], [class*='_root_1b2ny_3']");
 const treeRowCount = await treeRows.count().catch(() => 0);
 for (let index = treeRowCount - 1; index >= 0; index -= 1) {
   const text = (await treeRows.nth(index).innerText().catch(() => '')).trim();
@@ -148,7 +177,7 @@ for (let index = treeRowCount - 1; index >= 0; index -= 1) {
   await page.waitForTimeout(6000);
   break;
 }
-if (await page.locator("[class*='_headerUtilities']").count().catch(() => 0)) {
+if (await page.locator("[data-sumika-session-status], [class*='headerUtilities']").count().catch(() => 0)) {
   const marked = page.locator('[data-sumika-session-status]');
   sessionStatus = (await marked.count().catch(() => 0)) > 0
     ? { state: await marked.first().getAttribute('data-sumika-session-status').catch(() => null) }
@@ -174,6 +203,9 @@ if (await page.locator("[class*='_headerUtilities']").count().catch(() => 0)) {
 probe.sessionStatus = sessionStatus;
 if (sessionStatus.state === 'slot_rendered_without_our_entry') {
   sessionStatusFailure = 'session header rendered but the Sumika status entry is missing';
+}
+if(expectedSessionText && sessionStatus.state==='no_non_blank_session'){
+  sessionStatusFailure='Expected nonblank session was not opened; status slot remains unverified';
 }
 if (pagePath) await page.screenshot({ path: pagePath, fullPage: false });
 

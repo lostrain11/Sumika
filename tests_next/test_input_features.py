@@ -1,10 +1,11 @@
 """P11 pure input aggregation: classification, whitelist, grids, frames."""
 import json
+import copy
 import unittest
 
 from extensions.behavior.input_features import (
     FrameAggregator, MAX_FRAME_BYTES, classify_key, classify_shortcut,
-    grid_cell)
+    grid_cell, validate_frame)
 
 
 def identity():
@@ -118,6 +119,50 @@ class FrameAggregatorTests(unittest.TestCase):
         aggregator.focus('privacy_context_unknown')
         frame = aggregator.seal('1.0')
         self.assertEqual(frame['input_source_coverage'], 'coarse_only')
+
+    def test_unknown_context_has_quantity_without_direction_or_semantic_detail(self):
+        aggregator = self.aggregator()
+        aggregator.focus('privacy_context_unknown')
+        aggregator.key(0x43,100.1)
+        aggregator.shortcut(0x43,{'ctrl'})
+        aggregator.click('left',.1,.2)
+        aggregator.scroll('vertical',-120,100.2)
+        aggregator.scroll('vertical',120,100.3)
+        aggregator.drag(.5,.5,1,start=(.1,.1))
+        frame=aggregator.seal('101.0')
+        validate_frame(frame)
+        self.assertEqual(frame['keys']['counts'],{'other':1})
+        self.assertEqual(frame['scroll']['vertical'],{'count':2,'delta':240,'reversed':0})
+        self.assertEqual(frame['semantic_ops'],[])
+        self.assertEqual(frame['bursts'],[])
+        self.assertIsNone(frame['mouse']['grid'])
+
+    def test_closed_nested_schema_rejects_secret_strings_and_invalid_values(self):
+        base=self.aggregator().seal('101.0')
+        def secret(value): value['keys']['text']='SECRET_PAYLOAD'
+        def raw_codes(value): value['keys']['counts']['vk']=65
+        def bad_grid(value): value['mouse']['grid']=['SECRET_PAYLOAD']
+        def bad_burst(value): value['bursts']=[{'kind':'typing_burst','id':'SECRET_PAYLOAD','events':1}]
+        def bad_op(value): value['semantic_ops']=[{'kind':'SECRET_PAYLOAD','count':1}]
+        def bad_scroll(value): value['scroll']['vertical']['delta']='SECRET_PAYLOAD'
+        def nan_time(value): value['observed_to']='nan'
+        def reversed_time(value): value['observed_to']='99.0'
+        for mutate in (secret,raw_codes,bad_grid,bad_burst,bad_op,bad_scroll,nan_time,reversed_time):
+            with self.subTest(mutate=mutate.__name__):
+                value=copy.deepcopy(base); mutate(value)
+                with self.assertRaises(ValueError): validate_frame(value)
+
+    def test_burst_cap_keeps_total_and_secret_key_sequence_never_appears(self):
+        aggregator=self.aggregator()
+        secret='SENSITIVE_USER_SECRET'
+        for index in range(100):
+            for char in secret: aggregator.key(ord(char),100+index*.6)
+        frame=aggregator.seal('201.0')
+        validate_frame(frame)
+        self.assertEqual(frame['semantic_total'],100*sum(char.isalpha() for char in secret))
+        self.assertLessEqual(len(frame['bursts']),32)
+        self.assertTrue(frame['truncated'])
+        self.assertNotIn(secret,json.dumps(frame))
 
     def test_semantic_ops_cap_merges_and_marks_truncated(self):
         aggregator = self.aggregator()

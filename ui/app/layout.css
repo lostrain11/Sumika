@@ -73,7 +73,8 @@ html[data-density='compact'] .roster .member { padding:6px 8px; }
   .gnav { gap: 20px; }
   .top-right { gap: 6px; min-width: 0; }
   .model-chip { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .room-wrap { grid-template-columns: 196px minmax(0,1fr) 300px; }
+  /* .room-wrap is owned by css/room.css (2 columns, then 1 column at 1024px).
+     Re-declaring it here silently overrode that responsive rule. */
   .cap-wrap { grid-template-columns: minmax(0,1fr) 270px; }
   .set-wrap { grid-template-columns: 184px minmax(0,1fr) 250px; }
   .cap-main, .set-main { padding: 18px; }
@@ -84,7 +85,6 @@ html[data-density='compact'] .roster .member { padding:6px 8px; }
   .gnav { gap: 12px; }
   .top-right .proto { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .model-chip { max-width: 140px; }
-  .room-wrap { grid-template-columns: 170px minmax(0,1fr) 260px; }
   .cap-wrap { grid-template-columns: minmax(0,1fr) 240px; }
   .set-wrap { grid-template-columns: 160px minmax(0,1fr); overflow-y: auto; }
   .set-side { grid-column: 2; }
@@ -117,3 +117,99 @@ html[data-density='compact'] .roster .member { padding:6px 8px; }
 .sumika-capability-settings .sumika-field:not([type="checkbox"]) { flex-basis:100%; width:100%; min-width:0; box-sizing:border-box; }
 .sumika-capability-settings h3 { margin:12px 0; }
 .sumika-capability-settings > .mini-btn { margin:6px 6px 0 0; }
+
+/* Keep long permission/data forms above the information panel in narrow windows. */
+@media (max-width:1024px){
+  .set-wrap{grid-template-columns:minmax(0,1fr);grid-auto-rows:max-content;align-items:start;overflow-y:auto}
+  .set-nav{grid-row:auto}
+  .set-main{min-height:auto;overflow-y:visible}
+  .set-side{grid-column:auto;min-height:160px}
+}
+
+/* Data & storage: group the former text wall into the same card rhythm as the
+   other settings panes. Keep one visual source (tokens.css) and no new nav. */
+.data-section{padding:18px 0;border-bottom:1px dashed var(--line)}
+.data-section:first-child{padding-top:8px}
+.data-section:last-child{border-bottom:0;padding-bottom:4px}
+.data-section>h3{display:flex;align-items:center;gap:8px;margin:0 0 6px;
+  font:600 15px Georgia,"SimSun",serif;color:var(--ink)}
+.data-section>h3::before{content:none}
+.data-section h4{margin:22px 0 8px;padding-top:16px;border-top:1px dashed var(--line);font-size:12px;color:var(--rose);letter-spacing:.5px}
+.data-section h4:first-child{margin-top:0;padding-top:0;border-top:0}
+.data-section>p.sumika-form-note{margin:0 0 10px}
+.data-section .set-row{border-bottom:0;padding:7px 0}
+.set-row[hidden]{display:none!important}
+.data-section .sumika-settings-actions{padding:12px 0 4px}
+.data-section>button,.data-section>.sumika-action-row{margin-bottom:12px}
+.data-recommendation{margin:7px 0;padding:10px 12px;border:1px solid var(--line);
+  border-radius:var(--radius-sm);background:var(--paper-2);font-size:11.5px;
+  line-height:1.65;color:var(--muted)}
+.data-recommendation b{color:var(--rose);font-weight:600}
+.data-recommendation code{font-size:10.5px;color:var(--ink);background:var(--bg);
+  padding:2px 5px;border-radius:4px}
+.data-ok{color:var(--green)}
+.data-section .behavior-memory-row{border-bottom:1px dashed var(--line);padding:10px 0}
+.data-section .behavior-memory-row:last-child{border-bottom:0}
+.data-section [data-behavior-overview]{margin:6px 0 4px}
+.data-section [data-behavior-declarations]{margin-top:14px}
+.data-section .sumika-action-row{gap:8px;padding:8px 0 0}
+@media (max-width:680px){
+  .data-section{padding:14px 0}
+  .data-section .set-row{padding:9px 0}
+}
+/* Model settings tabs: the three scopes are one setting, presented as a tab
+   strip rather than three unstyled inline buttons. */
+.model-usage-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 16px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+.model-usage-tab{appearance:none;border:1px solid transparent;border-radius:var(--radius-pill);
+  background:transparent;color:var(--muted);padding:6px 15px;font:inherit;font-size:11.5px;cursor:pointer}
+.model-usage-tab:hover{background:var(--hover-surface);color:var(--ink)}
+.model-usage-tab.active{background:var(--rose-soft);border-color:var(--rose-line);color:var(--rose-deep);font-weight:600}
+.model-usage-panel[hidden]{display:none}
+.model-usage-panel{padding-top:2px}
+
+/* Long text values (excluded apps, worldbook, notes) must own a full row. */
+.set-row:has(textarea){flex-wrap:wrap}
+.set-row:has(textarea) .val{flex:1 1 100%;margin-left:0}
+.set-row:has(textarea) textarea{width:100%;min-height:104px;resize:vertical}
+
+/* Workbench unavailable state: a centered, intentional empty state instead of
+   a bare error string at the top of a blank screen. */
+.sumika-workbench-empty{height:100%;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:10px;padding:32px;text-align:center;color:var(--muted)}
+.sumika-workbench-empty .icon{width:52px;height:52px;border-radius:16px;display:grid;
+  place-items:center;background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber)}
+.sumika-workbench-empty h2{font:600 18px Georgia,"SimSun",serif;color:var(--ink)}
+.sumika-workbench-empty p{max-width:560px;font-size:11.5px;line-height:1.75;overflow-wrap:anywhere}
+.sumika-workbench-empty .sumika-action-row{padding-top:4px}
+
+/* Behavior overview: two compact stat cards keep the long data page readable. */
+.data-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0 10px}
+.data-stat{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--paper-2);padding:10px 12px}
+.data-stat b{display:block;font:600 18px Georgia,"SimSun",serif;color:var(--rose-deep)}
+.data-stat span{display:block;margin-top:2px;font-size:10px;color:var(--muted)}
+/* Work model call-to-action: one clear destination, not a lone button. */
+.settings-cta{display:flex;align-items:center;justify-content:space-between;gap:18px;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-2);
+  padding:15px 16px;margin:6px 0 12px}
+.settings-cta-copy{min-width:0}
+.settings-cta h3{font:600 15px Georgia,"SimSun",serif;color:var(--ink);margin:0 0 5px}
+.settings-cta p{font-size:11px;line-height:1.7;color:var(--muted);margin:0;max-width:620px}
+.settings-cta .mini-btn{flex:none;border-color:var(--rose-line);background:var(--rose-soft);color:var(--rose-deep)}
+.settings-cta .mini-btn:hover{background:var(--rose-line)}
+@media (max-width:700px){.settings-cta{align-items:flex-start;flex-direction:column}.settings-cta .mini-btn{width:100%}}
+
+/* Advanced/remote configuration is collapsed by default; it is not part of the
+   normal local/cloud setup flow. */
+.settings-advanced{margin:14px 0 4px;border:1px dashed var(--line);border-radius:var(--radius-sm);
+  background:var(--paper-2);padding:0 12px}
+.settings-advanced>summary{cursor:pointer;padding:11px 0;font-size:11.5px;color:var(--muted);
+  list-style:none}
+.settings-advanced>summary::-webkit-details-marker{display:none}
+.settings-advanced>summary::before{content:"＋";display:inline-block;width:16px;color:var(--rose)}
+.settings-advanced[open]>summary::before{content:"－"}
+.settings-advanced>p{margin:0 0 8px}
+.settings-advanced .set-row{padding:9px 0}
+
+/* The top-right chip is the role model, so it belongs to the room only. */
+body:not(.on-room):not(.on-board) .model-chip{display:none}
+body:not(.on-room) .proto{display:none}

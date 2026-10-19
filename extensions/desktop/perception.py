@@ -1,27 +1,38 @@
 """Bounded, explicit one-shot capture; no background sensing or model requests."""
 from pathlib import Path
+import sys
 
 
-def capture_camera(output,*,device=0,approved=False,enabled=True,warmup=5):
+def read_camera_frame(*,device=0,approved=False,warmup=5):
     """One-shot capture. warmup frames are discarded: many cameras return a black
     first frame right after opening, which must not be mistaken for a dark scene."""
-    if not enabled:return {'disabled':True}
     if approved is not True:raise PermissionError('camera capture needs native authorization')
     if type(warmup) is not int or not 0<=warmup<=60:raise ValueError('invalid warmup frame count')
-    output=Path(output).resolve()
-    if output.exists():raise FileExistsError(output)
     import cv2
-    camera=cv2.VideoCapture(device)
+    # Windows' default MSMF path can hang during camera negotiation. Use the
+    # bounded single-frame path's verified DirectShow backend explicitly.
+    camera=(cv2.VideoCapture(device,cv2.CAP_DSHOW) if sys.platform=='win32'
+            and type(device) is int else cv2.VideoCapture(device))
     try:
         if not camera.isOpened():raise RuntimeError('camera unavailable')
         ok,frame=False,None
         for _ in range(max(1,warmup+1)):
             ok,frame=camera.read()
             if not ok:raise RuntimeError('camera frame unavailable')
-        output.parent.mkdir(parents=True,exist_ok=True)
-        if not cv2.imwrite(str(output),frame):raise RuntimeError('camera output failed')
-        return {'path':str(output),'device':device,'frames':max(1,warmup+1),'discarded':warmup}
+        return frame
     finally:camera.release()
+
+
+def capture_camera(output,*,device=0,approved=False,enabled=True,warmup=5):
+    if not enabled:return {'disabled':True}
+    if approved is not True:raise PermissionError('camera capture needs native authorization')
+    output=Path(output).resolve()
+    if output.exists():raise FileExistsError(output)
+    frame=read_camera_frame(device=device,approved=approved,warmup=warmup)
+    import cv2
+    output.parent.mkdir(parents=True,exist_ok=True)
+    if not cv2.imwrite(str(output),frame):raise RuntimeError('camera output failed')
+    return {'path':str(output),'device':device,'frames':max(1,warmup+1),'discarded':warmup}
 
 
 def capture_audio(output,*,seconds=5,device=None,approved=False,enabled=True,sample_rate=16000):

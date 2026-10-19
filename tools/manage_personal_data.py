@@ -15,7 +15,8 @@ sys.path.insert(0, str(ROOT))
 from sumika_next.paths import user_data_directory
 from sumika_next.runtime_ownership import process_identity
 from ui.data_lease import DataLease
-from tools.backup_personal_data import backup, restore, rebind_role_paths, inventory
+from tools.backup_personal_data import (backup, restore, rebind_role_paths,
+                                        inventory, discover_behavior_root)
 
 
 def location_file():
@@ -73,8 +74,20 @@ def migrate(source, destination, expected_location, snapshot=None):
             target_lease = DataLease(destination).acquire(); stack.callback(target_lease.release)
             if snapshot is None:
                 manifest = json.loads((snapshot_path / 'snapshot.json').read_text(encoding='utf-8'))
-                if inventory(source) != manifest['files']:
+                personal_files = (manifest['roots']['personal']['files']
+                                  if manifest['schema_version'] == 2 else manifest['files'])
+                if inventory(source) != personal_files:
                     raise ValueError('复制期间原数据已变化；副本保留但未启用')
+                selected_behavior = discover_behavior_root(source)
+                if selected_behavior is not None:
+                    behavior_lease = DataLease(selected_behavior, filename='behavior-root.lock').acquire()
+                    stack.callback(behavior_lease.release)
+                if manifest['schema_version'] == 2:
+                    behavior = manifest['roots']['behavior']
+                    if selected_behavior != Path(behavior['source']).resolve() or inventory(selected_behavior) != behavior['files']:
+                        raise ValueError('复制期间行为数据或位置已变化；副本保留但未启用')
+                elif selected_behavior is not None and not selected_behavior.is_relative_to(source):
+                    raise ValueError('复制期间行为位置已变化；副本保留但未启用')
             if location_digest() != expected_location:
                 raise ValueError('数据位置已改变；副本未启用')
             temp = location_file().with_name('Sumika-location-' + uuid.uuid4().hex + '.tmp')
@@ -181,11 +194,14 @@ def run_job(job):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['resolve', 'cleanup', 'run'])
+    parser.add_argument('action', choices=['resolve', 'cleanup', 'run', 'purge-material'])
     parser.add_argument('--directory', type=Path)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--confirmed', action='store_true')
     parser.add_argument('--job', type=Path)
+    parser.add_argument('--settings', type=Path)
+    parser.add_argument('--message-id', action='append')
+    parser.add_argument('--expected-plan')
     args = parser.parse_args()
     if args.action == 'resolve':
         value = str(user_data_directory())
@@ -193,6 +209,12 @@ def main():
         else: print(value)
     elif args.action == 'cleanup':
         print(json.dumps(cleanup(args.directory, args.confirmed)))
+    elif args.action == 'purge-material':
+        if args.settings is None or not args.message_id:
+            parser.error('purge-material requires --settings and at least one --message-id')
+        from extensions.roles.material_purge import purge_material
+        print(json.dumps(purge_material(args.settings, args.message_id,
+            confirmed=args.confirmed, expected_plan=args.expected_plan), ensure_ascii=False))
     else:
         run_job(args.job)
 

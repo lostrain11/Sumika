@@ -27,7 +27,7 @@ const {chromium}=loadPlaywright();
 const browser=await chromium.launchPersistentContext(join(output,'profile'),{channel:'msedge',headless:true,
   args:['--mute-audio',`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
 let bridgeProcess;
-const settingsFile=resolve(process.env.SUMIKA_SETTINGS||'C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/Sumika/role-model-settings.json');
+const settingsFile=resolve(process.env.SUMIKA_SETTINGS||join(process.env.LOCALAPPDATA||'', 'Sumika', 'role-model-settings.json'));
 const report={passed:false,scope:'Real public Bilibili page -> isolated MV3 -> Sumika Bridge; no login, input, model, microphone or audio'};
 if(allowModel) report.scope='Real public Bilibili page -> isolated MV3 -> Sumika Bridge -> configured multimodal provider; isolated settings, no memory writes';
 try {

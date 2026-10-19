@@ -144,6 +144,17 @@ class ApplicationAudioTrack:
         from vosk import KaldiRecognizer
         return KaldiRecognizer(self.provider.load_model(), 16000)
 
+    def reset_stream(self):
+        """Discard partial speech while keeping the loaded provider model."""
+        with self._lock:
+            if self._stopping.is_set() or self._recognizer is None:
+                raise RuntimeError('application transcription is not active')
+            self._recognizer = self._new_recognizer()
+            self._segment_bytes = self._total_bytes = 0
+            self._result_start = 0
+            self._timing = self._pending_timing = None
+            self._clock_coverage.clear()
+
     def start(self):
         with self._lifecycle:
             with self._lock:
@@ -435,9 +446,14 @@ class SegmentedApplicationAudioTrack:
             try:
                 self.capture.stop()
             finally:
-                if self._thread is not None:
-                    self._thread.join()
-                    self._thread = None
+                thread = self._thread
+                if thread is not None and thread is not threading.current_thread():
+                    # A transcript callback runs on this decode thread and may
+                    # request stop; joining itself raises RuntimeError. A
+                    # provider that ignores cancellation must not block stop
+                    # forever, so the join is bounded (the thread is daemon).
+                    thread.join(timeout=15)
+                self._thread = None
                 self._total = 0
                 self._timing = None
                 self._pending_timing = None

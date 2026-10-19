@@ -36,7 +36,7 @@ def safe_path(value):
     for part in parts:
         low = part.casefold()
         public_ca = value in {f'runtime/{runtime}/Lib/site-packages/certifi/cacert.pem'
-                              for runtime in ('python', 'desktop', 'voice')} and part == 'cacert.pem'
+                              for runtime in ('python', 'desktop', 'voice', 'office/dependencies/python')} and part == 'cacert.pem'
         if (low in FORBIDDEN_PARTS or low.startswith('.env.') or '.update-' in low
                 or (low.endswith(('.sqlite3', '.db', '.log', '.pyc', '.pem', '.key')) and not public_ca)):
             raise ValueError('runtime data or credential file in release')

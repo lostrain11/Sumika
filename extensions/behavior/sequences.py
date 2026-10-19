@@ -63,11 +63,11 @@ class EpisodeTracker:
         self._last_at = None
         self._episodes = 0
 
-    def observe(self, action, *, target, paused=False, gap=False):
+    def observe(self, action, *, target, paused=False, gap=False, at=None):
         """Feed one semantic action; returns finished-candidate dicts when an
         episode ends. A paused stream or a capture gap ends the episode
         without recording the action."""
-        now = self._clock()
+        now = self._clock() if at is None else at
         finished = []
         if paused or gap:
             finished.extend(self._end())
@@ -79,8 +79,14 @@ class EpisodeTracker:
             self._episodes += 1
         self._target = target
         self._last_at = now
-        self._actions.append(action)
+        self._actions = merge_actions([*self._actions, action])[-TAIL_WINDOW:]
         return finished
+
+    def idle(self):
+        """End a quiet episode even when no later action arrives."""
+        if self._actions and self._clock() - self._last_at >= self._idle:
+            return self._end()
+        return None
 
     def end(self):
         """Explicit episode end (stop, revoke, target loss)."""
@@ -126,7 +132,7 @@ def select_ask_candidate(*, confirmed_patterns, candidates, episode_id):
             return {'signature': pattern, 'reason': 'confirmed'}
     supported = [item for item in candidates or [] if item.get('supported')]
     if supported:
-        best = max(supported, key=lambda item: (item['length'],
+        best = max(supported, key=lambda item: (bool(item.get('anomaly')), item['length'],
                                                 item['signature']))
         return {'signature': best['signature'], 'reason': 'supported'}
     return None

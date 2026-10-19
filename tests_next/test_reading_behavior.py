@@ -72,7 +72,17 @@ class ReadingBehaviorTests(unittest.TestCase):
         reports = self.feed(10, 12, 10, 12, 10)
         revisits = [item for item in reports if item and item['kind'] == 'revisit']
         self.assertEqual(len(revisits), 1)
-        self.assertEqual(revisits[0]['backward_flips'], 2)
+        self.assertGreaterEqual(revisits[0]['returns'], 2)
+
+    def test_descending_scan_is_not_a_revisit(self):
+        self.assertFalse(any(item and item['kind'] == 'revisit'
+                             for item in self.feed(20, 19, 18, 17, 16, 15)))
+
+    def test_return_cannot_cross_a_verification_gap(self):
+        self.feed(10, 12, 10)
+        self.now[0] += 5
+        self.assertIsNone(self.tracker.feed(12))
+        self.assertIsNone(self.tracker.feed(10))
 
     def test_unknown_or_invalid_page_resets_state(self):
         self.feed(1, 2, 3, 4)

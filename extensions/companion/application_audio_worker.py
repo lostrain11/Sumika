@@ -90,21 +90,22 @@ def run(input_stream, output_stream):
             raise PermissionError('explicit application audio consent required')
         require_asr(config)
         media_identity = snapshot_media_identity(config.get('media_identity'))
+        identity_state = {'value': media_identity, 'stream_epoch': config.get('stream_epoch')}
         def observation(bundle):
             if stop.is_set():
                 return
             require_asr(config)
             value = asdict(bundle)
-            if media_identity is not None:
-                value['metadata']['media_identity'] = snapshot_media_identity(media_identity)
+            if identity_state['value'] is not None:
+                value['metadata']['media_identity'] = snapshot_media_identity(identity_state['value'])
             value['observed_at'] = bundle.observed_at.isoformat()
-            emit({'observation': value})
+            emit({'observation': value, 'stream_epoch': identity_state['stream_epoch']})
         track = build_track(config, observation)
         # Load native dependencies before the blocking stdin owner watcher.
         if config.get('asr', {}).get('provider') == 'sherpa-onnx-sensevoice':
             track.prepare()
         if config.get('source') == 'pipe':
-            run_pipe(input_stream, track, stop, emit, config)
+            run_pipe(input_stream, track, stop, emit, config, identity_state)
             return 0
         def owner_closed():
             # Any subsequent input or EOF revokes this worker's entire session.
@@ -146,7 +147,7 @@ def run(input_stream, output_stream):
             diagnostic.close()
 
 
-def run_pipe(input_stream, track, stop, emit, config):
+def run_pipe(input_stream, track, stop, emit, config, identity_state=None):
     """Feed relayed browser tab PCM into the recognizer until stop or EOF.
 
     Each line is one bounded base64 packet; any gap, malformed packet or EOF
@@ -180,6 +181,25 @@ def run_pipe(input_stream, track, stop, emit, config):
                 note('stop action')
                 stop.set()
                 break
+            if action == 'reset':
+                stream_epoch = packet.get('stream_epoch')
+                if type(stream_epoch) is not int or stream_epoch < 0:
+                    raise ValueError('bounded audio stream epoch required')
+                identity = snapshot_media_identity(packet.get('media_identity'))
+                require_asr(config)
+                if hasattr(track, 'reset_stream'):
+                    track.reset_stream()
+                else:
+                    # Offline tracks stop/join old decoding before switching
+                    # identity; their provider retains the loaded model.
+                    track.stop()
+                    track.start()
+                if identity_state is not None and identity is not None:
+                    identity_state['value'] = identity
+                if identity_state is not None:
+                    identity_state['stream_epoch'] = stream_epoch
+                emit({'status': 'reset', 'stream_epoch': stream_epoch})
+                continue
             if action is not None:
                 note(f'unknown action {action}')
                 raise ValueError('unknown browser audio control')

@@ -1,7 +1,8 @@
-import {createRequire} from 'node:module';
+import {loadPlaywright} from './lib/playwright.mjs';
+
 import {writeFile} from 'node:fs/promises';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
-const {chromium}=require('playwright');
+
+const {chromium}=loadPlaywright();
 const cases=[
   ['昴，你吃了没',false],['Sumika 项目最近怎么样？',false],
   ['你觉得这个项目应该怎么优化？',false],['如果让你修复这个bug，你会怎么做？',false],
@@ -27,7 +28,7 @@ const fixture=[
       id:`fixture-${cases.length+i}`,who:'me',text:cases[13][0],at:'2026-09-12T10:00:00',task_intent,
     })),
 ];
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const page=await browser.newPage({viewport:{width:1280,height:720}});
 const checks=[],errors=[];let modelRequests=0;
 const diag={history:[]};

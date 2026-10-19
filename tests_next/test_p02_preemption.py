@@ -76,7 +76,8 @@ class P02PreemptionTests(unittest.TestCase):
         self.assertEqual(result['text'], '好的，我们一起看。')
         self.background_release.set()
         self.coordinator._proactive_thread.join(3)
-        self.assertFalse(self.background_started.is_set() and False or False)
+        self.assertFalse(self.coordinator._proactive_thread.is_alive(),
+                         'background generation must be joined after cancellation')
         self.assertEqual(self.proactive_events(), [],
                          'a background generation superseded by the user '
                          'question must never be emitted')

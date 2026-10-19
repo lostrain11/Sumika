@@ -46,35 +46,44 @@ def _env_provides(root, env, packages):
     return sorted(found)
 
 
-def _resolve(root, packages, envs):
+def _resolve(root, packages, envs, *, require_all=False):
     """Return (ready_names, source) from the bridge interpreter or extension envs."""
     local = _any_module(*packages)
-    if local:
+    if local and (not require_all or len(local) == len(packages)):
         return local, "本进程"
+    best = (local, "本进程" if local else "")
     for env in envs:
         provided = _env_provides(root, env, packages)
-        if provided:
+        if provided and (not require_all or len(provided) == len(packages)):
             return provided, f"隔离环境 {env}"
-    return [], ""
+        if len(provided) > len(best[0]):
+            best = (provided, f"隔离环境 {env}")
+    return best
 
 
-def _voice_resolve(root, packages):
-    """Inspect the interpreter used by voice workers, without importing native code.
+def _runtime_resolve(root, packages, kind):
+    """Inspect the selected worker interpreter without importing native code.
 
     Once a runtime is selected, bridge packages and other environments cannot
     satisfy its requirements. Presence is a preflight, not a native-load test.
     """
-    interpreter = capability_python('voice', root=root)
+    interpreter = capability_python(kind, root=root)
     if interpreter is None:
-        if any(key in os.environ for key in ('SUMIKA_VOICE_PYTHON', 'SUMIKA_DESKTOP_PYTHON')):
-            return [], '指定语音运行时不可用'
-        return _resolve(root, packages, ('voice-env', 'desktop-env'))
+        explicit_keys = ('SUMIKA_VOICE_PYTHON', 'SUMIKA_DESKTOP_PYTHON') if kind == 'voice' else ('SUMIKA_DESKTOP_PYTHON',)
+        if any(key in os.environ for key in explicit_keys):
+            return [], f'指定{"语音" if kind == "voice" else "桌面"}运行时不可用'
+        envs = ('voice-env', 'desktop-env') if kind == 'voice' else ('desktop-env', 'office-env')
+        return _resolve(root, packages, envs, require_all=True)
     executable = Path(interpreter)
     base = executable.parent.parent if executable.parent.name.casefold() in ('scripts', 'bin') else executable.parent
     sites = [base/'Lib/site-packages', *sorted(base.glob('lib/python*/site-packages'))]
     found = [name for name in packages if any(
-        (site/name).is_dir() or (site/(name+'.py')).is_file() for site in sites)]
-    return found, f'语音运行时 {executable}'
+        site.joinpath(*name.split('.')).is_dir() or (site/(name+'.py')).is_file() for site in sites)]
+    return found, f'{"语音" if kind == "voice" else "桌面"}运行时 {executable}'
+
+
+def _voice_resolve(root, packages):
+    return _runtime_resolve(root, packages, 'voice')
 
 
 def _sensevoice_model(root, home, configured=None):
@@ -100,7 +109,22 @@ def _rapidocr_json():
     return shutil.which("RapidOCR-json")
 
 
-def probes(root=None, *, home=None, asr_model=None):
+def _ocr_resolve(root):
+    """Match dispatch discovery; metadata alone or pytesseract is insufficient."""
+    from extensions.desktop.ocr.ocr import env_python, _runtime_has
+    packages = ('rapidocr', 'rapidocr_onnxruntime')
+    if 'SUMIKA_OCR_PYTHON' not in os.environ:
+        local = _any_module(*packages)
+        if local:
+            return local, '本进程'
+    python = env_python(root=root)
+    if python:
+        return [name for name in packages if _runtime_has(python, name)], f'隔离环境 {python}'
+    return [], ''
+
+
+def probes(root=None, *, home=None, asr_model=None, schedule_directory=None):
+    explicit_home = home is not None
     root = Path(root).resolve() if root else Path(__file__).resolve().parents[1]
     home = Path(home) if home else Path.home()
     rows = []
@@ -114,14 +138,17 @@ def probes(root=None, *, home=None, asr_model=None):
     add('pet', '桌宠模式', pet_ready,
         '独立桌面窗口' if pet_ready else '未找到包内桌宠宿主 SumikaPet.exe')
 
-    python_ocr, ocr_source = _resolve(root, ("rapidocr", "rapidocr_onnxruntime", "pytesseract"),
-                                      ("ocr-env", "desktop-env", "office-env"))
+    python_ocr, ocr_source = _ocr_resolve(root)
     binary_ocr = shutil.which("tesseract")
     umi = _rapidocr_json()
-    add("ocr", "OCR / 截屏翻译", bool(python_ocr or binary_ocr or umi),
+    windows_ocr, windows_source = _runtime_resolve(root, ('winrt.windows.media.ocr',), 'desktop')
+    windows_ocr = windows_ocr if platform.system()=='Windows' else []
+    add("ocr", "OCR / 截屏翻译", bool(python_ocr or binary_ocr or umi or windows_ocr),
         f"{ocr_source}：{', '.join(python_ocr)}" if python_ocr
         else (f"Umi-OCR RapidOCR：{umi}" if umi
-              else ("tesseract 可执行文件可用" if binary_ocr else "未安装 Tesseract 或 RapidOCR，识别不可用")))
+              else ("tesseract 可执行文件可用" if binary_ocr else
+                    (f'{windows_source}：Windows OCR（识别语言须已安装）' if windows_ocr
+                     else "未安装 Tesseract、RapidOCR 或 Windows OCR，识别不可用"))))
 
     sense_model = _sensevoice_model(root, home, asr_model)
     voice_packages = ('sherpa_onnx', 'numpy', 'sounddevice') if sense_model else ('vosk', 'sounddevice')
@@ -144,17 +171,20 @@ def probes(root=None, *, home=None, asr_model=None):
     add("browser", "网页咨询（内含浏览器）", browser_skill.is_file(),
         f"BrowserSkill：{browser_skill}" if browser_skill.is_file() else "未找到 runtime/browserskill/bsk.exe")
 
-    desktop_modules, desktop_source = _resolve(root, ("pywinauto", "pywinctl", "pyautogui"),
-                                              ("desktop-env", "office-env"))
-    add("desktop", "桌面控制", platform.system() == "Windows" and bool(desktop_modules),
+    desktop_modules, desktop_source = _runtime_resolve(root, ("pywinauto", "pywinctl"), 'desktop')
+    add("desktop", "桌面控制", platform.system() == "Windows" and len(desktop_modules) == 2,
         f"平台 {platform.system()}；{desktop_source or '未找到环境'}：{', '.join(desktop_modules) or '无'}")
 
-    office_modules, office_source = _resolve(root, ("docx", "openpyxl", "pptx", "fitz", "pymupdf"),
-                                            ("office-env",))
-    add("office", "办公文件", bool(office_modules),
+    from extensions.office.native import payload as office_payload
+    native_office = office_payload(root)
+    office_modules, office_source = _resolve(root, ("docx", "openpyxl", "pptx", "pypdf", "reportlab"),
+                                            ("office-env",), require_all=True)
+    if native_office is not None:
+        office_modules, office_source = list(('docx','openpyxl','pptx','pypdf','reportlab')), 'DSH原生依赖载荷'
+    add("office", "办公文件", len(office_modules)==5,
         f"{office_source or '未找到环境'}：{', '.join(office_modules) or '无'}")
 
-    camera_modules, camera_source = _resolve(root, ("cv2",), ("desktop-env", "office-env"))
+    camera_modules, camera_source = _runtime_resolve(root, ("cv2",), 'desktop')
     add("camera", "摄像头感知", bool(camera_modules),
         f"{camera_source or '未找到环境'}：{', '.join(camera_modules) or '无'}")
 
@@ -163,7 +193,14 @@ def probes(root=None, *, home=None, asr_model=None):
         f"{semantic_source}：{', '.join(semantic)}" if semantic
         else "未安装 fastembed，语义检索回落到内置关键词检索")
 
-    schedule_store = home / "Sumika" / "schedules"
+    if schedule_directory is not None:
+        schedule_store = Path(schedule_directory)
+    elif explicit_home:
+        # Explicit probe fixtures keep all discovery inside their chosen home.
+        schedule_store = home / 'Sumika' / 'schedules'
+    else:
+        from ui.schedule import default_directory
+        schedule_store = default_directory()
     add("schedule", "定时任务", True,
         f"定义目录 {schedule_store}（随应用运行，不安装系统开机任务）")
     return rows
@@ -223,16 +260,18 @@ def service_capabilities(root=None, *, home=None, asr_model=None):
     home = Path(home) if home else Path.home()
     entries = []
 
-    rapidocr, _ = _resolve(root, ("rapidocr", "rapidocr_onnxruntime"),
-                           ("ocr-env", "desktop-env", "office-env"))
+    rapidocr, _ = _ocr_resolve(root)
     if rapidocr:
         entries.append({"id": "ocr", "provider": "rapidocr", "enabled": True, "options": {}})
-    elif _rapidocr_json():
+    if _rapidocr_json():
         entries.append({"id": "ocr", "provider": "rapidocr_json", "enabled": True, "options": {}})
-    elif shutil.which("tesseract"):
+    if shutil.which("tesseract"):
         entries.append({"id": "ocr", "provider": "tesseract", "enabled": True, "options": {}})
+    windows_ocr, _ = _runtime_resolve(root, ('winrt.windows.media.ocr',), 'desktop')
+    if platform.system()=='Windows' and windows_ocr:
+        entries.append({'id':'ocr','provider':'windows','enabled':True,'options':{}})
 
-    desktop_modules, _ = _resolve(root, ("pywinauto", "pywinctl"), ("desktop-env", "office-env"))
+    desktop_modules, _ = _runtime_resolve(root, ("pywinauto", "pywinctl"), 'desktop')
     if platform.system() == "Windows" and len(desktop_modules) == 2:
         entries.append({"id": "desktop", "provider": "windows-uia", "enabled": True, "options": {}})
 
@@ -254,7 +293,7 @@ def service_capabilities(root=None, *, home=None, asr_model=None):
         entries.append({"id": "asr", "provider": "vosk", "enabled": True,
                         "options": {"model": str(model)}})
 
-    camera, _ = _resolve(root, ("cv2",), ("desktop-env", "office-env"))
+    camera, _ = _runtime_resolve(root, ("cv2",), 'desktop')
     if camera:
         entries.append({"id": "camera", "provider": "opencv", "enabled": True, "options": {}})
 

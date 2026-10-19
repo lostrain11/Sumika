@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sqlite3
 import sys
 import unittest
 from unittest.mock import patch
@@ -26,6 +27,16 @@ preflight = importlib.import_module('restore_preflight')
 def tree_bytes(root):
     return {p.relative_to(root).as_posix(): p.read_bytes()
             for p in root.rglob('*') if p.is_file()}
+
+
+def minimal_database(path):
+    """Use a valid offline SQLite file so snapshot integrity checks stay real."""
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute('CREATE TABLE fixture (id INTEGER PRIMARY KEY)')
+        connection.commit()
+    finally:
+        connection.close()
 
 
 class RestorePreflightAcceptance(unittest.TestCase):
@@ -82,7 +93,7 @@ class RestorePreflightAcceptance(unittest.TestCase):
     def test_internal_paths_resolve_only_inside_snapshot(self):
         (self.payload / 'roles' / 'person').mkdir(parents=True)
         (self.payload / 'roles' / 'person' / 'card.json').write_text('{}')
-        (self.payload / 'memory.sqlite3').write_bytes(b'opaque-existing-database')
+        minimal_database(self.payload / 'memory.sqlite3')
         self.fixture({'role': {'role_dir': str(self.source / 'roles' / 'person'),
                               'database': str(self.source / 'memory.sqlite3')},
                       'api_key': 'private-fixture-key'})

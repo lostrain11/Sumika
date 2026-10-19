@@ -1,7 +1,8 @@
 // Read-only regression: live settings and pre-auxiliary Bridge responses.
-import {createRequire} from 'node:module';
+import {loadPlaywright} from './lib/playwright.mjs';
 import assert from 'node:assert/strict';
-const {chromium}=createRequire(import.meta.url)(process.argv[2]);
+const {chromium}=loadPlaywright();
+const bridge=(process.env.SUMIKA_VERIFY_BRIDGE || 'http://127.0.0.1:8765').replace(/\/$/, '');
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try {
   for(const legacy of [false,true]){
@@ -13,7 +14,7 @@ try {
       delete data.data.auxiliary;delete data.data.model_library;
       await route.fulfill({response,json:data});
     });
-    await page.goto('http://127.0.0.1:8765/#settings');
+    await page.goto(`${bridge}/#settings`);
     await page.locator('.set-nav [data-section="models"]').waitFor({state:'visible',timeout:10000});
     await page.locator('.set-nav [data-section="models"]').click();
     const panel=page.locator('[data-settings-section="models"]');

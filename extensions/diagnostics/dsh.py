@@ -38,16 +38,26 @@ def project_page(page, *, session, version, through_seq, before_seq=None):
         if kind == 'tool/result':
             message = data.get('message')
             blocks = message.get('content') if isinstance(message, dict) else None
-            if isinstance(blocks, list) and len(blocks) == 1 and isinstance(blocks[0], dict):
+            if isinstance(message, dict) and message.get('role') == 'tool' and 'toolCallId' in message:
+                call_id = message.get('toolCallId')
+                source = message.get('source')
+                source_id = source.get('callId') if isinstance(source, dict) else None
+                # Current DSH puts identity/status on the whole tool message.
+                # Conflicting identities cannot safely correlate an outcome.
+                if isinstance(call_id, str) and (source_id is None or source_id == call_id):
+                    ids.append(identifier(call_id))
+                    if type(message.get('isError')) is bool:
+                        status = 'error' if message['isError'] else 'reported_success'
+            elif isinstance(blocks, list) and len(blocks) == 1 and isinstance(blocks[0], dict):
                 block = blocks[0]
                 if block.get('type') == 'tool-result':
                     if isinstance(block.get('toolCallId'), str):
                         ids.append(identifier(block['toolCallId']))
                     if type(block.get('isError')) is bool:
                         status = 'error' if block['isError'] else 'reported_success'
-                    error = data.get('error')
-                    if status == 'error' and isinstance(error, dict):
-                        code = identifier(error.get('code'))
+            error = data.get('error')
+            if status == 'error' and isinstance(error, dict):
+                code = identifier(error.get('code'))
         events.append({'seq': seq, 'kind': kind if kind in _EVENT_KINDS else identifier(kind), 'session': identifier(session),
                        'call_ids': ids, 'status': status, 'error_code': code,
                        'source': 'dsh.session/page', 'dsh_version': identifier(version),

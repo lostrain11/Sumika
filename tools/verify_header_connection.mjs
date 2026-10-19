@@ -1,13 +1,12 @@
 // Exercise product header functions in Edge; no daily service or model calls.
-import {createRequire} from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import {readFileSync,readdirSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
-const runtime=path.join(process.env.LOCALAPPDATA,'OpenAI/Codex/runtimes/cua_node');
-const pkg=readdirSync(runtime).map(n=>path.join(runtime,n,'bin/node_modules/playwright/package.json')).find(existsSync);
-const {chromium}=createRequire(pkg)('playwright');
+const {chromium}=loadPlaywright();
 const source=readFileSync('ui/app/bind.js','utf8');
 const header=source.slice(source.indexOf('function bindHeader('),source.indexOf('function bindRoster('));
 const networkHandlers=source.slice(source.indexOf("window.addEventListener('offline',"),source.indexOf('\nsyncNetworkNotice();',source.indexOf("window.addEventListener('offline',")));
@@ -35,7 +34,7 @@ const server=http.createServer((req,res)=>{
   </script>`);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const context=await browser.newContext();const page=await context.newPage();
 const report={passed:false,checks:[]};
 const label=async text=>page.waitForFunction(value=>document.querySelector('.proto').textContent===value,text);

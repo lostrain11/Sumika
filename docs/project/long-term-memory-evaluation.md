@@ -1,5 +1,28 @@
 # 长期记忆 provider 评测与首选
 
+2026-10-18接续：r11包内真实Bridge/UI补验结果见`feature-usage-and-acceptance.md`“r11主线治理与管理入口补验”。记忆策略5项、治理17项、行为/模式27项、定时7项、模块8项通过；候选个人目录迁移通过。仅维护验收扩充、未改变日用默认或产品界面，不扩张历史模型质量证据。R072现有设计只有预留卡，新增控件确认待答。
+
+## 2026-10-17 同题公开 CLI 实测（当前结论）
+
+现成资产：复用 `tools/evaluate_memory_quality.py` 的全部 FACTS/CASES 与本地 evaluate；改造 `.sumika-next/dsh-memory-eval/eval_ltm.py` 的公开 CLI 流程，避开旧脚本固定路径删库；直接使用已安装的 `@tr1v3r/dsh-ltm` 0.3.1 公开 CLI。新增 `tools/evaluate_community_memory.py` 只负责隔离研究编排，每次新 UUID 目录，不剪取插件私有 store，不安装、不读取真实素材、不更改产品配置。语义对照复用现有离线 Python/embedding cache。
+
+|同一14例中文合成题|结果|具体限制|
+|---|---|---|
+|DSH LTM 0.3.1|11/14|休息时间误召回牙医；两个未知问题均误召回鼓手|
+|现 EmbeddedMemory|8/14|六条同义改写无召回|
+|现 SemanticMemory|13/14|“哪些食材是我不能吃的”未召回花生过敏|
+
+LTM 纠正持久化、旧 revision 写入拒绝、遗忘后列表移除均实测通过；将遗忘前导出再次 import 会恢复该事实。这是普通备份恢复语义，不单独作为插件 bug；它不能直接取代 Sumika 已实现的永久 purge guard。公开 `search` 无 scope 参数，本轮用单 scope 独立库，不把这当成插件原生跨角色授权通过。
+
+**采用决定：保留当前 canonical SQLite 和 embedded/semantic；本轮不替换为 LTM。** 小题集不能证明总体优劣；Mnemon仍是可选只读宿主接缝，并非新的检索引擎。Engram 的离线启动与自动摄取限制仍待正式环境验证。没有新增前端入口或改变日用默认。
+
+复现：`python -X utf8 -B tools/evaluate_community_memory.py --cli D:/DeepSeek/dsh-home/profiles/memtest-ltm/node_modules/@tr1v3r/dsh-ltm/bin/dsh-ltm.mjs --semantic`。Windows测试清理需 `CODEBUDDY_SAFE_DELETE_ENABLED=0`。证据：`.sumika-next/community-memory/7f319ed8658b47999e85de7fb1a193d8/report.json`，同目录 `calls.json` 保留每次命令、返回码、完整合成响应和时间；CLI启动包含在延迟中，不能与进程内查询直接比较耗时。两次14例分数一致，第二次含治理检查；无外部模型调用。
+
+
+> 当前状态校正（2026-10-17）：日用 RoleSession 只接 embedded/semantic，MemMachine 是历史候选首选，尚未接入生产；Mem0 文件是本地基线，不是 Mem0 OSS 已接入。下方候选比较与 2026-10-16 插件测试保留其证据范围。素材/规范记忆/可重建索引的当前架构建议见 long-term-memory-plan.md 顶部，已实现规范仓储与可注入检索边界；候选引擎的实际替换和质量对照仍未完成。
+
+> 同日市场复查：新增 Mnemon 0.5.29（可组合框架）、Engram 0.8.12（检索）、Mneme 0.8.16（治理）候选，尚未完成本项目中文与隔离实测，不改变现 provider。Mnemon scoped 是 Source 选择，不等于角色权限隔离。新宿主兼容规则下 LTM 0.3.1 对 0.2.0-rc.2 的静态门禁通过、对 0.2.1-alpha.5 不通过；不等于已安装兼容。自托管本地服务本身不违反本地优先，须按外发、依赖和资源具体判断。详见 [DSH 市场复查](dsh-market-review-20261017.md)。
+
 ## 结论
 
 最终首选：**MemMachine 自托管服务 + 独立 Sumika 适配层**。依据你提供的 AML 信息，MemMachine 在事实召回、关系/多跳、时间事件和记忆治理等维度表现突出；仍需用 Sumika 中文评测集复测。

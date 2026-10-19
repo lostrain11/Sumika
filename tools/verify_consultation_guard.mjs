@@ -2,8 +2,9 @@
 import {createRequire} from 'node:module';
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import {loadPlaywright} from './lib/playwright.mjs';
 const require=createRequire(import.meta.url);
-const {chromium}=require(process.argv[2] || 'playwright');
+const {chromium}=process.argv[2] ? require(process.argv[2]) : loadPlaywright();
 const script=await readFile(new URL('../extensions/desktop/consultation_guard.js',import.meta.url),'utf8');
 const browser=await chromium.launch({headless:true,channel:'msedge'});
 try {

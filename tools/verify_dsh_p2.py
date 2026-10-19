@@ -147,7 +147,15 @@ def main():
             results = [message['content'] for message in messages]
             assert 'P2_SKILL_MARKER' in json.dumps(results), 'skill missing'
             assert 'P2_MCP_CHALLENGE' in json.dumps(results), 'MCP missing'
-            assert 'P2_CHILD_DONE' in json.dumps(results), 'subagent missing'
+            # 0.2.1 delivers child results as user/message notices. Restrict
+            # this alternative to settled notices: request/context and the
+            # subagent call itself also contain the expected marker.
+            settled = [f['event']['data'] for f in collected
+                       if f.get('event', {}).get('type') == 'user/message'
+                       and f['event']['data'].get('source', {}).get('kind') == 'subagent-settled']
+            assert ('P2_CHILD_DONE' in json.dumps(results)
+                    or any(part.get('type') == 'text' and part.get('text') == 'P2_CHILD_DONE'
+                           for notice in settled for part in notice.get('content', []))), 'subagent missing'
             assert 'P2_TEST_PASS' in json.dumps(results) and '[stderr]' not in json.dumps(results), 'terminal test failed'
             assert (work/'test-result.txt').read_text().strip() == 'verified'
             print('FILE_VERIFIED', flush=True)

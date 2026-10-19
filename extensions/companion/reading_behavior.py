@@ -125,7 +125,7 @@ class ReadingBehaviorTracker:
                 self._page = page
                 self._page_since = now
             elif page != self._page:
-                self._events.append((now, page - self._page))
+                self._events.append((now, page - self._page, self._page, page))
                 self._page = page
                 self._page_since = now
                 self._dwell_effective = 0.0
@@ -140,7 +140,17 @@ class ReadingBehaviorTracker:
         recent = [item for item in self._events if now - item[0] <= window]
         burst_events = [item for item in recent
                         if now - item[0] <= self._burst_window]
-        backjumps = [item for item in recent if item[1] < 0]
+        navigation = [item for item in recent if now - item[0] <= self._revisit_window]
+        backjumps = [item for item in navigation if item[1] < 0]
+        # A descending scan is not a revisit. Count returns to pages that
+        # were actually observed in this verification segment and window.
+        visited = set()
+        returns = 0
+        for _, _, origin, destination in navigation:
+            visited.add(origin)
+            if destination in visited:
+                returns += 1
+            visited.add(destination)
         page = self._page
         if len(burst_events) >= self._burst_flips:
             if 'flip_burst' not in self._reported:
@@ -153,12 +163,13 @@ class ReadingBehaviorTracker:
         elif not self._events or now - self._events[-1][0] >= self._calm_seconds:
             self._reported.discard('flip_burst')
             self._reported.discard('revisit')
-        if len(backjumps) >= self._revisit_backjumps:
+        if returns >= self._revisit_backjumps:
             if 'revisit' not in self._reported:
                 self._reported.add('revisit')
                 return {'kind': 'revisit', 'page': page,
                         'flips': len(recent),
                         'backward_flips': len(backjumps),
+                        'returns': returns,
                         'window_seconds': self._revisit_window}
         if 'long_dwell' not in self._reported and \
                 self._dwell_effective >= self._dwell_seconds:

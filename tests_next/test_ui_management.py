@@ -14,6 +14,73 @@ from ui.server import Bridge
 
 
 class ManagementTests(unittest.TestCase):
+    def test_role_context_edit_roundtrip_consumption_budget_and_isolation(self):
+        from extensions.roles.roles import load_role
+        from extensions.roles.service import RoleSession
+        role=Path(self.roles['a'])
+        original=(role/'card/original-card.json').read_bytes()
+        state=self.manager.resources('a')
+        changes={'background':'synthetic school background','worldbook':[
+            {'content':'secret garden','keys':['garden'],'secondary_keys':['blue'],
+             'selective':True,'enabled':True,'extensions':{'preserved':'yes'}},
+            {'content':'constant fact','keys':[],'constant':True},
+            {'content':'disabled fact','keys':['garden'],'enabled':False}],
+            'theme':{'accent':'#123456','soft':'#abcdef'}}
+        result=self.manager.resources('a','edit-context',{'expected_revision':state['revision'],'changes':changes})
+        self.assertTrue(Path(result['backup']).is_file())
+        self.assertEqual(result['worldbook'],changes['worldbook'])
+        self.assertEqual((role/'card/original-card.json').read_bytes(),original)
+        self.assertEqual(load_role(role)['verified']['status'],'ok')
+        with self.assertRaises(Conflict):
+            self.manager.resources('a','edit-context',{'expected_revision':state['revision'],'changes':changes})
+        for card_enabled in (True,False):
+            session=RoleSession(role,self.root/'edit-memory.sqlite3',user_id='u',project_id='p',
+                work_model='w',role_model='r',card_context_enabled=card_enabled)
+            try:
+                out=session.request('context',{'user_content':'garden blue','mode':'role'})
+                text=json.dumps(out['role_context'])
+                self.assertIn('secret garden',text);self.assertIn('constant fact',text)
+                self.assertNotIn('disabled fact',text)
+                self.assertIn('synthetic school background',text)
+                self.assertNotIn('secret garden',json.dumps(session.request('context',{'user_content':'garden'})['role_context']))
+                self.assertEqual(out['context']['original_user_content'],'garden blue')
+                if card_enabled:self.assertLessEqual(out['selection']['used_chars'],out['selection']['budget_chars'])
+            finally:session.close()
+        self.assertEqual(self.manager.memory('a')['memories'],[])
+        self.assertEqual(self.manager.resources('b')['background'],'')
+
+    def test_role_context_invalid_and_builtin_edits_do_not_write(self):
+        import copy
+        state=self.manager.resources('a')
+        initial=(Path(self.roles['a'])/'role.json').read_bytes()
+        changes={key:state[key] for key in ('background','worldbook','theme')}
+        for bad in ({'theme':{'accent':'red'}},{'worldbook':[{'keys':[12]}]},
+                    {'worldbook':[{'enabled':'yes'}]},{'background':None}):
+            with self.assertRaises(ValueError):
+                self.manager.resources('a','edit-context',{'expected_revision':state['revision'],'changes':{**copy.deepcopy(changes),**bad}})
+            self.assertEqual((Path(self.roles['a'])/'role.json').read_bytes(),initial)
+        self.assertFalse((self.root/'backups/roles').exists())
+        self.bridge._role_kinds=lambda:{'a':'builtin'}
+        with self.assertRaisesRegex(ValueError,'read-only'):
+            self.manager.resources('a','edit-context',{'expected_revision':state['revision'],'changes':changes})
+
+    def test_receive_handoff_uses_native_target_and_ignores_browser_context(self):
+        from extensions.roles.conversations import Conversations
+        settings = load(self.bridge.settings_path)
+        store = Conversations(self.root/'conversations.sqlite3')
+        turn = store.begin('scope', 'room', '请检查测试项目')
+        store.complete(turn, {'text': '收到'})
+        draft = store.prepare(settings['role']['user_id'], 'scope', turn+':user')
+        self.bridge.conversations = store
+        context = {'project': {'id': 'native', 'name': 'Real'}, 'session_id': 's', 'provenance': 'host_verified'}
+        self.bridge.workbench.handoff_context = Mock(return_value=context)
+        result = self.manager.dispatch('POST', '/api/manage/task-draft', {
+            'action': 'receive', 'id': draft['id'], 'workspace_id': 'native', 'session_id': 's',
+            'projects': [{'id': 'forged', 'name': 'Invented'}], 'receipts': [{'status': 'verified'}]})
+        self.bridge.workbench.handoff_context.assert_called_once_with('native', 's')
+        self.assertEqual(result['handoff']['context'], context)
+        self.assertIsNone(store.draft(settings['role']['user_id']))
+
     def setUp(self):
         root = Path('.sumika-next/test-ui-management')
         root.mkdir(parents=True, exist_ok=True)
@@ -44,6 +111,29 @@ class ManagementTests(unittest.TestCase):
             self.manager.update_settings({'expected_revision':initial['revision'],'changes':{'enabled':True}})
         with self.assertRaises(ValueError):
             self.manager.update_settings({'expected_revision':out['revision'],'changes':{'role':{'database':'other'}}})
+
+    def test_tunnel_settings_merge_partial_and_preserve_auxiliary(self):
+        initial = self.manager.settings()
+        out = self.manager.update_settings({
+            'expected_revision': initial['revision'],
+            'changes': {'auxiliary': {
+                'enabled': True, 'provider': 'ollama',
+                'endpoint': 'http://127.0.0.1:18114',
+                'model': 'qwen2.5:7b-instruct-q4_K_M',
+                'tunnel': {'enabled': True, 'host': '192.168.31.227',
+                           'user': 'lostrain'}}}})
+        tunnel = out['data']['auxiliary']['tunnel']
+        self.assertEqual(tunnel['remote_port'], 11434)
+        self.assertEqual(tunnel['ssh_port'], 22)
+        self.assertEqual(out['data']['auxiliary']['model'], 'qwen2.5:7b-instruct-q4_K_M')
+        current = self.manager.settings()
+        out = self.manager.update_settings({
+            'expected_revision': current['revision'],
+            'changes': {'auxiliary': {'tunnel': {'host': '192.168.31.228'}}}})
+        tunnel = out['data']['auxiliary']['tunnel']
+        self.assertEqual(tunnel['host'], '192.168.31.228')
+        self.assertEqual(tunnel['user'], 'lostrain')
+        self.assertEqual(tunnel['remote_port'], 11434)
 
     def test_voice_settings_change_stops_audio_but_memory_change_does_not(self):
         initial=self.manager.settings()
@@ -97,6 +187,68 @@ class ManagementTests(unittest.TestCase):
         state=self.manager.memory('a','reset',{'expected_revision':state['revision'],'confirmed':True})
         self.assertEqual(state['relations'],[])
         self.assertTrue(list((self.root/'backups'/'memory').glob('*.json')))
+
+    def test_memory_correction_management_requires_confirmation_and_host_scope(self):
+        state = self.manager.memory('a')
+        state = self.manager.memory('a', 'remember', {
+            'expected_revision': state['revision'], 'text': 'likes tea', 'request_id': 'initial'})
+        old = state['memories'][0]
+        payload = {'expected_revision': state['revision'], 'record_id': old['record_id'],
+                   'text': 'likes coffee', 'request_id': 'correct-1'}
+        with self.assertRaisesRegex(ValueError, 'confirmation'):
+            self.manager.memory('a', 'correct', payload)
+        other = self.manager.memory('b')
+        with self.assertRaises(Conflict):
+            self.manager.memory('b', 'correct', {**payload, 'expected_revision': other['revision'], 'confirmed': True})
+        result = self.manager.memory('a', 'correct', {**payload, 'confirmed': True,
+            'scope': other['scope']})
+        self.assertEqual([m['text'] for m in result['memories']], ['likes coffee'])
+        self.assertNotEqual(result['memories'][0]['record_id'], old['record_id'])
+        with self.assertRaises(Conflict):
+            self.manager.memory('a', 'correct', {**payload, 'confirmed': True})
+        self.assertEqual(self.manager.memory('b')['memories'], [])
+
+    def test_memory_management_forget_passes_record_cas_after_state_read(self):
+        state = self.manager.memory('a')
+        state = self.manager.memory('a', 'remember', {
+            'expected_revision': state['revision'], 'text': 'tea', 'request_id': 'initial'})
+        row = state['memories'][0]
+        session = self.manager.role_session('a')
+        original_request = session.request
+        def racing_request(operation, data):
+            if operation == 'forget':
+                original_request('correct', {'record_id': row['record_id'], 'text': 'coffee',
+                    'expected_revision': row['revision'], 'event_id': 'race-correct'})
+            return original_request(operation, data)
+        session.request = racing_request
+        with patch.object(self.manager, 'role_session', return_value=session):
+            with self.assertRaisesRegex(ValueError, 'revision conflict'):
+                self.manager.memory('a', 'forget', {'expected_revision': state['revision'],
+                    'id': row['id'], 'confirmed': True})
+        self.assertEqual([m['text'] for m in self.manager.memory('a')['memories']], ['coffee'])
+
+    def test_relation_management_uses_single_identity_and_cas(self):
+        state = self.manager.memory('a')
+        for _ in range(2):
+            state = self.manager.memory('a', 'relate', {'expected_revision': state['revision'],
+                'subject': 'user', 'predicate': 'likes', 'object': 'tea'})
+        row = state['relations'][0]
+        result = self.manager.memory('a', 'edit_relation', {**row,
+            'expected_revision': state['revision'], 'new_object': 'coffee'})
+        self.assertEqual([r['object'] for r in result['relations']], ['coffee', 'tea'])
+        session = self.manager.role_session('a')
+        original = session.request
+        def racing_request(operation, data):
+            if operation == 'delete_relation':
+                session.memory.mutate_relation(row['record_id'], expected_revision=row['revision'] + 1,
+                    new_object='water', **session.scope)
+            return original(operation, data)
+        session.request = racing_request
+        with patch.object(self.manager, 'role_session', return_value=session):
+            with self.assertRaisesRegex(ValueError, 'revision conflict'):
+                self.manager.memory('a', 'delete_relation', {**result['relations'][0],
+                    'expected_revision': result['revision'], 'confirmed': True})
+        self.assertEqual([r['object'] for r in self.manager.memory('a')['relations']], ['water', 'tea'])
 
     def test_origin_and_csrf(self):
         handler=SimpleNamespace(server=SimpleNamespace(server_port=1234),headers={'Host':'127.0.0.1:1234','Origin':'http://evil.test','X-Sumika-CSRF':self.manager.csrf})

@@ -38,6 +38,28 @@ class FakeAdapter:
 
 
 class WorkbenchControllerTests(unittest.TestCase):
+    def test_handoff_uses_live_workspace_baseline_and_closes_stream(self):
+        controller = WorkbenchController(Path('.'))
+        controller.browser_binding = MagicMock(return_value=('http://127.0.0.1:1234', 'owned'))
+        controller.adapter = MagicMock()
+        def baseline():
+            yield {'type': 'baseline', 'value': {'items': [
+                {'workspaceId': 'w', 'title': 'Real title', 'path': 'D:/real', 'sessionIds': ['s']}]}}
+        controller.adapter.stream.side_effect = lambda *args, **kwargs: baseline()
+        context = controller.handoff_context('w', 's')
+        self.assertEqual(context['project'], {'id': 'w', 'name': 'Real title', 'path': 'D:/real'})
+        self.assertEqual(context['session_id'], 's')
+        for workspace, session in [('forged', 's'), ('w', 'other'), ('', 's'), ('w', None)]:
+            with self.assertRaises(ValueError): controller.handoff_context(workspace, session)
+        stream = MagicMock()
+        stream.__next__.return_value = {'type': 'unexpected'}
+        controller.adapter.stream.side_effect = None
+        controller.adapter.stream.return_value = stream
+        with self.assertRaises(WorkbenchError): controller.handoff_context('w', 's')
+        stream.close.assert_called_once()
+        controller.browser_binding.return_value = None
+        with self.assertRaises(WorkbenchError): controller.handoff_context('w', 's')
+
     def test_relocated_profile_uses_selected_product_plugins(self):
         with tempfile.TemporaryDirectory() as d:
             product = self._root(d)
@@ -56,6 +78,16 @@ class WorkbenchControllerTests(unittest.TestCase):
             self.assertEqual(len(owned), 3)
             self.assertTrue(all(Path(item['name']).is_relative_to(product.resolve()/'extensions/ui') for item in owned))
             self.assertEqual(next(item for item in owned if item['id'] == 'sumika-brand')['config']['release'], '0.1.5-rc.2')
+
+    def test_ensure_skin_records_exact_bridge_origin_for_workbench_plugin(self):
+        with tempfile.TemporaryDirectory() as d:
+            product = self._root(d)
+            home = product/'personal/profile'
+            ensure_skin(home, root=product, bridge_origin='http://127.0.0.1:8765')
+            rows = json.loads((home/'cordis.patch.yml').read_text(encoding='utf8'))
+            entry = next(item for row in rows for item in row.get('insert', [])
+                         if item.get('id') == 'sumika-workbench')
+            self.assertEqual(entry['config']['bridgeOrigin'], 'http://127.0.0.1:8765')
 
     def setUp(self):
         # Controller behavior is tested with fake subprocesses; lease gets its

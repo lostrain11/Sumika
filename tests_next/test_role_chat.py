@@ -103,6 +103,13 @@ class SettingsTests(unittest.TestCase):
                 validate({**value, "endpoint": "http://api.example.com"})
             with self.assertRaisesRegex(ValueError, "unsupported provider"):
                 validate({**value, "provider": "some-other-vendor"})
+            local = {**value, "provider": "openai-compatible-local",
+                     "endpoint": "http://127.0.0.1:18083/v1"}
+            validate(local)
+            with self.assertRaisesRegex(ValueError, "loopback http"):
+                validate({**local, "endpoint": "http://192.168.31.227:8083/v1"})
+            with self.assertRaisesRegex(ValueError, "loopback http"):
+                validate({**local, "endpoint": "https://127.0.0.1:18083/v1"})
             with self.assertRaisesRegex(ValueError, "must not hold a credential"):
                 validate({**value, "language": {**value["language"], "key": "x"}})
 
@@ -149,6 +156,17 @@ class SettingsTests(unittest.TestCase):
 
 
 class RoleChatTests(unittest.TestCase):
+    def test_local_openai_provider_is_loopback_without_a_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            settings = _settings(Path(d), enabled=True)
+            settings.update(provider="openai-compatible-local",
+                            endpoint="http://127.0.0.1:18083/v1")
+            with patch("extensions.roles.chat.CloudProvider") as provider:
+                RoleChat(settings)._provider()
+                provider.assert_called_once_with(
+                    "http://127.0.0.1:18083/v1", key_env=None, enabled=True,
+                    timeout=settings["timeout_seconds"], allow_loopback_http=True)
+
     def test_intent_uses_one_generation_and_never_enters_role_history(self):
         import re
         with tempfile.TemporaryDirectory() as d:

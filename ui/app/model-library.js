@@ -1,7 +1,7 @@
 // Shared model assets; never downloads, imports or starts a runtime.
 export function mountModelLibrary({host,field,node,button,request,roleModel,roleProvider,auxiliaryModel,auxiliaryProvider,onSaved}){
   const panel=node('section',undefined,'sumika-record');host.append(panel);
-  panel.append(node('h3','本地模型库'));
+  panel.append(node('h3','模型目录'));
   panel.append(node('p','指定文件夹后扫描现有权重。不会复制、下载或加载模型；发现文件不代表可运行。','sumika-form-note'));
   const body=node('div');panel.append(body);
   async function render(){

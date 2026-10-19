@@ -2,10 +2,10 @@
 import argparse
 import json
 import socket
-import subprocess
 import urllib.request
 from pathlib import Path
 from sumika_next.runtime_ownership import process_identity
+from sumika_next.socket_ownership import listener_pids
 
 
 def probe(root, settings, port):
@@ -29,13 +29,10 @@ def probe(root, settings, port):
         creation = process_identity(data['pid'])
         if creation is None or creation != data.get('creation'):
             return 3
-        result = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
-            f'(Get-NetTCPConnection -State Listen -LocalPort {int(port)} -ErrorAction Stop).OwningProcess'],
-            capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
-        if result.returncode or set(result.stdout.split()) != {str(data['pid'])}:
+        if listener_pids(port) != {data['pid']}:
             return 3
         return 0
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError):
         return 3
 
 

@@ -8,6 +8,8 @@ let state = 'stopped', captureActive=false, audioActive=false, cursor = 0, event
 const writes = [];
 let failQuestion=false;
 let petAlive=false,failPet=false;
+let notesRequests=0;
+let cameraContext=false;
 const server = createServer(async (request,response) => {
   try {
     if (request.url === '/') {
@@ -25,15 +27,24 @@ const server = createServer(async (request,response) => {
       response.setHeader('Content-Type','application/json');
       if(failPet && packet.action==='start') {response.statusCode=500;response.end(JSON.stringify({error:'uncertain start'}));}
       else response.end(JSON.stringify({available:true,alive:petAlive,status:petAlive?'running':'stopped'}));
+    } else if (request.url === '/api/companion/notes') {
+      notesRequests++;
+      response.setHeader('Content-Type','application/json');
+      response.end(JSON.stringify({notes:[{text:`fixture note ${notesRequests}`,source:{page:3}}]}));
     } else if (request.url === '/api/manage/session') {
       response.setHeader('Content-Type','application/json'); response.end(JSON.stringify({csrf:'fixture'}));
     } else if(request.url==='/api/companion/windows') {
       response.setHeader('Content-Type','application/json'); response.end(JSON.stringify({windows:[{handle:123,process_id:42,process_creation:'7',title:'Tutorial'}]}));
+    } else if(request.url==='/api/companion/camera') {
+      let body=''; for await(const chunk of request) body+=chunk;
+      const packet=JSON.parse(body); writes.push({...packet,kind:'camera'}); cameraContext=true;
+      response.setHeader('Content-Type','application/json');
+      response.end(JSON.stringify({context_active:true,source:'camera-frame',target:'camera:default'}));
     } else if(request.url==='/api/companion/perception' || request.url==='/api/companion/revoke') {
       let body=''; for await(const chunk of request) body+=chunk;
       const packet=JSON.parse(body);
       if(packet.action==='start') {writes.push({...packet,kind:'capture'});captureActive=true;}
-      if(request.url.endsWith('revoke')) {state='stopped';captureActive=audioActive=false;writes.push({action:'revoke'});}
+      if(request.url.endsWith('revoke')) {state='stopped';captureActive=audioActive=cameraContext=false;writes.push({action:'revoke'});}
       response.setHeader('Content-Type','application/json'); response.end(JSON.stringify({status:captureActive?'running':'stopped',alive:captureActive,observations:captureActive?1:0}));
     } else if(request.url==='/api/companion/audio') {
       let body=''; for await(const chunk of request) body+=chunk;
@@ -51,6 +62,7 @@ const server = createServer(async (request,response) => {
       if (packet.action === 'stop') state = 'stopped';
       response.setHeader('Content-Type','application/json');
       response.end(JSON.stringify({status:state,alive:state==='listening',cursor,
+        paste_context:{active:cameraContext,target:cameraContext?'camera:default':null},
         capture:{status:captureActive?'running':'stopped',alive:captureActive,target:{handle:123,process_id:42}},
         application_audio:{status:audioActive?'running':'stopped',alive:audioActive},
         events:events.filter(event=>event.sequence > (packet.after || 0))}));
@@ -68,7 +80,7 @@ const server = createServer(async (request,response) => {
   } catch(error) { response.statusCode=500; response.end(error.message); }
 });
 await new Promise(done=>server.listen(0,'127.0.0.1',done));
-const browser = await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const browser = await chromium.launch({channel:'msedge',headless:true});
 const page = await browser.newPage({viewport:{width:390,height:700}});
 const errors = []; page.on('pageerror',error=>errors.push(error.message));
 page.on('dialog',dialog=>dialog.accept());
@@ -80,6 +92,14 @@ try {
   const start = page.getByRole('button',{name:'开始陪学'});
   const stop = page.getByRole('button',{name:'停止陪学'});
   await start.waitFor();
+  const notes = page.locator('.companion-notes');
+  await notes.locator('summary').click();
+  await page.waitForFunction(()=>document.querySelector('.companion-notes summary').textContent==='最近笔记（1）');
+  await notes.locator('summary').click();
+  await notes.locator('summary').click();
+  await page.waitForFunction(()=>document.querySelector('.companion-notes p')?.textContent.includes('fixture note 2'));
+  check('reopening recent notes replaces rows instead of duplicating',await notes.locator('p').count()===1);
+  await notes.locator('summary').click();
   await page.getByLabel('学习窗口').selectOption({label:'Tutorial'});
   await page.waitForFunction(()=>!document.querySelector('[aria-label="开始陪学"]').disabled);
   check('opening details never starts capture',writes.length===0);
@@ -144,8 +164,26 @@ try {
   check('partial start retains stop',await stop.isEnabled());
   await stop.click();
   await page.waitForFunction(()=>!document.querySelector('[aria-label="开始陪学"]').disabled);
-  await page.waitForFunction(()=>document.querySelectorAll('.companion-commands svg').length===3);
-  check('icons rendered',await page.locator('.companion-commands svg').count()===3);
+  await page.waitForFunction(()=>document.querySelectorAll('.companion-commands svg').length===5);
+  check('icons rendered including notes and explicit danmaku',await page.locator('.companion-commands svg').count()===5);
+  const cameraButton=page.getByRole('button',{name:'摄像头采集一帧',exact:true});
+  await cameraButton.waitFor();
+  page.removeAllListeners('dialog'); page.once('dialog',dialog=>dialog.dismiss());
+  await cameraButton.click();
+  check('camera confirmation cancellation captures nothing',!writes.some(value=>value.kind==='camera'));
+  page.on('dialog',dialog=>dialog.accept());
+  await cameraButton.click();
+  await page.waitForFunction(()=>document.querySelector('[data-camera-status]').textContent.includes('已采集'));
+  check('camera requires explicit per-frame consent',writes.filter(value=>value.kind==='camera').length===1 && writes.find(value=>value.kind==='camera').consent===true);
+  check('camera context retains explicit stop',await stop.isEnabled());
+  const cameraQuestion=await page.evaluate(async()=>{
+    const {sendCompanionText}=await import('/app/companion-text.js');
+    return sendCompanionText('describe camera',()=>{});
+  });
+  check('camera routes through existing message box',cameraQuestion && writes.find(value=>value.kind==='question' && value.question==='describe camera').expected_target==='camera:default');
+  await stop.click();
+  await page.waitForFunction(()=>!document.querySelector('[data-camera-status]').textContent);
+  check('stop removes camera context',!cameraContext);
   check('narrow viewport has no horizontal overflow',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   check('no page exceptions',errors.length===0);
   await mkdir(output,{recursive:true}); await page.screenshot({path:resolve(output,'narrow.png')});

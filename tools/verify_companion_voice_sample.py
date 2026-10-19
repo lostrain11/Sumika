@@ -7,6 +7,7 @@ This verifies pipeline integration, not a hardware player's stop or model qualit
 import argparse
 import asyncio
 import json
+import statistics
 from pathlib import Path
 import sys
 import threading
@@ -83,6 +84,7 @@ async def verify(model, sample, output, voice):
         result = synthesize(text, path, voice_name=voice)
         with wave.open(str(path), 'rb') as file:
             frames = file.getnframes()
+        event('synthesis_ready', {'index': index})
         segments.append({'text':text, 'path':str(path), 'frames':frames,
                          'provider':result['provider']})
         if index == 0:
@@ -149,8 +151,8 @@ def decompose(events, first_char_marks):
     """R7 latency decomposition from the SAME recorded sample.
 
     Per turn: 停说→ASR (user_stopped -> transcribed), ASR→首字 (transcribed
-    -> first fixture reply character), ASR→首音 (transcribed -> first
-    playback_started). The last leg ends at real SAPI file synthesis — no
+    -> first fixture reply character), ASR→首段合成 (transcribed -> first
+    synthesis_ready). The last leg ends at real SAPI file synthesis — no
     hardware speaker or microphone is involved here (R-126 waiver stands;
     the live hardware decomposition remains the user-gated tool).
     """
@@ -168,9 +170,9 @@ def decompose(events, first_char_marks):
             if marks:
                 current['asr_to_first_char_ms'] = round(marks[0] - at, 1)
                 marks.pop(0)
-        elif name == 'playback_started' and current is not None:
-            if 'transcribed_ms' in current:
-                current['asr_to_first_audio_ms'] = round(at - current['transcribed_ms'], 1)
+        elif name == 'synthesis_ready' and current is not None:
+            if 'transcribed_ms' in current and 'asr_to_first_synthesis_ready_ms' not in current:
+                current['asr_to_first_synthesis_ready_ms'] = round(at - current['transcribed_ms'], 1)
         elif name in ('playback_ended', 'interrupted') and current is not None:
             for key in ('user_started_ms', 'user_stopped_ms', 'transcribed_ms'):
                 current.pop(key, None)
@@ -181,13 +183,13 @@ def decompose(events, first_char_marks):
         values = sorted(turn[key] for turn in turns if turn.get(key) is not None)
         if not values:
             return None
-        middle = values[len(values)//2]
+        middle = statistics.median(values)
         return {'min': values[0], 'median': middle, 'max': values[-1]}
     return {'turns': turns,
             'summary': {key: summarize(key) for key in
                         ('stop_speak_to_asr_ms', 'asr_to_first_char_ms',
-                         'asr_to_first_audio_ms')},
-            'boundary': 'first audio = SAPI file synthesis ready; no audible '
+                         'asr_to_first_synthesis_ready_ms')},
+            'boundary': 'Synthesis readiness is measured after SAPI writes the file, not playback_started; no audible '
                         'playback or hardware; R-126 hardware decomposition '
                         'remains in tools/verify_companion_voice_live.py'}
 
@@ -198,11 +200,16 @@ def main():
     parser.add_argument('--sample', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--voice', default='Microsoft Huihui Desktop - Chinese (Simplified)')
+    parser.add_argument('--product', type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
+    product = args.product.resolve(strict=True)
+    sys.path.insert(0, str(product))
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     report = asyncio.run(verify(args.model.resolve(strict=True),
         args.sample.resolve(strict=True), output, args.voice))
+    report['product'] = str(product)
+    report['python'] = sys.executable
     (output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
     print(json.dumps(report,ensure_ascii=False))
     return 0 if report['passed'] else 2

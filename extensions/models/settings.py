@@ -14,6 +14,11 @@ from sumika_next.paths import user_data_directory
 
 SCHEMA_VERSION = 1
 PROVIDERS = ("ollama", "openai-compatible")
+ROLE_PROVIDERS = (*PROVIDERS, "openai-compatible-local")
+AUXILIARY_PROVIDERS = (*PROVIDERS, "openai-compatible-local")
+TUNNEL_DEFAULTS = {"enabled": False, "host": "", "user": "", "ssh_port": 22,
+                   "remote_port": 11434, "preload": False}
+TUNNEL_KEYS = frozenset(TUNNEL_DEFAULTS)
 KEY_ENV_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 SECRET_PATTERN = re.compile(r"(^sk-[A-Za-z0-9])|(api[_-]?key\s*[:=])|(bearer\s+[A-Za-z0-9._-]{16,})", re.IGNORECASE)
 SECRET_FIELDS = ("key", "api_key", "apikey", "token", "secret", "password", "authorization")
@@ -42,6 +47,41 @@ def _required_text(value, name):
     return value.strip()
 
 
+def _validate_tunnel(auxiliary):
+    tunnel = auxiliary.setdefault("tunnel", dict(TUNNEL_DEFAULTS))
+    if not isinstance(tunnel, dict):
+        raise ValueError("auxiliary.tunnel must be an object")
+    if set(tunnel) - TUNNEL_KEYS:
+        raise ValueError("unsupported auxiliary.tunnel field")
+    for key, default in TUNNEL_DEFAULTS.items():
+        tunnel.setdefault(key, default)
+    if type(tunnel["enabled"]) is not bool:
+        raise ValueError("auxiliary.tunnel.enabled must be boolean")
+    if type(tunnel["preload"]) is not bool:
+        raise ValueError("auxiliary.tunnel.preload must be boolean")
+    for key in ("ssh_port", "remote_port"):
+        value = tunnel.get(key)
+        if type(value) is not int or not 1 <= value <= 65535:
+            raise ValueError(f"invalid auxiliary.tunnel.{key}")
+    for key in ("host", "user"):
+        value = tunnel.get(key)
+        if not isinstance(value, str):
+            raise ValueError(f"auxiliary.tunnel.{key} must be text")
+        if value and (len(value) > 253 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value)
+                      or value.startswith("-")):
+            raise ValueError(f"invalid auxiliary.tunnel.{key}")
+    if tunnel["enabled"]:
+        if not tunnel["host"] or not tunnel["user"]:
+            raise ValueError("tunnel host and user are required when enabled")
+        if auxiliary["provider"] not in ("ollama", "openai-compatible-local"):
+            raise ValueError("SSH tunnel requires a loopback auxiliary provider")
+        parsed = urlparse(auxiliary["endpoint"])
+        if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+                or not parsed.port or parsed.port < 1024):
+            raise ValueError("tunnel endpoint must be loopback http with an unprivileged port")
+    return tunnel
+
+
 def validate(settings):
     if not isinstance(settings, dict) or settings.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("invalid settings schema")
@@ -49,7 +89,7 @@ def validate(settings):
     if type(settings.get("enabled")) is not bool:
         raise ValueError("enabled must be boolean")
     provider = settings.get("provider")
-    if provider not in PROVIDERS:
+    if provider not in ROLE_PROVIDERS:
         raise ValueError("unsupported provider; no fallback is applied")
     _required_text(settings.get("model"), "model")
     endpoint = _required_text(settings.get("endpoint"), "endpoint")
@@ -67,6 +107,9 @@ def validate(settings):
     if provider == "ollama":
         if parsed.hostname not in ("127.0.0.1", "localhost", "::1") and parsed.scheme != "https":
             raise ValueError("local provider must use loopback or https")
+    if provider == "openai-compatible-local":
+        if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("local provider must use loopback http")
     for name, low, high in (("timeout_seconds", 1, 900), ("max_tokens", 1, 32768),
                             ("context_length", 512, 1_000_000)):
         value = settings.get(name)
@@ -174,7 +217,7 @@ def validate(settings):
     if type(auxiliary.get('enabled')) is not bool:
         raise ValueError('auxiliary.enabled must be boolean')
     aux_provider = auxiliary.get('provider')
-    if aux_provider not in PROVIDERS:
+    if aux_provider not in AUXILIARY_PROVIDERS:
         raise ValueError('unsupported auxiliary provider; no fallback is applied')
     _required_text(auxiliary.get('model'), 'auxiliary.model')
     aux_endpoint = _required_text(auxiliary.get('endpoint'), 'auxiliary.endpoint')
@@ -183,14 +226,19 @@ def validate(settings):
         raise ValueError('invalid auxiliary endpoint')
     if aux_parsed.username or aux_parsed.password:
         raise ValueError('auxiliary endpoint must not embed credentials')
+    loopback = aux_parsed.hostname in ('127.0.0.1', 'localhost', '::1')
     if aux_provider == 'openai-compatible':
         if aux_parsed.scheme != 'https':
             raise ValueError('auxiliary cloud provider requires https')
         aux_key_env = _required_text(auxiliary.get('key_env'), 'auxiliary.key_env')
         if not KEY_ENV_PATTERN.match(aux_key_env):
             raise ValueError('invalid auxiliary key_env')
+    elif aux_provider == 'openai-compatible-local':
+        if aux_parsed.scheme != 'http' or not loopback:
+            raise ValueError('local auxiliary provider must use loopback http')
     elif aux_parsed.hostname not in ('127.0.0.1', 'localhost', '::1') and aux_parsed.scheme != 'https':
         raise ValueError('auxiliary local provider must use loopback or https')
+    _validate_tunnel(auxiliary)
     for name, low, high in (('timeout_seconds', 1, 900), ('max_tokens', 1, 32768),
                             ('context_length', 512, 1_000_000)):
         value = auxiliary.get(name)
@@ -269,7 +317,8 @@ def example(role_dir, database):
         "auxiliary": {"enabled": False, "provider": "ollama", "model": "sumika-minicpm5-2b:latest",
                        "endpoint": "http://127.0.0.1:11434", "key_env": "AUXILIARY_MODEL_API_KEY",
                        "timeout_seconds": 60, "max_tokens": 512, "temperature": 0.2,
-                       "context_length": 4096, "capabilities": ["prompt_enhancement"]},
+                       "context_length": 4096, "capabilities": ["prompt_enhancement"],
+                       "tunnel": dict(TUNNEL_DEFAULTS)},
         "role": {
             "role_dir": str(role_dir),
             "database": str(database),

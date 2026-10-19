@@ -47,6 +47,22 @@ class PersonalDataManagementTests(unittest.TestCase):
                 migrate(self.source, self.base/'failed', location_digest())
         self.assertEqual(user_data_directory(), self.source)
 
+    def test_migration_automatically_includes_external_behavior_library(self):
+        from extensions.behavior.library import BehaviorLibrary
+        from extensions.behavior.locator import BehaviorLocator
+        locator = BehaviorLocator(self.source)
+        with patch('extensions.behavior.locator._product_source_roots', return_value=set()):
+            locator.select(self.base/'external-behavior', confirmed=True)
+        library = BehaviorLibrary(locator.resolve()/'behavior.sqlite3', locator=locator)
+        library.observe({'event_id': 'behavior-1', 'kind': 'revisit', 'source': 'test'}, scope={'user': 'u'})
+        destination = self.base/'moved-with-behavior'
+        result = migrate(self.source, destination, None)
+        self.assertEqual(result['status'], 'complete')
+        rebound = BehaviorLocator(destination)
+        self.assertEqual(rebound.resolve(), destination/'behavior')
+        restored = BehaviorLibrary(rebound.resolve()/'behavior.sqlite3', locator=rebound)
+        self.assertEqual(restored.list_records(scope={'user': 'u'})['records'][0]['event_id'], 'behavior-1')
+
     def test_live_writer_blocks_migration_and_cleanup(self):
         lock=DataLease(self.source).acquire()
         try:

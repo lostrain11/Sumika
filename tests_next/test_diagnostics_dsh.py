@@ -7,10 +7,25 @@ from extensions.diagnostics.continuity import ingest_observations
 from extensions.continuity.continuity import initialize
 from sumika_next.contracts import HarnessInstance, Trust, WorkBinding, ToolRequest
 from sumika_next.authorization import AuthorizationError
-from sumika_next.dsh import Dsh
+from sumika_next.dsh import Dsh, DshError
 
 
 class NativeDiagnosticProjection(unittest.TestCase):
+    def test_current_message_level_outcome_and_call_correlation(self):
+        for is_error, expected in ((True,'error'),(False,'reported_success'),(None,'unknown')):
+            message={'role':'tool','toolCallId':'call-1','source':{'kind':'tool','callId':'call-1'},
+                     'isError':is_error,'content':[{'type':'text','text':'private-body'},
+                                                   {'type':'image','data':'private-image'}]}
+            event={'seq':1,'type':'tool/result','data':{'message':message,'error':{'code':'ABORTED_BEFORE_DISPATCH'}}}
+            result=project_page({'hasMore':False,'records':[{'type':'event','event':event}]},session='s',version='0.2.1-rc.2',through_seq=1)
+            row=result['events'][0]
+            self.assertEqual(row['call_ids'],['call-1']);self.assertEqual(row['status'],expected)
+            self.assertEqual(row['error_code'],'ABORTED_BEFORE_DISPATCH' if is_error is True else None)
+            self.assertNotIn('private',str(result))
+            message['source']['callId']='different-call'
+            row=project_page({'hasMore':False,'records':[{'type':'event','event':event}]},session='s',version='v',through_seq=1)['events'][0]
+            self.assertEqual(row['call_ids'],[]);self.assertEqual(row['status'],'unknown')
+
     def test_metadata_only_tool_failure(self):
         page = {'hasMore': True, 'records': [
             {'type': 'event', 'event': {'seq': 4, 'type': 'tool/call', 'time': 1,
@@ -70,7 +85,7 @@ class NativeDiagnosticProjection(unittest.TestCase):
         with patch.object(adapter, '_check_owner'):
             result = adapter.diagnostic_page(binding, through_seq=3)
         self.assertEqual(result['through_seq'], 3)
-        with self.assertRaises(Exception):
+        with self.assertRaises(AuthorizationError):
             adapter.diagnostic_page(WorkBinding(adapter.instance.instance_id, 'r', 1, 'other', 'step'), through_seq=3)
 
     def test_existing_session_must_be_explicitly_listed_before_adoption(self):
@@ -81,7 +96,7 @@ class NativeDiagnosticProjection(unittest.TestCase):
                                                         'running': False, 'blank': False}]} if method == 'session/list' else None
         with patch.object(adapter, '_check_owner'):
             self.assertEqual(adapter.adopt_existing_session('listed'), 'listed')
-            with self.assertRaises(Exception): adapter.adopt_existing_session('unknown')
+            with self.assertRaises(DshError): adapter.adopt_existing_session('unknown')
             self.assertNotIn('listed', adapter.sessions)
             binding = WorkBinding(adapter.instance.instance_id, 'r', 1, 'listed', 'cancel')
             with self.assertRaises(AuthorizationError):

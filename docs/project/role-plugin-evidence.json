@@ -1,5 +1,6 @@
 {
   "passed": true,
+  "runtime": "D:\\Code\\Sumika\\runtime\\dsh",
   "auto_injection": true,
   "explicit_memory_write": true,
   "cross_session_recall": true,
@@ -8,5 +9,5 @@
   "original_unchanged": true,
   "disabled_no_injection": true,
   "external_model_calls": 0,
-  "artifact": "D:\\Code\\Sumika\\.sumika-next\\role-plugin-2bbedab272d74cee99e764486463b124"
+  "artifact": "D:\\Code\\Sumika\\.sumika-next\\role-plugin-f567da17685f4309a639f1ec68b1d647"
 }

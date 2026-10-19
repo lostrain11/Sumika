@@ -15,7 +15,9 @@ def execute(store, request):
         from extensions.desktop.control.uia import WindowsController
         c=WindowsController()
         if operation=='inspect':return c.inspect(**args)
-        if operation=='act':return c.act(**args)
+        if operation=='act':
+            from extensions.desktop.control.authorized_action import execute as authorized_action
+            return authorized_action(c, **args)
     if capability=='voice' and provider=='windows-sapi' and operation=='synthesize':
         from extensions.roles.voice import synthesize
         return synthesize(**args,**settings)

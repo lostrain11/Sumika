@@ -1,18 +1,15 @@
 // Browser half of the isolated real-host approval acceptance. Auth arrives on stdin.
-import { createRequire } from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import { readdirSync, existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
 const config = JSON.parse(input);
-const runtimes = path.join(process.env.LOCALAPPDATA, 'OpenAI/Codex/runtimes/cua_node');
-const candidate = readdirSync(runtimes).map(name => path.join(runtimes, name, 'bin/node_modules/playwright/package.json'))
-  .find(file => existsSync(file));
-if (!candidate) throw new Error('Installed Playwright unavailable');
-const { chromium } = createRequire(candidate)('playwright');
+const { chromium } = loadPlaywright();
 const browser = await chromium.launch({
-  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true,
+  channel: 'msedge', headless: true,
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const report = { passed: false, decision: config.decision };
@@ -100,12 +97,39 @@ try {
     await ui.getByText(config.title,{exact:true}).first().click();
     await ui.getByText('submitted-note.txt',{exact:true}).first().waitFor({state:'visible'});
     report.sentAttachmentRestoredAfterReload=true;
+  }else if(config.mode==='question'){
+    report.stage='native-question';
+    await ui.getByText(config.question,{exact:true}).waitFor({state:'visible',timeout:20000});
+    await ui.locator('[data-sumika-session-status]').filter({hasText:'等待回答'}).waitFor({state:'visible'});
+    report.nativeQuestionPendingVerified=true;
+    await page.screenshot({path:path.join(config.directory,'before.png'),fullPage:true});
+    if(config.decision==='cancel'){
+      await writeFile(path.join(config.directory,'ready.json'),JSON.stringify({questionVisible:true}));
+    }else{
+      if(config.decision==='custom')await ui.getByPlaceholder('输入你的答案',{exact:true}).fill(config.answer);
+      else await ui.getByText(config.answer,{exact:true}).click();
+      report.stage='submit-question';
+      await ui.getByRole('button',{name:/^(提交|提交回答|发送|发送回答|Submit|Send)$/}).click();
+    }
+    await ui.locator('[data-sumika-session-status="idle"]').waitFor({state:'attached',timeout:20000});
+    report.idleAfterQuestionVerified=true;
+    await page.reload({waitUntil:'domcontentloaded'});ui=await surface();
+    await ui.getByText(config.title,{exact:true}).first().click();
+    await ui.locator('[data-sumika-session-status="idle"]').waitFor({state:'attached',timeout:20000});
+    if(await ui.getByPlaceholder('输入你的答案',{exact:true}).isVisible())throw Error('answered or cancelled question resurrected');
+    report.noPendingQuestionAfterReload=true;
   }else{
   const label = config.decision === 'reject' ? /^(拒绝|Reject)$/ : /^(允许一次|Allow once)$/;
   const button = ui.getByRole('button', { name: label }).first();
   report.stage='await-approval';
   await button.waitFor({ state: 'visible', timeout: 20000 });
   report.button = await button.innerText();
+  if(config.shell){
+    const badge=ui.locator('[data-sumika-session-status]');
+    await badge.filter({hasText:'等待审批'}).waitFor({state:'visible'});
+    if(!(await badge.getAttribute('data-sumika-session-status')).includes('pending'))throw Error('pending approval state missing');
+    report.pendingApprovalStatusVerified=true;
+  }
   if(config.shell){
     await ui.evaluate(()=>window.__sumikaAcceptanceIdentity=crypto.randomUUID());
     const before=await ui.evaluate(()=>window.__sumikaAcceptanceIdentity);
@@ -126,6 +150,10 @@ try {
     await button.click();
   }
   await button.waitFor({ state: 'hidden', timeout: 15000 });
+  if(config.shell){
+    await ui.locator('[data-sumika-session-status="idle"]').waitFor({state:'attached',timeout:20000});
+    report.idleAfterDecisionVerified=true;
+  }
   if (config.decision === 'cancel') {
     await page.reload({ waitUntil: 'domcontentloaded' });
     ui=await surface();
@@ -136,7 +164,7 @@ try {
     }
     report.cancelledApprovalAbsentAfterReload = true;
   }
-  if(config.shell && config.decision==='allow'){
+  if(config.shell && config.decision==='allow' && !config.approvalsOnly){
     report.stage='composer-draft-page-switch';
     const editor=ui.locator('[contenteditable="true"]').first();
     const draft='未发送的验收草稿：保留原文、标点与代码 `x = 1`。';
@@ -205,6 +233,7 @@ try {
   }
   }
   await page.screenshot({ path: path.join(config.directory, 'after.png'), fullPage: true });
+  if(report.browserErrors?.length)throw Error('browser page errors during native acceptance');
   report.passed = true;
 } catch (error) {
   // Do not persist URL, credentials or arbitrary browser error strings.

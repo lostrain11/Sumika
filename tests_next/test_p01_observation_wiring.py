@@ -87,8 +87,7 @@ class P01ObservationWiringTests(unittest.TestCase):
 
     def behavior_events(self):
         return [event for event in self.bridge._voice_events
-                if event.get('event') == 'proactive_text'
-                and event.get('kind') == 'behavior']
+                if event.get('event') == 'behavior_prompt']
 
     def wait_for_behavior_event(self, timeout=3.0):
         deadline = time.monotonic() + timeout
@@ -136,6 +135,8 @@ class P01ObservationWiringTests(unittest.TestCase):
     def test_fresh_same_page_verifications_accumulate_one_dwell(self):
         """Fresh verifications of a static page accumulate effective time and
         report long dwell exactly once."""
+        permission = self.bridge._behavior_permissions
+        permission.save({'recording': True, 'questions': True}, revision=permission.load()['revision'])
         self.publish(_observation(page=5))
         for _ in range(185):
             self.clock[0] += 1.0
@@ -145,7 +146,7 @@ class P01ObservationWiringTests(unittest.TestCase):
         self.assertTrue(self.wait_for_behavior_event())
         events = self.behavior_events()
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]['behavior']['kind'], 'long_dwell')
+        self.assertEqual(events[0]['kind'], 'long_dwell')
 
     def test_capture_gap_longer_than_three_seconds_breaks_dwell(self):
         """Verifications more than three seconds apart end the segment."""

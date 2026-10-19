@@ -99,6 +99,26 @@ class UsageStoreTests(unittest.TestCase):
         self.assertEqual(categories['vision']['unknown_count'], 0)
         connection.close()
 
+    def test_partial_token_measurement_is_reported_as_unknown(self):
+        """A token row is incomplete when any applicable token field is NULL."""
+        connection = sqlite3.connect(self.database)
+        store = UsageStore(connection)
+        metrics = {'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15}
+        for missing in metrics:
+            with self.subTest(missing=missing):
+                values = {key: None if key == missing else value
+                          for key, value in metrics.items()}
+                store.record(scope='p', session=missing, provider='ollama', model='m',
+                             **values, status='reported', category='room')
+                category = store.totals('p', session=missing)['categories']['room']
+                self.assertEqual(category['known_sum'], values)
+                self.assertEqual(category['unknown_count'], 1)
+        store.record(scope='p', session='zero', provider='ollama', model='m',
+                     prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                     status='reported', category='room')
+        self.assertEqual(store.totals('p', session='zero')['categories']['room']['unknown_count'], 0)
+        connection.close()
+
     def test_legacy_rows_migrate_only_when_determinable(self):
         connection = sqlite3.connect(self.database)
         store = UsageStore(connection)

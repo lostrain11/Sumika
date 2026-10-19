@@ -17,6 +17,7 @@ import urllib.request
 
 from .authorization import AuthorizationError
 from .contracts import HarnessInstance, Recovery, TaskState, ToolRequest, Trust
+from .socket_ownership import listener_pids
 
 
 class DshError(RuntimeError):
@@ -115,12 +116,11 @@ class Dsh:
             raise DshError("managed process is no longer alive")
         if os.name != "nt":
             raise DshError("managed peer verification currently supports Windows only")
-        result = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
-            f"(Get-NetTCPConnection -State Listen -LocalPort {int(port)} -ErrorAction Stop).OwningProcess"],
-            capture_output=True, text=True, timeout=15,
-            creationflags=subprocess.CREATE_NO_WINDOW)
-        owners = set(result.stdout.split())
-        if result.returncode or str(self.process.pid) not in owners or len(owners) != 1:
+        try:
+            owners = listener_pids(port)
+        except (OSError, ValueError) as error:
+            raise DshError('cannot verify managed listening socket') from error
+        if owners != {self.process.pid}:
             raise DshError("listening socket does not belong to managed process")
 
     def _rpc(self, method, arguments):
@@ -264,7 +264,7 @@ class Dsh:
     def stream(self, endpoint, arguments, timeout=15):
         """Read native Remote streams; iteration errors never authorize replay."""
         import websocket
-        if endpoint not in ("session/follow", "session/control", "$events"):
+        if endpoint not in ("session/follow", "session/control", "workspace/follow", "$events"):
             raise DshError("unsupported read stream")
         self._check_owner(int(self.url.rsplit(":", 1)[1]))
         request = urllib.request.Request(self.url + "/api/remote.mux")

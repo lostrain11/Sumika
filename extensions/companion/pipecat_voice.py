@@ -89,16 +89,17 @@ class CompanionTurnProcessor(FrameProcessor):
         try:
             if hold is not None:
                 hold.cancel()
-                try:
-                    await hold
-                except asyncio.CancelledError:
-                    pass
+                # A provider that ignores cancellation must not hang the whole
+                # pipeline; wait a bounded time and leave a still-pending task
+                # cancelled instead of awaiting it forever.
+                _, pending = await asyncio.wait({hold}, timeout=2)
+                for item in pending:
+                    item.cancel()
             if task is not None:
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                _, pending = await asyncio.wait({task}, timeout=5)
+                for item in pending:
+                    item.cancel()
         finally:
             await self.stop_playback()
             if task is not None:

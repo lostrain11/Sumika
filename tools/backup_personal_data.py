@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import sys
 import time
 
@@ -56,6 +57,44 @@ def inventory(root):
     return files
 
 
+def discover_behavior_root(source, behavior_root=None):
+    """Resolve selected storage without creating a missing external directory."""
+    from extensions.behavior.locator import BehaviorLocator
+    source = Path(source).resolve()
+    locator = BehaviorLocator(source)
+    selected = locator.resolve()
+    if behavior_root is not None:
+        explicit = Path(behavior_root).absolute()
+        if locator.locator_path.exists() and explicit.resolve() != selected.resolve():
+            raise ValueError('explicit behavior root differs from the active locator')
+        selected = explicit
+    if not selected.exists():
+        if locator.locator_path.exists() or behavior_root is not None:
+            raise ValueError('selected behavior root is unavailable')
+        return None
+    for part in (selected, *selected.parents):
+        if part.is_symlink() or part.is_junction():
+            raise ValueError('behavior root must be a physical directory')
+    if not selected.is_dir():
+        raise ValueError('behavior root must be a directory')
+    return selected.resolve()
+
+
+def check_databases(root, files):
+    for relative in files:
+        if Path(relative).suffix not in ('.sqlite3', '.db'):
+            continue
+        database = Path(root)/relative
+        connection = sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)
+        try:
+            if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                raise ValueError('snapshot database failed integrity_check')
+        except sqlite3.Error as error:
+            raise ValueError('snapshot database failed integrity_check') from error
+        finally:
+            connection.close()
+
+
 def backup(source, destination, behavior_root=None):
     source = Path(source).absolute()
     destination = Path(destination).absolute()
@@ -64,22 +103,30 @@ def backup(source, destination, behavior_root=None):
     source = source.resolve()
     if destination.exists() or destination.resolve().is_relative_to(source):
         raise ValueError('choose a new destination outside the source data')
-    external_behavior = None
-    if behavior_root is not None:
-        external_behavior = Path(behavior_root).absolute()
-        if external_behavior.is_symlink() or external_behavior.is_junction() \
-                or not external_behavior.is_dir():
-            raise ValueError('external behavior root must be a physical directory')
-        external_behavior = external_behavior.resolve()
+    selected_behavior = discover_behavior_root(source, behavior_root)
+    external_behavior = selected_behavior
+    if external_behavior is not None:
+        if source.is_relative_to(external_behavior):
+            raise ValueError('personal and behavior roots must not ambiguously nest')
+        if destination.resolve().is_relative_to(external_behavior):
+            raise ValueError('snapshot must stay outside the behavior root')
         if external_behavior.is_relative_to(source):
-            # Internal behavior rides inside the personal snapshot once.
+            if external_behavior != source/'behavior':
+                raise ValueError('internal selected behavior must use the dedicated behavior child')
             external_behavior = None
+        else:
+            marker = external_behavior/'behavior-root.json'
+            if not marker.is_file() or marker.is_symlink():
+                raise ValueError('external behavior ownership marker missing')
+            owner = json.loads(marker.read_text(encoding='utf8'))
+            if owner.get('schema_version') != 1 or not isinstance(owner.get('owner_id'), str):
+                raise ValueError('invalid external behavior ownership marker')
     lease = DataLease(source).acquire()
     profile_leases = []
-    behavior_lease = (DataLease(external_behavior,
-                                filename='behavior-root.lock').acquire()
-                      if external_behavior is not None else None)
+    behavior_lease = None
     try:
+        if selected_behavior is not None:
+            behavior_lease = DataLease(selected_behavior, filename='behavior-root.lock').acquire()
         # Independent CLI workbench processes do not hold the bridge lock.
         # Honor their existing byte-range lock without changing ownership records.
         for directory, dirs, names in os.walk(source, followlinks=False):
@@ -110,6 +157,7 @@ def backup(source, destination, behavior_root=None):
         after = inventory(source)
         if before != copied or before != after:
             raise ValueError('source changed or snapshot failed verification; incomplete destination retained')
+        check_databases(personal_target, copied)
         if external_behavior is None:
             manifest = {'schema_version': 1, 'kind': 'sumika-private-offline-snapshot',
                         'status': 'verified', 'source': str(source), 'files': copied,
@@ -125,6 +173,7 @@ def backup(source, destination, behavior_root=None):
             behavior_after = inventory(external_behavior)
             if behavior_before != behavior_copied or behavior_before != behavior_after:
                 raise ValueError('behavior root changed during snapshot; incomplete destination retained')
+            check_databases(behavior_payload, behavior_copied)
             manifest = {'schema_version': 2, 'kind': 'sumika-private-offline-snapshot',
                         'status': 'verified', 'source': str(source),
                         'roots': {'personal': {'source': str(source), 'files': copied},
@@ -166,6 +215,7 @@ def verify_snapshot(snapshot):
             raise ValueError('invalid snapshot manifest')
         if inventory(payload) != manifest['files']:
             raise ValueError('snapshot integrity mismatch')
+        check_databases(payload, manifest['files'])
         return manifest
     roots = manifest.get('roots')
     if not isinstance(roots, dict) or not isinstance(
@@ -175,6 +225,14 @@ def verify_snapshot(snapshot):
     if inventory(payload/'personal') != roots['personal']['files'] \
             or inventory(payload/'behavior') != roots['behavior']['files']:
         raise ValueError('snapshot integrity mismatch')
+    check_databases(payload/'personal', roots['personal']['files'])
+    check_databases(payload/'behavior', roots['behavior']['files'])
+    owner_path = payload/'behavior'/'behavior-root.json'
+    if not owner_path.is_file():
+        raise ValueError('snapshot behavior ownership marker missing')
+    owner = json.loads(owner_path.read_text(encoding='utf8'))
+    if owner.get('schema_version') != 1 or not isinstance(owner.get('owner_id'), str):
+        raise ValueError('invalid snapshot behavior ownership marker')
     return manifest
 
 
@@ -190,6 +248,9 @@ def restore(snapshot, destination, behavior_destination=None):
     snapshot = Path(snapshot).absolute()
     destination = Path(destination).absolute()
     manifest = verify_snapshot(snapshot)
+    for part in (destination, *destination.parents):
+        if part.is_symlink() or part.is_junction():
+            raise ValueError('restore destination must be physical')
     payload = snapshot/'data'
     if destination.exists() or destination.resolve().is_relative_to(snapshot.resolve()):
         raise ValueError('restore requires a new directory outside snapshot')
@@ -199,6 +260,11 @@ def restore(snapshot, destination, behavior_destination=None):
         if behavior_destination.exists() or \
                 behavior_destination.resolve().is_relative_to(snapshot.resolve()):
             raise ValueError('behavior restore requires a new directory outside snapshot')
+        for part in (behavior_destination, *behavior_destination.parents):
+            if part.is_symlink() or part.is_junction():
+                raise ValueError('behavior restore destination must be physical')
+        if destination.resolve().is_relative_to(behavior_destination.resolve()):
+            raise ValueError('behavior restore destination must not contain personal data')
         if behavior_destination.resolve().is_relative_to(destination.resolve()) \
                 and behavior_destination != destination/'behavior':
             raise ValueError('explicit behavior roots must stay outside the '
@@ -220,6 +286,14 @@ def restore(snapshot, destination, behavior_destination=None):
               'boundary': 'Not activated. Absolute path bindings and external dependencies require reconciliation before use.'}
     if manifest['schema_version'] == 2:
         behavior_files = manifest['roots']['behavior']['files']
+        if behavior_destination.exists():
+            # A prior migration can leave an inactive behavior root in personal
+            # data. Preserve that restored copy before installing the active root.
+            retained = destination/('behavior-retained-' + hashlib.sha256(
+                str(manifest['roots']['behavior']['source']).encode('utf8')).hexdigest()[:12])
+            if behavior_destination != destination/'behavior' or retained.exists():
+                raise ValueError('restored behavior destination collision')
+            behavior_destination.rename(retained)
         behavior_destination.mkdir(parents=True, exist_ok=False)
         for relative in behavior_files:
             target = behavior_destination/relative
@@ -227,6 +301,26 @@ def restore(snapshot, destination, behavior_destination=None):
             shutil.copyfile(payload/'behavior'/relative, target)
         if inventory(behavior_destination) != behavior_files:
             raise ValueError('behavior restore verification failed')
+        database = behavior_destination/'behavior.sqlite3'
+        if database.is_file():
+            connection = sqlite3.connect(database)
+            try:
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE name='management'").fetchone():
+                    row = connection.execute("SELECT value FROM management WHERE key='migration_journal'").fetchone()
+                    if row:
+                        journal = json.loads(row[0])
+                        if journal.get('state') in ('locator_committed', 'complete'):
+                            if Path(journal.get('destination', '')).resolve() != Path(manifest['roots']['behavior']['source']).resolve():
+                                raise ValueError('snapshot behavior migration journal diverges from its active root')
+                            connection.execute('INSERT INTO management(key,value) VALUES(?,?) '
+                                               'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                               ('restore_source_migration_journal', row[0]))
+                            journal.update(state='complete', destination=str(behavior_destination))
+                            connection.execute("UPDATE management SET value=? WHERE key='migration_journal'",
+                                               (json.dumps(journal),))
+                            connection.commit()
+            finally:
+                connection.close()
         marker = behavior_destination/'behavior-root.json'
         owner_id = (json.loads(marker.read_text(encoding='utf8'))['owner_id']
                     if marker.is_file() else None)

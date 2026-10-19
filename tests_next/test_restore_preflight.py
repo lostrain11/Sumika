@@ -15,7 +15,7 @@ class RestorePreflightBoundaries(acceptance.RestorePreflightAcceptance):
             self.skipTest('Windows case-insensitive path semantics')
         (self.payload/'Role').mkdir()
         (self.payload/'Role/card.json').write_text('{}')
-        (self.payload/'Memory.db').write_bytes(b'db')
+        acceptance.minimal_database(self.payload/'Memory.db')
         self.fixture({'role':{'role_dir':str(self.source/'role'),'database':str(self.source/'memory.DB')}})
         self.assertEqual(restore_preflight.inspect_snapshot(self.snapshot)['status'],'ready')
 

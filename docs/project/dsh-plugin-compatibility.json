@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "runtime": "0.2.0-rc.2",
-  "checked": "2026-10-08",
+  "runtime": "0.2.1-rc.2",
+  "checked": "2026-10-17",
   "source": "npm registry package metadata and isolated runtime lockfile",
   "conclusion": "Plugins can replace selected infrastructure when their peer range matches exactly, but installation is not capability acceptance. Keep Sumika's Harness-neutral modules and use plugins at the DSH boundary.",
   "candidates": [
@@ -123,6 +123,124 @@
       "failed install leaves unrelated plugin config byte-identical",
       "zero external model calls"
     ],
-    "boundary": "Daily runtime 0.1.5-rc.2 has no /api/pluginManager surface (HTTP 404): the native plugin manager arrived in the 0.2.x line, so lifecycle acceptance binds to the 0.2.0-rc.2 target runtime only. Community third-party plugins remain 未验证 until each is installed and exercised; the verdicts below cover official @deepseek-ai candidates reviewed from npm metadata, lockfile peers and source files."
+    "boundary": "Historical lifecycle runs retain their original 0.2.0-rc.2 scope. Current daily runtime is 0.2.1-rc.2; the 0.2.1 lifecycle, migration and rollback evidence is recorded in docs/project/dsh-upgrade-20261017.md. Community third-party plugins remain 未验证 until each is installed and exercised; the verdicts below cover official @deepseek-ai candidates reviewed from npm metadata, lockfile peers and source files."
+  },
+  "upgrade_20261017": {
+    "version": "0.2.1-rc.2",
+    "status": "daily_runtime_upgraded_verified",
+    "record": "docs/project/dsh-upgrade-20261017.md",
+    "candidate": ".sumika-next/dsh-upgrade/0.2.1-rc.2",
+    "checks": {
+      "probe": true,
+      "p2_release_gate": true,
+      "plugin_lifecycle": true,
+      "migration": true,
+      "migration_failure_rollback": true,
+      "paid_model_calls": 0
+    },
+    "compatibility_fix": "P2 verifier accepts subagent-settled events introduced by 0.2.x",
+    "rollback": "0.1.5-rc.2 runtime/profile pair retained; no in-place downgrade"
+  },
+  "market_review_20261017": {
+    "status": "review_complete_implementation_not_started",
+    "record": "docs/project/dsh-market-review-20261017.md",
+    "snapshot": ".sumika-next/dsh-market-20261017/",
+    "catalog_counts": {
+      "awesome": 4782,
+      "hub": 4636,
+      "overlapping_not_additive": true
+    },
+    "third_party_packages": 28,
+    "third_party_source_snapshots": 26,
+    "verification": [
+      "28 manifests x 3 versions: alpha5 published compatibility pure-function gate only",
+      "Windows MCP initialize/tools-list; no desktop actions",
+      "PDF synthetic pure backend; no parse/render/cloud/UI",
+      "Both old community catalogs rejected by official new index schema"
+    ],
+    "runtime_unchanged": true,
+    "next": "Confirm active desktop runtime, then select M00-M05 isolated implementation packages; no module replacement or upgrade performed",
+    "compatibility_notice": "Historical runtime/checked/candidates above retain their original evidence scope. New matrix uses alpha5 engines-first includePrerelease rule, not old host installer acceptance."
+  },
+  "upgrade_validation": {
+    "record": "docs/project/dsh-upgrade-20261017.md",
+    "note": "Per-candidate 0.2.0 peer notes below are historical research, not a blanket 0.2.1 third-party certification. Native lifecycle and installed role/continuity/UI integrations verified as listed in upgrade record."
+  },
+  "official_office_r8_20261017": {
+    "status": "r8_bounded_acceptance_passed_overall_active",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r8",
+    "assets": [
+      {
+        "path": "ui/readiness.py",
+        "decision": "adapt",
+        "purpose": "complete-environment lookup and selected worker runtime parity"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/libreoffice-kit",
+        "decision": "direct_use",
+        "purpose": "official CLI/native Windows engine/notices; no host soffice fallback"
+      },
+      {
+        "path": "extensions/office/requirements.lock",
+        "decision": "adapt",
+        "purpose": "17 hash-locked Office/data-analysis dependencies"
+      },
+      {
+        "path": "tools/verify_office_complex.py",
+        "decision": "reuse_fixtures",
+        "purpose": "same Chinese structured files and exact formula expectations"
+      }
+    ],
+    "repairs": [
+      "partial bridge no longer masks complete Office env; never union packages across interpreters",
+      "desktop/camera readiness and candidates follow selected runtime; invalid explicit runtime unavailable",
+      "official skills receive bundled Node/CLI when engine layout is present; missing engine remains explicitly disabled",
+      "Office layer starts with empty site-packages; inherited duplicate metadata eliminated and duplicates rejected"
+    ],
+    "verification": {
+      "python_full": "1329 tests /129.549s OK skipped=23; existing warnings",
+      "final_focused": "19 office/readiness/seed tests passed after final wording change",
+      "inventory_files": 60468,
+      "source_identity": "537 compared; only tools/verify_capability_package.py advanced after build; product matches",
+      "source_identity_report": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r8.json",
+      "native_host_report": ".sumika-next/p5-office-ca98a52081bf4388b365e9a9e53848ec/report.json",
+      "loopback_model_calls": 14,
+      "external_model_calls": 0,
+      "native_host_checks": [
+        "automatic profile wiring",
+        "seven official skills with installed engine paths",
+        "dependency tool returns bundled Python",
+        "four-format roundtrips",
+        "native terminal PDF conversion and formula cache7"
+      ],
+      "engine_fixture_report": ".sumika-next/acceptance-20261017/official-kit-r8/681024087a834a1eb78ee662ec6e0c6d/report.json",
+      "engine_fixture_checks": [
+        "DOCX/XLSX/PPTX to two-page PDFs",
+        "formula caches90/105/超预算 with formulas retained",
+        "two DOCX PNG pages match manually reviewed pixels exactly",
+        "invalid document rejected without output",
+        "source hashes unchanged"
+      ],
+      "dependency_report": "E:/SumikaBuild/acceptance-20261017-current/capabilities-r8.json",
+      "dependency_scope": "Bridge/desktop/voice/Office imports, Chinese OCR creation, VAD loading and process-audio capability only; no device capture/playback",
+      "office_distributions": 17,
+      "numpy": "2.5.3",
+      "pandas": "3.0.6",
+      "tzdata": "2026.5",
+      "data_library_report": ".sumika-next/acceptance-20261017/office-data-libraries-clean.json",
+      "matrix": "128/128, no horizontal overflow/pageerror; E:/SumikaBuild/acceptance-20261017-current/matrix-r8/report.json",
+      "exe": "4 passed; E:/SumikaBuild/acceptance-20261017-current/exe-startup-e62aca81d2d843e9b98aa55eca43ebb1/report.json; test Bridge stopped"
+    },
+    "findings_resolved": [
+      "initial full suite failure was old seed fixture mocking only voice resolver and leaking real camera environment; generalized runtime fixture isolated, full suite passed",
+      "r7 copied old tzdata2025.2 dist-info beside new files; r8 uses clean payload-r4 and unique metadata verification; r7 not promoted"
+    ],
+    "limits": [
+      "Courier font substitution reported; real arbitrary files may render differently",
+      "Windows VC++v14 runtime required by official native engine; clean machine not tested",
+      "legacy sumika-office enabled flag governs its own runner, not upstream Office skills or terminal",
+      "No natural-language model-quality or overall device/site/clean-machine completion claim; no user deployment or publication"
+    ],
+    "next": "Continue remaining mainline feature walk-through and actual device/site/model-quality/clean-machine acceptance; use r8, keep earlier feature evidence version-specific. Full goal active."
   }
 }

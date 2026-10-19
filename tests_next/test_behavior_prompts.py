@@ -94,8 +94,10 @@ class PromptLifecycleTests(unittest.TestCase):
         self.library.mute_kind('flip_burst', scope=SCOPE, day=day, mute=True)
         self.assertTrue(self.library.kind_muted_today(
             'flip_burst', scope=SCOPE, day=day))
-        # Stop-asking persists beyond the day (its own record, no history
-        # deletion); unmuting is the explicit way out.
+        self.assertFalse(self.library.kind_muted_today(
+            'flip_burst', scope=SCOPE, day='2026-10-20'))
+        # Only the persistent stop-asking action survives a day change.
+        self.library.mute_kind('flip_burst', scope=SCOPE, mute=True)
         self.assertTrue(self.library.kind_muted_today(
             'flip_burst', scope=SCOPE, day='2026-10-20'))
         self.library.mute_kind('flip_burst', scope=SCOPE, mute=False)
@@ -124,25 +126,22 @@ class ProgressAndHabitsTests(unittest.TestCase):
                                                     scope=SCOPE))
 
     def test_habit_summaries_weight_by_half_life_and_cap_three(self):
-        old_day = '2026-01-01'
-        fresh_day = '2026-10-14'
-        # Confirmed support: an old one is weak, fresh ones rank first.
-        self.library.mute_kind('flip_burst', scope=SCOPE, day=fresh_day,
-                               mute=False)
-        with self.library._lock, self.library._connection() as db:
-            db.execute('INSERT INTO feedback(scope_user,feedback_id,'
-                       'user_event_id,verdict,corrected,at) '
-                       "VALUES('project-1','h1','host:1','confirm',"
-                       "'kind:flip_burst',?)", (old_day + 'T00:00:00',))
-            db.execute('INSERT INTO feedback(scope_user,feedback_id,'
-                       'user_event_id,verdict,corrected,at) '
-                       "VALUES('project-1','h2','host:2','confirm',"
-                       "'kind:flip_burst',?)", (fresh_day + 'T00:00:00',))
-        summaries = self.library.habit_summaries('flip_burst', scope=SCOPE,
-                                                 now=self.now + 86400)
+        from datetime import datetime, timezone
+        now = [datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()]
+        self.library._clock = lambda: now[0]
+        for index, label in enumerate(('旧习惯', '新习惯')):
+            if index: now[0] += 180 * 86400
+            prompt = self.library.record_prompt('flip_burst', scope=SCOPE)
+            self.library.feedback({'feedback_id': f'h{index}', 'user_event_id': f'user-{index}',
+                'prompt_id': prompt['prompt_id'], 'verdict': 'confirm', 'label': label}, scope=SCOPE)
+        summaries = self.library.habit_summaries('flip_burst', scope=SCOPE, now=now[0])
         self.assertLessEqual(len(summaries), 3)
-        self.assertEqual(summaries[0]['kind'], 'flip_burst')
-        self.assertGreater(summaries[0]['support'], 0)
+        self.assertEqual(summaries[0]['label'], '新习惯')
+        self.assertEqual(summaries[0]['source'], 'user_confirmed')
+        self.assertTrue(summaries[0]['inferred'])
+        self.assertGreater(summaries[0]['support'], summaries[1]['support'])
+        with self.assertRaises(ValueError):
+            self.library.habit_summaries(scope=SCOPE, limit=4)
 
     def test_behavior_context_block_is_bounded_and_labeled(self):
         recent = self.library.context(scope=SCOPE, limit=3)

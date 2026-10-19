@@ -1,10 +1,27 @@
 # 独立办公文件扩展
 
+## 当前补验：r8 官方办公引擎与运行时探测（2026-10-17）
+
+当前内部候选为 `E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r8`，DSH仍固定最新发布的0.2.1-rc.2。复用官方Office技能、workspace-dependencies工具、LibreOfficeKit0.1.5及其已随包提供的Windows引擎；只改公开profile接线和独立依赖层，不改上游或新增UI。
+
+已修复：局部bridge库遮蔽完整Office环境；桌面/摄像头就绪探测忽略选定运行时；依赖载荷继承旧dist-info造成版本歧义。当前载荷从干净site-packages安装17项SHA锁定依赖，包含NumPy2.5.3/Pandas3.0.6/tzdata2026.5，无重复元数据。`prepare_office_payload.py`不再携入基础bridge的第三方包。
+
+验证：源码1329项/129.549秒OK，23跳过，既有警告保留；最终定向19项通过。r8库存60468文件；537文件比对仅外部维护工具`verify_capability_package.py`在构建后推进，产品源码一致。包内Bridge/desktop/voice/Office导入、中文OCR创建、VAD加载、process-audio能力探测通过，未开启采集或播放；实际EXE首启/复用/外部端口拒绝/认证退出4项与128格布局通过，无横溢出/pageerror。
+
+r8真实DSH自动注册7技能和依赖工具，技能包含包内Node/CLI路径；四类文件读建改重开、原生终端导出PDF和重算7通过（14次loopback夹具调用、0外部调用），证据`.sumika-next/p5-office-ca98a52081bf4388b365e9a9e53848ec/report.json`。官方引擎另测三格式各2页PDF、跨表公式90/105/超预算及公式保留、2张DOCX预览、损坏输入拒绝、源SHA不变；两张PNG与人工审阅版本SHA一致，证据`.sumika-next/acceptance-20261017/official-kit-r8/681024087a834a1eb78ee662ec6e0c6d/report.json`。此前r6“官方引擎禁用”和“numpy/pandas未提供”属于历史快照，r8已补齐；r7曾继承旧tzdata元数据，不作为最终候选。
+
+复现：设置`SUMIKA_TEST_CANDIDATE`为r8，运行`python -X utf8 -B tools/verify_phase5_office.py --native-office-workflow --native-office-engines --repair-fixture-acl`；依赖无设备检查使用`python -X utf8 -B -m tools.verify_capability_package <candidate> --require-office --require-process-audio --output <新报告路径>`。ACL只处理生成的测试工作区。
+
+边界：引擎报告Courier字体替换；依赖Windows VC++v14运行时，尚未在干净机器验证。旧sumika-office开关只控制自身runner，不能关闭官方技能或撤销终端权限。自然语言自主任务质量、任意文件无损、真实设备/站点和整体验收未完成；未部署/发布，整体目标保持进行中。
+
+## 旧Skill兼容工作流与历史验证
+
+
 首个基线复用 `python-docx`、`openpyxl`、`python-pptx`、`pypdf`、`reportlab`。没有自建 Office/PDF 解析器或 Agent 循环。`skills/sumika-office/` 可整体安装到其他支持 Skill 和终端的 Harness；不导入 Sumika 或 DSH。DSH 通过原生 `.agents/skills` 发现和加载它，文件操作沿用原生终端的权限、审批和取消流程。
 
 ## 安装与使用
 
-锁定环境为 Windows x64、CPython 3.14。固定了全部 11 项依赖及所选 wheel 的 SHA-256（与 PyPI 元数据核对）；更换 Python/平台需要重新解析和验收，不能直接移除哈希约束。
+锁定环境为 Windows x64、CPython 3.14。固定了全部 17 项依赖及所选 wheel 的 SHA-256（与 PyPI 元数据核对）；更换 Python/平台需要重新解析和验收，不能直接移除哈希约束。
 
 在仓库根执行：
 
@@ -75,3 +92,16 @@ python -X utf8 -B .agents/skills/sumika-office/scripts/run.py exec extensions/of
 ```powershell
 & .sumika-next\office-env\Scripts\python.exe -B tools/verify_office_visual.py --soffice <soffice.exe 路径>
 ```
+
+
+## 接续：官方 Office 技能与随包依赖（r6）
+
+2026-10-17 实时复核 npm 完整发布时间，最新仍为 `0.2.1-rc.2`，`next` 同版；`latest` 仍旧版。证据 `.sumika-next/acceptance-20261017/dsh-registry-final.json`。不追旧标签降级，不修改上游。
+
+现成资产：直接使用官方 `dsh-skill-office` 和 `dsh-tool-workspace-dependencies`；改造已有 `ui/workbench.py` 的公开 profile 注册，以及已有 `extensions/office/requirements.lock` 的独立依赖载荷。没有新增界面入口。新载荷由 `tools/prepare_office_payload.py` 从既有 standalone Python 和哈希锁 wheel 构建，不依赖开发机 venv，不更改 PATH；构建可指定 `--office-runtime`。
+
+内部候选 `E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r6` 库存 58139 文件通过。536 文件源码比对仅 `tools/verify_phase5_office.py` 在构建后增加验收模式；产品源码一致。源码全量 1326 项 /126.857 秒 OK、23 跳过；定向 42 项通过，既有警告保留。
+
+真实 r6 原生宿主自动注册两个插件、7 个官方渐进式技能、`load_workspace_dependencies` 返回包内 Python、该 Python 经原生终端完成 DOCX/XLSX/PPTX/PDF 读建改重开均通过。证据 `.sumika-next/p5-office-2d26d5685e274eebac59fbcc3087fba1/report.json`；12 次 loopback 合成模型调用、0 外部调用，受管 DSH 已关闭。复现：设置 `SUMIKA_TEST_CANDIDATE` 后运行 `python -X utf8 -B tools/verify_phase5_office.py --native-office-workflow --repair-fixture-acl`，ACL 仅针对本次生成的工作目录。
+
+边界：官方 LibreOfficeKit 引擎仍禁用（`cli:false`），不能把宿主 soffice 渲染验证算给它；当前载荷是已有五类库及锁定依赖，不含官方工具通用描述中的所有库（例如 numpy/pandas）。旧 `sumika-office` 开关只管旧 runner，不能撤销原生终端或官方技能。readiness 是存在性预检，局部 bridge 库遮住完整旧 office-env 的边界仍待处理。未部署/发布，未做干净机器验收，r5 的其他功能证据不自动继承到 r6。

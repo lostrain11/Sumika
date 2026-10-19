@@ -11,8 +11,10 @@ export function apply(ctx,config) {
   const selection=Object.freeze({provider:config.provider,model:config.model,
     ...(config.reasoningEffort===undefined?{}:{reasoningEffort:config.reasoningEffort})});
   ctx.on('agent/request',async(_event,next)=>{
-    await next(); // Preserve native rejection; do not inherit the work model route.
+    // A disabled preset must not send the work-model request at all; calling
+    // next() first would already have dispatched it before this rejection.
     if (!config.enabled) throw Error('role model disabled');
+    await next(); // Preserve native rejection; do not inherit the work model route.
     return {...selection};
   },{prepend:true});
 }

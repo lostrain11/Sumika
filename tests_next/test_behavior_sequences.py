@@ -138,14 +138,15 @@ class PromotionTests(unittest.TestCase):
         # until a user confirms it — never self-confirmed).
         promoted = self.library.promote_pattern(
             signature, scope=self.scope, derived_version='seq-v1',
-            supports=[support])
+            supports=self.library.pattern_supports(signature, scope=self.scope))
         self.assertEqual(promoted['status'], 'promoted')
         self.assertNotIn(signature, self.library.confirmed_patterns(
             scope=self.scope))
 
     def test_duplicate_episode_and_pattern_are_idempotent(self):
         episode = {'episode_id': 'ep1', 'pattern': 'typing|scroll',
-                   'started_at': 'a', 'ended_at': 'b', 'session': 's1'}
+                   'started_at': '2026-10-14T00:00:00+00:00',
+                   'ended_at': '2026-10-14T00:01:00+00:00', 'session': 's1'}
         first = self.library.record_episode(episode, scope=self.scope)
         second = self.library.record_episode(dict(episode), scope=self.scope)
         self.assertEqual(first['status'], 'recorded')

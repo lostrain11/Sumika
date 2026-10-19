@@ -2,7 +2,7 @@
 
 这是独立的、可替换 OCR 适配层，不修改 DSH，也不绑定具体 UI。它只负责把图片交给用户选择的 OCR provider，并输出结构化文字；翻译由后续 Harness/模型步骤完成，避免把某个云服务或密钥写死。
 
-当前首选是已有的 Umi-OCR RapidOCR-json provider（RapidOCR，Apache-2.0 组件），其次探测本机 `tesseract`，最后才是 Python 环境中的 RapidOCR。已有 provider 的路径可用 `SUMIKA_RAPIDOCR_JSON` 覆盖。provider 都不存在时安全失败；不会自动下载模型、调用网络或伪造识别结果。
+当前 `auto` 顺序为 Python RapidOCR → Tesseract → RapidOCR-json → Windows OCR；模块服务优先使用用户在能力登记中明确选定的实现，失败不会静默切换。Windows OCR复用伴学现有WinRT识别器及桌面运行时，无需另装RapidOCR。识别语言必须已在Windows安装；`eng`、`chi_sim`、`jpn`分别映射到对应Windows语言，其他语言标识直接传递。Windows路径限制图片文件20MiB、像素400万及系统原生边长上限，返回像素四角坐标、`score=null`。不自动下载模型或调用网络。
 
 ```powershell
 python -X utf8 -B ocr.py status
@@ -36,5 +36,29 @@ python -X utf8 -B ocr.py recognize screenshot.png --provider auto
 其他实测要点：
 
 - 引擎必须复用。每次调用都重新构造 `RapidOCR()` 会重新加载 ONNX 模型，字幕用例从 1430 ms 降到 889 ms 就是缓存的差别。
-- 隔离环境入口：`SUMIKA_OCR_PYTHON` 可显式指定解释器，默认依次查找 `.sumika-next/ocr-env`、`.sumika-next/office-env`。
+- 隔离环境入口：`SUMIKA_OCR_PYTHON` 可显式指定解释器，默认依次查找 `.sumika-next/ocr-env`、`.sumika-next/desktop-env`、`.sumika-next/office-env`；只有解释器和实际包同时存在才可用。
 - 识别结果现在返回 `lines[{text, score, box}]`、`elapsed_ms`，供叠层定位与去重使用；`detect=False` 时 `box` 为 `null` 属于预期。
+
+## 前端配置与文件识别（2026-10-18）
+
+### 工作台一次性截图翻译
+
+工作台启动时，`extensions/desktop/screenshot_skill.py`将现有模板`extensions/desktop/screenshot-skill.md`发布到受管DSH profile的默认Skill目录；通过原生filesystem provider发现，不新增页面或插件。已运行的工作台需在空闲时停止并重新启动才能登记新Skill，不自动重启用户会话。同名用户Skill不会覆盖；路径按实际安装位置与当前能力数据库生成。
+
+使用步骤：在「能力」启用「OCR / 截屏翻译」，必要时按下文选择已安装实现；进入「工作台」的现有项目/会话，提供图片附件或明确文件绝对路径，输入“使用 sumika-screenshot-translation 将这张截图翻译为简体中文，先列原文及识别不确定处”。DSH依原生权限执行模块服务，当前工作模型在同一对话给出原文与译文。附件必须已能作为本地文件访问；否则先提供文件路径。
+
+此流程不采集屏幕、不后台监控、不生成游戏叠层；不另行调用角色模型或网站。当前工作模型若是云端，识别文字也会作为任务上下文发送到该工作模型。OCR禁用、依赖缺失或语言未安装时明确停止，由用户在现有配置入口处理，不绕过能力登记或静默切换实现。图片文字仅作不可信文档内容，不作为工具指令或用户记忆。
+
+维护验证：`python -X utf8 -B tools/verify_screenshot_skill.py --product <候选目录> --repair-fixture-acl --output <证据目录>`。仅生成测试图片、启动隔离DSH并走真实OCR；loopback模型夹具验证原文进入上下文，不能证明实际模型的翻译质量。
+
+进入「能力 → 管理模块」，找到 `ocr`，在「实现」选择 `windows` 或其他已检测实现，点击「应用实现」。选择实现不会开启原先禁用的模块；同实现保留选项，跨实现使用新实现的选项，刷新后选择保留。能力开关仍由已有能力详情控制。此路径只配置实现，不开始截屏或设备采集。
+
+工作台提供图片文件路径后，可通过原生终端调用模块服务（遵循原生执行权限）：
+
+```powershell
+python -X utf8 -B -m extensions.desktop.service --store <当前能力SQLite绝对路径> --request <请求JSON绝对路径>
+```
+
+请求格式：`{"capability":"ocr","operation":"recognize","arguments":{"image":"<图片绝对路径>","language":"chi_sim"}}`。解释器须使用当前产品Bridge运行时；不能把示例里的数据库路径当成固定用户路径。调用前须已登记并启用OCR。当前没有独立图片上传识别按钮；实时翻译叠层仍未完成，不把配置入口等同于完整翻译功能。
+
+维护验证：`python -X utf8 -B tools/verify_windows_file_ocr.py --output <证据目录> [--product <候选目录>]`生成中英图片、走真实模块服务，检查文本/坐标及禁用、语言缺失、像素预算拒绝，不截取用户屏幕。`node tools/verify_ocr_provider_ui.mjs <证据目录>`验证真实Bridge的既有选择器与保存刷新；候选通过 `SUMIKA_TEST_CANDIDATE`/`SUMIKA_TEST_PYTHON`指定。

@@ -1,9 +1,10 @@
-import {createRequire} from 'node:module';
+import {loadPlaywright} from './lib/playwright.mjs';
+
 import {mkdir,writeFile} from 'node:fs/promises';
-const {chromium}=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/')('playwright');
+const {chromium}=loadPlaywright();
 const {url}=await(await fetch('http://127.0.0.1:8765/api/workbench/embed')).json();
 const dir='.sumika-next/sidebar-verification';await mkdir(dir,{recursive:true});
-const b=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const b=await chromium.launch({channel:'msedge',headless:true});
 const p=await b.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));const checks=[];
 try {
 await p.goto(url);await p.waitForTimeout(5000);

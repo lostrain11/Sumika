@@ -1,8 +1,21 @@
-# Sumika 新版项目连续性记录
+# Sumika 项目文档入口
 
-## 当前 ZCode / GLM5.3flash 执行入口（2026-10-12）
+更新：2026-10-19。当前隔离候选 r32（60483文件库存、实际EXE四组、干净 Sandbox 通过）使用 DSH `0.2.1-rc.2`，源码全量1412项OK（20跳过）；安装包已构建、未安装，[手测配置](manual-test-r32.md)、[干净机验收](acceptance-20261019-clean-windows.md)。r22的设备配置UI与真实B站前端链路、r20真机摄像头等专项按原候选归属。PDF自动选区有历史Edge接口限制和COM超时证据，采用已实现的显式粘贴回退。真实设备完整流程、真实个人PDF/模型质量仍未全验，未部署日用。
 
-先读 [repair-and-acceptance-plan.md](repair-and-acceptance-plan.md)，再完整读 [behavior-memory-plan.md](behavior-memory-plan.md)、[companion-profiles-plan.md](companion-profiles-plan.md) 与 [acceptance-20261012.md](acceptance-20261012.md)。P00归档完成，P01～P17未实施；整体未通过验收。总入口包含可直接交给ZCode的启动指令，下一包P01。旧companion-implementation.md冻结稿为历史依据，不重放旧上传/安装动作。
+- 开发接手：`handoff.json` → `progress.json` → `plan.json`；需求原文查 `requirements.json` / `approved-plan.md`。
+- 用户逐项手测：[使用与验收清单](feature-usage-and-acceptance.md)。
+- P6 现场探测（2026-10-19）：[节点模型/B 站/PDF/设备](acceptance-20261019-p6-live.md)；包含频繁 seek 修复与 6/6 复测、合成 PDF 可见页通过；真实摄像头/麦克风采集未执行。
+- MiniCPM-V 4.7 规格/格式对比（2026-10-19）：[1B/35B-A3B、SSD、真实屏幕与 LES 可行性](acceptance-20261019-minicpm-v47-formats.md)；当前按用户要求 [35B 单模型常驻](resident-35b.md)。
+- [LES + 定制 llama.cpp-omni + 特殊量化尝试](les-attempt.md)（P6-8：CPU/CUDA 运行时已跑通，文本 8.5 prompt / 7.1 token/s，OCR 可用但格式/速度未过质量门；未替换常驻 35B）；[运行时复用与容量算法](les-runtime-reuse.md)（换模型步骤、RAM/VRAM/磁盘公式、更大模型边界）。
+- 提示词优化接入（2026-10-19）：[预览/确认与本地实测](acceptance-20261019-prompt.md)；[Qwen2.5-7B 等模型对比](acceptance-20261019-prompt-bench.md)；[可管理 SSH 隧道](managed-tunnel.md)。Qwen2.5-7B 产出 6 条可用改写但未通过质量门，本地模型暂不负责提示词优化，日用未启用。
+- 当前缺陷、证据和下一步：[主线修复与验收计划](repair-and-acceptance-plan.md)。
+- UI设计与入口约束：[设计覆盖表](ui-design-coverage.md)。
+- 长期记忆：[设计与接入](long-term-memory-plan.md)、[治理验收](acceptance-20261017-memory.md)；行为领域：[实现验收](acceptance-20261017-behavior.md)。
+- DSH/社区复用：[市场评估](dsh-market-review-20261017.md)、[内核升级](dsh-upgrade-20261017.md)。评估可用不等于日用替换。
+- 本地模型：[当前选型与实测](phase-07-local-model-plan.md)、[能力上限与路由/估时](local-model-capability-and-routing-20261019.md)。用户 2026-10-19 决定继续用 MiniCPM-V 4.7 35B-A3B 作常驻单模型；LFM2.5-24B-A2B 仅作纯文本备选。服务当前运行状态另查，不把小样本准确率推广成日常质量。
+- 历轮施工及清理前记录：[归档索引](archive/20261018/README.md)。历史报告描述当时状态，不代表现在仍待施工。
+
+长期愿景暂缓。提示词优化已接通预览/确认与 loopback 本地 provider，但本地候选未通过质量门、暂不由本地模型负责，日用未启用；干净 Windows Sandbox 安装/EXE 已验；真实设备、真实内容和模型质量仍与软件隔离验收分开记录。
 
 本目录是新版项目的持久化交接入口，独立于模型上下文和 Harness 实现。
 
@@ -65,8 +78,6 @@ python -B -m sumika_next.cli receipt --root <项目根> --input <project-relativ
 - `ui-design-plan.md`：插入 P5 前的 UI 设计阶段与旧版参考。
 - `capability-registry.md`：扩展能力注册表、开关语义、播种规则与真实验收。
 - `workbench-skin-plan.md`：工作台以 DSH 原生 Web 呈现时的皮肤/客户端插件方案与插槽契约。
-# Sumika Next 项目资料索引
-
 ## 目录职责
 
 - `sumika_next/`：Harness 中立核心、DSH 适配、日用入口和交接命令。
@@ -85,4 +96,4 @@ python -B -m sumika_next.cli receipt --root <项目根> --input <project-relativ
 
 ## 当前边界
 
-旧版源码不作为新版架构来源。UI 设计文件由独立模型维护；非 UI 扩展通过适配层接入。移动或重命名现有文件前必须先搜索引用并运行完整测试，避免破坏阶段证据和交接命令。
+旧版源码不作为新版架构来源。UI按现有设计稿及已批准控件范围维护；非UI扩展通过适配层接入。移动或重命名现有文件前必须先搜索引用并运行完整测试，避免破坏阶段证据和交接命令。

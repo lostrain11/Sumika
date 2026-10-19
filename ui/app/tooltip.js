@@ -90,11 +90,25 @@ function closeHelp(wrap) {
    同时作为兜底，CSS 已把默认方向设为「从左缘向右展开」，即使测量未跑到也不会溢出左侧。 */
 function placeTooltip(wrap) {
   const tip = wrap.querySelector('.' + TOOLTIP);
-  if (!tip) return;
-  tip.classList.remove('flip-left');
+  const trigger = wrap.querySelector('.' + TRIGGER);
+  if (!tip || !trigger) return;
+  // Measure while hidden: display:none would give a zero-size rect and make
+  // every tooltip look like it fits, which is how it got clipped before.
+  tip.style.display = 'block';
+  tip.style.visibility = 'hidden';
+  const anchor = trigger.getBoundingClientRect();
   const rect = tip.getBoundingClientRect();
-  const margin = 8;
-  if (rect.right > window.innerWidth - margin) tip.classList.add('flip-left');
+  const margin = 10, gap = 7;
+  let left = anchor.left;
+  let top = anchor.bottom + gap;
+  if (left + rect.width > window.innerWidth - margin) left = anchor.right - rect.width;
+  if (left < margin) left = margin;
+  if (top + rect.height > window.innerHeight - margin) top = anchor.top - gap - rect.height;
+  if (top < margin) top = margin;
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
+  tip.style.visibility = '';
+  tip.style.display = '';
 }
 
 /* 用 pointerenter/mouseenter 而非 mouseover：直接绑定到元素本身，命中更可靠 */

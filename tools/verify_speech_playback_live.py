@@ -9,33 +9,38 @@ import wave
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from extensions.capabilities import CapabilityStore
-from extensions.desktop.audio_devices import env_python
-from extensions.roles.speech_playback import SpeechPlayback
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--play', action='store_true', help='Play a short Chinese sentence and cancel a second local playback')
+    parser.add_argument('--product', type=Path, default=ROOT)
+    parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     if not args.play:
         parser.error('--play is required for audible output')
-    python = env_python()
+    product = args.product.resolve(strict=True)
+    sys.path.insert(0, str(product))
+    from extensions.capabilities import CapabilityStore
+    from extensions.desktop.runtime import capability_python
+    from extensions.roles.speech_playback import SpeechPlayback
+    python = capability_python('voice', root=product)
     if not python:
         raise RuntimeError('configured local voice runtime unavailable')
-    base = ROOT/'.sumika-next'/('playback-live-'+uuid.uuid4().hex)
+    base = args.output.resolve() if args.output else ROOT/'.sumika-next'/('playback-live-'+uuid.uuid4().hex)
     base.mkdir(parents=True)
     database = base/'capabilities.sqlite3'
     store = CapabilityStore(database)
     store.configure('voice', 'windows-sapi')
     selected = store.resolve('voice')
     store.close()
-    config = dict(python=python, root=str(ROOT), capabilities=str(database),
+    config = dict(python=python, root=str(product), capabilities=str(database),
                   voice_capability=selected,
                   voice_name='Microsoft Huihui Desktop - Chinese (Simplified)')
     service = SpeechPlayback(base/'jobs', lambda role: dict(config))
     report = dict(passed=False, microphone_used=False, cloud_calls=0,
-                  audible_confirmation='not_observed', checks={})
+                  audible_confirmation='not_observed', product=str(product),
+                  python=str(python), checks={})
     try:
         started = service.start('isolated-test', text='这是 Sumika 的本地语音测试。', approved=True)
         service.thread.join(timeout=65)

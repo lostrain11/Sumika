@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import shutil
 import unittest
 from unittest.mock import patch
 import uuid
@@ -14,6 +15,9 @@ class LegacyProfileTests(unittest.TestCase):
         self.source.mkdir(parents=True)
         (self.source / 'history.json').write_text('{"outcome":"unknown","message":"original"}')
         self.personal = self.base / 'personal'
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
 
     def test_copy_preserves_original_and_rejects_repeat(self):
         original = (self.source / 'history.json').read_bytes()

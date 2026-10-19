@@ -11,5 +11,7 @@ test('role route does not inherit work selection or suppress rejection',async()=
 });
 test('disabled preset stops model requests',async()=>{
   let hook;apply({on:(_,fn)=>{hook=fn;}},{enabled:false,provider:'p',model:'m'});
-  await assert.rejects(hook({},async()=>({provider:'work',model:'work'})),/disabled/);
+  let dispatched=false;
+  await assert.rejects(hook({},async()=>{dispatched=true;return {provider:'work',model:'work'};}),/disabled/);
+  assert.equal(dispatched,false,'disabled preset must not reach the native request');
 });

@@ -50,15 +50,20 @@ def image_parts(images, *, max_images=8, max_bytes=20_000_000):
 
 
 class CloudProvider:
-    def __init__(self, endpoint, *, key_env, enabled=True, timeout=180):
+    def __init__(self, endpoint, *, key_env=None, enabled=True, timeout=180,
+                 allow_loopback_http=False):
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise ValueError("endpoint required")
         parsed = urlparse(endpoint)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise ValueError("cloud endpoint must be https")
+        loopback = parsed.hostname in ("127.0.0.1", "localhost", "::1")
+        secure = parsed.scheme == "https"
+        if not secure and not (allow_loopback_http and parsed.scheme == "http" and loopback):
+            raise ValueError("cloud endpoint must be https (loopback http only for a local provider)")
+        if not parsed.hostname:
+            raise ValueError("invalid endpoint")
         if parsed.username or parsed.password:
             raise ValueError("cloud endpoint must not embed credentials")
-        if not isinstance(key_env, str) or not key_env.strip():
+        if key_env is not None and (not isinstance(key_env, str) or not key_env.strip()):
             raise ValueError("key environment name required")
         if type(enabled) is not bool:
             raise ValueError("invalid enabled flag")
@@ -72,13 +77,18 @@ class CloudProvider:
     def _key(self):
         if not self.enabled:
             raise CloudError("disabled", "cloud provider disabled")
+        if self.key_env is None:
+            return None
         value = os.environ.get(self.key_env)
         if not value:
             raise CloudError("missing_key", f"{self.key_env} is not set in the process environment")
         return value
 
     def _request(self, path, *, payload=None, method=None):
-        headers = {"Authorization": "Bearer " + self._key()}
+        headers = {}
+        key = self._key()
+        if key:
+            headers["Authorization"] = "Bearer " + key
         data = None
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf8")
@@ -150,9 +160,13 @@ class CloudProvider:
         if not callable(on_delta):
             raise ValueError('delta callback required')
         payload = dict(payload, stream=True, stream_options={'include_usage': True})
+        headers = {'Content-Type':'application/json'}
+        key = self._key()
+        if key:
+            headers['Authorization'] = 'Bearer '+key
         request = urllib.request.Request(self.endpoint+'/chat/completions',
             data=json.dumps(payload, ensure_ascii=False).encode('utf8'),
-            headers={'Authorization': 'Bearer '+self._key(), 'Content-Type':'application/json'})
+            headers=headers)
         fragments, final = [], {'model': payload['model'], 'usage': {}}
         finished = False
         characters = 0

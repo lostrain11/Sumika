@@ -142,8 +142,8 @@ class SelectionAndDeleteTests(unittest.TestCase):
         revision = self.store.load()['revision']
         self.store.select('auto', expected_revision=revision)
         runtime = self.store.runtime()
-        # 学习与游戏两个模板都启用 auto：诚实报告 ambiguous（P15 评分器定夺）。
-        self.assertEqual(runtime['reason'], 'ambiguous')
+        # 学习与游戏两个模板都启用 auto：存储不猜场景；由路由器评分决定。
+        self.assertEqual(runtime['reason'], 'unknown')
 
     def test_deleting_current_manual_leaves_null_never_auto(self):
         self.store.select('manual', self.study_id,
@@ -160,13 +160,13 @@ class SelectionAndDeleteTests(unittest.TestCase):
         state = self.store.load()
         game_id = state['profiles'][1]['id']
         self.store.select('auto', expected_revision=self.revision)
-        # 两个 auto 模板（学习+游戏）-> ambiguous
-        self.assertEqual(self.store.runtime()['reason'], 'ambiguous')
+        # 两个 auto 模板不证明任何场景
+        self.assertEqual(self.store.runtime()['reason'], 'unknown')
         revision = self.store.load()['revision']
         self.store.delete(game_id, expected_revision=revision)
         runtime = self.store.runtime()
-        self.assertEqual(runtime['reason'], 'matched')
-        self.assertNotEqual(runtime['effective_profile_id'], game_id)
+        self.assertEqual(runtime['reason'], 'unknown')
+        self.assertIsNone(runtime['effective_profile_id'])
 
     def test_deleting_every_profile_is_legal_and_null(self):
         state = self.store.load()

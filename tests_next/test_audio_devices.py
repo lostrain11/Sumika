@@ -1,11 +1,34 @@
 import json
+import io
+import types
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from extensions.desktop import audio_devices
 
 
 class AudioDeviceListingTests(unittest.TestCase):
+    def test_probe_accepts_sounddevice_pair_protocol_for_default_device(self):
+        class Pair:
+            def __init__(self, index): self.index = index
+            def __getitem__(self, position): return (self.index, 9)[position]
+        for index, expected in ((3, 3), (-1, None)):
+            sounddevice = types.SimpleNamespace(
+                default=types.SimpleNamespace(device=Pair(index)),
+                query_devices=lambda: [
+                    {'name': 'output', 'max_input_channels': 0},
+                    {'name': 'input one', 'max_input_channels': 1, 'hostapi': 0},
+                    {'name': 'output two', 'max_input_channels': 0},
+                    {'name': 'default input', 'max_input_channels': 2, 'hostapi': 0}],
+                query_hostapis=lambda host: {'name': 'fixture'})
+            output = io.StringIO()
+            with patch.dict('sys.modules', {'sounddevice': sounddevice}), redirect_stdout(output):
+                exec(audio_devices.PROBE, {})
+            result = json.loads(output.getvalue())
+            self.assertEqual(result['default_input'], expected)
+            self.assertEqual([d['index'] for d in result['devices']], [1, 3])
+
     def test_explicit_missing_runtime_never_discovers_another_environment(self):
         with patch.dict(audio_devices.os.environ, {'SUMIKA_VOICE_PYTHON': 'missing.exe'}), \
                 patch.object(audio_devices.Path, 'is_file', side_effect=[False, True]) as exists, \

@@ -345,9 +345,30 @@
       "card examples, worldbook and history are tone references only; their language is not inherited"
     ],
     "kana_ratio_by_case": {
-      "deepseek-flash before policy": [0.6863, 0.6657, 0.0057, 0.0685, 0.6996, 0.6791],
-      "deepseek-flash after policy": [0.0375, 0.0338, 0.0229, 0.0201, 0.0081, 0.0128],
-      "sumika-minicpm5-2b after policy": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      "deepseek-flash before policy": [
+        0.6863,
+        0.6657,
+        0.0057,
+        0.0685,
+        0.6996,
+        0.6791
+      ],
+      "deepseek-flash after policy": [
+        0.0375,
+        0.0338,
+        0.0229,
+        0.0201,
+        0.0081,
+        0.0128
+      ],
+      "sumika-minicpm5-2b after policy": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
     },
     "evidence_paths": {
       "deepseek-flash before policy": "E:\\Models\\Sumika\\role-models\\deepseek-flash-role-evaluation.json",
@@ -386,10 +407,28 @@
     ],
     "evidence_path": "E:\\Models\\Sumika\\role-models\\deepseek-flash-card-v13-romaji.json",
     "model": "deepseek-flash",
-    "kana_ratio_by_case": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "kana_ratio_by_case": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
     "total_characters_inspected": 1984,
-    "chinese_name_hits": {"仁菜": 3, "桃香": 4, "智酱": 1, "露帕": 2},
-    "romaji_interjections_seen": ["hmm", "eh", "hey", "un", "ne"],
+    "chinese_name_hits": {
+      "仁菜": 3,
+      "桃香": 4,
+      "智酱": 1,
+      "露帕": 2
+    },
+    "romaji_interjections_seen": [
+      "hmm",
+      "eh",
+      "hey",
+      "un",
+      "ne"
+    ],
     "quality_observations": {
       "natural_role_consistency": true,
       "updated_preference_recalled": true,
@@ -416,11 +455,22 @@
       "requested_language_policy": null,
       "resolved_source": "card",
       "evidence_path": "E:\\Models\\Sumika\\role-models\\deepseek-flash-card-first-v13.json",
-      "kana_ratio_by_case": [0.008, 0.0, 0.0, 0.0068, 0.0, 0.0058],
+      "kana_ratio_by_case": [
+        0.008,
+        0.0,
+        0.0,
+        0.0068,
+        0.0,
+        0.0058
+      ],
       "overall_kana_ratio": 0.0033,
-      "residual_kana": ["さん"],
+      "residual_kana": [
+        "さん"
+      ],
       "after_localize_names_kana_ratio": 0.0,
-      "applied_name_mappings": ["桃香さん"]
+      "applied_name_mappings": [
+        "桃香さん"
+      ]
     }
   },
   "cloud_role_evaluation": {
@@ -447,5 +497,13 @@
     },
     "assessment": "passes current role quality gate; recommended default pending user billing/provider preference",
     "key_recorded": false
+  },
+  "current_selection_20261016": {
+    "selected_local_main": "LFM2.5-24B-A2B-Q4_K_M",
+    "status": "user_selected_main_conditional_simple_tasks_role_quality_not_passed",
+    "record": "docs/project/phase-07-local-model-plan.md",
+    "historical_results_preserved": true,
+    "daily_settings_changed": false,
+    "acceptance": "2026-10-17: 19-case adapted benchmark; strict JSON semantics 5/6; role factual consistency failed"
   }
 }

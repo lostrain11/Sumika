@@ -30,6 +30,11 @@ let epoch=0;
 let audioCapture=null;
 let audioBusy=false;
 let currentAudioEpoch=null;
+let pendingAudioResume=null;
+const clearAudioResume=()=>{
+  if(pendingAudioResume)pendingAudioResume.video.removeEventListener(pendingAudioResume.event,pendingAudioResume.resume);
+  pendingAudioResume=null;
+};
 const send=message=>chrome.runtime.sendMessage(message).catch(()=>{});
 
 // ---- video observation polling (subtitles, clean frames, playback state) ----
@@ -44,8 +49,26 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       respond({started:true,already:true});return;
     }
     (async()=>{
+      clearAudioResume();
       await audioCapture?.stop();
       currentAudioEpoch=message.audio_epoch;
+      const initial=collect({origin:location.origin,capture_frame:false});
+      if(initial.ok && (initial.paused || initial.seeking) && !initial.ended) {
+        // Pausing revokes the old PCM generation. Wait for actual playback
+        // instead of claiming that a refused capture restart succeeded.
+        const video=[...document.querySelectorAll('video')].find(item=>item.isConnected && !item.ended);
+        if(video) {
+          const event=initial.seeking?'seeked':'playing';
+          const waiting={video,event,resume:()=>{
+            if(pendingAudioResume!==waiting)return;
+            clearAudioResume();
+            send({type:'audio-stopped',reason:'player_changed'});
+          }};
+          pendingAudioResume=waiting;
+          video.addEventListener(event,waiting.resume,{once:true});
+        }
+        return {started:false,waiting:!!video,error:'player_paused_or_seeking'};
+      }
       let restartTimer=null;
       let pendingSends=0;let pendingDrops=0;let sendSequence=0;
       audioCapture=createAudio({consent:true,origin:location.origin,
@@ -85,6 +108,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     return true;
   }
   if(message?.type==='stop-audio') {
+    clearAudioResume();
     (async()=>{await audioCapture?.stop();return {stopped:true};})().then(respond);
     return true;
   }
@@ -93,6 +117,8 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   let tick=0;
   let previousState=null;
   let previousContent=null;
+  let needsFull=false;
+  let networkRetries=0;
   const poll=async()=>{
     if(owner!==epoch)return;
     try {
@@ -102,14 +128,27 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       const signature=JSON.stringify({identity:state.media_identity,subtitles:state.subtitles,
         paused:state.paused,ended:state.ended,seeking:state.seeking,rate:state.playback_rate});
       const changed=signature!==previousState;
-      const full=changed || tick===1 || (message.capture_frame && tick%5===0);
+      const full=needsFull || changed || tick===1 || (message.capture_frame && tick%5===0);
       const snapshot=full ? (message.capture_frame ? collect({origin:message.origin,capture_frame:true}) : state) : null;
       if(full && !snapshot.ok) {epoch++;return;}
       const content=snapshot ? JSON.stringify({state:signature,image:snapshot.image,
         frame_status:snapshot.frame_status,danmaku:(snapshot.danmaku||[]).map(item=>item.text)}) : previousContent;
       const upload=full && content!==previousContent;
       const result=await chrome.runtime.sendMessage(upload ? {type:'snapshot',snapshot} : {type:'heartbeat'});
-      if(!result?.accepted) {epoch++;return;}
+      if(!result?.accepted) {
+        // A transient bridge/service-worker failure must not kill the approved
+        // page collection. Retry a bounded number of times and force a fresh
+        // frame, so the next accepted observation cannot carry stale media time.
+        if(result?.retry && owner===epoch && networkRetries<30) {
+          networkRetries++;
+          needsFull=true;
+          setTimeout(poll,1000);
+          return;
+        }
+        epoch++;return;
+      }
+      networkRetries=0;
+      needsFull=false;
       previousState=signature;
       if(upload)previousContent=content;
     } catch {epoch++;return;}
@@ -353,13 +392,21 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     }
     (async()=>{
       // R3: queued PCM belongs to the dead epoch; it never crosses it.
+      audioActive=false;
       if(audioPending)audioPending.length=0;
       const epoch=await post('/api/companion/passive-browser/audio-epoch',{});
+      if(connection!==owner)return {restarted:false};
       owner.grant.audio_epoch=epoch.audio_epoch;
-      await chrome.tabs.sendMessage(owner.grant.tab_id,
+      const result=await chrome.tabs.sendMessage(owner.grant.tab_id,
         {type:'start-audio',consent:true,audio_epoch:epoch.audio_epoch});
-      return {restarted:true};
-    })().then(respond,()=>respond({restarted:false}));
+      if(connection!==owner)return {restarted:false};
+      audioActive=result?.started===true;
+      lastAudioError=audioActive?null:(result?.error||'audio restart failed');
+      return {restarted:audioActive,waiting:result?.waiting===true};
+    })().then(respond,error=>{
+      if(connection===owner){audioActive=false;lastAudioError=error.message||'audio restart failed';}
+      respond({restarted:false});
+    });
     return true;
   }
   if(!['snapshot','heartbeat'].includes(message?.type) || !ownedSender(message,sender,owner) || owner.busy) {
@@ -377,7 +424,13 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
       if(accepted)owner.accepted++;
       else {connection=null;console.log('[sumika] video push rejected:',JSON.stringify(result));}
       respond({accepted});
-    } catch(error) {if(connection===owner){connection=null;lastStatus='network_failed';console.log('[sumika] video push failed:',error.message);}respond({accepted:false});}
+    } catch(error) {
+      // Keep the approved grant across a transient transport failure; the
+      // content poll retries with a forced full snapshot. Only an explicit
+      // host rejection or a new grant may replace the connection.
+      if(connection===owner){lastStatus='network_failed';console.log('[sumika] video push retryable:',error.message);}
+      respond({accepted:false,retry:true});
+    }
     finally {owner.busy=false;}
   })();
   return true;

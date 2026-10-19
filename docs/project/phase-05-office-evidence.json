@@ -61,5 +61,115 @@
     "P5-6",
     "P5-7",
     "P5-8"
-  ]
+  ],
+  "acceptance_20261017": {
+    "status": "structured_files_visual_and_native_r5_passed",
+    "assets": [
+      "extensions/office/verify_files.py",
+      "extensions/office/render.py",
+      "tools/verify_office_visual.py",
+      "tools/verify_phase5_office.py",
+      ".agents/skills/sumika-office"
+    ],
+    "asset_decision": "Reuse enabled independent file libraries, existing converter/native test; new focused structured fixture in tools; no product editor/parser or UI change.",
+    "verification": [
+      "Synthetic DOCX preserves bold/italic runs,header/footer,table,page break; XLSX preserves chart/freeze/formulas,real LibreOffice SUMIF/SUM/IF/date caches90,105,超预算; PPTX retains table/chart/notes and second slide after editing.",
+      "All3 formats converted to2-page PDFs; all6 PNGs manually reviewed, no clipping/overlap/blank pages. Original source hashes unchanged. Chinese PDF heading text order is imperfect, actual pixels verified through OCR and manual review.",
+      "r5 real DSH/native Skill and terminal four-format read/create/edit/reopen passed; disabled launcher refuses sentinel/no-write;5 loopback calls,0 external calls; explicit host Office environment, not proof of bundled dependency completeness.",
+      "Office extension7 tests passed. Existing product unchanged; three maintenance verifiers and new complex fixture are ahead of r5 build snapshot."
+    ],
+    "evidence": [
+      ".sumika-next/acceptance-20261017/office-complex-final/report.json",
+      ".sumika-next/p5-office-e53a72506b0543bc88df9f2656b5777c/report.json",
+      ".sumika-next/acceptance-20261017/office-native-r5-physical.log"
+    ],
+    "failures_resolved": [
+      "Native fixture workspace Win32 5 grantWrite fixed with official bundled ACL diagnosis script scoped to generated work only; physical flat package script location supported.",
+      "0.2 standard message-level errors/text replaced historical nested tool result assertion.",
+      "LibreOffice Chinese heading PDF glyph extraction is out of reading order; retain extraction evidence and verify pixels with existing RapidOCR."
+    ],
+    "limits": [
+      "Natural-language model task quality not evaluated.",
+      "No general arbitrary OOXML fidelity,macros,signatures,legacy binaries or secure PDF redaction guarantee.",
+      "Current host LibreOffice26.2.6 and enabled Office env used; clean machine runtime completeness remains open."
+    ],
+    "next": "Continue outstanding mainline real dependency/device checks; current manual guide now includes concrete Office UI path and sample prompt."
+  },
+  "official_office_r8_20261017": {
+    "status": "r8_bounded_acceptance_passed_overall_active",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r8",
+    "assets": [
+      {
+        "path": "ui/readiness.py",
+        "decision": "adapt",
+        "purpose": "complete-environment lookup and selected worker runtime parity"
+      },
+      {
+        "path": "runtime/dsh/node_modules/@deepseek-ai/libreoffice-kit",
+        "decision": "direct_use",
+        "purpose": "official CLI/native Windows engine/notices; no host soffice fallback"
+      },
+      {
+        "path": "extensions/office/requirements.lock",
+        "decision": "adapt",
+        "purpose": "17 hash-locked Office/data-analysis dependencies"
+      },
+      {
+        "path": "tools/verify_office_complex.py",
+        "decision": "reuse_fixtures",
+        "purpose": "same Chinese structured files and exact formula expectations"
+      }
+    ],
+    "repairs": [
+      "partial bridge no longer masks complete Office env; never union packages across interpreters",
+      "desktop/camera readiness and candidates follow selected runtime; invalid explicit runtime unavailable",
+      "official skills receive bundled Node/CLI when engine layout is present; missing engine remains explicitly disabled",
+      "Office layer starts with empty site-packages; inherited duplicate metadata eliminated and duplicates rejected"
+    ],
+    "verification": {
+      "python_full": "1329 tests /129.549s OK skipped=23; existing warnings",
+      "final_focused": "19 office/readiness/seed tests passed after final wording change",
+      "inventory_files": 60468,
+      "source_identity": "537 compared; only tools/verify_capability_package.py advanced after build; product matches",
+      "source_identity_report": "E:/SumikaBuild/acceptance-20261017-current/source-identity-rc2-r8.json",
+      "native_host_report": ".sumika-next/p5-office-ca98a52081bf4388b365e9a9e53848ec/report.json",
+      "loopback_model_calls": 14,
+      "external_model_calls": 0,
+      "native_host_checks": [
+        "automatic profile wiring",
+        "seven official skills with installed engine paths",
+        "dependency tool returns bundled Python",
+        "four-format roundtrips",
+        "native terminal PDF conversion and formula cache7"
+      ],
+      "engine_fixture_report": ".sumika-next/acceptance-20261017/official-kit-r8/681024087a834a1eb78ee662ec6e0c6d/report.json",
+      "engine_fixture_checks": [
+        "DOCX/XLSX/PPTX to two-page PDFs",
+        "formula caches90/105/超预算 with formulas retained",
+        "two DOCX PNG pages match manually reviewed pixels exactly",
+        "invalid document rejected without output",
+        "source hashes unchanged"
+      ],
+      "dependency_report": "E:/SumikaBuild/acceptance-20261017-current/capabilities-r8.json",
+      "dependency_scope": "Bridge/desktop/voice/Office imports, Chinese OCR creation, VAD loading and process-audio capability only; no device capture/playback",
+      "office_distributions": 17,
+      "numpy": "2.5.3",
+      "pandas": "3.0.6",
+      "tzdata": "2026.5",
+      "data_library_report": ".sumika-next/acceptance-20261017/office-data-libraries-clean.json",
+      "matrix": "128/128, no horizontal overflow/pageerror; E:/SumikaBuild/acceptance-20261017-current/matrix-r8/report.json",
+      "exe": "4 passed; E:/SumikaBuild/acceptance-20261017-current/exe-startup-e62aca81d2d843e9b98aa55eca43ebb1/report.json; test Bridge stopped"
+    },
+    "findings_resolved": [
+      "initial full suite failure was old seed fixture mocking only voice resolver and leaking real camera environment; generalized runtime fixture isolated, full suite passed",
+      "r7 copied old tzdata2025.2 dist-info beside new files; r8 uses clean payload-r4 and unique metadata verification; r7 not promoted"
+    ],
+    "limits": [
+      "Courier font substitution reported; real arbitrary files may render differently",
+      "Windows VC++v14 runtime required by official native engine; clean machine not tested",
+      "legacy sumika-office enabled flag governs its own runner, not upstream Office skills or terminal",
+      "No natural-language model-quality or overall device/site/clean-machine completion claim; no user deployment or publication"
+    ],
+    "next": "Continue remaining mainline feature walk-through and actual device/site/model-quality/clean-machine acceptance; use r8, keep earlier feature evidence version-specific. Full goal active."
+  }
 }

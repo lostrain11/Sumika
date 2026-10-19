@@ -1,12 +1,13 @@
 // Render the installed native approval component with an isolated pending object.
 // No approval/request RPC is issued and no host authority is created.
-import {createRequire} from 'node:module';
+
+import {loadPlaywright} from './lib/playwright.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import {isNativeOrigin} from './lib/native-frame.mjs';
-const require=createRequire('C:/Users/Lostrain.DESKTOP-43S7UNP/AppData/Local/OpenAI/Codex/runtimes/cua_node/df473e5367fa2b42/bin/node_modules/');
-const {chromium}=require('playwright');
+
+const {chromium}=loadPlaywright();
 const source=await readFile('runtime/dsh/node_modules/.pnpm/@deepseek-ai+dsh-client-ui-_0042ab2fbacdc55b3b6e01cd122ef81e/node_modules/@deepseek-ai/dsh-client-ui-approval/lib/client.js','utf8');
-const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+const browser=await chromium.launch({channel:'msedge',headless:true});
 const page=await browser.newPage({viewport:{width:1024,height:576}});
 const checks=[],errors=[];
 let original;

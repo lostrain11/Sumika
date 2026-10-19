@@ -183,8 +183,6 @@ class BackupV2Tests(unittest.TestCase):
         self.personal = self.folder/'data'
         self.personal.mkdir()
         (self.personal/'role-model-settings.json').write_text('{}', encoding='utf8')
-        (self.personal/'behavior-locator.json').write_text(
-            json.dumps({'schema_version': 1, 'root': 'Z:/live/root'}), encoding='utf8')
         self.external = self.folder/'behavior-external'
         self.external.mkdir()
         (self.external/'behavior-root.json').write_text(json.dumps(
@@ -194,6 +192,8 @@ class BackupV2Tests(unittest.TestCase):
         connection.execute("INSERT INTO t VALUES ('lesson')")
         connection.commit()
         connection.close()
+        (self.personal/'behavior-locator.json').write_text(json.dumps({
+            'schema_version': 1, 'root': str(self.external), 'owner_id': 'owner-1'}), encoding='utf8')
 
     def from_tools_backup_personal_data(self):
         import sys
@@ -230,6 +230,7 @@ class BackupV2Tests(unittest.TestCase):
     def test_v1_snapshot_still_verifies_and_never_carries_a_stale_pointer(self):
         module = self.from_tools_backup_personal_data()
         snapshot = self.folder/'snapshot-v1'
+        (self.personal/'behavior-locator.json').unlink()
         module.backup(self.personal, snapshot)
         manifest = json.loads((snapshot/'snapshot.json').read_text(encoding='utf8'))
         self.assertEqual(manifest['schema_version'], 1)

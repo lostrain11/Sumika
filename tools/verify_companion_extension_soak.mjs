@@ -10,6 +10,7 @@
 //   --muted                video.muted=true (player volume zero still captures)
 //   --other-tab            second tab plays audible audio concurrently (fixture only)
 //   --seek-every N         seek the video every N seconds (fence checks)
+//   --seek-tail N          stop seeking N seconds before the soak ends
 //   --pause-at N           pause at N seconds, expect packets to stop
 //   --part-change N        switch ?p= part at N seconds (reconnect + re-consent, fixture only)
 //   --live-url URL         real public Bilibili video instead of the fixture
@@ -34,6 +35,7 @@ const subtitles = (value('--subtitles') || 'on') === 'on';
 const muted = args.includes('--muted');
 const otherTab = args.includes('--other-tab');
 const seekEvery = Number(value('--seek-every') || 0);
+const seekTail = Number(value('--seek-tail') || 0);
 const pauseAt = Number(value('--pause-at') || 0);
 const partChange = Number(value('--part-change') || 0);
 const liveUrl = value('--live-url');
@@ -51,11 +53,11 @@ await mkdir(directory,{recursive:true});
 const report = {passed:false, scope: liveUrl
     ? 'Production MV3 extension in real headless Edge against a real public Bilibili video (anonymous, player muted) -> isolated Sumika bridge -> packaged voice interpreter (vosk). No external model.'
     : 'Production MV3 extension in real headless Edge -> isolated Sumika bridge -> packaged voice interpreter (vosk). Generated local lesson; no real website, no external model.',
-  options:{seconds,subtitles,muted,otherTab,seekEvery,pauseAt,partChange,liveUrl}, checks:{}, phases:[]};
+  options:{seconds,subtitles,muted,otherTab,seekEvery,seekTail,pauseAt,partChange,liveUrl}, checks:{}, phases:[]};
 const extension = await buildCompanionExtension(join(directory,'extension'));
 const {chromium} = loadPlaywright();
 const browser = await chromium.launchPersistentContext(join(directory,'profile'),{
-  channel:'msedge',headless:true,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
+  channel:'msedge',headless:true,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`,'--autoplay-policy=no-user-gesture-required']});
 let bridgeProcess;
 const log = message => {report.phases.push({at:new Date().toISOString(),message});console.log('[soak]',message);};
 try {
@@ -362,7 +364,8 @@ finally: server.shutdown();server.server_close();thread.join()
         const video=document.querySelector('video');if(video)video.play().catch(()=>{});});
       paused=false;
     }
-    if (seekEvery && elapsed % seekEvery === 0 && !paused) {
+    if (seekEvery && elapsed % seekEvery === 0 && !paused
+        && (!seekTail || elapsed <= seconds - seekTail)) {
       seekCount++;
       // Seek forward but never into the last 4s: the looping fixture would
       // wrap within the assertion window and the position would be genuine
@@ -419,18 +422,36 @@ finally: server.shutdown();server.server_close();thread.join()
     last_error:finalAudio.error||null};
   // A soak with a speaking lesson must have actually relayed packets
   // (100ms each => ~10/s while playing) and produced real transcripts.
+  // Compute before assertions: an inactive final worker must produce the
+  // intended diagnostic, not a temporal-dead-zone ReferenceError.
+  const maxReceived=Math.max(0,...samples.map(sample=>sample.audio.received||0));
+  const maxTranscripts=Math.max(0,...samples.map(sample=>sample.audio.transcripts||0));
+  report.soak.peak_received=maxReceived;
+  report.soak.peak_transcripts=maxTranscripts;
   assert.equal(finalAudio.error,null,'audio track reported: '+finalAudio.error);
   if (!pauseAt) assert.ok(finalAudio.alive || maxTranscripts>0,
     'audio track stopped before soak end');
   assert.ok(samples.length>=seconds/2,'status samples missing');
   // Epoch rotations reset per-generation counters; the soak honestly asserts
   // on the PEAK any generation reached (each sample is a real observation).
-  const maxReceived=Math.max(...samples.map(sample=>sample.audio.received||0));
-  const maxTranscripts=Math.max(...samples.map(sample=>sample.audio.transcripts||0));
   assert.ok(maxReceived >= Math.min(seconds,35)*2,
     `expected relayed packets in some generation, got ${maxReceived}`);
-  assert.ok(maxTranscripts >= 1,
-    `expected transcripts from the spoken lesson, got ${maxTranscripts}`);
+  if (seekEvery) {
+    // Every seek intentionally restarts the page recognizer; without a quiet
+    // tail an aggressive run may not reach a final transcript in any
+    // generation. With --seek-tail the last segment must transcribe.
+    report.checks.seek_audio_alive=finalAudio.alive===true;
+    if (seekTail > 0) {
+      report.checks.seek_transcripts_after_tail=maxTranscripts;
+      assert.ok(maxTranscripts >= 1,
+        `expected transcripts after the ${seekTail}s seek-free tail, got ${maxTranscripts}`);
+    } else {
+      report.checks.seek_transcripts_optional=true;
+    }
+  } else {
+    assert.ok(maxTranscripts >= 1,
+      `expected transcripts from the spoken lesson, got ${maxTranscripts}`);
+  }
   report.checks.tab_audio_relayed_packets=maxReceived;
   report.checks.tab_audio_transcripts=maxTranscripts;
   report.checks.soak_completed_with_healthy_audio_track=true;

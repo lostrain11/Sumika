@@ -9,6 +9,42 @@ import sqlite3
 from zoneinfo import ZoneInfo
 
 
+def next_occurrence(schedule, now):
+    """Next nominal due time at/after now, independent of dispatch history.
+
+    Match occurrence(): skip nonexistent local times and use fold=0 for
+    repeated times. Calendar-day arithmetic preserves local recurring times.
+    """
+    if now.tzinfo is None:
+        raise ValueError('timezone-aware clock required')
+    now = now.astimezone(timezone.utc)
+    if schedule.kind == 'once':
+        due = datetime.fromisoformat(schedule.expression)
+        if due.tzinfo is None:
+            raise ValueError('once timestamp needs timezone')
+        due = due.astimezone(timezone.utc)
+        return due if due >= now else None
+    zone = timezone.utc if schedule.timezone_name == 'UTC' else ZoneInfo(schedule.timezone_name)
+    expression = schedule.expression
+    weekday = None
+    if schedule.kind == 'weekly':
+        day, expression = expression.split()
+        weekday = int(day)
+        if not 0 <= weekday <= 6:
+            raise ValueError('invalid weekday')
+    hour, minute = map(int, expression.split(':'))
+    due = now.astimezone(zone).replace(hour=hour, minute=minute, second=0, microsecond=0, fold=0)
+    if weekday is not None:
+        due += timedelta(days=(weekday - due.weekday()) % 7)
+    step = timedelta(days=7 if weekday is not None else 1)
+    while True:
+        utc_due = due.astimezone(timezone.utc)
+        valid = utc_due.astimezone(zone).replace(tzinfo=None) == due.replace(tzinfo=None)
+        if valid and utc_due >= now:
+            return utc_due
+        due += step
+
+
 def occurrence(schedule, now):
     if now.tzinfo is None: raise ValueError('timezone-aware clock required')
     now = now.astimezone(timezone.utc)

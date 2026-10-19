@@ -11,7 +11,7 @@ calls.
 import threading
 import time
 
-from extensions.models.cancellation import CancellationToken
+from extensions.models.cancellation import CancellationToken, RequestCancelled
 from .contracts import ObservationBundle, PerceptionService
 from .reading_behavior import ReadingBehaviorTracker
 from .study_extras import DanmakuBuffer
@@ -108,6 +108,8 @@ class StudySessionCoordinator:
         if behavior_sink is not None and not callable(behavior_sink):
             raise ValueError('behavior sink must be callable')
         self._behavior_sink = behavior_sink
+        self._profile_prompt = DISCUSSION_PROMPT
+        self._behavior_prompts_enabled = True
         # The published service bundle stays authoritative for scheduling; the
         # host projection is only a backstop for paths that bypass publish.
         self._perception = FusionPerception(
@@ -131,7 +133,7 @@ class StudySessionCoordinator:
         self._failed = None
         # Frozen delivery plan P5: background model analysis at most twice a
         # minute; user questions never consume this budget.
-        self._background_budget = BackgroundBudget(max_per_minute=2)
+        self._background_budget = BackgroundBudget(max_per_minute=2, clock=monotonic)
         if (type(behavior_note_cooldown) not in (int, float)
                 or not 0 <= behavior_note_cooldown <= 3600):
             raise ValueError('invalid behavior note cooldown')
@@ -150,6 +152,7 @@ class StudySessionCoordinator:
         self._monotonic = monotonic
         self._activity_revision = 0
         self._background_tokens = set()
+        self._background_owner = None
         self._text_busy = False
         self._voice_busy = False
         # Local-rule danmaku dedup: scrolling comments collapse per window and
@@ -222,7 +225,7 @@ class StudySessionCoordinator:
             if self._behavior_sink is not None:
                 try:
                     import hashlib as _hashlib
-                    self._behavior_sink({
+                    handled = self._behavior_sink({
                         # Bounded stable id: the same detection re-fed must
                         # stay idempotent in the library.
                         'event_id': _hashlib.sha1(
@@ -235,8 +238,13 @@ class StudySessionCoordinator:
                                      if key != 'kind'
                                      and isinstance(value, (str, int, float, bool))},
                     })
-                except Exception:
-                    pass
+                    if handled:
+                        return
+                except Exception as error:
+                    # An installed sink owns recording and question policy.
+                    # Its failure must never fall back to an ungoverned note.
+                    self._emit('behavior_persist_error', {'error': type(error).__name__})
+                    return
             self._maybe_behavior_note(report)
 
     def _maybe_behavior_note(self, report):
@@ -252,6 +260,8 @@ class StudySessionCoordinator:
         """
         with self._lock:
             now = self._monotonic()
+            if not self._behavior_prompts_enabled:
+                return
             # A report inside the speech fence is stale by the time the fence
             # opens (the reader moved on minutes ago): drop it, never queue.
             # The underlying episode may continue past the fence, so its
@@ -274,22 +284,33 @@ class StudySessionCoordinator:
             if thread is not None and thread.is_alive():
                 self._queued_behavior_report = (now, report)
                 return
-            if not self._background_budget.allow():
+            token = CancellationToken()
+            if not self.reserve_background(token, speaking=True):
                 self._queued_behavior_report = (now, report)
                 return
             self._queued_behavior_report = None
             self._behavior_note_at = now
+            activity = self._activity_revision
             self._proactive_thread = threading.Thread(
-                target=self._generate_behavior_note, args=(report,),
+                target=self._generate_behavior_note, args=(report, token, activity),
                 name='sumika-behavior-note', daemon=True)
             self._proactive_thread.start()
 
-    def _generate_behavior_note(self, report):
+    def _generate_behavior_note(self, report, token=None, activity=None):
+        token = token or CancellationToken()
+        if activity is None:
+            activity = self._activity_revision
         try:
-            result = self._service.behavior_note(report)
+            result = self._service.behavior_note(report, cancellation_token=token)
+            token.check()
+        except RequestCancelled:
+            return
         except Exception as error:
             self._emit('proactive_error', {'error': type(error).__name__})
             return
+        finally:
+            with self._lock:
+                self.release_background(token)
         if not isinstance(result, dict) or result.get('status') != 'behavior_note':
             return
         text = result.get('text')
@@ -297,15 +318,14 @@ class StudySessionCoordinator:
             return
         # R2: the user may have started a question while the provider ran;
         # a superseded or busy-suppressed note is dropped, never emitted.
-        if not self._background_gate():
-            return
-        self._open_speech_fence()
         with self._lock:
-            if (self._failed is not None or self._scheduler_target is None
+            if (activity != self._activity_revision or not self._background_gate()
+                    or self._failed is not None or self._scheduler_target is None
                     or self._active or self._voice_bindings):
                 return
+            self._open_speech_fence()
             speaker = self._speaker
-        self._emit('proactive_text', {'text': text, 'kind': 'behavior',
+            self._emit('proactive_text', {'text': text, 'kind': 'behavior',
                                       'behavior': dict(report)})
         if speaker is not None:
             try:
@@ -361,9 +381,12 @@ class StudySessionCoordinator:
 
     def context_cleared(self):
         """The fused learning context ended; stop scheduling, keep the error none."""
+        self._invalidate_background()
         with self._lock:
             self._scheduler_target = None
             self._queued_behavior_report = None
+            self._voice_busy = False
+            self._voice_bindings.clear()
         self._behavior.reset()
         self.danmaku.clear()
         try:
@@ -383,6 +406,64 @@ class StudySessionCoordinator:
             # R2: disabling proactive immediately cancels in-flight
             # background generations; existing text answers stay.
             self._invalidate_background()
+
+    def apply_profile(self, profile):
+        """Apply preferences only. Capture and model permissions stay host-owned."""
+        self._invalidate_background()
+        self._behavior.reset()
+        with self._lock:
+            self._queued_behavior_report = None
+            self._profile_prompt = ((profile or {}).get('response_instructions') or '')[:2000]
+            settings = (profile or {}).get('settings', {})
+            self._behavior_prompts_enabled = bool(settings.get('behavior_prompts_enabled', False))
+        self.set_proactive(enabled=bool(settings.get('proactive_enabled', False)),
+            interval_seconds=settings.get('proactive_interval_seconds', 300))
+
+    def invalidate_background(self):
+        self._invalidate_background()
+
+    def background_busy(self):
+        with self._lock:
+            return bool(self._text_busy or self._voice_busy or self._active or self._voice_bindings)
+
+    def reserve_background(self, token, *, speaking=False):
+        """One physical background request, shared by routing and discussion.
+
+        A cancelled provider keeps the slot until it actually returns. User
+        questions cancel it but do not wait for this slot.
+        """
+        with self._lock:
+            if self._failed is not None or self.background_busy() or self._background_owner is not None:
+                return False
+            if speaking and not self._background_gate():
+                return False
+            if not self._background_budget.allow():
+                return False
+            self._background_owner = token
+            self._background_tokens.add(token)
+            return True
+
+    def release_background(self, token):
+        with self._lock:
+            self._background_tokens.discard(token)
+            if self._background_owner is token:
+                self._background_owner = None
+
+    def emit_behavior_prompt(self, prepare):
+        """Persist and display a local question under the shared speech fence.
+
+        prepare runs while admission is held; a user span or profile change
+        cannot slip between the persisted question and its display.
+        """
+        with self._lock:
+            if not self._behavior_prompts_enabled or not self._background_gate():
+                return False
+            detail = prepare()
+            if not detail:
+                return False
+            self._open_speech_fence()
+            self._emit('behavior_prompt', detail)
+            return True
 
     def cancel_voice_requests(self):
         """Cancel tracked voice requests without touching the shared context."""
@@ -478,6 +559,7 @@ class StudySessionCoordinator:
     def voice_request_finished(self, request):
         with self._lock:
             self._active.pop(request, None)
+            self._release_voice_busy_if_idle()
 
     def finish_turn_requests(self, turn):
         """Playback ended or was interrupted; release the turn's requests."""
@@ -485,7 +567,19 @@ class StudySessionCoordinator:
             requests = [item.request for item in self._active.values() if item.turn == turn]
             for request in requests:
                 self._active.pop(request, None)
+            self._release_voice_busy_if_idle()
         return requests
+
+    def _release_voice_busy_if_idle(self):
+        """One voice turn must not mute proactive discussion forever.
+
+        ``_voice_busy`` blocks proactive/behavior/danmaku while the user is in a
+        voice turn. It is released only when no voice request or frozen turn
+        binding remains; otherwise a single voice interaction would suppress
+        every background feature until the coordinator is recreated.
+        """
+        if not self._active and not self._voice_bindings:
+            self._voice_busy = False
 
     def voice_event(self, event, turn):
         """Existing playback/interruption lifecycle gating for the scheduler."""
@@ -551,13 +645,12 @@ class StudySessionCoordinator:
                     or self._text_busy or self._voice_busy
                     or self._active or self._voice_bindings):
                 return
-            if not self._background_budget.allow():
-                return
             thread = self._proactive_thread
             if thread is not None and thread.is_alive():
                 return
             token = CancellationToken()
-            self._background_tokens.add(token)
+            if not self.reserve_background(token, speaking=True):
+                return
             activity = self._activity_revision
             self._proactive_thread = threading.Thread(
                 target=self._generate_proactive, args=(observation, token, activity),
@@ -567,13 +660,14 @@ class StudySessionCoordinator:
     def _generate_proactive(self, observation, token=None, activity=0):
         try:
             result = self._service.proactive(expected_observation=observation,
-                                             prompt=DISCUSSION_PROMPT)
+                prompt=self._profile_prompt or '结合当前参考简短回应；资料不足则暂不提示。',
+                cancellation_token=token)
         except Exception as error:
             self._emit('proactive_error', {'error': type(error).__name__})
             return
         finally:
             with self._lock:
-                self._background_tokens.discard(token)
+                self.release_background(token)
         # R2: the user may have started a question while the provider ran.
         # A superseded or busy-suppressed generation is dropped, never
         # emitted or spoken — even when the provider ignored cancellation.
@@ -582,19 +676,19 @@ class StudySessionCoordinator:
                 token.check()
             except RequestCancelled:
                 return
-        if activity != self._activity_revision or not self._background_gate():
-            return
         if not isinstance(result, dict) or result.get('status') != 'proactive':
             return
         text = result.get('text')
         if not isinstance(text, str) or not text.strip():
             return
-        self._open_speech_fence()
-        self._emit('proactive_text', {'text': text,
-            'observation_at': result.get('observation_at'),
-            'observation_source': result.get('observation_source'),
-            'observation_target': result.get('observation_target')})
         with self._lock:
+            if activity != self._activity_revision or not self._background_gate():
+                return
+            self._open_speech_fence()
+            self._emit('proactive_text', {'text': text,
+                'observation_at': result.get('observation_at'),
+                'observation_source': result.get('observation_source'),
+                'observation_target': result.get('observation_target')})
             speaker = self._speaker
         if speaker is not None:
             try:
@@ -617,17 +711,21 @@ class StudySessionCoordinator:
         if not callable(summarize):
             raise ValueError('summary callable required')
         with self._lock:
-            if self._failed is not None or not self._background_budget.allow():
-                return {'status': 'skipped', 'reason': 'background budget or failure state'}
             epoch = self._service.collection_token()
             texts = self.danmaku.snapshot_texts()
             if not texts:
                 return {'status': 'empty'}
+            token = CancellationToken()
+            if not self.reserve_background(token):
+                return {'status': 'skipped', 'reason': 'background budget or failure state'}
         def run():
             try:
                 if self._service.collection_token() != epoch:
                     return  # The session ended or changed target mid-summary.
-                result = summarize(chr(10).join(texts), source='danmaku')
+                with token.activate():
+                    token.check()
+                    result = summarize(chr(10).join(texts), source='danmaku')
+                    token.check()
                 text = result.get('text') if isinstance(result, dict) else None
                 if isinstance(text, str) and text.strip():
                     if self._service.collection_token() != epoch:
@@ -635,9 +733,13 @@ class StudySessionCoordinator:
                     self._emit('danmaku_summary', {'text': text[:2000],
                                                    'entries': len(texts),
                                                    'audience_discussion': True})
+            except RequestCancelled:
+                pass
             except Exception as error:
                 self._emit('danmaku_summary_error',
                            {'error': type(error).__name__, 'reason': str(error)[:160]})
+            finally:
+                self.release_background(token)
         threading.Thread(target=run, name='sumika-danmaku-summary', daemon=True).start()
         return {'status': 'started', 'entries': len(texts)}
 
@@ -660,6 +762,8 @@ class StudySessionCoordinator:
         """Explicit session start clears a previous failure; nothing replays."""
         with self._lock:
             self._failed = None
+            self._voice_busy = False
+            self._voice_bindings.clear()
 
     def _require_ready(self):
         with self._lock:

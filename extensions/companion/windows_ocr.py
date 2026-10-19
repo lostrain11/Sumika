@@ -11,15 +11,15 @@ def normalize_text(text):
     return re.sub(r'(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])', '', text).strip()
 
 
-async def _recognize(image):
+async def _recognize(image, *, language=None):
     from PIL import Image
     from winrt.windows.media.ocr import OcrEngine
     from winrt.windows.globalization import Language
     from winrt.windows.graphics.imaging import SoftwareBitmap, BitmapPixelFormat
     from winrt.windows.storage.streams import DataWriter
 
-    engine = OcrEngine.try_create_from_language(Language('zh-Hans-CN'))
-    if engine is None:
+    engine = OcrEngine.try_create_from_language(Language(language or 'zh-Hans-CN'))
+    if engine is None and language is None:
         engine = OcrEngine.try_create_from_user_profile_languages()
     if engine is None:
         raise RuntimeError('no installed Windows OCR language')

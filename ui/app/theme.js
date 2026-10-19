@@ -26,4 +26,4 @@ window.addEventListener('message',event=>{
     preference=event.data.preference;localStorage.setItem('sumika-theme',preference);render();
   }
 });
-media.addEventListener('change',render);render();
+media.addEventListener('change',()=>{render();send();});render();

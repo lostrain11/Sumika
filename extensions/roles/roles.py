@@ -2,10 +2,13 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 from pathlib import PureWindowsPath
 import shutil
 import tempfile
+import time
+import uuid
 import zipfile
 
 
@@ -20,6 +23,8 @@ def list_roles(defaults, user_store=None):
         for manifest in sorted(root.glob('*/role.json')):
             try:
                 data=json.loads(manifest.read_text(encoding='utf8')); validate_config({'schema_version':1,'work_model':'x','role_model':'y','roles':[data]})
+                if kind == 'builtin' and data['id'] in {'sumika-guide'}:
+                    continue
                 result.append({'id':data['id'],'name':data['name'],'kind':kind,'path':str(manifest.parent)})
             except (OSError, ValueError, json.JSONDecodeError, KeyError):
                 continue
@@ -60,7 +65,8 @@ def load_role(role_dir):
         checks=json.loads((root/'checksums.json').read_text(encoding='utf8'))
         covered={(root/name).resolve() for name in checks}
         if any(Path(p) not in covered for p in assets.values()):verified={'status':'failed','reason':'declared asset missing from checksums'}
-    return {'id':data['id'],'name':data['name'],'enabled':data.get('enabled',True),'persona':data.get('persona',''),'worldbook':data.get('worldbook',[]),'theme':data.get('theme',{}),'assets':assets,'verified':verified}
+    return {'id':data['id'],'name':data['name'],'enabled':data.get('enabled',True),'persona':data.get('persona',''),'worldbook':data.get('worldbook',[]),'theme':data.get('theme',{}),'assets':assets,'verified':verified,
+            'context_edits':data.get('context_edits',{})}
 
 
 def _text(value, name):
@@ -81,6 +87,13 @@ def validate_config(data):
         ids.add(rid); _text(role.get('name'), 'role.name')
         if not isinstance(role.get('enabled', True), bool): raise ValueError('role.enabled must be boolean')
         if not isinstance(role.get('persona',''),str):raise ValueError('persona must be text')
+        edits=role.get('context_edits',{})
+        if not isinstance(edits,dict) or set(edits)-{'background','worldbook'}:
+            raise ValueError('invalid role context edits')
+        if 'background' in edits and (not isinstance(edits['background'],str) or len(edits['background'])>32000):
+            raise ValueError('background must be text of at most 32000 characters')
+        if 'worldbook' in edits:
+            validate_worldbook(edits['worldbook'])
         book=role.get('worldbook',[])
         if not isinstance(book,list):raise ValueError('worldbook must be an array')
         for entry in book:
@@ -89,6 +102,55 @@ def validate_config(data):
         theme=role.get('theme',{})
         if not isinstance(theme,dict) or any(not isinstance(v,str) or len(v)!=7 or not v.startswith('#') or any(c not in '0123456789abcdefABCDEF' for c in v[1:]) for v in theme.values()):raise ValueError('theme colors must be #RRGGBB')
     return data
+
+
+def validate_worldbook(entries):
+    if not isinstance(entries,list) or len(entries)>500:
+        raise ValueError('worldbook must contain at most 500 entries')
+    for entry in entries:
+        if not isinstance(entry,dict) or not isinstance(entry.get('content',''),str) or len(entry.get('content',''))>32000:
+            raise ValueError('invalid worldbook content')
+        for key in ('keys','secondary_keys'):
+            values=entry.get(key,[])
+            if not isinstance(values,list) or any(not isinstance(v,str) or len(v)>256 for v in values):
+                raise ValueError('worldbook keys must be text arrays')
+        for flag in ('enabled','constant','selective','case_sensitive'):
+            if flag in entry and type(entry[flag]) is not bool:
+                raise ValueError('worldbook flags must be booleans')
+        if type(entry.get('insertion_order',0)) is not int:
+            raise ValueError('worldbook order must be integer')
+    if len(json.dumps(entries,ensure_ascii=False))>512000:
+        raise ValueError('worldbook too large')
+    return entries
+
+
+def edit_context(role_id, store, changes):
+    """Keep original card and unknown manifest/entry fields intact."""
+    if not isinstance(changes,dict) or set(changes)!={'background','worldbook','theme'}:
+        raise ValueError('background, worldbook and theme required')
+    role=_role_dir(role_id,store)
+    target=role/'role.json'
+    manifest=json.loads(target.read_text(encoding='utf8'))
+    manifest['context_edits']={key:changes[key] for key in ('background','worldbook')}
+    manifest['theme']=changes['theme']
+    validate_config({'schema_version':1,'work_model':'x','role_model':'y','roles':[manifest]})
+    target.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
+    _refresh_checksums(role)
+
+
+def editable_context(role):
+    """Project full card entries, retaining advanced fields for round trips."""
+    compiled={}
+    if role.get('assets',{}).get('card'):
+        from extensions.roles.card_context import compile_card
+        try: compiled=compile_card(role['assets']['card'])
+        except (ValueError,OSError): pass
+    edits=role.get('context_edits',{})
+    entries=edits.get('worldbook',compiled.get('worldbook',role.get('worldbook',[])))
+    return {'background':edits.get('background',compiled.get('scenario','')),
+            'worldbook':[dict(entry) if isinstance(entry,dict) else
+                         {'content':entry,'keys':[],'constant':True} for entry in entries],
+            'theme':dict(role.get('theme',{}))}
 
 
 def context_block(role, memory=()):
@@ -108,6 +170,27 @@ def _safe_member(name):
     return p
 
 
+def _publish_role_directory(source, destination):
+    """Retry only an unapplied Windows directory rename, never replace a role.
+
+    WinError 5 can be transient even under an inherited store ACL. The actual
+    owner of such a short-lived denial is unknown; do not change permissions.
+    """
+    identity = source.stat()
+    for attempt in range(4):
+        try:
+            source.rename(destination)
+            return
+        except PermissionError as error:
+            if (getattr(error, 'winerror', None) not in (5, 32, 33)
+                    or attempt == 3 or destination.exists() or not source.is_dir()):
+                raise
+            current = source.stat()
+            if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                raise
+            time.sleep((attempt + 1) * 0.04)
+
+
 def import_package(package, store):
     package = Path(package).resolve(strict=True); store = Path(store).resolve(); store.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(package) as z:
@@ -120,21 +203,39 @@ def import_package(package, store):
         role_member = next((name for p, name in members if p == Path('role.json')), None)
         if role_member is None: raise ValueError('package needs role.json')
         with z.open(role_member) as f: manifest = json.load(f)
+        if not isinstance(manifest, dict): raise ValueError('role manifest must be an object')
         if manifest.get('schema_version') != SCHEMA: raise ValueError('unsupported role package schema')
         rid = _text(manifest.get('id'), 'role.id')
         if len(_safe_member(rid).parts)!=1 or '/' in rid or '\\' in rid: raise ValueError('unsafe role id')
         destination = store / rid
         if destination.exists(): raise ValueError('role already exists; remove/export explicitly first')
-        temp = Path(tempfile.mkdtemp(prefix='.role-', dir=store))
+        # Do not use tempfile.mkdtemp here.  On Windows/Python 3.14 it may
+        # create a child with a restricted ACL, making the same-volume
+        # directory publish fail with WinError 5.  Creating the random staging
+        # directory under the already-authorized store preserves isolation and
+        # keeps the final rename atomic.
+        temp = None
+        for _ in range(8):
+            candidate = store / ('.role-' + uuid.uuid4().hex)
+            try:
+                candidate.mkdir()
+                temp = candidate
+                break
+            except FileExistsError:
+                continue
+        if temp is None:
+            raise OSError('could not create role staging directory')
         try:
             for member, archive_name in members:
                 target = temp / member
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with z.open(archive_name) as src, target.open('wb') as out: shutil.copyfileobj(src, out)
             (temp/'checksums.json').write_text(json.dumps({str(p): hashlib.sha256((temp/p).read_bytes()).hexdigest() for p, _ in members}, indent=2), encoding='utf-8')
+            if load_role(temp)['verified']['status'] != 'ok':
+                raise ValueError('role package validation failed')
             # New role publication must not request Windows REPLACE_EXISTING.
             # Target conflicts remain errors; never retry or merge directories.
-            temp.rename(destination)
+            _publish_role_directory(temp, destination)
         except Exception:
             shutil.rmtree(temp, ignore_errors=True); raise
     return destination
@@ -158,41 +259,128 @@ def _role_dir(role_id, store):
     return role
 
 
-def attach_asset(role_id, store, kind, source):
-    """Copy one file in as a declared asset and refresh the checksum manifest.
+def _atomic_bytes(path, content):
+    temporary = path.with_name('.' + path.name + '-' + uuid.uuid4().hex)
+    try:
+        temporary.write_bytes(content)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
-    Used for assets a card import cannot carry — typically the user's own VRM —
-    so `model_3d` is real and verification keeps saying `ok` afterwards.
+
+def _asset_directory_files(source):
+    """Explicit whole-directory import, never follow reparse points or links."""
+    files = []
+    total = 0
+    for current, directories, names in os.walk(source, followlinks=False):
+        for name in directories + names:
+            path = Path(current) / name
+            if path.is_symlink() or path.is_junction():
+                raise ValueError('linked asset resources are not supported')
+            relative = path.relative_to(source)
+            _safe_member(relative.as_posix())
+            if path.is_file():
+                size = path.stat().st_size
+                total += size
+                if size > 256 * 1024 * 1024 or total > 512 * 1024 * 1024:
+                    raise ValueError('asset directory exceeds size limit')
+                files.append((path, relative))
+                if len(files) > 990:
+                    raise ValueError('asset directory has too many files')
+    if not files:
+        raise ValueError('asset directory is empty')
+    return files
+
+
+def _copy_asset_bytes(source, destination, *, total=0):
+    copied = 0
+    while chunk := source.read(1024 * 1024):
+        copied += len(chunk)
+        total += len(chunk)
+        if copied > 256 * 1024 * 1024 or total > 512 * 1024 * 1024:
+            raise ValueError('asset changed or exceeds size limit')
+        destination.write(chunk)
+    return total
+
+
+def attach_asset(role_id, store, kind, source):
+    """Import a file or an explicit multi-file resource bundle, with rollback.
+
+    Directory resources retain all relative dependencies in a ZIP; importing
+    them does not install code or assert renderer/voice-provider compatibility.
+    Existing resources are never overwritten in place.
     """
     if kind not in KINDS: raise ValueError('unsupported asset kind')
     role = _role_dir(role_id, store)
-    src = Path(source).resolve(strict=True)
-    if not src.is_file(): raise ValueError('asset source must be a file')
-    if src.stat().st_size > 256 * 1024 * 1024: raise ValueError('asset too large')
+    raw_source = Path(source)
+    if raw_source.is_symlink() or raw_source.is_junction():
+        raise ValueError('linked asset source is not supported')
+    src = raw_source.resolve(strict=True)
+    is_directory = src.is_dir()
+    if is_directory and kind not in ('model_2d', 'voice', 'scene'):
+        raise ValueError('directory bundles are supported for 2D, voice and scene resources; use a standalone VRM file for 3D')
+    if not is_directory and not src.is_file(): raise ValueError('asset source must be a file or directory')
+    if not is_directory and src.stat().st_size > 256 * 1024 * 1024: raise ValueError('asset too large')
+    if is_directory and (src == role or src in role.parents or role in src.parents):
+        raise ValueError('asset directory must be outside the target role')
+    members = _asset_directory_files(src) if is_directory else None
     name = src.name.strip()
     if not name or name in ('.', '..') or any(c in name for c in '\\/:*?"<>|'):
         raise ValueError('unsafe asset file name')
-    relative = f'{kind}/{name}'
+    _safe_member(name)
+    name = name + '.zip' if is_directory else name
+    relative = f'{kind}/{uuid.uuid4().hex}/{name}'
     target = (role / relative).resolve()
     if role not in target.parents: raise ValueError('unsafe asset path')
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, target)
     manifest_path = role / 'role.json'
-    manifest = json.loads(manifest_path.read_text(encoding='utf8'))
+    checks_path = role / 'checksums.json'
+    original_manifest = manifest_path.read_bytes()
+    original_checks = checks_path.read_bytes() if checks_path.exists() else None
+    manifest = json.loads(original_manifest)
     assets = manifest.get('assets')
     if not isinstance(assets, dict): raise ValueError('invalid role assets')
     assets[kind] = relative
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
-    _refresh_checksums(role)
+    target.parent.mkdir(parents=True, exist_ok=False)
+    metadata_started = False
+    try:
+        if members is not None:
+            total = 0
+            with zipfile.ZipFile(target, 'x', zipfile.ZIP_DEFLATED) as archive:
+                for path, member in members:
+                    if (path.is_symlink() or path.is_junction() or not path.is_file()
+                            or src not in path.resolve().parents):
+                        raise ValueError('asset directory changed during import')
+                    with path.open('rb') as input_file, archive.open(member.as_posix(), 'w') as output_file:
+                        total = _copy_asset_bytes(input_file, output_file, total=total)
+        else:
+            with src.open('rb') as input_file, target.open('xb') as output_file:
+                _copy_asset_bytes(input_file, output_file)
+        role_files = [p for p in role.rglob('*') if p.is_file()]
+        if len(role_files) > 1000 or sum(p.stat().st_size for p in role_files) > 512 * 1024 * 1024:
+            raise ValueError('role resources exceed package size limit')
+        metadata_started = True
+        _atomic_bytes(manifest_path, (json.dumps(manifest, ensure_ascii=False, indent=2)+'\n').encode('utf8'))
+        _refresh_checksums(role)
+        if load_role(role)['verified']['status'] != 'ok':
+            raise ValueError('attached resource verification failed')
+    except Exception:
+        if metadata_started:
+            _atomic_bytes(manifest_path, original_manifest)
+            if original_checks is None:
+                checks_path.unlink(missing_ok=True)
+            else:
+                _atomic_bytes(checks_path, original_checks)
+        shutil.rmtree(target.parent)
+        raise
     return target
 
 
 def _refresh_checksums(role):
     """Rewrite a role's checksum manifest over every file it currently holds."""
-    (role / 'checksums.json').write_text(json.dumps({
+    _atomic_bytes(role / 'checksums.json', (json.dumps({
         path.relative_to(role).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(role.rglob('*'))
-        if path.is_file() and path.name != 'checksums.json'}, indent=2) + '\n', encoding='utf8')
+        if path.is_file() and path.name != 'checksums.json'}, indent=2) + '\n').encode('utf8'))
     return role / 'checksums.json'
 
 

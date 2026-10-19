@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-08",
+  "updated_at": "2026-10-17",
   "relevance_paths": {
     "neko": [
       "main_logic/proactive*",
@@ -247,7 +247,28 @@
           "requires dsh >= 0.1.7; candidate 0.2.0 should be tested in an isolated profile"
         ]
       }
-    ]
+    ],
+    "review_20261017": {
+      "status": "review_complete_implementation_not_started",
+      "record": "docs/project/dsh-market-review-20261017.md",
+      "snapshot": ".sumika-next/dsh-market-20261017/",
+      "catalog_counts": {
+        "awesome": 4782,
+        "hub": 4636,
+        "overlapping_not_additive": true
+      },
+      "third_party_packages": 28,
+      "third_party_source_snapshots": 26,
+      "verification": [
+        "28 manifests x 3 versions: alpha5 published compatibility pure-function gate only",
+        "Windows MCP initialize/tools-list; no desktop actions",
+        "PDF synthetic pure backend; no parse/render/cloud/UI",
+        "Both old community catalogs rejected by official new index schema"
+      ],
+      "runtime_unchanged": true,
+      "next": "Confirm active desktop runtime, then select M00-M05 isolated implementation packages; no module replacement or upgrade performed",
+      "compatibility_notice": "Historical runtime/checked/candidates above retain their original evidence scope. New matrix uses alpha5 engines-first includePrerelease rule, not old host installer acceptance."
+    }
   },
   "policy": {
     "weekly_check": "Monday 10:00 Asia/Shanghai while Sumika is running; merge missed check on next startup",

@@ -2,7 +2,6 @@
 import json
 import re
 from extensions.memory.extraction_policy import ExtractionGate
-from extensions.memory.write_policy import MemoryWriter
 
 
 def instruction(marker, *, task_intent=False):
@@ -47,7 +46,6 @@ def collect(reply, marker, message, message_id, session):
         candidates = json.loads(raw.strip())
         if not isinstance(candidates, list) or len(candidates) > 3:
             return visible.rstrip(), 0
-        writer = MemoryWriter(session.memory, session.scope)
         count = 0
         for index, item in enumerate(candidates):
             if not isinstance(item, dict):
@@ -63,17 +61,10 @@ def collect(reply, marker, message, message_id, session):
                 continue
             # Source and event identity come from the host, never from model output.
             event = f'{message_id}:proposal:{index}'
-            scope = session.memory._scope(session.scope['user_id'], session.scope['role_id'], session.scope['project_id'])
-            if session.memory.db.execute('SELECT 1 FROM memory_proposals WHERE scope=? AND event=?',(scope,event)).fetchone():
-                continue
-            writer.record(origin='model', event_id=event, text=accepted[0]['text'])
-            row = session.memory.db.execute('SELECT data FROM memory_proposals WHERE scope=? AND event=?', (scope,event)).fetchone()
-            data = json.loads(row[0])
-            data.update(quote=quote, message_id=message_id)
-            with session.memory.db:
-                session.memory.db.execute('UPDATE memory_proposals SET data=? WHERE scope=? AND event=?',
-                                          (json.dumps(data,ensure_ascii=False,sort_keys=True),scope,event))
-            count += 1
+            result = session.memory.put_proposal(event_id=event,text=accepted[0]['text'],
+                quote=quote,message_id=message_id,**session.scope)
+            if not result.get('duplicate') and result.get('status')=='proposal':
+                count += 1
         return visible.rstrip(), count
     except (ValueError, TypeError):
         # Bad structured output must not trigger another generation.
@@ -81,28 +72,8 @@ def collect(reply, marker, message, message_id, session):
 
 
 def list_proposals(session):
-    scope = session.memory._scope(session.scope['user_id'], session.scope['role_id'], session.scope['project_id'])
-    return [dict(event_id=event, **json.loads(data)) for event,data in
-            session.memory.db.execute('SELECT event,data FROM memory_proposals WHERE scope=? ORDER BY rowid', (scope,))]
+    return session.memory.list_proposals(**session.scope)
 
 
 def resolve(session, event_id, accept):
-    proposals = list_proposals(session)
-    selected = next((p for p in proposals if p['event_id']==event_id), None)
-    if selected is None:
-        raise ValueError('proposal not found in selected role')
-    status = 'accepted' if accept else 'rejected'
-    if selected.get('status','pending') != 'pending':
-        if selected['status'] != status:
-            raise ValueError('proposal already resolved')
-        return
-    if accept:
-        # No model-selected fact key: a suggestion cannot silently replace a fact.
-        session.request('remember', {'text':selected['text'], 'source':'user-confirmed',
-                                     'event_id':event_id})
-    selected.pop('event_id')
-    selected['status'] = status
-    scope = session.memory._scope(session.scope['user_id'], session.scope['role_id'], session.scope['project_id'])
-    with session.memory.db:
-        session.memory.db.execute('UPDATE memory_proposals SET data=? WHERE scope=? AND event=?',
-                                  (json.dumps(selected,ensure_ascii=False,sort_keys=True),scope,event_id))
+    return session.memory.resolve_proposal(event_id,accept,**session.scope)

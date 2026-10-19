@@ -21,6 +21,13 @@ export async function sendCompanionText(question, onText) {
       });
       return drainAsk(response,onText);
     }
+    if (status.paste_context?.active && status.paste_context?.target) {
+      const response = await bridgeFetch('/api/companion/ask-stream', {
+        method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal,
+        body:JSON.stringify({question, session:'companion', expected_target:status.paste_context.target}),
+      });
+      return drainAsk(response,onText);
+    }
     const target=status.capture?.target;
     if(!status.capture?.alive) return false;
     if(!target) throw Error('学习窗口状态未知');

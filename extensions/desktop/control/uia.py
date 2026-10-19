@@ -25,6 +25,11 @@ class WindowsController:
     def act(self,handle,process_id,action,*,approved=False,expected_snapshot_hash=None,automation_id=None,control_type=None,text=None,keys=None):
         # This guard is not an authorization service. Harness must approve exact arguments.
         if approved is not True:raise PermissionError('native approval required for desktop mutation')
+        if action not in ('set_text','invoke','focus','minimize','maximize','restore','hotkey'):
+            raise ValueError('unsupported desktop action')
+        if action=='set_text' and not isinstance(text,str):raise ValueError('text required')
+        if action=='hotkey' and (not isinstance(keys,list) or not keys or any(not isinstance(k,str) or not k for k in keys)):
+            raise ValueError('key list required')
         w=self._window(handle,process_id)
         before=self.inspect(handle,process_id)
         digest=hashlib.sha256(json.dumps(before,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
@@ -35,19 +40,26 @@ class WindowsController:
             candidates=[c for c in w.descendants() if c.element_info.automation_id==automation_id and (control_type is None or c.element_info.control_type==control_type)]
             if len(candidates)!=1:raise ValueError('control target is missing or ambiguous')
             target=candidates[0]
-        if action=='set_text':
-            if not isinstance(text,str):raise ValueError('text required')
-            target.set_edit_text(text)
-        elif action=='invoke':target.invoke()
-        elif action in ('focus','minimize','maximize','restore'):
-            getattr(w,'set_focus' if action=='focus' else action)()
-        elif action=='hotkey':
-            if not isinstance(keys,list) or not keys or any(not isinstance(k,str) for k in keys):raise ValueError('key list required')
+        if action=='hotkey':
             import pyautogui
-            w.set_focus()
             import ctypes
-            if ctypes.windll.user32.GetForegroundWindow()!=handle:raise RuntimeError('foreground window changed')
-            pyautogui.hotkey(*keys)
-        else:raise ValueError('unsupported desktop action')
-        after=self.inspect(handle,process_id)
+        # Once a native mutation is attempted, an exception cannot prove that
+        # nothing happened. Return uncertainty instead of inviting a retry.
+        phase='mutation'
+        try:
+            if action=='set_text':target.set_edit_text(text)
+            elif action=='invoke':target.invoke()
+            elif action in ('focus','minimize','maximize','restore'):
+                getattr(w,'set_focus' if action=='focus' else action)()
+            elif action=='hotkey':
+                w.set_focus()
+                if ctypes.windll.user32.GetForegroundWindow()!=handle:
+                    raise RuntimeError('foreground window changed')
+                pyautogui.hotkey(*keys)
+            phase='post_action_inspection'
+            after=self.inspect(handle,process_id)
+        except Exception as error:
+            return dict(status='unknown',action_attempted=True,retry_allowed=False,
+                        failure_phase=phase,error_type=type(error).__name__,
+                        boundary='Native mutation attempted; effects may have occurred; inspect before any new approval')
         return dict(status='performed',verification=after,verification_hash=hashlib.sha256(json.dumps(after,ensure_ascii=False,separators=(',',':')).encode()).hexdigest())

@@ -11,7 +11,6 @@ import secrets
 import threading
 import uuid
 import shutil
-import tempfile
 import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
@@ -19,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from extensions.models.settings import load, save
 from extensions.roles.chat import open_session
-from extensions.roles.roles import load_role, rename_role, export_package, attach_asset, import_package
+from extensions.roles.roles import load_role, rename_role, export_package, attach_asset, import_package, editable_context, edit_context, validate_config
 from extensions.desktop.scheduler import Schedule
 from extensions.capabilities import CapabilityStore
 from ui.readiness import service_capabilities
@@ -88,7 +87,8 @@ class Management:
             'startup': {'auto_start', 'tray'}, 'usage': {'enabled'},
             'prompt_enhancement': {'enabled'},
             'auxiliary': {'enabled', 'provider', 'model', 'endpoint', 'key_env',
-                          'timeout_seconds', 'max_tokens', 'temperature', 'context_length', 'capabilities'},
+                          'timeout_seconds', 'max_tokens', 'temperature', 'context_length',
+                          'capabilities', 'tunnel'},
             'model_library': {'roots','auto_scan'},
             'role': {'memory_provider', 'card_context_enabled', 'card_context_budget_chars'},
         }
@@ -97,6 +97,13 @@ class Management:
             if key in scalar:
                 updated[key] = value
             elif key in sections and isinstance(value, dict) and set(value) <= sections[key]:
+                if key == 'auxiliary' and 'tunnel' in value:
+                    if not isinstance(value['tunnel'], dict):
+                        raise ValueError('auxiliary.tunnel must be an object')
+                    value = dict(value)
+                    merged = dict(updated[key].get('tunnel') or {})
+                    merged.update(value['tunnel'])
+                    value['tunnel'] = merged
                 updated[key].update(value)
             else:
                 raise ValueError('unsupported settings field')
@@ -105,6 +112,9 @@ class Management:
             python,cache=installed_runtime()
             embed_batch(python,cache,[],'语义记忆依赖检查')
         save(updated, self.bridge.settings_path)
+        tunnel = getattr(self.bridge, 'tunnel', None)
+        if tunnel is not None:
+            tunnel.configure(updated)
         if updated['voice'] != current['data']['voice']:
             self.bridge.stop_speech()
         startup = self.bridge.startup_state()
@@ -140,6 +150,7 @@ class Management:
         if role['verified']['status'] != 'ok':
             raise ValueError('角色资源校验失败，请先核对原始导入文件')
         state = {'id':role_id, 'name':role['name'], 'assets':sorted(role['assets']),
+                 **editable_context(role),
                  'editable':self.bridge._role_kinds().get(role_id)=='user',
                  'revision':revision((role_path/'checksums.json').read_text(encoding='utf8'))}
         if action is None:
@@ -147,8 +158,14 @@ class Management:
         self.check_revision(payload, state['revision'])
         if not state['editable']:
             raise ValueError('built-in resources are read-only')
-        if action not in ('rename','attach','export','archive'):
+        if action not in ('rename','attach','export','archive','edit-context'):
             raise ValueError('unsupported resource action')
+        if action=='edit-context':
+            changes=payload.get('changes')
+            if not isinstance(changes,dict) or set(changes)!={'background','worldbook','theme'}:
+                raise ValueError('background, worldbook and theme required')
+            validate_config({'schema_version':1,'work_model':'x','role_model':'y','roles':[
+                {'id':role_id,'name':role['name'],'context_edits':{k:changes[k] for k in ('background','worldbook')},'theme':changes['theme']}]})
         if action == 'archive':
             if payload.get('confirmed') is not True:
                 raise ValueError('confirmation required')
@@ -171,6 +188,7 @@ class Management:
             return {'archived':True,'path':str(archive),'backup':str(backup)}
         if action=='rename':rename_role(role_id,role_path.parent,name)
         if action=='attach':attach_asset(role_id,role_path.parent,payload['kind'],payload.get('path',''))
+        if action=='edit-context':edit_context(role_id,role_path.parent,changes)
         return {**self.resources(role_id),'backup':str(backup)}
 
     def import_resources(self, payload):
@@ -186,7 +204,13 @@ class Management:
         # Same volume, outside the live registry; malformed roles never appear.
         staging=store.parent/'role-import-staging'
         staging.mkdir(parents=True,exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=staging) as directory:
+        # Avoid tempfile.TemporaryDirectory here. On Windows/Python 3.14 its
+        # child ACL can reject the same-volume atomic rename used to publish a
+        # validated role (WinError 5). Keep staging under the authorized
+        # parent, with explicit cleanup and a random directory name instead.
+        directory = staging / ('.import-' + uuid.uuid4().hex)
+        directory.mkdir()
+        try:
             role_path=import_package(source,directory)
             role=load_role(role_path)
             if role['verified']['status']!='ok':
@@ -196,22 +220,27 @@ class Management:
             destination=store/role_path.name
             if destination.exists():raise ValueError('role already exists')
             role_path.rename(destination)
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
         return {'id':role['id'],'name':role['name'],'path':str(destination),
                 'missing':[key for key in ('card','model_3d') if key not in role['assets']]}
 
     @staticmethod
     def memory_state(session):
-        scope = session.memory._scope(session.scope['user_id'], session.scope['role_id'],
-                                      session.scope['project_id'])
-        columns = 'id,text,source,active,fact_key,event_id,created,updated'
-        names = columns.split(',')
-        rows = [dict(zip(names, row)) for row in session.memory.db.execute(
-            f'SELECT {columns} FROM memories WHERE scope=? ORDER BY id', (scope,))]
+        fence = session.memory.scope_revision(**session.scope)
+        rows=[]
+        while True:
+            page=session.memory.list_records(**session.scope,include_inactive=True,
+                limit=1000,after_id=rows[-1]['id'] if rows else 0)
+            rows.extend(page)
+            if len(page)<1000:break
         relations = session.request('relations_all', {'limit': 500})
         from extensions.memory.model_proposer import list_proposals
         proposals = list_proposals(session)
+        if session.memory.scope_revision(**session.scope) != fence:
+            raise Conflict('记忆在读取期间已改变，请重新加载')
         return {'scope': session.scope, 'memories': [r for r in rows if r['active']],
-                'proposals': proposals, 'relations': relations, 'revision': revision([rows, relations, proposals])}
+                'proposals': proposals, 'relations': relations, 'revision': revision([fence, rows, relations, proposals])}
 
     def memory(self, role_id, action=None, payload=None):
         session = self.role_session(role_id)
@@ -220,7 +249,7 @@ class Management:
             if action is None:
                 return state
             self.check_revision(payload, state['revision'])
-            if action in ('forget', 'reset', 'restore', 'delete_relation') and payload.get('confirmed') is not True:
+            if action in ('correct', 'forget', 'reset', 'restore', 'delete_relation') and payload.get('confirmed') is not True:
                 raise ValueError('explicit confirmation required')
             if action in ('reset', 'restore'):
                 backup_dir = self.bridge.settings_path.parent / 'backups' / 'memory'
@@ -238,6 +267,15 @@ class Management:
                     raise ValueError('request_id required')
                 session.request('remember', {'text': payload.get('text'), 'source': 'user',
                     'fact_key': payload.get('fact_key'), 'event_id': event})
+            elif action == 'correct':
+                # Dialog-level revision and record-level CAS are separate.
+                # The host binds role/user/project; never accept payload scope.
+                record = next((m for m in state['memories'] if m['record_id'] == payload.get('record_id')), None)
+                if record is None:
+                    raise Conflict('记忆已改变，请重新加载')
+                session.request('correct', {'record_id': record['record_id'],
+                    'text': payload.get('text'), 'event_id': payload.get('request_id'),
+                    'expected_revision': record['revision']})
             elif action in ('forget', 'relate', 'edit_relation', 'delete_relation'):
                 keys = {'forget': ('id',), 'relate': ('subject','predicate','object'),
                         'edit_relation': ('subject','predicate','object','new_object'),
@@ -245,8 +283,18 @@ class Management:
                 data = {key: payload.get(key) for key in keys}
                 if action == 'forget':
                     if type(data['id']) is not int: raise ValueError('memory id required')
+                    record = next((m for m in state['memories'] if m['id'] == data['id']), None)
+                    if record is None:
+                        raise Conflict('记忆已改变，请重新加载')
+                    data['expected_revision'] = record['revision']
                 elif any(not isinstance(v, str) or not v.strip() for v in data.values()):
                     raise ValueError('relationship fields required')
+                if action in ('edit_relation', 'delete_relation'):
+                    relation = next((r for r in state['relations'] if r['record_id'] == payload.get('record_id')), None)
+                    if relation is None:
+                        raise Conflict('关系已改变，请重新加载')
+                    data['record_id'] = relation['record_id']
+                    data['expected_revision'] = relation['revision']
                 session.request(action, data)
             elif action == 'reset':
                 session.request('reset_to_card', {})
@@ -261,8 +309,8 @@ class Management:
                         return {'data': exported}
                     data = payload.get('data')
                     if not isinstance(data, (dict, list)): raise ValueError('invalid backup')
-                    wanted = session.memory._scope(session.scope['user_id'], session.scope['role_id'], session.scope['project_id'])
-                    collections = [data] if isinstance(data, list) else [data.get(k, []) for k in ('memories','relations','proposals')]
+                    wanted = session.memory.scope_key(**session.scope)
+                    collections = [data] if isinstance(data, list) else [data.get(k, []) for k in ('memories','relations','proposals','suppressions')]
                     scopes = {row.get('scope') for rows in collections if isinstance(rows, list) for row in rows if isinstance(row, dict)}
                     if scopes and scopes != {wanted}:
                         raise ValueError('backup belongs to another memory scope')
@@ -387,6 +435,24 @@ class Management:
         finally:
             session.close()
 
+    def tunnel(self, action='status'):
+        manager = getattr(self.bridge, 'tunnel', None)
+        if manager is None:
+            return {'enabled': False, 'running': False, 'healthy': False,
+                    'last_error': 'tunnel manager unavailable'}
+        settings = load(self.bridge.settings_path)
+        manager.configure(settings)
+        if action == 'status':
+            return manager.status()
+        if action == 'start':
+            return manager.start()
+        if action == 'stop':
+            return manager.stop()
+        if action == 'restart':
+            manager.stop()
+            return manager.start()
+        raise ValueError('unsupported tunnel action')
+
     def auxiliary(self, action, payload=None):
         from extensions.models.auxiliary import health, enhance_prompt, classify_task
         settings = load(self.bridge.settings_path)
@@ -498,8 +564,7 @@ class Management:
                     draft = store.draft(owner)
                     if not draft or draft.get('id') != payload.get('id'):
                         raise ValueError('handoff draft not found')
-                    from extensions.roles.handoff import verified_project_context
-                    context = verified_project_context(draft.get('project_id'), payload.get('projects', []), receipts=payload.get('receipts', []))
+                    context = self.bridge.workbench.handoff_context(payload.get('workspace_id'), payload.get('session_id'))
                     return {'handoff': store.receive_handoff(owner, draft['id'], context)}
                 if payload.get('action') == 'result':
                     from extensions.roles.handoff import create_result_receipt
@@ -513,6 +578,10 @@ class Management:
             if parts == ['api','manage','model-library'] and method=='GET':
                 from extensions.models.library import scan
                 return scan(self.settings()['data']['model_library']['roots'])
+            if parts == ['api','manage','tunnel']:
+                if method == 'GET':
+                    return self.tunnel('status')
+                return self.tunnel((payload or {}).get('action', 'status'))
             if parts == ['api','manage','auxiliary'] and method == 'GET':
                 return self.auxiliary('health')
             if len(parts) == 4 and parts[:3] == ['api','manage','auxiliary'] and method == 'POST':
@@ -521,6 +590,10 @@ class Management:
                 return self.import_resources(payload)
             if parts == ['api','manage','schedules'] and method == 'GET':
                 return self.schedules()
+            if parts == ['api','manage','schedules','targets'] and method == 'GET':
+                return self.bridge.workbench.schedule_targets()
+            if parts == ['api','manage','schedules','native-create'] and method == 'POST':
+                return self.bridge.workbench.create_native_schedule(payload)
             if parts == ['api','manage','modules'] and method == 'GET':
                 return self.modules()
             if parts == ['api','manage','browsers'] and method == 'GET': return self.browsers()

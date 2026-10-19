@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from .write_policy import MemoryWriter
+from .repository import message_evidence
 
 DIRECTIVE=re.compile(r'^(?:请)?记住(?:\[([^\]\r\n]+)\])?[：:]([\s\S]+)$')
 
@@ -24,8 +25,12 @@ def capture(memory,scope,*,namespace,session_id,messages):
         key,text=match.groups()
         if not text.strip() or (key is not None and not key.strip()):raise ValueError('empty memory instruction')
         identity=json.dumps([namespace,session_id,message['id']],ensure_ascii=False)
-        records.append((hashlib.sha256(identity.encode()).hexdigest(),text,key))
+        records.append((hashlib.sha256(identity.encode()).hexdigest(),text,key,message['id']))
     writer=MemoryWriter(memory,scope)
     # A crash between records is safe: retries reuse the same event identity.
-    results=[writer.record(origin='user',event_id=event,text=text,fact_key=key) for event,text,key in records]
+    # The message id is recorded as evidence so source-wide retraction/purge
+    # can find facts written from that exact user message.
+    results=[writer.record(origin='user',event_id=event,text=text,fact_key=key,
+                           evidence=message_evidence(message_id))
+             for event,text,key,message_id in records]
     return {'recorded':len(results),'duplicates':sum(bool(r.get('duplicate')) for r in results)}

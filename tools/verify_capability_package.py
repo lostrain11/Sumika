@@ -11,6 +11,7 @@ def main():
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--require-process-audio', action='store_true')
+    parser.add_argument('--require-office', action='store_true')
     args = parser.parse_args()
     if args.output.exists():
         raise ValueError('report must be new')
@@ -36,6 +37,21 @@ def main():
                  "from pipecat.audio.vad.silero import SileroVADAnalyzer; "
                  "SileroVADAnalyzer(sample_rate=16000); print('voice model loaded')",
     }
+    if args.require_office:
+        programs['python'] += (
+            "; from ui.readiness import probes; "
+            "office=next(p for p in probes(r,home=r) if p['id']=='office'); "
+            "assert office['ready'] and 'DSH原生依赖载荷' in office['detail'], office; print(office)")
+        programs['office/dependencies/python'] = (
+            "import json,sys,importlib.metadata as m; from pathlib import Path; "
+            "import docx,openpyxl,pptx,pypdf,reportlab,pypdfium2,xlsxwriter,numpy,pandas; "
+            "distributions=list(m.distributions()); "
+            "names=[d.metadata['Name'].lower().replace('_','-') for d in distributions]; "
+            "assert len(names)==len(set(names)), 'duplicate distributions'; "
+            "manifest=json.loads((Path(sys.executable).parents[2]/'runtime.json').read_text()); "
+            "assert all(m.version(name)==version for name,version in manifest['pythonPackages'].items()); "
+            "assert pandas.DataFrame({'v':numpy.array([2,3])})['v'].sum()==5; "
+            "print(json.dumps({'unique_distributions':len(names),'versions':manifest['pythonPackages']}))")
     try:
         for name, code in programs.items():
             result = subprocess.run([str(root/'runtime'/name/'python.exe'), '-I', '-X', 'utf8', '-B', '-c', code],

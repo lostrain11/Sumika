@@ -25,6 +25,80 @@ def _role_dir(root):
 
 
 class UIServerTests(unittest.TestCase):
+    def test_camera_requires_consent_and_enabled_images_before_capture(self):
+        bridge = self.server.sumika_bridge
+        with patch('ui.server.subprocess.run') as run:
+            for payload in ({}, {'consent': 1}, {'consent': True, 'device': 2}):
+                with self.assertRaises(PermissionError): bridge.companion_camera(payload)
+            settings = load_settings(self.settings_path)
+            settings['multimodal']['enabled'] = False
+            with patch('ui.server.load_settings', return_value=settings):
+                with self.assertRaises(ValueError): bridge.companion_camera({'consent': True})
+            run.assert_not_called()
+
+    def test_camera_context_is_fenced_by_revoke_and_reaches_text_question(self):
+        import base64
+        import subprocess
+        bridge = self.server.sumika_bridge
+        # Transport fixture; no camera/decoder/model request is run here.
+        image = {'media_type': 'image/jpeg', 'data_base64': base64.b64encode(b'fixture').decode('ascii')}
+        settings = load_settings(self.settings_path)
+        settings['multimodal']['enabled'] = True
+        output = subprocess.CompletedProcess([], 0, json.dumps(image), '')
+        from extensions.capabilities import CapabilityStore
+        store = CapabilityStore(bridge.capability_database)
+        previous = next((item for item in store.list() if item['id'] == 'camera'), None)
+        store.configure('camera', 'opencv')
+        store.close()
+        bridge.companion_revoke()
+        try:
+            with patch('ui.server.load_settings', return_value=settings), \
+                 patch.object(bridge, '_effective_profile', return_value=None), \
+                 patch('extensions.desktop.runtime.capability_python', return_value='python'), \
+                 patch('ui.server.subprocess.run', return_value=output):
+                with patch.object(bridge._perception, 'status', return_value={'alive': True}):
+                    with self.assertRaisesRegex(RuntimeError, 'stop the current'):
+                        bridge.companion_camera({'consent': True})
+                bridge._camera_lock.acquire()
+                try:
+                    with self.assertRaisesRegex(RuntimeError, 'already in progress'):
+                        bridge.companion_camera({'consent': True})
+                finally:
+                    bridge._camera_lock.release()
+                _, result = self.request('/api/companion/camera', method='POST', body={'consent': True})
+                self.assertTrue(result['context_active'])
+                self.assertEqual(bridge._companion.latest.image, image)
+                with patch.object(bridge._companion, 'ask', return_value={'status': 'answered'}) as ask:
+                    bridge.companion_ask('说明画面', expected_target='camera:default')
+                    self.assertEqual(ask.call_args.kwargs['binding'].observation.image, image)
+                bridge.companion_revoke()
+                self.assertIsNone(bridge._companion.latest)
+                def revoke_during_capture(*args, **kwargs):
+                    bridge.companion_revoke()
+                    return output
+                with patch('ui.server.subprocess.run', side_effect=revoke_during_capture):
+                    with self.assertRaisesRegex(RuntimeError, 'revoked or superseded'):
+                        bridge.companion_camera({'consent': True})
+                self.assertIsNone(bridge._companion.latest)
+                self.assertIsNone(bridge._paste_context)
+                with patch('ui.server.subprocess.run', side_effect=subprocess.TimeoutExpired('camera', 15)):
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        bridge.companion_camera({'consent': True})
+                self.assertIsNone(bridge._paste_context)
+                self.assertFalse(bridge._camera_lock.locked())
+                store = CapabilityStore(bridge.capability_database)
+                store.configure('camera', 'opencv', enabled=False); store.close()
+                with self.assertRaises(PermissionError):
+                    bridge.companion_camera({'consent': True})
+        finally:
+            bridge.companion_revoke()
+            store = CapabilityStore(bridge.capability_database)
+            if previous:
+                store.configure('camera', previous['provider'], enabled=previous['enabled'], options=previous['options'])
+            else:
+                store.remove('camera')
+            store.close()
+
     def test_oneshot_configuration_accepts_sensevoice_and_checks_rate(self):
         from extensions.capabilities import CapabilityStore
         bridge = self.server.sumika_bridge
@@ -118,6 +192,25 @@ class UIServerTests(unittest.TestCase):
                 with self.assertRaises(urllib.error.HTTPError):
                     self.request('/api/companion/microphone', method='POST', body=payload)
             launch.assert_not_called()
+
+    def test_behavior_prompt_replay_follows_repository_state_and_fails_closed(self):
+        bridge = self.server.sumika_bridge
+        library, scope = bridge._behavior_library, bridge._behavior_scope()
+        library.observe({'event_id':'delivery-source','kind':'revisit','source':'reading-tracker'}, scope=scope)
+        prompt = library.record_prompt('revisit', event_id='delivery-source', scope=scope)
+        bridge._companion_microphone_event({'event':'behavior_prompt', **prompt, 'text':'question'})
+        status = bridge.companion_microphone({'action':'status'})
+        self.assertEqual(status['events'][0]['prompt_id'], prompt['prompt_id'])
+        library.set_prompt_state(prompt['prompt_id'], 'answered', scope=scope)
+        status = bridge.companion_microphone({'action':'status'})
+        self.assertEqual(status['events'], [])
+        self.assertEqual(status['behavior_prompt_states'][prompt['prompt_id']], 'answered')
+        with library._connection() as db:db.execute('DELETE FROM prompts')
+        status = bridge.companion_microphone({'action':'status'})
+        self.assertEqual(status['behavior_prompt_states'][prompt['prompt_id']], 'unavailable')
+        self.assertEqual(status['events'], [])
+        with patch.object(library, 'prompt_states', side_effect=OSError('unavailable')):
+            self.assertEqual(bridge.companion_microphone({'action':'status'})['events'], [])
 
     def test_microphone_events_are_bounded_and_cursor_filtered(self):
         bridge = self.server.sumika_bridge
@@ -597,6 +690,7 @@ class UIServerTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+        self.thread.join(timeout=5)
         self._tmp.cleanup()
 
     def test_behavior_prompt_lifecycle_route(self):
@@ -619,11 +713,15 @@ class UIServerTests(unittest.TestCase):
             "action": "prompt_mute_kind", "kind": "long_dwell",
             "day": "2026-10-14", "mute": True})
         self.assertEqual(muted["status"], "muted")
-        _, progress = self.request("/api/manage/behavior", method="POST", body={
-            "action": "progress_record", "material": "E:/Books/lesson.pdf",
-            "position": 41, "effective_seconds": 600,
-            "source": "reading-tracker"})
-        self.assertEqual(progress["position"], 41)
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            self.request("/api/manage/behavior", method="POST", body={
+                "action": "progress_record", "material": "E:/Books/lesson.pdf",
+                "position": 41, "effective_seconds": 600, "source": "reading-tracker"})
+        self.assertEqual(denied.exception.code, 400)
+        # Only a trusted collector can persist progress, never the web payload.
+        self.server.sumika_bridge._behavior_library.record_progress(
+            'E:/Books/lesson.pdf', 41, effective_seconds=600,
+            source='reading-tracker', scope=self.server.sumika_bridge._behavior_scope())
         _, fetched = self.request("/api/manage/behavior", method="POST", body={
             "action": "progress_get", "material": "E:/Books/lesson.pdf"})
         self.assertEqual(fetched["progress"]["position"], 41)
@@ -727,13 +825,14 @@ class UIServerTests(unittest.TestCase):
         # beneath it.
         status, state = self.request("/api/manage/behavior")
         self.assertEqual(status, 200)
-        self.assertEqual(state["schema_version"], 3)
+        self.assertEqual(state["schema_version"], 6)
         self.assertTrue(state["enabled"])
         revision = state["revision"]
+        _, prompt = self.request("/api/manage/behavior", method="POST", body={
+            "action": "prompt_show", "kind": "revisit"})
         _, recorded = self.request("/api/manage/behavior", method="POST", body={
-            "action": "feedback",
-            "entry": {"feedback_id": "f-route", "user_event_id": "host-1",
-                      "verdict": "confirm"}})
+            "action": "prompt_feedback", "prompt_id": prompt['prompt_id'],
+            "verdict": "confirm", "corrected": "在找公式"})
         self.assertEqual(recorded["status"], "recorded")
         _, listing = self.request("/api/manage/behavior", method="POST", body={
             "action": "list", "limit": 100})
@@ -767,6 +866,14 @@ class UIServerTests(unittest.TestCase):
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status, json.loads(response.read().decode("utf8"))
 
+    def test_tunnel_status_endpoint_reports_observed_state(self):
+        status, data = self.request('/api/manage/tunnel')
+        self.assertEqual(status, 200)
+        self.assertFalse(data['enabled'])
+        self.assertFalse(data['running'])
+        self.assertFalse(data['healthy'])
+        self.assertEqual(data['local_port'], 11434)
+
     def test_state_settings_and_modules_are_real(self):
         status, state = self.request("/api/state")
         self.assertEqual(status, 200)
@@ -794,7 +901,7 @@ class UIServerTests(unittest.TestCase):
                  '/api/workbench/start', '/api/workbench/stop', '/api/workbench/session',
                  '/api/role/chat', '/api/schedule/toggle', '/api/capabilities/toggle',
                  '/api/companion/collect', '/api/companion/observe', '/api/companion/ask',
-                 '/api/companion/revoke', '/api/companion/video', '/api/companion/browser-video', '/api/companion/capture', '/api/companion/perception', '/api/companion/ask-stream']
+                 '/api/companion/revoke', '/api/companion/video', '/api/companion/browser-video', '/api/companion/capture', '/api/companion/perception', '/api/companion/camera', '/api/companion/ask-stream']
         for path in paths:
             with self.subTest(path=path):
                 req = urllib.request.Request(f'http://127.0.0.1:{self.port}{path}', data=b'{}',
@@ -914,7 +1021,8 @@ class UIServerTests(unittest.TestCase):
             with self.assertRaises(WorkbenchError):
                 bridge.shutdown()
             playback.assert_called_once()
-            workbench.assert_not_called()
+            # A speech failure must not skip stopping the owned workbench.
+            workbench.assert_called_once()
         self.assertTrue(bridge._shutdown_requested.is_set())
         self.assertFalse(bridge._closing)
 
@@ -1000,6 +1108,14 @@ class UIServerTests(unittest.TestCase):
         with self.assertRaises(OSError):
             DataLease(self.settings_path.parent).acquire()
         self.assertTrue(bridge._shutdown_requested.is_set())
+
+    def test_listener_close_does_not_raise_uncaught_windows_socket_error(self):
+        error = OSError(10038, 'listener closed')
+        with patch('http.server.ThreadingHTTPServer.serve_forever', side_effect=error):
+            self.assertIsNone(self.server.serve_forever())
+        with patch('http.server.ThreadingHTTPServer.serve_forever', side_effect=OSError(5, 'other failure')):
+            with self.assertRaises(OSError):
+                self.server.serve_forever()
 
     def test_shutdown_waits_for_admitted_chat_to_persist(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -1149,10 +1265,20 @@ class UIServerTests(unittest.TestCase):
         self.assertEqual(body["status"], "unknown")
         self.assertFalse(body["fallback_used"])
 
+    def test_workbench_plugin_receives_exact_shell_origin(self):
+        bridge = self.server.sumika_bridge
+        self.assertEqual(bridge.workbench.bridge_origin, f'http://127.0.0.1:{self.port}')
+
     def test_static_serving_blocks_path_traversal(self):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.request("/../AGENTS.md")
         self.assertIn(caught.exception.code, (403, 404))
+
+    def test_static_serving_does_not_expose_python_sources(self):
+        for path in ("/server.py", "/management.py", "/bridge_probe.py"):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.request(path)
+            self.assertEqual(caught.exception.code, 404)
 
     def test_schedule_endpoints_over_http(self):
         from extensions.desktop.scheduler import Schedule
@@ -1232,11 +1358,12 @@ class CompanionSessionEntryTests(unittest.TestCase):
         self.bridge = self.server.sumika_bridge
 
     def tearDown(self):
-        # R1: never wait on serve_forever here — a daemon service thread that
-        # died would hang shutdown() forever. Close the socket (which runs the
-        # bridge shutdown and releases the data lease) and let the daemon exit.
-        self.thread.join(timeout=5)
+        # Stop the serving loop before closing its Windows socket. Closing
+        # first produces an uncaught WinError 10038 in serve_forever.
+        if self.thread.is_alive():
+            self.server.shutdown()
         self.server.server_close()
+        self.thread.join(timeout=5)
         self._tmp.cleanup()
 
     def test_text_session_start_applies_proactive_settings(self):

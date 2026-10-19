@@ -8,6 +8,8 @@
   let current=null, epoch=0, state='stopped', reason=null;
   const status=()=>({state,reason,packets:current?.packets||0});
   const identity=snapshot=>JSON.stringify(snapshot.media_identity);
+  const sourceIdentity=value=>{const {timeline_revision,...source}=value.media_identity;return JSON.stringify(source);};
+  const seekPending=owner=>owner.seeking || snapshot().seeking;
   const release=async owner=>{
     if(!owner)return;
     clearInterval(owner.timer);
@@ -26,8 +28,9 @@
   const snapshot=()=>config.readSnapshot({origin:config.origin,capture_frame:false});
   const matches=owner=>{
     const value=snapshot();
-    return owner.video.isConnected && value.ok && !value.paused && !value.seeking && !value.ended &&
-      value.playback_rate===owner.rate && identity(value)===owner.identity;
+    return owner.video.isConnected && value.ok && !value.paused && !value.ended &&
+      value.playback_rate===owner.rate && sourceIdentity(value)===owner.sourceIdentity &&
+      (seekPending(owner) || identity(value)===owner.identity);
   };
   const start=async()=>{
     if(current)throw new Error('player audio already active');
@@ -43,6 +46,7 @@
     if(videos.length!==1 || typeof videos[0].captureStream!=='function')
       throw new Error('media element audio capture unavailable');
     const owner=current={epoch:++epoch,video:videos[0],identity:identity(initial),
+      sourceIdentity:sourceIdentity(initial),
       media_identity:initial.media_identity,rate:initial.playback_rate,packets:0,busy:false,listeners:[]};
     state='starting';reason=null;
     try {
@@ -61,7 +65,11 @@
       owner.source.connect(owner.node);owner.node.connect(owner.sink);owner.sink.connect(owner.context.destination);
       owner.node.port.onmessage=event=>{
         if(current!==owner || owner.epoch!==epoch)return;
+        // Seeking changes the collector's timeline revision and can briefly
+        // produce silence or stale samples. Keep the stream alive, but never
+        // forward samples until the seeked boundary rotates the host epoch.
         if(!matches(owner)){void stop('player_changed');return;}
+        if(seekPending(owner))return;
         const data=event.data;
         if(!(data instanceof ArrayBuffer) || data.byteLength!==3200){void stop('invalid_audio_packet');return;}
         // At most one 100ms packet is handed to an asynchronous consumer. A
@@ -78,8 +86,29 @@
           .finally(()=>{owner.busy=false;});
       };
       const revoke=()=>{if(current===owner)void stop('player_changed');};
+      const beginSeek=()=>{if(current===owner)owner.seeking=true;};
+      const finishSeek=()=>{
+        if(current!==owner)return;
+        // Keep the media-element capture alive across a seek. The worklet
+        // drops packets while seeking; tearing down the AudioContext and
+        // rebuilding it from a seek event left the new context without a
+        // usable audio stream (repeated seeks then produced zero packets).
+        // Adopt the post-seek timeline identity and resume forwarding.
+        owner.seeking=false;
+        const value=snapshot();
+        if(!value.ok || value.paused || value.ended ||
+           sourceIdentity(value)!==owner.sourceIdentity){
+          revoke();
+          return;
+        }
+        owner.identity=identity(value);
+        owner.media_identity=value.media_identity;
+        owner.rate=value.playback_rate;
+      };
       for(const track of owner.stream.getAudioTracks())track.addEventListener('ended',revoke,{once:true});
-      for(const name of ['seeking','emptied','pause','ended','ratechange']){
+      owner.video.addEventListener('seeking',beginSeek);owner.listeners.push(['seeking',beginSeek]);
+      owner.video.addEventListener('seeked',finishSeek);owner.listeners.push(['seeked',finishSeek]);
+      for(const name of ['emptied','pause','ended','ratechange']){
         owner.video.addEventListener(name,revoke);owner.listeners.push([name,revoke]);
       }
       owner.timer=setInterval(()=>{if(current===owner && !matches(owner))revoke();},100);

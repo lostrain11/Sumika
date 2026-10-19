@@ -81,10 +81,11 @@ html[data-sumika-skin='1'] [class*='_collapsed'] button[class*='_newSession'] {
         .map(([key, value]) => [key, {light: value, dark: value}]));
       let dispose = null;
       let updating = false;
-      const host='http://127.0.0.1:8765';
+      const host=(()=>{try{const parent=new URL(window.location.ancestorOrigins?.[0]||document.referrer);
+        return parent.protocol==='http:'&&parent.hostname==='127.0.0.1'&&!parent.username&&!parent.password?parent.origin:null;}catch{return null;}})();
       let initial=true;
       const report=()=>{
-        if(window.parent!==window)window.parent.postMessage({type:initial?'sumika:theme-ready':'sumika:theme-state',preference:ctx.theme.getTheme().preference},host);
+        if(host&&window.parent!==window)window.parent.postMessage({type:initial?'sumika:theme-ready':'sumika:theme-state',preference:ctx.theme.getTheme().preference},host);
       };
       const sync = () => {
         if (updating) return;

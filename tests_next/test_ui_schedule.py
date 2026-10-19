@@ -48,6 +48,19 @@ class ScheduleControllerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 controller.acknowledge("")
 
+    def test_future_once_and_recurring_next_due_do_not_use_past_occurrence(self):
+        with tempfile.TemporaryDirectory() as d:
+            controller = self._controller(d)
+            controller.store.upsert(Schedule('future', 'once', '2026-01-03T09:00:00+08:00', 'future'))
+            controller.store.upsert(Schedule('past', 'once', '2026-01-01T09:00:00+08:00', 'past'))
+            controller.store.upsert(Schedule('off', 'daily', '09:00', 'off', enabled=False))
+            now = datetime(2026, 1, 2, 14, tzinfo=timezone.utc)
+            rows = {r['id']: r for r in controller.definitions(now)}
+            self.assertEqual(rows['future']['next_due'], '2026-01-03T01:00:00+00:00')
+            self.assertEqual(rows['daily-anime']['next_due'], '2026-01-03T13:00:00+00:00')
+            self.assertIsNone(rows['past']['next_due'])
+            self.assertIsNone(rows['off']['next_due'])
+
     def test_reminders_are_durable_and_acknowledged_locally(self):
         with tempfile.TemporaryDirectory() as d:
             controller = self._controller(d)

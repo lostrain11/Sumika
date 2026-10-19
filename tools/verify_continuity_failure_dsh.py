@@ -5,6 +5,7 @@ All data belongs to a new isolated profile. No cloud calls or personal data.
 import json
 import sys
 import uuid
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,37 @@ def turn(adapter, sid, request):
         next(stream)
         prompt(adapter, sid, request)
         return [frame['event'] for frame in finish(stream) if frame.get('event')]
+    finally:
+        stream.close()
+
+
+def fenced_turn(adapter, sid, request):
+    """Accept native admission rejection or the older asynchronous failure.
+
+    Inspect the actual RPC error: a generic gateway error alone is not proof
+    that continuity fenced the request.
+    """
+    stream = adapter.stream('session/follow', {
+        'address': {'kind': 'session', 'sessionId': sid}}, timeout=30)
+    try:
+        next(stream)
+        rpc_id = uuid.uuid4().hex
+        body = {'type': 'client-request', 'rpcId': rpc_id,
+                'method': 'session/prompt', 'payload': {'args': {'request': {
+                    'sessionId': sid, 'requestId': request, 'mode': 'queue',
+                    'content': [{'type': 'text', 'text': request}]}}}}
+        call = urllib.request.Request(adapter.url + '/api/session/prompt',
+            data=json.dumps(body).encode(), headers={
+                'Content-Type': 'application/json', 'Origin': adapter.url})
+        with adapter._opener.open(call, timeout=20) as response:
+            reply = json.load(response)
+        assert reply.get('type') == 'server-response' and reply.get('rpcId') == rpc_id
+        result = reply['result']
+        if result.get('ok') is False:
+            return {'kind': 'rpc_rejected', 'error': result['error']}
+        assert result == {'ok': True, 'value': {'accepted': True}}, result
+        events = [frame['event'] for frame in finish(stream) if frame.get('event')]
+        return {'kind': events[-1]['data']['reason']['kind'], 'events': events}
     finally:
         stream.close()
 
@@ -61,17 +93,16 @@ def main():
             adapter = Dsh(ROOT, home)
             adapter.start()
             for attempt in range(2):
-                events = turn(adapter, sid, 'failure-probe-' + str(attempt))
-                reason = events[-1]['data']['reason']
+                failure = fenced_turn(adapter, sid, 'failure-probe-' + str(attempt))
                 # Require the plugin error, not just an absence of model traffic.
-                serialized = json.dumps(events)
+                serialized = json.dumps(failure)
                 has_cause = 'Continuity outcome unknown; automatic retries disabled' in serialized
                 report['checks']['attempt_' + str(attempt)] = {
-                    'reason_kind': reason.get('kind'),
+                    'reason_kind': failure['kind'],
                     'continuity_error_observed': has_cause,
                     'new_model_requests': len(model.requests) - baseline_requests,
                 }
-                assert reason.get('kind') != 'completed', reason
+                assert failure['kind'] != 'completed', failure
                 assert has_cause, 'missing continuity failure evidence'
                 assert len(model.requests) == baseline_requests
                 assert db.read_bytes() == b'not sqlite'
@@ -81,9 +112,9 @@ def main():
             db.write_bytes(repaired)
             adapter = Dsh(ROOT, home)
             adapter.start()
-            events = turn(adapter, sid, 'after-repair-do-not-replay')
-            assert events[-1]['data']['reason']['kind'] != 'completed'
-            assert 'Continuity outcome unknown; automatic retries disabled' in json.dumps(events)
+            failure = fenced_turn(adapter, sid, 'after-repair-do-not-replay')
+            assert failure['kind'] != 'completed'
+            assert 'Continuity outcome unknown; automatic retries disabled' in json.dumps(failure)
             assert len(model.requests) == baseline_requests
             assert db.read_bytes() == repaired, 'restored storage was automatically written'
             report['checks']['repair_and_restart_preserve_unknown_fence'] = True

@@ -56,6 +56,17 @@ class Harness(unittest.TestCase):
     def classifier_requests(self):
         return len(self.classifications)
 
+    def classify(self, material=None):
+        material = material or self.material()
+        self.engine.on_foreground(self.identity, material=material)
+        self.clock['now'] += 2.01
+        return self.engine.on_foreground(self.identity, material=material)
+
+    def apply(self, material=None):
+        self.classify(material)
+        self.clock['now'] += 8.01
+        return self.engine.on_foreground(self.identity, material=material or self.material())
+
 
 class ManualAndControlTests(Harness):
     def test_manual_never_calls_the_classifier(self):
@@ -124,8 +135,7 @@ class QualificationTests(Harness):
     def test_top_and_lead_qualified(self):
         self.respond({'profile_id': self.study_id, 'score': 0.9,
                       'scores': {self.study_id: 0.9, self.game_id: 0.4}})
-        view = self.engine.on_foreground(self.identity,
-                                         material=self.material())
+        view = self.apply()
         self.assertEqual(view['reason'], 'matched')
         self.assertEqual(view['effective_profile_id'], self.study_id)
         self.assertEqual(view['score'], 0.9)
@@ -133,8 +143,7 @@ class QualificationTests(Harness):
     def test_small_lead_is_ambiguous(self):
         self.respond({'profile_id': self.study_id, 'score': 0.9,
                       'scores': {self.study_id: 0.9, self.game_id: 0.85}})
-        view = self.engine.on_foreground(self.identity,
-                                         material=self.material())
+        view = self.classify()
         self.assertEqual(view['reason'], 'ambiguous')
         self.assertIsNone(view['effective_profile_id'])
         self.assertEqual(view['candidate_profile_id'], self.study_id)
@@ -142,9 +151,9 @@ class QualificationTests(Harness):
     def test_low_top_is_unknown(self):
         self.respond({'profile_id': self.study_id, 'score': 0.6,
                       'scores': {self.study_id: 0.6, self.game_id: 0.1}})
-        view = self.engine.on_foreground(self.identity,
-                                         material=self.material())
+        view = self.classify()
         self.assertEqual(view['reason'], 'unknown')
+        self.assertEqual(self.classifier_requests(), 1)
 
     def test_garbage_responses_are_unknown_without_fallback(self):
         cases = [
@@ -158,54 +167,120 @@ class QualificationTests(Harness):
         for index, response in enumerate(cases):
             self.respond(response, target_key=f'target-{index}')
             self.clock['now'] += 100  # bypass the repeat window per case
-            view = self.engine.on_foreground(self.identity,
-                                             material=self.material(
-                                                 f'target-{index}'))
+            view = self.classify(self.material(f'target-{index}'))
             self.assertEqual(view['reason'], 'unknown', msg=response)
 
     def test_raising_classifier_is_unknown(self):
         self.respond(RuntimeError('model exploded'), target_key='lesson.pdf')
-        view = self.engine.on_foreground(self.identity,
-                                         material=self.material())
+        view = self.classify()
         self.assertEqual(view['reason'], 'unknown')
+        self.assertEqual(self.classifier_requests(), 1)
 
 
 class RateLimitTests(Harness):
-    def test_unchanged_scene_classified_once_per_60s(self):
-        self.respond({'profile_id': self.study_id, 'score': 0.95,
-                      'scores': {self.study_id: 0.95, self.game_id: 0.1}})
-        self.engine.on_foreground(self.identity, material=self.material())
-        self.clock['now'] += 3  # past the 2s debounce: binds + classifies
-        self.engine.on_foreground(self.identity, material=self.material())
-        calls = self.classifier_requests()
-        self.assertEqual(calls, 2)
-        self.clock['now'] += 25  # same scene, inside the 30s re-class window
-        self.engine.on_foreground(self.identity, material=self.material())
-        self.assertEqual(self.classifier_requests(), calls)
+    def setUp(self):
+        super().setUp()
+        self.respond({'scores': {self.study_id: .95, self.game_id: .1}})
 
-    def test_same_target_reclassified_after_30s(self):
-        self.respond({'profile_id': self.study_id, 'score': 0.95,
-                      'scores': {self.study_id: 0.95, self.game_id: 0.1}})
+    def test_first_foreground_waits_then_candidate_waits_eight_seconds(self):
+        view = self.engine.on_foreground(self.identity, material=self.material())
+        self.assertEqual(self.classifier_requests(), 0)
+        self.clock['now'] += 1.99
         self.engine.on_foreground(self.identity, material=self.material())
-        self.clock['now'] += 31
-        self.engine.on_foreground(self.identity, material=self.material())
+        self.assertEqual(self.classifier_requests(), 0)
+        self.clock['now'] += .02
+        view = self.engine.on_foreground(self.identity, material=self.material())
+        self.assertEqual(self.classifier_requests(), 1)
+        self.assertIsNone(view['effective_profile_id'])
+        self.clock['now'] += 7.99
+        self.assertIsNone(self.engine.on_foreground(self.identity,
+            material=self.material())['effective_profile_id'])
+        self.clock['now'] += .02
+        self.assertEqual(self.engine.on_foreground(self.identity,
+            material=self.material())['effective_profile_id'], self.study_id)
+
+    def test_unchanged_scene_never_reclassifies_periodically(self):
+        self.apply()
+        for seconds in (31, 61, 600, 3600):
+            self.clock['now'] += seconds
+            self.engine.on_foreground(self.identity, material=self.material())
+        self.assertEqual(self.classifier_requests(), 1)
+
+    def test_changed_evidence_same_target_waits_minimum_thirty_seconds(self):
+        self.classify()
+        self.clock['now'] += 5
+        self.engine.on_foreground(self.identity, material=self.material(title='新章节'))
+        self.assertEqual(self.classifier_requests(), 1)
+        self.clock['now'] += 25.01
+        self.engine.on_foreground(self.identity, material=self.material(title='新章节'))
         self.assertEqual(self.classifier_requests(), 2)
 
-    def test_target_change_triggers_immediate_classification(self):
-        self.respond({'profile_id': self.study_id, 'score': 0.95,
-                      'scores': {self.study_id: 0.95, self.game_id: 0.1}},
-                     target_key='lesson.pdf')
-        self.engine.on_foreground(self.identity,
-                                  material=self.material('lesson.pdf'))
-        calls = self.classifier_requests()
-        self.respond({'profile_id': self.game_id, 'score': 0.95,
-                      'scores': {self.study_id: 0.1, self.game_id: 0.95}},
-                     target_key='game.exe')
-        self.clock['now'] += 5
-        view = self.engine.on_foreground(self.identity,
-                                         material=self.material('game.exe'))
-        self.assertEqual(self.classifier_requests(), calls + 1)
-        self.assertEqual(view['effective_profile_id'], self.game_id)
+    def test_new_material_cancels_candidate_and_waits_for_application(self):
+        self.apply()
+        self.respond({'scores': {self.study_id: .1, self.game_id: .95}}, 'game.exe')
+        self.clock['now'] += 1
+        material = self.material('game.exe')
+        view = self.engine.on_foreground(self.identity, material=material)
+        self.assertIsNone(view['effective_profile_id'])
+        self.assertEqual(self.classifier_requests(), 2)
+        self.clock['now'] += 8.01
+        self.assertEqual(self.engine.on_foreground(self.identity,
+            material=material)['effective_profile_id'], self.game_id)
+
+
+class LateResponseTests(Harness):
+    def run_race(self, mutation):
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        def classifier(request):
+            entered.set()
+            self.assertTrue(release.wait(3))
+            return {'scores': {self.study_id: .99, self.game_id: .01}}
+        self.engine._classifier = classifier
+        self.engine.on_foreground(self.identity, material=self.material())
+        self.clock['now'] += 2.01
+        worker = threading.Thread(target=lambda: self.engine.on_foreground(
+            self.identity, material=self.material()))
+        worker.start()
+        self.assertTrue(entered.wait(2))
+        try:
+            mutation()
+        finally:
+            release.set()
+            worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.clock['now'] += 10
+        return self.engine.view()
+
+    def test_pause_rejects_late_result(self):
+        self.assertEqual(self.run_race(lambda: self.engine.set_suspended(True))['reason'], 'suspended')
+
+    def test_unavailable_foreground_rejects_late_result(self):
+        self.assertEqual(self.run_race(lambda: self.engine.on_foreground(None))['reason'], 'suspended')
+
+    def test_manual_revision_rejects_late_auto_result(self):
+        def manual():
+            self.store.select('manual', self.game_id, expected_revision=self.store.load()['revision'])
+            self.engine.on_foreground(self.identity, material=self.material())
+        self.assertEqual(self.run_race(manual)['effective_profile_id'], self.game_id)
+
+    def test_changed_config_rejects_late_result(self):
+        def change():
+            self.store.update(self.study_id, {'name': '改名'}, expected_revision=self.store.load()['revision'])
+            self.engine.on_config_changed()
+        self.assertIsNone(self.run_race(change)['effective_profile_id'])
+
+    def test_target_change_rejects_late_result(self):
+        self.assertIsNone(self.run_race(lambda: self.engine.on_foreground(
+            {'handle': 3}, material=self.material('new')))['effective_profile_id'])
+
+    def test_single_physical_request_even_when_cancel_is_ignored(self):
+        def change():
+            self.engine.on_foreground({'handle': 3}, material=self.material('new'))
+            self.clock['now'] += 2.1
+            self.engine.on_foreground({'handle': 3}, material=self.material('new'))
+            self.assertIsNotNone(self.engine._request)
+        self.run_race(change)
 
 
 if __name__ == '__main__':
