@@ -114,6 +114,7 @@ public partial class ShellWindow : Window
             };
             var menu = new WinForms.ContextMenuStrip();
             menu.Items.Add("显示主窗口", null, (_, _) => ShowMainWindow());
+            menu.Items.Add("隐藏到托盘", null, (_, _) => Hide());
             menu.Items.Add("退出 Sumika", null, (_, _) =>
             {
                 _allowClose = true;
