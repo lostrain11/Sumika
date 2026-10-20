@@ -62,9 +62,9 @@ public partial class ShellWindow : Window
             await Browser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                 "document.documentElement.classList.add('shell-host');");
             Browser.CoreWebView2.WebMessageReceived += OnShellMessage;
-            var target = string.IsNullOrWhiteSpace(_initialRoute)
-                ? _baseUrl
-                : _baseUrl + "#" + Uri.EscapeDataString(_initialRoute);
+            var target = _baseUrl + "?shell=1";
+            if (!string.IsNullOrWhiteSpace(_initialRoute))
+                target += "#" + Uri.EscapeDataString(_initialRoute);
             Browser.Source = new Uri(target);
         }
         catch (Exception error)

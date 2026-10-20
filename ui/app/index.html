@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="/app/layout.css">
 </head>
 <body>
-<script>if(new URLSearchParams(location.search).get('pet')==='1')document.documentElement.classList.add('pet-host');</script>
+<script>if(new URLSearchParams(location.search).get('pet')==='1')document.documentElement.classList.add('pet-host');if(new URLSearchParams(location.search).get('shell')==='1')document.documentElement.classList.add('shell-host');</script>
 <script>
 /* Native shell host: report route/window visibility without taking over the page. */
 (function(){

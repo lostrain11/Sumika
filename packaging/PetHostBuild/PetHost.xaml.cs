@@ -34,6 +34,9 @@ public partial class PetHost : Window
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool SetProp(IntPtr window, string name, IntPtr value);
 
@@ -56,6 +59,9 @@ public partial class PetHost : Window
     {
         InitializeComponent();
         _url = url;
+        var workArea = SystemParameters.WorkArea;
+        Left = workArea.Right - Width - 12;
+        Top = workArea.Bottom - Height - 12;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -64,10 +70,11 @@ public partial class PetHost : Window
         {
             var handle = new WindowInteropHelper(this).Handle;
             Diagnostic("window-created");
-            // Capture exclusion is best effort: some Windows editions refuse the
-            // affinity call, but the companion window must still open.
+            // Do not set WDA_EXCLUDEFROMCAPTURE here: the desktop pet is meant to
+            // be visible in screenshots and normal capture tools.
             SetProp(handle, CaptureHostProperty, new IntPtr(1));
-            SetWindowDisplayAffinity(handle, 0x11);
+            Topmost = true;
+            SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
             var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Sumika", "WebView2", "PetHost");
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: cache);
@@ -92,8 +99,8 @@ public partial class PetHost : Window
                         if (compact == _compact) return;
                         var right = Left + Width;
                         var bottom = Top + Height;
-                        Width = compact ? 56 : 340;
-                        Height = compact ? 56 : 430;
+                        Width = compact ? 76 : 340;
+                        Height = compact ? 76 : 430;
                         Left = right - Width;
                         Top = bottom - Height;
                         CloseButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;

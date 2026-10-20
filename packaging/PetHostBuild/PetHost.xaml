@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" AllowsTransparency="True" Background="#01000000"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
-        Width="56" Height="56" Loaded="OnLoaded" MouseLeftButtonDown="OnDrag">
+        Width="76" Height="76" Loaded="OnLoaded" MouseLeftButtonDown="OnDrag">
   <Grid Background="Transparent">
     <wv2:WebView2 x:Name="Browser" xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf" />
     <Button x:Name="CloseButton" Content="×" Width="24" Height="24" HorizontalAlignment="Right" VerticalAlignment="Top"
