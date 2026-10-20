@@ -1006,12 +1006,35 @@
     panel.setAttribute("aria-hidden", open ? "false" : "true");
     if (open && frame && !frame.src) frame.src = "/?preview=1#room";
   };
-  document.getElementById("activityPreviewClose")?.addEventListener("click", () => {
-    document.getElementById("activityPreview")?.classList.remove("open");
+  window.addEventListener("keydown", e => {
+    if (e.key === "Escape") document.getElementById("activityPreview")?.classList.remove("open");
   });
   window.addEventListener("hashchange", () => {
     if (location.hash === "#room") document.getElementById("activityPreview")?.classList.remove("open");
   });
+  (function previewDrag(){
+    const panel = document.getElementById("activityPreview");
+    const grip = panel?.querySelector(".activity-preview-grip");
+    if (!panel || !grip) return;
+    let drag = null;
+    grip.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      const r = panel.getBoundingClientRect();
+      drag = {x:e.clientX, y:e.clientY, left:r.left, top:r.top};
+      panel.style.left = r.left + "px"; panel.style.top = r.top + "px";
+      panel.style.right = "auto"; panel.style.bottom = "auto";
+      grip.setPointerCapture(e.pointerId);
+    });
+    grip.addEventListener("pointermove", e => {
+      if (!drag) return;
+      const maxX = innerWidth - panel.offsetWidth - 8;
+      const maxY = innerHeight - panel.offsetHeight - 8;
+      panel.style.left = Math.min(Math.max(8, drag.left + e.clientX - drag.x), maxX) + "px";
+      panel.style.top = Math.min(Math.max(8, drag.top + e.clientY - drag.y), maxY) + "px";
+    });
+    grip.addEventListener("pointerup", () => { drag = null; });
+    grip.addEventListener("pointercancel", () => { drag = null; });
+  })();
   if (document.documentElement.classList.contains('pet-host')) {
     document.getElementById('deskpet')?.classList.add('mini');
     setTimeout(() => window.chrome?.webview?.postMessage('sumika:compact'), 120);
@@ -1167,12 +1190,9 @@
 <script type="module" src="/app/bind.js"></script>
 <script type="module" src="/app/management.js"></script>
 <script type="module" src="/app/handoff.js"></script>
-<button id="petChip" class="pet-chip" type="button" title="进入桌宠模式" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>桌宠</button>
+<button id="petChip" class="pet-chip" type="button" title="打开活动室预览" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>活动预览</button>
 <div id="activityPreview" class="activity-preview" aria-hidden="true">
-  <div class="activity-preview-bar">
-    <span>活动室预览</span>
-    <button id="activityPreviewClose" type="button" title="收起预览" aria-label="收起预览">×</button>
-  </div>
+  <div class="activity-preview-grip" title="拖动预览" aria-hidden="true"></div>
   <iframe id="activityPreviewFrame" title="活动室实时预览" loading="lazy"></iframe>
 </div>
 </body>
