@@ -28,17 +28,22 @@ class PetHost:
                     'pid':self._process.pid if self._process is not None else None,
                     'status':'running' if self._process is not None else 'stopped'}
 
-    def start(self, port):
+    def start(self, port, hidden=False):
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError('valid bridge port required')
+        if type(hidden) is not bool:
+            raise ValueError('valid hidden flag required')
         with self._lock:
             state = self.status()
             if state['alive']:
                 return state
             if not state['available']:
                 raise RuntimeError('packaged Windows pet host unavailable')
-            process = subprocess.Popen([str(self.root/'SumikaPet.exe'),
-                f'http://127.0.0.1:{port}/?pet=1'], cwd=self.root,
+            argv = [str(self.root/'SumikaPet.exe'),
+                    f'http://127.0.0.1:{port}/?pet=1']
+            if hidden:
+                argv.append('--hidden')
+            process = subprocess.Popen(argv, cwd=self.root,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             job = None

@@ -14,6 +14,7 @@ namespace SumikaPetHost;
 public partial class PetHost : Window
 {
     private readonly string _url;
+    private readonly bool _hidden;
     private bool _compact;
     private const string CaptureHostProperty = "Sumika.Companion.CaptureHost";
 
@@ -55,10 +56,11 @@ public partial class PetHost : Window
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
-    public PetHost(string url)
+    public PetHost(string url, bool hidden = false)
     {
         InitializeComponent();
         _url = url;
+        _hidden = hidden;
         var workArea = SystemParameters.WorkArea;
         Left = workArea.Right - Width - 12;
         Top = workArea.Bottom - Height - 12;
@@ -99,8 +101,8 @@ public partial class PetHost : Window
                         if (compact == _compact) return;
                         var right = Left + Width;
                         var bottom = Top + Height;
-                        Width = compact ? 76 : 340;
-                        Height = compact ? 76 : 430;
+                        Width = compact ? 76 : 380;
+                        Height = compact ? 76 : 540;
                         Left = right - Width;
                         Top = bottom - Height;
                         CloseButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
@@ -189,6 +191,7 @@ public partial class PetHost : Window
                 }
             };
             Browser.Source = new Uri(_url);
+            if (_hidden) Dispatcher.BeginInvoke(new Action(Hide));
         }
         catch (Exception error)
         {
@@ -201,11 +204,6 @@ public partial class PetHost : Window
     {
         RemoveProp(new WindowInteropHelper(this).Handle, CaptureHostProperty);
         base.OnClosed(e);
-    }
-
-    private void OnDrag(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ButtonState == MouseButtonState.Pressed) DragMove();
     }
 
     private void CloseHost(object sender, RoutedEventArgs e) => Close();

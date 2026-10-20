@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using WinForms = System.Windows.Forms;
 
@@ -24,14 +26,18 @@ public partial class ShellWindow : Window
     private string _route = "room";
     private bool _petRunning;
     private bool _petBusy;
+    private int _petPid;
+    private IntPtr _petWindow;
     private bool _serverReady;
     private readonly string? _initialRoute;
     private WinForms.NotifyIcon? _tray;
+    private readonly DispatcherTimer _petTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
 
     public ShellWindow(int port, string? dataDirectory, string? initialRoute = null)
     {
         InitializeComponent();
         _initialRoute = initialRoute;
+        _route = string.IsNullOrWhiteSpace(initialRoute) ? "room" : initialRoute;
         _port = port;
         _dataDirectory = dataDirectory;
         _baseUrl = $"http://127.0.0.1:{port}/";
@@ -41,8 +47,8 @@ public partial class ShellWindow : Window
         };
         Loaded += OnLoaded;
         Closing += OnClosing;
-        StateChanged += (_, _) => _ = SyncPetAsync();
-        IsVisibleChanged += (_, _) => _ = SyncPetAsync();
+        _petTimer.Tick += (_, _) => _ = SyncPetAsync();
+        _petTimer.Start();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -83,7 +89,21 @@ public partial class ShellWindow : Window
         {
             using var document = JsonDocument.Parse(e.WebMessageAsJson);
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
+            if (root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("type", out var kind)
+                && kind.GetString() == "sumika:pet-mode")
+            {
+                Dispatcher.Invoke(Hide);
+                return;
+            }
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                using var nested = JsonDocument.Parse(root.GetString() ?? "{}");
+                root = nested.RootElement;
+                if (root.ValueKind != JsonValueKind.Object
+                    || root.GetProperty("type").GetString() != "sumika:context") return;
+            }
+            else if (root.ValueKind != JsonValueKind.Object
                 || root.GetProperty("type").GetString() != "sumika:context") return;
             var route = root.TryGetProperty("route", out var value) ? value.GetString() : null;
             if (!string.IsNullOrWhiteSpace(route) && route != _route)
@@ -136,20 +156,54 @@ public partial class ShellWindow : Window
         });
     }
 
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr window);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter,
+        int x, int y, int width, int height, uint flags);
+
+    private static IntPtr FindPetWindow(int pid)
+    {
+        var found = IntPtr.Zero;
+        EnumWindows((window, _) =>
+        {
+            GetWindowThreadProcessId(window, out var owner);
+            if (owner != pid) return true;
+            if (!GetWindowRect(window, out var rect)) return true;
+            // The pet's top-level window is at least the compact orb box; skip
+            // WebView2/utility windows that are short or zero-sized.
+            if (rect.Right - rect.Left < 60 || rect.Bottom - rect.Top < 60) return true;
+            found = window;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     private async Task SyncPetAsync()
     {
         if (_petBusy || !_serverReady) return;
         _petBusy = true;
         try
         {
-            var desired = _route != "room" || WindowState == WindowState.Minimized || !IsVisible;
-            if (desired == _petRunning) return;
-            if (desired)
-                _petRunning = await PetActionAsync("start");
-            else
+            var desired = WindowState == WindowState.Minimized || !IsVisible;
+            if (desired && !_petRunning)
             {
-                await PetActionAsync("stop");
-                _petRunning = false;
+                _petRunning = await StartHiddenPetAsync();
+            }
+            else if (!desired && _petRunning)
+            {
+                await StopPetAsync();
             }
         }
         finally
@@ -158,7 +212,29 @@ public partial class ShellWindow : Window
         }
     }
 
-    private async Task<bool> PetActionAsync(string action)
+    private async Task<bool> EnsurePetAsync()
+    {
+        if (_petWindow != IntPtr.Zero && IsWindow(_petWindow)) return true;
+        if (_petPid == 0)
+        {
+            var started = await StartHiddenPetAsync();
+            if (!started) return false;
+        }
+        for (var i = 0; i < 50; i++)
+        {
+            var handle = FindPetWindow(_petPid);
+            if (handle != IntPtr.Zero)
+            {
+                _petWindow = handle;
+                ShowWindow(handle, 0);
+                return true;
+            }
+            await Task.Delay(100);
+        }
+        return false;
+    }
+
+    private async Task<bool> StartHiddenPetAsync()
     {
         try
         {
@@ -168,16 +244,41 @@ public partial class ShellWindow : Window
             if (string.IsNullOrWhiteSpace(csrf)) return false;
             using var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "api/companion/pet");
             request.Headers.Add("X-Sumika-CSRF", csrf);
-            request.Content = new StringContent("{\"action\":\"" + action + "\"}",
+            request.Content = new StringContent("{\"action\":\"start\"}",
                 System.Text.Encoding.UTF8, "application/json");
             using var response = await _http.SendAsync(request);
             if (!response.IsSuccessStatusCode) return false;
             using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            return action == "start"
-                && result.RootElement.TryGetProperty("alive", out var alive)
-                && alive.ValueKind == JsonValueKind.True;
+            if (!result.RootElement.TryGetProperty("alive", out var alive)
+                || alive.ValueKind != JsonValueKind.True) return false;
+            if (result.RootElement.TryGetProperty("pid", out var pid)
+                && pid.TryGetInt32(out var value)) _petPid = value;
+            return _petPid != 0;
         }
         catch (Exception) { return false; }
+    }
+
+    private async Task StopPetAsync()
+    {
+        if (_petPid == 0) return;
+        try
+        {
+            using var session = await _http.GetAsync(_baseUrl + "api/manage/session");
+            using var sessionDocument = JsonDocument.Parse(await session.Content.ReadAsStringAsync());
+            var csrf = sessionDocument.RootElement.GetProperty("csrf").GetString();
+            if (!string.IsNullOrWhiteSpace(csrf))
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "api/companion/pet");
+                request.Headers.Add("X-Sumika-CSRF", csrf);
+                request.Content = new StringContent("{\"action\":\"stop\"}",
+                    System.Text.Encoding.UTF8, "application/json");
+                using var response = await _http.SendAsync(request);
+            }
+        }
+        catch (Exception) { }
+        _petWindow = IntPtr.Zero;
+        _petPid = 0;
+        _petRunning = false;
     }
 
     private async Task EnsureServerAsync()
@@ -234,22 +335,16 @@ public partial class ShellWindow : Window
         _serverReady = false;
         try
         {
-            if (_ownsServer || _petRunning) await StopPetAsync();
+            if (_ownsServer || _petPid != 0) await StopPetAsync();
             if (_ownsServer) await StopOwnedServerAsync();
         }
         finally
         {
+            _petTimer.Stop();
             _tray?.Dispose();
             _tray = null;
             Close();
         }
-    }
-
-    private async Task StopPetAsync()
-    {
-        if (!_petRunning) return;
-        await PetActionAsync("stop");
-        _petRunning = false;
     }
 
     private async Task StopOwnedServerAsync()

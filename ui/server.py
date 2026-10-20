@@ -1576,9 +1576,12 @@ class Bridge:
         return speak
 
     def companion_pet(self, payload):
-        if not isinstance(payload, dict) or set(payload) != {'action'}:
+        if not isinstance(payload, dict) or 'action' not in payload or set(payload) - {'action', 'hidden'}:
             raise ValueError('pet action required; custom launch arguments are not supported')
         action = payload['action']
+        hidden = payload.get('hidden', False)
+        if type(hidden) is not bool:
+            raise ValueError('pet hidden flag must be boolean')
         if action == 'status':
             return self._pet_host.status()
         if action == 'stop':
@@ -1586,7 +1589,7 @@ class Bridge:
         if action == 'start':
             if self._shutdown_requested.is_set():
                 raise RuntimeError('bridge is shutting down')
-            return self._pet_host.start(self.listen_port)
+            return self._pet_host.start(self.listen_port, hidden=hidden)
         raise ValueError('invalid pet action')
 
     def companion_session(self, payload):

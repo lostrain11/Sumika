@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using System.Linq;
 
 namespace SumikaPetHost;
 
@@ -15,6 +16,7 @@ public partial class App : Application
             Shutdown(2);
             return;
         }
-        new PetHost(parsed.ToString()).Show();
+        var hidden = args.Args.Contains("--hidden");
+        new PetHost(parsed.ToString(), hidden).Show();
     }
 }

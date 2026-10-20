@@ -140,5 +140,17 @@ body.on-room .deskpet{display:none}
 .dp-chat [data-dp-send]{width:26px;height:26px;border-radius:8px;background:var(--chara);display:grid;place-items:center;flex:none;transition:background .2s;color:var(--plain);border:none}
 .dp-chat [data-dp-send]:hover{filter:brightness(1.08)}
 
-/* The native shell owns the desktop pet; suppress the in-page clone. */
-html.shell-host #deskpet{display:none!important}
+
+/* Desktop pet window is only as large as the orb; keep tooltips out of it. */
+.pet-host .dp-mini-tip{display:none!important}
+
+/* In-client deskpet entry: a quiet chip, never a second floating orb. */
+.pet-chip{display:none;position:fixed;right:16px;bottom:16px;z-index:48;align-items:center;gap:5px;
+  height:28px;padding:0 10px;border:1px solid var(--rose-line);border-radius:999px;
+  background:var(--paper);color:var(--rose);font:11px/1 var(--sans);cursor:pointer;
+  box-shadow:0 4px 14px rgba(80,60,50,.10)}
+.pet-chip span{font:12px Georgia,serif}
+.pet-chip:hover{background:var(--rose-soft)}
+body:not(.on-room) .pet-chip{display:flex}
+html.pet-host .pet-chip{display:none!important}
+html:not(.pet-host) #deskpet{display:none!important}

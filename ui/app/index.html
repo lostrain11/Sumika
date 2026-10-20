@@ -733,7 +733,7 @@
        这样收起态的圆形按钮既能拖动也能单击展开。 */
     el.addEventListener('pointerdown', e => {
       /* 可交互区不参与拖动：按钮（收起态圆钮除外）、输入框、聊天记录面板 */
-      if (e.target.closest('button:not(.dp-mini),input,[data-dp-log]')) return;
+      if (e.target.closest('button,input,[data-dp-log]')) return;
       if (document.documentElement.classList.contains('pet-host') && window.chrome?.webview) {
         if (e.button === 0) window.chrome.webview.postMessage('sumika:drag');
         return;
@@ -980,6 +980,9 @@
   if (ACT[qs.get('act')]) setAct(qs.get('act')); else applyCam();
   buildDeskpet();
   syncDeskpet();
+  document.getElementById("petChip")?.addEventListener("click", () => {
+    try { window.chrome?.webview?.postMessage({type:"sumika:pet-mode"}); } catch (_) {}
+  });
   if (document.documentElement.classList.contains('pet-host')) {
     document.getElementById('deskpet')?.classList.add('mini');
     setTimeout(() => window.chrome?.webview?.postMessage('sumika:compact'), 120);
@@ -1135,5 +1138,6 @@
 <script type="module" src="/app/bind.js"></script>
 <script type="module" src="/app/management.js"></script>
 <script type="module" src="/app/handoff.js"></script>
+<button id="petChip" class="pet-chip" type="button" title="进入桌宠模式"><span aria-hidden="true">✿</span>桌宠</button>
 </body>
 </html>
