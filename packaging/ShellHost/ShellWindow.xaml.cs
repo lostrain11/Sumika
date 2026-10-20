@@ -66,7 +66,11 @@ public partial class ShellWindow : Window
             Browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
             Browser.CoreWebView2.Settings.IsStatusBarEnabled = false;
             await Browser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                "document.documentElement.classList.add('shell-host');");
+                "document.documentElement.classList.add('shell-host');" +
+                "document.addEventListener('click', e => {" +
+                " if (e.target && e.target.closest && e.target.closest('#petChip'))" +
+                "  window.chrome.webview.postMessage(JSON.stringify({type:'sumika:pet-mode'}));" +
+                "}, true);");
             Browser.CoreWebView2.WebMessageReceived += OnShellMessage;
             var target = _baseUrl + "?shell=1";
             if (!string.IsNullOrWhiteSpace(_initialRoute))
@@ -87,24 +91,21 @@ public partial class ShellWindow : Window
     {
         try
         {
-            using var document = JsonDocument.Parse(e.WebMessageAsJson);
-            var root = document.RootElement;
-            if (root.ValueKind == JsonValueKind.Object
-                && root.TryGetProperty("type", out var kind)
-                && kind.GetString() == "sumika:pet-mode")
+            using var outer = JsonDocument.Parse(e.WebMessageAsJson);
+            JsonElement root = outer.RootElement;
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                using var nested = JsonDocument.Parse(root.GetString() ?? "{}");
+                root = nested.RootElement.Clone();
+            }
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("type", out var kind)) return;
+            if (kind.GetString() == "sumika:pet-mode")
             {
                 Dispatcher.Invoke(Hide);
                 return;
             }
-            if (root.ValueKind == JsonValueKind.String)
-            {
-                using var nested = JsonDocument.Parse(root.GetString() ?? "{}");
-                root = nested.RootElement;
-                if (root.ValueKind != JsonValueKind.Object
-                    || root.GetProperty("type").GetString() != "sumika:context") return;
-            }
-            else if (root.ValueKind != JsonValueKind.Object
-                || root.GetProperty("type").GetString() != "sumika:context") return;
+            if (kind.GetString() != "sumika:context") return;
             var route = root.TryGetProperty("route", out var value) ? value.GetString() : null;
             if (!string.IsNullOrWhiteSpace(route) && route != _route)
             {

@@ -11,7 +11,7 @@
 .pet-host .deskpet .dp-chat{display:flex!important;max-width:calc(100vw - 16px);box-sizing:border-box}
 .pet-host .deskpet{display:flex!important;right:8px;bottom:8px}
 .pet-host body.on-room .deskpet{display:flex!important}
-.pet-host .deskpet .dp-main{width:300px}
+.pet-host .deskpet .dp-main{width:min(300px, calc(100vw - 16px))}
 .pet-host .deskpet .dp-chara{border-color:transparent;background:transparent;box-shadow:none}
 .pet-host .deskpet.mini .dp-main,.pet-host .deskpet.mini .dp-chat,.pet-host .deskpet.mini .dp-bubble{display:none!important}
 .deskpet:active{cursor:grabbing}
