@@ -1012,6 +1012,21 @@
   window.addEventListener("hashchange", () => {
     if (location.hash === "#room") document.getElementById("activityPreview")?.classList.remove("open");
   });
+  (function fitPreview(){
+    if (!document.documentElement.classList.contains("preview-host")) return;
+    const room = document.querySelector(".room-wrap");
+    if (!room) return;
+    const fit = () => {
+      const scale = Math.min(innerWidth / 720, innerHeight / 840);
+      const left = (innerWidth - 720 * scale) / 2;
+      const top = (innerHeight - 840 * scale) / 2;
+      room.style.transform = `translate(${left}px, ${top}px) scale(${scale})`;
+    };
+    fit();
+    addEventListener("resize", fit);
+    setTimeout(fit, 300);
+    setTimeout(fit, 900);
+  })();
   (function previewDrag(){
     const panel = document.getElementById("activityPreview");
     const grip = panel?.querySelector(".activity-preview-grip");
@@ -1190,9 +1205,9 @@
 <script type="module" src="/app/bind.js"></script>
 <script type="module" src="/app/management.js"></script>
 <script type="module" src="/app/handoff.js"></script>
-<button id="petChip" class="pet-chip" type="button" title="打开活动室预览" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>活动预览</button>
+<button id="petChip" class="pet-chip" type="button" title="打开桌宠预览" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>桌宠</button>
 <div id="activityPreview" class="activity-preview" aria-hidden="true">
-  <div class="activity-preview-grip" title="拖动预览" aria-hidden="true"></div>
+  <div class="activity-preview-grip" title="拖动预览"><span>桌宠</span></div>
   <iframe id="activityPreviewFrame" title="活动室实时预览" loading="lazy"></iframe>
 </div>
 </body>

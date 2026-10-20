@@ -105,7 +105,7 @@ public partial class PetHost : Window
                         Height = compact ? 76 : 540;
                         Left = right - Width;
                         Top = bottom - Height;
-                        CloseButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+                        CloseButton.Visibility = Visibility.Collapsed;
                         _compact = compact;
                         Diagnostic(compact ? "compacted" : "expanded");
                         return;
