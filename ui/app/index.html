@@ -1138,6 +1138,6 @@
 <script type="module" src="/app/bind.js"></script>
 <script type="module" src="/app/management.js"></script>
 <script type="module" src="/app/handoff.js"></script>
-<button id="petChip" class="pet-chip" type="button" title="进入桌宠模式"><span aria-hidden="true">✿</span>桌宠</button>
+<button id="petChip" class="pet-chip" type="button" title="进入桌宠模式" onclick="try{window.chrome?.webview?.postMessage({type:'sumika:pet-mode'})}catch(_){}"><span aria-hidden="true">✿</span>桌宠</button>
 </body>
 </html>

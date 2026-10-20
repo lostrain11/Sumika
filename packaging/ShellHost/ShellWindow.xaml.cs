@@ -57,6 +57,7 @@ public partial class ShellWindow : Window
         {
             await EnsureServerAsync();
             _serverReady = true;
+            _ = PrewarmPetAsync();
             var cache = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Sumika", "WebView2");
@@ -184,7 +185,9 @@ public partial class ShellWindow : Window
             if (!GetWindowRect(window, out var rect)) return true;
             // The pet's top-level window is at least the compact orb box; skip
             // WebView2/utility windows that are short or zero-sized.
-            if (rect.Right - rect.Left < 60 || rect.Bottom - rect.Top < 60) return true;
+            var width = rect.Right - rect.Left;
+            var height = rect.Bottom - rect.Top;
+            if (width < 60 || height < 60 || width > 600 || height > 800) return true;
             found = window;
             return false;
         }, IntPtr.Zero);
@@ -198,19 +201,30 @@ public partial class ShellWindow : Window
         try
         {
             var desired = WindowState == WindowState.Minimized || !IsVisible;
-            if (desired && !_petRunning)
+            if (desired)
             {
-                _petRunning = await StartHiddenPetAsync();
+                if (!await EnsurePetAsync()) return;
+                ShowWindow(_petWindow, 8); // SW_SHOWNA
+                SetWindowPos(_petWindow, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
+                _petRunning = true;
             }
-            else if (!desired && _petRunning)
+            else
             {
-                await StopPetAsync();
+                if (_petWindow != IntPtr.Zero && IsWindow(_petWindow))
+                    ShowWindow(_petWindow, 0); // SW_HIDE
+                _petRunning = false;
             }
         }
         finally
         {
             _petBusy = false;
         }
+    }
+
+    private async Task PrewarmPetAsync()
+    {
+        if (!_serverReady) return;
+        await EnsurePetAsync();
     }
 
     private async Task<bool> EnsurePetAsync()
@@ -245,7 +259,7 @@ public partial class ShellWindow : Window
             if (string.IsNullOrWhiteSpace(csrf)) return false;
             using var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "api/companion/pet");
             request.Headers.Add("X-Sumika-CSRF", csrf);
-            request.Content = new StringContent("{\"action\":\"start\"}",
+            request.Content = new StringContent("{\"action\":\"start\",\"hidden\":true}",
                 System.Text.Encoding.UTF8, "application/json");
             using var response = await _http.SendAsync(request);
             if (!response.IsSuccessStatusCode) return false;
