@@ -48,7 +48,7 @@ public partial class ShellWindow : Window
         Loaded += OnLoaded;
         Closing += OnClosing;
         _petTimer.Tick += (_, _) => _ = SyncPetAsync();
-        _petTimer.Start();
+        Activated += (_, _) => { if (!_petTimer.IsEnabled) _petTimer.Start(); };
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -76,6 +76,7 @@ public partial class ShellWindow : Window
             if (!string.IsNullOrWhiteSpace(_initialRoute))
                 target += "#" + Uri.EscapeDataString(_initialRoute);
             Browser.Source = new Uri(target);
+            _petTimer.Start();
         }
         catch (Exception error)
         {
