@@ -154,3 +154,12 @@ body.on-room .deskpet{display:none}
 body:not(.on-room) .pet-chip{display:flex}
 html.pet-host .pet-chip{display:none!important}
 html:not(.pet-host) #deskpet{display:none!important}
+
+/* Expanded desktop pet gets a soft paper card; compact orb stays transparent. */
+.pet-host .deskpet:not(.mini) .dp-main{
+  background:rgba(255,251,244,.95);
+  border:1px solid var(--rose-line);
+  border-radius:18px;
+  box-shadow:0 18px 50px rgba(80,60,50,.22);
+  backdrop-filter:blur(12px);
+}

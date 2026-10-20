@@ -622,6 +622,24 @@
       setTimeout(() => el.classList.remove('opening'), 360);
       if (document.documentElement.classList.contains('pet-host')) window.chrome?.webview?.postMessage('sumika:expand');
     });
+    /* 桌面壳里圆球既是展开按钮，也是拖动把手：移动超过阈值才交给原生拖动。 */
+    if (document.documentElement.classList.contains('pet-host')) {
+      const mini = el.querySelector('[data-dp-restore]');
+      let down = null;
+      mini.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        down = {x:e.clientX, y:e.clientY};
+      });
+      mini.addEventListener('pointermove', e => {
+        if (!down) return;
+        if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 4) return;
+        down = null;
+        el.dataset.justDragged = '1';
+        window.chrome?.webview?.postMessage('sumika:drag');
+      });
+      mini.addEventListener('pointerup', () => { down = null; });
+      mini.addEventListener('pointercancel', () => { down = null; });
+    }
     layoutDeskpet();
     /* ---- 记录区：只显示真实对话，不再预置任何编造内容 ---- */
     const MAX_LOG = 60;
