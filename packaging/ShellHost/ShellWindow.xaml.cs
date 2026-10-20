@@ -57,7 +57,6 @@ public partial class ShellWindow : Window
         {
             await EnsureServerAsync();
             _serverReady = true;
-            _ = PrewarmPetAsync();
             var cache = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Sumika", "WebView2");
@@ -241,7 +240,6 @@ public partial class ShellWindow : Window
             if (handle != IntPtr.Zero)
             {
                 _petWindow = handle;
-                ShowWindow(handle, 0);
                 return true;
             }
             await Task.Delay(100);
@@ -259,7 +257,7 @@ public partial class ShellWindow : Window
             if (string.IsNullOrWhiteSpace(csrf)) return false;
             using var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "api/companion/pet");
             request.Headers.Add("X-Sumika-CSRF", csrf);
-            request.Content = new StringContent("{\"action\":\"start\",\"hidden\":true}",
+            request.Content = new StringContent("{\"action\":\"start\"}",
                 System.Text.Encoding.UTF8, "application/json");
             using var response = await _http.SendAsync(request);
             if (!response.IsSuccessStatusCode) return false;
