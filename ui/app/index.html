@@ -1027,7 +1027,7 @@
     setTimeout(fit, 300);
     setTimeout(fit, 900);
   })();
-  (function previewDrag(){
+  function initPreviewDrag(){
     const panel = document.getElementById("activityPreview");
     const grip = panel?.querySelector(".activity-preview-grip");
     if (!panel || !grip) return;
@@ -1049,7 +1049,9 @@
     });
     grip.addEventListener("pointerup", () => { drag = null; });
     grip.addEventListener("pointercancel", () => { drag = null; });
-  })();
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initPreviewDrag);
+  else initPreviewDrag();
   if (document.documentElement.classList.contains('pet-host')) {
     document.getElementById('deskpet')?.classList.add('mini');
     setTimeout(() => window.chrome?.webview?.postMessage('sumika:compact'), 120);
@@ -1207,7 +1209,7 @@
 <script type="module" src="/app/handoff.js"></script>
 <button id="petChip" class="pet-chip" type="button" title="打开桌宠预览" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>桌宠</button>
 <div id="activityPreview" class="activity-preview" aria-hidden="true">
-  <div class="activity-preview-grip" title="拖动预览"><span>桌宠</span></div>
+  <div class="activity-preview-grip" title="拖动预览"></div>
   <iframe id="activityPreviewFrame" title="活动室实时预览" loading="lazy"></iframe>
 </div>
 </body>

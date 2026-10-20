@@ -35,6 +35,14 @@ public partial class PetHost : Window
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr window, uint affinity);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr window, out NativeRect rect);
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
@@ -191,6 +199,7 @@ public partial class PetHost : Window
                 }
             };
             Browser.Source = new Uri(_url);
+            Dispatcher.BeginInvoke(new Action(ApplyShape));
             if (_hidden) Dispatcher.BeginInvoke(new Action(Hide));
         }
         catch (Exception error)
@@ -204,6 +213,18 @@ public partial class PetHost : Window
     {
         RemoveProp(new WindowInteropHelper(this).Handle, CaptureHostProperty);
         base.OnClosed(e);
+    }
+
+    private void ApplyShape()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect)) return;
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        if (width < 8 || height < 8) return;
+        var radius = Width <= 100 ? width : 28;
+        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
+        if (region != IntPtr.Zero) SetWindowRgn(handle, region, true);
     }
 
     private void CloseHost(object sender, RoutedEventArgs e) => Close();
