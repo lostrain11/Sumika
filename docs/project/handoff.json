@@ -15,9 +15,9 @@
   ],
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
   "updated_at": "2026-10-20",
-  "next_action": "r75候选与安装包已构建（60485文件库存/EXE四组通过；安装包SHA 907966b9...；r32 clean为最近干净机基线）；源码1412项OK（20跳过，115.429秒）；35B角色 provider 经SSH 18083接入；默认名册仅 Sumika 示例助手，安和昴已归档；r61 增加 WebView2 桌面壳（安装器/开始菜单/便携入口均为 SumikaShell.exe），并完成状态/配置胶囊、模型胶囊分屏、角色导入弹窗、镜头发光圈桌宠；手测配置见docs/project/manual-test-r75.md。35B单模型常驻8083（用户2026-10-19确认继续用4.7，LFM仅文本备选；本地能力/路由策略见local-model-capability-and-routing-20261019.md，产品路由未实现）；提示词优化按第1种保持关闭；LES P6-8运行时已跑通（CPU/CUDA、资产逐字节校验、文本8.5 prompt/7.1 token/s、OCR可用），stripped GGUF已打通（磁盘25.68→13.49GB，需--no-mmap），但格式/完整输出质量门未过、未替换常驻；容量边界与换模型算法见les-runtime-reuse.md。B站频繁seek参考与seek后转写已修（6/6；20秒尾段2–3条）；无尾段极端seek仍可能0；合成PDF可见页、图片型扫描PDF OCR、真实个人PDF（个人 PDF）均通过。真实摄像头/麦克风与真实PDF选择/双窗/缩放已通过；主线剩余模型质量；匿名未登录时CC字幕不可得（登录后已通过）；无尾段极端seek仍可能0。",
+  "next_action": "r76候选与安装包已构建（60485文件库存/EXE四组通过；安装包SHA 907966b9...；r32 clean为最近干净机基线）；源码1412项OK（20跳过，115.429秒）；35B角色 provider 经SSH 18083接入；默认名册仅 Sumika 示例助手，安和昴已归档；r61 增加 WebView2 桌面壳（安装器/开始菜单/便携入口均为 SumikaShell.exe），并完成状态/配置胶囊、模型胶囊分屏、角色导入弹窗、镜头发光圈桌宠；手测配置见docs/project/manual-test-r76.md。35B单模型常驻8083（用户2026-10-19确认继续用4.7，LFM仅文本备选；本地能力/路由策略见local-model-capability-and-routing-20261019.md，产品路由未实现）；提示词优化按第1种保持关闭；LES P6-8运行时已跑通（CPU/CUDA、资产逐字节校验、文本8.5 prompt/7.1 token/s、OCR可用），stripped GGUF已打通（磁盘25.68→13.49GB，需--no-mmap），但格式/完整输出质量门未过、未替换常驻；容量边界与换模型算法见les-runtime-reuse.md。B站频繁seek参考与seek后转写已修（6/6；20秒尾段2–3条）；无尾段极端seek仍可能0；合成PDF可见页、图片型扫描PDF OCR、真实个人PDF（个人 PDF）均通过。真实摄像头/麦克风与真实PDF选择/双窗/缩放已通过；主线剩余模型质量；匿名未登录时CC字幕不可得（登录后已通过）；无尾段极端seek仍可能0。",
   "current_acceptance": {
-    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r75",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r76",
     "dsh": "0.2.1-rc.2",
     "overall_status": "in_progress",
     "deployed": false,
@@ -66,7 +66,7 @@
       "path": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r32",
       "inventory": "60484 files; tools/verify_portable_staging.py passed",
       "exe": "E:/SumikaBuild/acceptance-20261017-current/exe-startup-68c43c262c1b4671a3a5dd040053e4d5/report.json",
-      "manual_test": "docs/project/manual-test-r75.md",
+      "manual_test": "docs/project/manual-test-r76.md",
       "ui_review": "docs/project/ui-review-20261020.md"
     },
     "candidate_r29": {

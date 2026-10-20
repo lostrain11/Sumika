@@ -103,7 +103,7 @@ public partial class ShellWindow : Window
                 || !root.TryGetProperty("type", out var kind)) return;
             if (kind.GetString() == "sumika:pet-mode")
             {
-                Dispatcher.Invoke(Hide);
+                Dispatcher.Invoke(() => WindowState = WindowState.Minimized);
                 return;
             }
             if (kind.GetString() != "sumika:context") return;
