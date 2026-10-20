@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="/app/layout.css">
 </head>
 <body>
-<script>if(new URLSearchParams(location.search).get('pet')==='1')document.documentElement.classList.add('pet-host');if(new URLSearchParams(location.search).get('shell')==='1')document.documentElement.classList.add('shell-host');</script>
+<script>if(new URLSearchParams(location.search).get('pet')==='1')document.documentElement.classList.add('pet-host');if(new URLSearchParams(location.search).get('shell')==='1')document.documentElement.classList.add('shell-host');if(new URLSearchParams(location.search).get('preview')==='1')document.documentElement.classList.add('preview-host');</script>
 <script>
 /* Native shell host: report route/window visibility without taking over the page. */
 (function(){
@@ -998,8 +998,19 @@
   if (ACT[qs.get('act')]) setAct(qs.get('act')); else applyCam();
   buildDeskpet();
   syncDeskpet();
-  document.getElementById("petChip")?.addEventListener("click", () => {
-    try { window.chrome?.webview?.postMessage({type:"sumika:pet-mode"}); } catch (_) {}
+  window.sumikaTogglePreview = () => {
+    const panel = document.getElementById("activityPreview");
+    if (!panel) return;
+    const frame = document.getElementById("activityPreviewFrame");
+    const open = panel.classList.toggle("open");
+    panel.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open && frame && !frame.src) frame.src = "/?preview=1#room";
+  };
+  document.getElementById("activityPreviewClose")?.addEventListener("click", () => {
+    document.getElementById("activityPreview")?.classList.remove("open");
+  });
+  window.addEventListener("hashchange", () => {
+    if (location.hash === "#room") document.getElementById("activityPreview")?.classList.remove("open");
   });
   if (document.documentElement.classList.contains('pet-host')) {
     document.getElementById('deskpet')?.classList.add('mini');
@@ -1156,6 +1167,13 @@
 <script type="module" src="/app/bind.js"></script>
 <script type="module" src="/app/management.js"></script>
 <script type="module" src="/app/handoff.js"></script>
-<button id="petChip" class="pet-chip" type="button" title="进入桌宠模式" onclick="try{window.chrome?.webview?.postMessage({type:'sumika:pet-mode'})}catch(_){}"><span aria-hidden="true">✿</span>桌宠</button>
+<button id="petChip" class="pet-chip" type="button" title="进入桌宠模式" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>桌宠</button>
+<div id="activityPreview" class="activity-preview" aria-hidden="true">
+  <div class="activity-preview-bar">
+    <span>活动室预览</span>
+    <button id="activityPreviewClose" type="button" title="收起预览" aria-label="收起预览">×</button>
+  </div>
+  <iframe id="activityPreviewFrame" title="活动室实时预览" loading="lazy"></iframe>
+</div>
 </body>
 </html>
