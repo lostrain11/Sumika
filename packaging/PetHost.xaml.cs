@@ -222,8 +222,12 @@ public partial class PetHost : Window
         var width = rect.Right - rect.Left;
         var height = rect.Bottom - rect.Top;
         if (width < 8 || height < 8) return;
-        var radius = Width <= 100 ? width : 28;
-        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
+        if (Width > 100)
+        {
+            SetWindowRgn(handle, IntPtr.Zero, true);
+            return;
+        }
+        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, width, width);
         if (region != IntPtr.Zero) SetWindowRgn(handle, region, true);
     }
 
