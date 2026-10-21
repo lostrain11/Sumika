@@ -1221,7 +1221,7 @@
 <button id="petChip" class="pet-chip" type="button" title="打开桌宠预览" onclick="window.sumikaTogglePreview?.()"><span aria-hidden="true">✿</span>桌宠</button>
 <div id="activityPreview" class="activity-preview" aria-hidden="true">
   <div class="activity-preview-grip" title="拖动预览"></div>
-  <button id="activityPreviewCollapse" class="activity-preview-collapse" type="button" title="收起预览">收起</button>
+  <button id="activityPreviewCollapse" class="activity-preview-collapse" type="button" title="收起预览" onclick="document.getElementById('activityPreview').classList.remove('open');document.body.classList.remove('activity-preview-open')">收起</button>
   <iframe id="activityPreviewFrame" title="活动室实时预览" loading="lazy"></iframe>
 </div>
 </body>
