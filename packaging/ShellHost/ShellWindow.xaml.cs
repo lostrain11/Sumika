@@ -172,6 +172,8 @@ public partial class ShellWindow : Window
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
     [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter,
         int x, int y, int width, int height, uint flags);
 
@@ -201,14 +203,16 @@ public partial class ShellWindow : Window
         try
         {
             var desired = WindowState == WindowState.Minimized || !IsVisible;
-            if (desired)
+            if (desired && !_petRunning)
             {
                 if (!await EnsurePetAsync()) return;
+                // A previously expanded pet must return to the orb before showing.
+                PostMessage(_petWindow, 0x8000 + 0x51, IntPtr.Zero, IntPtr.Zero);
                 ShowWindow(_petWindow, 8); // SW_SHOWNA
                 SetWindowPos(_petWindow, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
                 _petRunning = true;
             }
-            else
+            else if (!desired && _petRunning)
             {
                 if (_petWindow != IntPtr.Zero && IsWindow(_petWindow))
                     ShowWindow(_petWindow, 0); // SW_HIDE

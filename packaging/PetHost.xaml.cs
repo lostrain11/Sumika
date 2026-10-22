@@ -104,6 +104,11 @@ public partial class PetHost : Window
                 try
                 {
                     var action = message.TryGetWebMessageAsString();
+                    if (action == "sumika:probe")
+                    {
+                        MessageBox.Show("WebView2 已就绪：" + Browser.CoreWebView2.Source, "Sumika 桌宠");
+                        return;
+                    }
                     if (action == "sumika:compact" || action == "sumika:expand")
                     {
                         var compact = action == "sumika:compact";
@@ -112,8 +117,9 @@ public partial class PetHost : Window
                         var bottom = Top + Height;
                         Width = compact ? 76 : 380;
                         Height = compact ? 76 : 540;
-                        Left = right - Width;
-                        Top = bottom - Height;
+                        var work = SystemParameters.WorkArea;
+                        Left = Math.Min(Math.Max(work.Left - 8, right - Width), work.Right - Width + 8);
+                        Top = Math.Min(Math.Max(work.Top - 8, bottom - Height), work.Bottom - Height + 8);
                         CloseButton.Visibility = Visibility.Collapsed;
                         _compact = compact;
                         Diagnostic(compact ? "compacted" : "expanded");
@@ -128,6 +134,13 @@ public partial class PetHost : Window
                 ReleaseCapture();
                 var coordinates = unchecked((int)(((uint)point.Y & 0xffff) << 16 | ((uint)point.X & 0xffff)));
                 SendMessage(handle, 0xA1, new IntPtr(2), new IntPtr(coordinates));
+            };
+            Browser.CoreWebView2.NavigationCompleted += (_, _) =>
+            {
+                Topmost = false;
+                Topmost = true;
+                var hwnd = new WindowInteropHelper(this).Handle;
+                SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
             };
             Browser.CoreWebView2.NavigationStarting += (_, navigation) =>
             {

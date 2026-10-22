@@ -40,7 +40,7 @@ class PetHost:
             if not state['available']:
                 raise RuntimeError('packaged Windows pet host unavailable')
             argv = [str(self.root/'SumikaPet.exe'),
-                    f'http://127.0.0.1:{port}/?pet=1']
+                    f'http://127.0.0.1:{port}/?preview=1#room']
             if hidden:
                 argv.append('--hidden')
             process = subprocess.Popen(argv, cwd=self.root,

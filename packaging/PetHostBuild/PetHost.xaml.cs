@@ -2,11 +2,14 @@ using System;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Controls;
+using System.Windows.Media;
 using System.Runtime.InteropServices;
 using System.ComponentModel;
 using System.IO;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
 
 namespace SumikaPetHost;
@@ -16,6 +19,10 @@ public partial class PetHost : Window
     private readonly string _url;
     private readonly bool _hidden;
     private bool _compact;
+    private Point? _dragOrigin;
+    private Point _dragStart;
+    private bool _dragging;
+    private const int CollapseMessage = 0x8000 + 0x51;
     private const string CaptureHostProperty = "Sumika.Companion.CaptureHost";
 
     private static void Diagnostic(string stage)
@@ -84,6 +91,7 @@ public partial class PetHost : Window
             // Do not set WDA_EXCLUDEFROMCAPTURE here: the desktop pet is meant to
             // be visible in screenshots and normal capture tools.
             SetProp(handle, CaptureHostProperty, new IntPtr(1));
+            HwndSource.FromHwnd(handle)?.AddHook(WndProc);
             Topmost = true;
             SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
             var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -93,6 +101,8 @@ public partial class PetHost : Window
             await Browser.EnsureCoreWebView2Async(environment);
             Diagnostic("webview-ready");
             Browser.DefaultBackgroundColor = System.Drawing.Color.Transparent;
+            CardLayer.Visibility = Visibility.Collapsed;
+            OrbLayer.Visibility = Visibility.Visible;
             Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             Browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
             var origin = new Uri(_url).GetLeftPart(UriPartial.Authority);
@@ -104,19 +114,14 @@ public partial class PetHost : Window
                 try
                 {
                     var action = message.TryGetWebMessageAsString();
+                    if (action == "sumika:probe")
+                    {
+                        MessageBox.Show("WebView2 已就绪：" + Browser.CoreWebView2.Source, "Sumika 桌宠");
+                        return;
+                    }
                     if (action == "sumika:compact" || action == "sumika:expand")
                     {
-                        var compact = action == "sumika:compact";
-                        if (compact == _compact) return;
-                        var right = Left + Width;
-                        var bottom = Top + Height;
-                        Width = compact ? 76 : 380;
-                        Height = compact ? 76 : 540;
-                        Left = right - Width;
-                        Top = bottom - Height;
-                        CloseButton.Visibility = Visibility.Collapsed;
-                        _compact = compact;
-                        Diagnostic(compact ? "compacted" : "expanded");
+                        SetCompact(action == "sumika:compact");
                         return;
                     }
                     if (action != "sumika:drag") return;
@@ -128,6 +133,13 @@ public partial class PetHost : Window
                 ReleaseCapture();
                 var coordinates = unchecked((int)(((uint)point.Y & 0xffff) << 16 | ((uint)point.X & 0xffff)));
                 SendMessage(handle, 0xA1, new IntPtr(2), new IntPtr(coordinates));
+            };
+            Browser.CoreWebView2.NavigationCompleted += (_, _) =>
+            {
+                Topmost = false;
+                Topmost = true;
+                var hwnd = new WindowInteropHelper(this).Handle;
+                SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
             };
             Browser.CoreWebView2.NavigationStarting += (_, navigation) =>
             {
@@ -214,6 +226,102 @@ public partial class PetHost : Window
     {
         RemoveProp(new WindowInteropHelper(this).Handle, CaptureHostProperty);
         base.OnClosed(e);
+    }
+
+    private async void KeepOnTop(int rounds = 12)
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        for (var i = 0; i < rounds; i++)
+        {
+            if (handle == IntPtr.Zero) return;
+            SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
+            await Task.Delay(400);
+        }
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == CollapseMessage)
+        {
+            handled = true;
+            Dispatcher.BeginInvoke(new Action(() => SetCompact(true)));
+        }
+        return IntPtr.Zero;
+    }
+
+    private void CollapseHost(object sender, RoutedEventArgs e) => SetCompact(true);
+
+    private void OnOrbDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        _dragOrigin = e.GetPosition(this);
+        _dragStart = new Point(Left, Top);
+        _dragging = false;
+        OrbLayer.CaptureMouse();
+    }
+
+    private void OnOrbMove(object sender, MouseEventArgs e)
+    {
+        if (_dragOrigin is null || e.LeftButton != MouseButtonState.Pressed) return;
+        var point = e.GetPosition(this);
+        var dx = point.X - _dragOrigin.Value.X;
+        var dy = point.Y - _dragOrigin.Value.Y;
+        if (!_dragging && Math.Abs(dx) < 4 && Math.Abs(dy) < 4) return;
+        _dragging = true;
+        Left = _dragStart.X + dx;
+        Top = _dragStart.Y + dy;
+    }
+
+    private void OnOrbUp(object sender, MouseButtonEventArgs e)
+    {
+        OrbLayer.ReleaseMouseCapture();
+        _dragOrigin = null;
+        if (_dragging)
+        {
+            _dragging = false;
+            return;
+        }
+        SetCompact(false);
+    }
+
+    private void SetCompact(bool compact)
+    {
+        if (compact == _compact) return;
+        var right = Left + Width;
+        var bottom = Top + Height;
+        Width = compact ? 76 : 380;
+        Height = compact ? 76 : 540;
+        var work = SystemParameters.WorkArea;
+        Left = Math.Min(Math.Max(work.Left - 8, right - Width), work.Right - Width + 8);
+        Top = Math.Min(Math.Max(work.Top - 8, bottom - Height), work.Bottom - Height + 8);
+        _compact = compact;
+        OrbLayer.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
+        CardLayer.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        if (!compact) Dispatcher.BeginInvoke(new Action(() => { try { RoundedClip(); Browser.Focus(); } catch (InvalidOperationException) { } }));
+        CollapseButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        CloseButton.Visibility = Visibility.Collapsed;
+        UpdateLayout();
+        Dispatcher.BeginInvoke(new Action(ApplyShape), System.Windows.Threading.DispatcherPriority.Loaded);
+        KeepOnTop();
+        Diagnostic(compact ? "compacted" : "expanded");
+    }
+
+    private void RoundedClip()
+    {
+        if (CardLayer.ActualWidth <= 0 || CardLayer.ActualHeight <= 0) return;
+        var radius = 16.0;
+        var figure = new PathFigure { StartPoint = new Point(radius, 0) };
+        figure.Segments.Add(new LineSegment(new Point(CardLayer.ActualWidth - radius, 0), true));
+        figure.Segments.Add(new ArcSegment(new Point(CardLayer.ActualWidth, radius), new Size(radius, radius), 0, false, SweepDirection.Clockwise, true));
+        figure.Segments.Add(new LineSegment(new Point(CardLayer.ActualWidth, CardLayer.ActualHeight - radius), true));
+        figure.Segments.Add(new ArcSegment(new Point(CardLayer.ActualWidth - radius, CardLayer.ActualHeight), new Size(radius, radius), 0, false, SweepDirection.Clockwise, true));
+        figure.Segments.Add(new LineSegment(new Point(radius, CardLayer.ActualHeight), true));
+        figure.Segments.Add(new ArcSegment(new Point(0, CardLayer.ActualHeight - radius), new Size(radius, radius), 0, false, SweepDirection.Clockwise, true));
+        figure.Segments.Add(new LineSegment(new Point(0, radius), true));
+        figure.Segments.Add(new ArcSegment(new Point(radius, 0), new Size(radius, radius), 0, false, SweepDirection.Clockwise, true));
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        ((Grid)CardLayer.Child).Clip = geometry;
     }
 
     private void ApplyShape()
