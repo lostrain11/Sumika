@@ -184,8 +184,10 @@ html.preview-host,html.preview-host body{overflow:hidden!important;background:va
 html.preview-host .room-wrap{position:absolute!important;left:0!important;top:0!important;width:720px!important;height:840px!important;max-width:none!important;display:block!important;transform-origin:0 0}
 html.preview-host .room-left{width:100%!important;height:100%!important;max-width:none!important}
 
-.activity-preview-collapse{position:absolute;z-index:3;right:9px;top:5px;height:18px;padding:0 7px;
-  border:1px solid var(--rose-line);border-radius:999px;background:var(--paper);
-  color:var(--muted);font:9px/1 var(--sans);cursor:pointer}
+.activity-preview-collapse{position:absolute;z-index:3;right:10px;top:4px;width:16px;height:14px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  border:0;border-radius:5px;background:transparent;
+  color:var(--muted-2);font:12px/1 var(--sans);cursor:pointer}
 .activity-preview-collapse:hover{background:var(--rose-soft);color:var(--rose)}
+.activity-preview-grip{position:relative}
 body.activity-preview-open .pet-chip{display:none!important}
