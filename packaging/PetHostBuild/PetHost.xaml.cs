@@ -69,6 +69,7 @@ public partial class PetHost : Window
         InitializeComponent();
         _url = url;
         _hidden = hidden;
+        _compact = true;
         var workArea = SystemParameters.WorkArea;
         Left = workArea.Right - Width - 12;
         Top = workArea.Bottom - Height - 12;
@@ -199,7 +200,7 @@ public partial class PetHost : Window
                 }
             };
             Browser.Source = new Uri(_url);
-            Dispatcher.BeginInvoke(new Action(ApplyShape));
+            Dispatcher.BeginInvoke(new Action(ApplyShape), System.Windows.Threading.DispatcherPriority.Loaded);
             if (_hidden) Dispatcher.BeginInvoke(new Action(Hide));
         }
         catch (Exception error)
@@ -222,12 +223,13 @@ public partial class PetHost : Window
         var width = rect.Right - rect.Left;
         var height = rect.Bottom - rect.Top;
         if (width < 8 || height < 8) return;
-        if (Width > 100)
+        if (!_compact)
         {
             SetWindowRgn(handle, IntPtr.Zero, true);
             return;
         }
-        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, width, width);
+        var diameter = Math.Min(width, height);
+        var region = CreateRoundRectRgn(0, 0, diameter + 1, diameter + 1, diameter, diameter);
         if (region != IntPtr.Zero) SetWindowRgn(handle, region, true);
     }
 

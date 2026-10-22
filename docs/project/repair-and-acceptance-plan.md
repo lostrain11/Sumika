@@ -1,6 +1,6 @@
 # 当前主线修复与验收计划
 
-更新：2026-10-20。总体状态：进行中，已进入验收/打包阶段。当前候选为 `E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r86`，DSH `0.2.1-rc.2`，60484文件库存、实际EXE启动通过；未部署、发布或替换日用安装。手测配置见 `manual-test-r86.md`，干净机证据见 `acceptance-20261019-clean-windows.md`。提示词优化按第1种保持关闭；LES为独立P6-8实验。
+更新：2026-10-20。总体状态：进行中，已进入验收/打包阶段。当前候选为 `E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r87`，DSH `0.2.1-rc.2`，60484文件库存、实际EXE启动通过；未部署、发布或替换日用安装。手测配置见 `manual-test-r87.md`，干净机证据见 `acceptance-20261019-clean-windows.md`。提示词优化按第1种保持关闭；LES为独立P6-8实验。
 
 ## 现有资产与实施结论
 
