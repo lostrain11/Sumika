@@ -922,6 +922,10 @@ const CAPABILITY_COPY = {
     card: '连接第三方工具服务，按需授权。',
     detail: '第三方 MCP 服务按来源和作用域显式授权；权限和凭据在设置中统一管理。',
   },
+  'native:插件': {
+    card: '浏览 Sumika 精选的 DSH 插件。',
+    detail: '安装、版本、兼容性和卸载由 DSH 原生 Discover 管理；Sumika 只提供精选索引和工作台入口，不复制安装器。',
+  },
 };
 
 const CONFIGURABLE_KEYS = new Set(['browser','schedule','role-resources','speech','memory','pet','native:Skills','native:MCP 连接']);
@@ -941,6 +945,7 @@ const NATIVE_CARDS = [
   { icon: 'cap-subagent', title: '子代理', text: '独立任务与代码审查交由原生子 Agent，可并行。' },
   { icon: 'cap-skills', title: 'Skills', text: '领域技能包，安装前经安全审查。' },
   { icon: 'cap-mcp', title: 'MCP 连接', text: '第三方工具服务器，按来源与作用域显式授权。' },
+  { icon: 'cap-module', title: '插件', text: 'Sumika 精选索引；安装与兼容性由 DSH 原生 Discover 管理。', status: '工作台管理', statusClass: 'on' },
 ];
 
 /** 注册表 id → 语义图标名；未登记的扩展回落到通用模块图标。 */
@@ -1171,6 +1176,11 @@ function renderCapabilityDetail(card, entry, readinessRow, version) {
       copy: 'MCP 服务器、来源和作用域授权由 DSH 工作台管理；连接和凭据不在 Sumika 内重复配置。',
       buttons: [{ label: '在 DSH 工作台管理', open: () => { location.hash = '#board'; } }],
     },
+    'native:插件': {
+      title: '插件',
+      copy: '在 DSH 工作台的 Plugins 页管理安装、版本、兼容性和卸载；Sumika 只提供精选索引，不自动安装或升级。',
+      buttons: [{ label: '在 DSH 工作台打开 Plugins', open: () => { location.hash = '#board'; } }],
+    },
   };
   const action = actions[selectedId];
   actionPanel.hidden = !action;
@@ -1281,7 +1291,7 @@ async function bindCapabilityScreens() {
       nativeGrid.className = 'cap-grid';
       NATIVE_CARDS.forEach(card => {
         nativeGrid.appendChild(capabilityCard({
-          icon: card.icon, title: card.title, status: '已启用', statusClass: 'on',
+          icon: card.icon, title: card.title, status: card.status || '已启用', statusClass: card.statusClass || 'on',
           text: capabilityCardText(`native:${card.title}`, card.text), source: '', capabilityId: `native:${card.title}`,
           configurable: CONFIGURABLE_KEYS.has(`native:${card.title}`),
         }));

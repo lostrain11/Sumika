@@ -124,7 +124,7 @@ class UIServerTests(unittest.TestCase):
         with patch.object(bridge._pet_host,'start',return_value={'status':'running','alive':True}) as start:
             _, result=self.request('/api/companion/pet',method='POST',body={'action':'start'})
             self.assertTrue(result['alive'])
-            start.assert_called_once_with(self.server.server_port)
+            start.assert_called_once_with(self.server.server_port, hidden=False)
             with self.assertRaises(urllib.error.HTTPError):
                 self.request('/api/companion/pet',method='POST',body={'action':'start','url':'https://example.com'})
             self.assertEqual(start.call_count,1)
@@ -873,6 +873,19 @@ class UIServerTests(unittest.TestCase):
         self.assertFalse(data['running'])
         self.assertFalse(data['healthy'])
         self.assertEqual(data['local_port'], 11434)
+
+    def test_public_plugin_catalog_is_the_checked_in_index(self):
+        status, data = self.request('/api/plugins/catalog')
+        self.assertEqual(status, 200)
+        self.assertEqual(data['format'], 1)
+        names = [plugin['name'] for plugin in data['plugins']]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn('dsh-phone', names)
+        self.assertIn('dsh-bili-scroll', names)
+        self.assertIn('@kenz1117/dsh-engram', names)
+        for plugin in data['plugins']:
+            self.assertTrue(plugin['versions'])
+            self.assertIn(plugin['metadata']['category'], data['metadata']['categories'])
 
     def test_state_settings_and_modules_are_real(self):
         status, state = self.request("/api/state")

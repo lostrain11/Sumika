@@ -21,7 +21,7 @@ class PetHostTests(unittest.TestCase):
                 self.assertTrue(host.start(12345)['alive'])
                 host.start(12345)
                 spawn.assert_called_once()
-                self.assertEqual(spawn.call_args.args[0], [str(root.resolve()/'SumikaPet.exe'),'http://127.0.0.1:12345/?pet=1'])
+                self.assertEqual(spawn.call_args.args[0], [str(root.resolve()/'SumikaPet.exe'),'http://127.0.0.1:12345/?preview=1#room'])
                 job.assign.assert_called_once_with(process)
                 self.assertFalse(host.stop()['alive'])
                 job.close.assert_called_once()

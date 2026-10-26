@@ -2256,6 +2256,16 @@ def _handler(bridge):
 
         def do_GET(self):
             path = urlparse(self.path).path
+            # The curated plugin index is public metadata, not user data. DSH's
+            # plugin-market host fetches index sources without a Sumika bridge
+            # token, so this one read-only route is intentionally unauthenticated.
+            if path == "/api/plugins/catalog":
+                target = UI_ROOT / "app" / "plugin-catalog.json"
+                try:
+                    payload = json.loads(target.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    return self._json(503, {"error": "plugin catalog unavailable"})
+                return self._json(200, payload)
             if not self._authorize():
                 return
             if path == '/api/companion/windows':

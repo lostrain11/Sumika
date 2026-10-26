@@ -92,6 +92,30 @@ def ensure_skin(home, *, enabled=True, root=None, bridge_origin=None):
                 workbench_found = True
     if not workbench_found:
         rows.append({"insert": [workbench_entry]})
+    # Native Discover is an optional DSH bundle in 0.2.1-rc.2. Sumika enables
+    # its two loader rows and points them at the curated read-only catalog. The
+    # catalog is built into the UI tree; DSH owns installation and compatibility.
+    if bridge_origin:
+        catalog = str(bridge_origin).rstrip("/") + "/api/plugins/catalog"
+        market_entry = {"id": "plugin-market", "name": "@deepseek-ai/dsh-plugin-market",
+                        "config": {"indexes": [catalog]}}
+        discover_entry = {"id": "ui-plugin-market",
+                          "name": "@deepseek-ai/dsh-client-ui-plugin-market"}
+        for entry in (market_entry, discover_entry):
+            found_market = False
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for item in row.get("insert", []) or []:
+                    if isinstance(item, dict) and item.get("id") == entry["id"]:
+                        if entry["id"] == "plugin-market":
+                            config = item.setdefault("config", {})
+                            indexes = config.setdefault("indexes", [])
+                            if catalog not in indexes:
+                                indexes.append(catalog)
+                        found_market = True
+            if not found_market:
+                rows.append({"insert": [entry]})
     from extensions.office.native import configure as configure_office
     configure_office(rows, product)
     patch.parent.mkdir(parents=True, exist_ok=True)

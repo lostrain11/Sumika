@@ -79,6 +79,21 @@ class WorkbenchControllerTests(unittest.TestCase):
             self.assertTrue(all(Path(item['name']).is_relative_to(product.resolve()/'extensions/ui') for item in owned))
             self.assertEqual(next(item for item in owned if item['id'] == 'sumika-brand')['config']['release'], '0.1.5-rc.2')
 
+    def test_ensure_skin_adds_curated_market_source_idempotently(self):
+        with tempfile.TemporaryDirectory() as d:
+            product = self._root(d)
+            home = product/'personal/profile'
+            ensure_skin(home, root=product, bridge_origin='http://127.0.0.1:8765')
+            first = (home/'cordis.patch.yml').read_bytes()
+            ensure_skin(home, root=product, bridge_origin='http://127.0.0.1:8765')
+            self.assertEqual(first, (home/'cordis.patch.yml').read_bytes())
+            rows = json.loads(first)
+            entries = [item for row in rows for item in row.get('insert', [])]
+            market = next(item for item in entries if item.get('id') == 'plugin-market')
+            self.assertEqual(market['config']['indexes'], [
+                'http://127.0.0.1:8765/api/plugins/catalog'])
+            self.assertTrue(any(item.get('id') == 'ui-plugin-market' for item in entries))
+
     def test_ensure_skin_records_exact_bridge_origin_for_workbench_plugin(self):
         with tempfile.TemporaryDirectory() as d:
             product = self._root(d)
