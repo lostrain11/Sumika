@@ -3,7 +3,7 @@
   "current_phase": "P6",
   "phase_status": "in_progress",
   "updated_at": "2026-10-27",
-  "next_action": "B站插件已扫码登录成功（凭据本地），但手动 duty 在 B站 工具调用前因 DSH 模型凭据缺失失败：MISSING_CREDENTIAL deepseek-official；只生成占位报告，无写操作。下一步：在 DSH 登录账号或配置可用模型后重跑 B站 只读 duty。r97 安装包/1418 项测试保持；插件市场、安装状态、RRF 已完成。",
+  "next_action": "B站只读 duty 已真实通过：DSH 模型登录后 exit 0，挑了 5 条，报告 5 个 BV 条目；无评论/私信/写操作。已知：首次失败留下的占位文本仍在报告顶部，第二次成功内容追加在后。下一步：清理占位/重跑干净报告，并进入手机能力（需要 Android SDK/AVD）。",
   "current_acceptance": {
     "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r97",
     "dsh": "0.2.1-rc.2",
