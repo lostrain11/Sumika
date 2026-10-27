@@ -57,3 +57,10 @@
 - 实际读取：7 条视频（5 条入报告、2 条跳过），字幕可用，无转写。
 - 写操作：`评论/私信全部没开`；日志无 `bili_touch` / `bili_post_dynamic` / `bili_send_dm` 调用。
 - 已知小问题：第一次失败留下的占位报告仍位于成功报告顶部；第二次运行把真实报告追加在后面。测试副本已从 `## 2026-10-27 值班报告` 起截取干净版本，原始带占位报告保留在 `.sumika-next/bili-report-raw-with-placeholder.md`；插件本身未覆盖旧占位，属于上游行为，不计为已修复。
+
+## 手机 2026-10-27 现场结果
+
+- 本机已有 Android SDK（`%LOCALAPPDATA%\Android\Sdk`）、emulator 和 android-29 x86 system image；无现成 AVD。
+- 手工创建 `sumika-phone` AVD（Pixel_2 / android-29 / x86）；emulator 启动成功，`adb devices` 显示 `emulator-5554 device`，`sys.boot_completed=1`。
+- `dsh-phone` 的 `POST /attach/verify` 对 `127.0.0.1:5555` 与 `localhost:5555` 均返回 `ADB 认证握手超时（3000ms）`；端点未写入，手机状态仍为 stopped。
+- 未登录 App、未执行任何手机写操作；只验证到“Android 实例可启动、插件 UI 可打开”。
