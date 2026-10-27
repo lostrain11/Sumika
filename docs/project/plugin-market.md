@@ -127,7 +127,11 @@ DSH `0.2.1-rc.2` 默认关闭自定义市场 bundle。`ui/workbench.py` 在写�
 - r95 真实 DSH 工作台：Plugins 出现「发现」tab，标题为「Sumika 精选插件」，7 项全部显示；固定版本和日期正确（如 `dsh-phone 0.3.0 · 2026-10-26`）。
 - 目录分类、标签、说明来自 `ui/app/plugin-catalog.json`。
 - 当前测试 profile 未登录 DSH 账号，因此“安装按钮完成安装”仍未记入已验证；实际安装需在已登录的 DSH 环境完成。
-- CLI 试验安装 `@kenz1117/dsh-engram` 时，pnpm 因 `onnxruntime-node`/`protobufjs` 的 build script 被忽略而以 exit 1 结束；目录已把它标为「实验 / 需批准构建脚本」，不把它列为默认可装。
+- CLI 试验安装（独立空 profile，非日用数据）：
+  - `dshmarket@1.70.2`：exit 0，可安装
+  - `dsh-pet-live2d@3.3.3`：exit 0，可安装
+  - `dsh-bili-scroll@2.1.0`：exit 0，可安装（Python/uv 依赖仍需首次运行准备）
+  - `@kenz1117/dsh-engram`：exit 1，pnpm 因 `onnxruntime-node`/`protobufjs` 的 build script 被忽略而失败；目录已标为「实验 / 需批准构建脚本」
 - 公开路由 `/api/plugins/catalog` 返回 200；不使用 Sumika CSRF。
 
 ## 限制

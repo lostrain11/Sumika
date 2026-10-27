@@ -15,7 +15,7 @@
   ],
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
   "updated_at": "2026-10-27",
-  "next_action": "r95 候选已构建并验证：DSH 原生 Discover 接入 Sumika 精选插件索引（7 项，固定版本/日期/前置标签），能力页新增插件状态卡；真实 DSH 已显示「发现」目录。全量源码 1414 项 OK/19 skipped。安装器 SHA 70e85d10...；插件实际安装待已登录 DSH 环境或 Phase M0 插件实验室验证。下一步：按单项验收接入 dsh-phone/B站/记忆。",
+  "next_action": "r95 候选已构建并验证：DSH 原生 Discover 接入 Sumika 精选插件索引（7 项，固定版本/日期/前置标签），能力页新增插件状态卡；真实 DSH 已显示「发现」目录。空 profile CLI 已验证 dshmarket/dsh-pet-live2d/dsh-bili-scroll 可安装；engram 因 pnpm build script 被忽略而失败，已标为「实验/需批准构建脚本」。全量源码 1414 项 OK/19 skipped。下一步：Phase M0 功能冒烟（B站/手机/生活循环）与单项接入决策。",
   "current_acceptance": {
     "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r95",
     "dsh": "0.2.1-rc.2",
