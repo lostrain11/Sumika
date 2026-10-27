@@ -15,7 +15,7 @@
   ],
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
   "updated_at": "2026-10-27",
-  "next_action": "r97 候选：精选索引 7 项（dsh-phone 0.4.1），能力页插件卡读取真实安装数（0 显示未安装），SemanticMemory 增加 FTS5+向量 RRF 排序；全量 1418 项 OK/19 skipped。安装器 SHA 35f0f262...；B站/手机端到端仍缺账号/模拟器。下一步：已登录 DSH UI 安装 + B站/手机功能冒烟。",
+  "next_action": "B站插件已扫码登录成功（凭据本地），但手动 duty 在 B站 工具调用前因 DSH 模型凭据缺失失败：MISSING_CREDENTIAL deepseek-official；只生成占位报告，无写操作。下一步：在 DSH 登录账号或配置可用模型后重跑 B站 只读 duty。r97 安装包/1418 项测试保持；插件市场、安装状态、RRF 已完成。",
   "current_acceptance": {
     "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r97",
     "dsh": "0.2.1-rc.2",

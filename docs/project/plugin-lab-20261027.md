@@ -40,3 +40,12 @@
 2. 安装 Android SDK/AVD 后验证 `phone_status`/`phone_screenshot`。
 3. B站扫码后验证只读 `bili_*` 工具和日报。
 4. 再决定是否接入 Sumika 的专用 DSH 任务会话。
+
+## B站 2026-10-27 现场结果
+
+- B站扫码登录：**成功**；`bili_credential.json` 已写入 `data-r97/.../bili-duty/`。
+- Python 依赖：**就绪**（51 包，venv）。
+- 手动跑一轮：**失败**，发生在 B站 工具调用前。
+- 失败原因：`dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "deepseek-official"`。
+- 结果：只生成占位报告 `out/2026-10-27.md`，未挑选视频、未调用 B站 工具、无点赞/评论/关注等写操作。
+- 结论：B站登录与插件安装通过；真实只读 duty 仍需 DSH 模型账号或 API Key。
