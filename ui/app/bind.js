@@ -1298,6 +1298,18 @@ async function bindCapabilityScreens() {
       });
       nativeGroup.appendChild(nativeGrid);
       shelf.appendChild(nativeGroup);
+      // The catalog is installed by DSH, not this process. Read the managed
+      // profile's dependency list so the card reports a fact, never a guess.
+      const pluginStatus = await api('/api/plugins/status').catch(() => null);
+      const pluginCard = nativeGrid.querySelector('[data-capability-id="native:插件"]');
+      if (pluginCard && pluginStatus?.available) {
+        const pill = pluginCard.querySelector('.st');
+        if (pill) {
+          const count = Number(pluginStatus.count) || 0;
+          pill.textContent = count ? `已装 ${count}` : '未安装';
+          pill.className = `st ${count ? 'on' : 'off'}`;
+        }
+      }
 
       // Clicking a card fills the detail column; the first registry entry is the
       // default so the panel never shows a capability that is not present.

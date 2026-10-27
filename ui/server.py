@@ -41,6 +41,7 @@ from ui.readiness import probes as readiness_probes, service_capabilities
 from ui.schedule import ScheduleController
 from ui.workbench import WorkbenchController, WorkbenchError
 from ui.management import Management, Conflict
+from sumika_next.plugins import profile_plugins
 from ui.local_tunnel import LocalTunnel
 from ui.pet_host import PetHost
 from extensions.companion import ObservationBundle, CompanionQuestionService, video, cues
@@ -2292,6 +2293,8 @@ def _handler(bridge):
                     return self._json(200, {"roles": bridge.roles(), "active": bridge.active_role()})
                 if path == "/api/workbench":
                     return self._json(200, bridge.workbench.status())
+                if path == "/api/plugins/status":
+                    return self._json(200, profile_plugins(bridge.workbench.profile()))
                 if path == "/api/memory":
                     parameters = parse_qs(urlparse(self.path).query)
                     query = (parameters.get("q") or [None])[0]

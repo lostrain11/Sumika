@@ -94,6 +94,14 @@ DSH `0.2.1-rc.2` 默认关闭自定义市场 bundle。`ui/workbench.py` 在写�
 - 已存在时不重复追加
 - `bridge_origin` 未知时不启用，避免写入错误端口
 
+## 安装状态
+
+能力页的“插件”卡读取 `GET /api/plugins/status`，显示受管 DSH profile 的已安装插件数量。该接口只读 `profiles/web/package.json` 和已安装 package.json 的版本，不返回依赖路径、规格或凭据。
+
+- profile 缺失/损坏：`available=false`，卡片保留“工作台管理”，不伪造 0
+- 已安装但未进入 `dsh.profile.bundles`：计入 count，不计入 active_count
+- 安装/卸载由 DSH 完成后，下一次页面渲染刷新
+
 ## 公开路由
 
 `/api/plugins/catalog` 是唯一不要求 Sumika CSRF 的 API 路由，原因是 DSH 的 plugin-market Host 用进程 `fetch` 读取索引源，不带 Sumika token。
@@ -124,7 +132,7 @@ DSH `0.2.1-rc.2` 默认关闭自定义市场 bundle。`ui/workbench.py` 在写�
 
 ## 验证记录（2026-10-27）
 
-- r96 真实 DSH 工作台：Plugins 出现「发现」tab，标题为「Sumika 精选插件」，7 项全部显示；固定版本和日期正确（如 `dsh-phone 0.4.1 · 2026-10-26`）。
+- r97 真实 DSH 工作台：Plugins 出现「发现」tab，标题为「Sumika 精选插件」，7 项全部显示；固定版本和日期正确（如 `dsh-phone 0.4.1 · 2026-10-26`）。
 - 目录分类、标签、说明来自 `ui/app/plugin-catalog.json`。
 - 当前测试 profile 未登录 DSH 账号，因此“安装按钮完成安装”仍未记入已验证；实际安装需在已登录的 DSH 环境完成。
 - CLI 试验安装（独立空 profile，非日用数据）：

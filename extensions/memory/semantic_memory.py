@@ -6,6 +6,7 @@ models, calls a server or silently substitutes a different provider.
 import hashlib
 import json
 import math
+import sqlite3
 from pathlib import Path
 from extensions.memory.embedded_memory import EmbeddedMemory
 from extensions.memory.embedding_runtime import validate_embeddings
@@ -86,8 +87,36 @@ class SemanticMemory(EmbeddedMemory):
         # remaining results.
         needle=query.strip().casefold()
         exact_boost=len(needle)>=2
-        ranked=sorted([(max(score(vectors[i]),0.85 if exact_boost and needle in t.casefold() else -1),i,t,s,record_id,revision) for i,t,s,record_id,revision in rows],reverse=True)
-        results=[dict(id=i,record_id=record_id,revision=record_revision,text=t,source=s,score=round(n,6),retrieval='hybrid') for n,i,t,s,record_id,record_revision in ranked if n>=self.threshold][:limit]
+        # RRF combines the FTS5 rank with the local-vector rank. The cosine
+        # score remains the public score and the threshold still gates recall;
+        # RRF only decides the order of facts that both channels accepted.
+        # This keeps the old precision behaviour while a literal identifier
+        # match cannot be pushed below a semantically similar but unrelated row.
+        lexical = {}
+        terms=[term for term in query.split() if term]
+        if terms:
+            expression=' OR '.join('"'+term.replace('"','""')+'"' for term in terms)
+            source_sql=' and m.source=?' if source is not None else ''
+            params=[expression,scope]+([source] if source is not None else [])+[100]
+            try:
+                lexical_rows=self.db.execute(
+                    'select m.id from memory_fts f join memories m on m.id=f.rowid '
+                    'where f.text match ? and m.scope=?'+source_sql+' and m.active=1 '
+                    'order by rank,m.updated desc limit ?',params).fetchall()
+                lexical={row[0]: rank for rank,row in enumerate(lexical_rows,1)}
+            except sqlite3.OperationalError:
+                # A malformed FTS query must not make semantic recall fail.
+                lexical={}
+        candidates=[(max(score(vectors[i]),0.85 if exact_boost and needle in t.casefold() else -1),i,t,s,record_id,revision)
+                    for i,t,s,record_id,revision in rows]
+        candidates=[row for row in candidates if row[0]>=self.threshold]
+        semantic_rank={row[1]: rank for rank,row in enumerate(
+            sorted(candidates,key=lambda row:(-row[0],row[1])),1)}
+        def reciprocal_rank(row):
+            return (1.0/(60+lexical.get(row[1],10000))
+                    + 1.0/(60+semantic_rank[row[1]]))
+        ranked=sorted(candidates,key=lambda row:(-reciprocal_rank(row),-row[0],row[1]))
+        results=[dict(id=i,record_id=record_id,revision=record_revision,text=t,source=s,score=round(n,6),retrieval='hybrid-rrf') for n,i,t,s,record_id,record_revision in ranked[:limit]]
         return results if self.enabled and self.scope_revision(**scope_fields)==revision else []
 
     def restore_json(self,src,*,user_id,role_id,project_id='default'):

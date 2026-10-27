@@ -73,6 +73,24 @@ class SemanticVectorBoundaryTests(unittest.TestCase):
                 self.vectors, self.query = [[scale, 0.]], [scale, 0.]
                 self.assertEqual(self.search()[0]['score'], 1.)
 
+    def test_lexical_rank_is_fused_with_semantic_rank(self):
+        memory = SemanticMemory.__new__(SemanticMemory)
+        EmbeddedMemory.__init__(memory, Path(self.memory.path).with_name("rrf.db"))
+        self.addCleanup(memory.close)
+        memory.model_id, memory.threshold, memory.embedding_python = "test-model", .45, None
+        memory.db.execute("CREATE TABLE embeddings(memory_id INTEGER,model TEXT,vector TEXT,PRIMARY KEY(memory_id,model))")
+        vectors = {"tea": [.8, .6], "drink": [1., 0.]}
+        class Embedder:
+            def embed(self, texts): return iter([vectors[text] for text in texts])
+            def query_embed(self, query): return iter([[1., 0.]])
+        memory.embedder = Embedder()
+        tea = memory.add("tea", **self.scope)
+        drink = memory.add("drink", **self.scope)
+        hits = memory.search("tea", **self.scope)
+        self.assertEqual([hit["record_id"] for hit in hits], [tea["record_id"], drink["record_id"]])
+        self.assertLess(hits[0]["score"], hits[1]["score"])
+        self.assertEqual(hits[0]["retrieval"], "hybrid-rrf")
+
     def test_shared_validator_rejects_non_numeric_and_empty_query(self):
         for vectors, query in (([[True, 0]], [1, 0]), ([[1, 0]], []),
                                ([[1, 0]], [1e308, 1e308, 1e308, 1e308])):

@@ -874,6 +874,22 @@ class UIServerTests(unittest.TestCase):
         self.assertFalse(data['healthy'])
         self.assertEqual(data['local_port'], 11434)
 
+    def test_plugin_status_reads_the_managed_profile(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            profile = home / "profiles" / "web"
+            profile.mkdir(parents=True)
+            (profile / "package.json").write_text(json.dumps({
+                "dependencies": {"dshmarket": "1.70.2"},
+                "dsh": {"profile": {"bundles": ["dshmarket"]}},
+            }), encoding="utf-8")
+            with patch.object(self.server.sumika_bridge.workbench, "profile", return_value=str(home)):
+                status, result = self.request("/api/plugins/status")
+            self.assertEqual(status, 200)
+            self.assertTrue(result["available"])
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(result["active_count"], 1)
+
     def test_public_plugin_catalog_is_the_checked_in_index(self):
         status, data = self.request('/api/plugins/catalog')
         self.assertEqual(status, 200)

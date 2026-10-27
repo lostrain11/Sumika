@@ -15,18 +15,18 @@
   ],
   "recovery_bundle": ".sumika-next/backups/phase-01-a464af6.bundle",
   "updated_at": "2026-10-27",
-  "next_action": "r96 候选：精选索引 7 项（dsh-phone 0.4.1）；独立 lab 已安装验证 dshmarket/dsh-pet-live2d/dsh-bili-scroll/dsh-phone/dsh-fish/dsh-bili-interact 共 6 个，engram 因构建脚本失败；B站/手机端到端仍缺账号/模拟器。下一步：已登录 DSH 的 UI 安装与 B站/手机功能冒烟。",
+  "next_action": "r97 候选：精选索引 7 项（dsh-phone 0.4.1），能力页插件卡读取真实安装数（0 显示未安装），SemanticMemory 增加 FTS5+向量 RRF 排序；全量 1418 项 OK/19 skipped。安装器 SHA 35f0f262...；B站/手机端到端仍缺账号/模拟器。下一步：已登录 DSH UI 安装 + B站/手机功能冒烟。",
   "current_acceptance": {
-    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r96",
+    "candidate": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r97",
     "dsh": "0.2.1-rc.2",
     "overall_status": "in_progress",
     "deployed": false,
     "full_suite": {
-      "tests": 1414,
+      "tests": 1418,
       "skipped": 19,
-      "seconds": 123.677,
+      "seconds": 116.404,
       "result": "OK",
-      "scope": "Current source tree after plugin-market changes; package-level tests separate"
+      "scope": "Current source tree after plugin status and memory RRF; package-level tests separate"
     },
     "r17_evidence": {
       "candidate_manifest": "E:/SumikaBuild/acceptance-20261017-current/candidate-rc2-r17/package-manifest.json",
