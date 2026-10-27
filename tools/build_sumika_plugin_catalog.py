@@ -39,9 +39,9 @@ SELECTION = [
         },
         "keywords": ["android", "phone", "emulator", "bilibili"],
         "fallback": {
-            "version": "0.3.0",
-            "publishTimestamp": 1792994143,
-            "commit": "6f2baa8b1391e185ff885d47e40283ffe7dc80dd",
+            "version": "0.4.1",
+            "publishTimestamp": 1793045588,
+            "commit": "b503eb55c4259dc2bb849f4f8b5a34d57ac4dbf9",
             "repository": "https://github.com/Thatgfsj/dsh-phone",
             "engines": {"dsh": ">=0.2.1-rc.2 <0.3.0"},
         },

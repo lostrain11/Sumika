@@ -1,6 +1,6 @@
 # Sumika 项目文档入口
 
-更新：2026-10-19。当前隔离候选 r95（60487文件库存、实际EXE四组、精选插件索引接入）使用 DSH `0.2.1-rc.2`，源码全量1414项OK（19跳过）；安装包已构建、未安装，[手测配置](manual-test-r95.md)、[干净机验收](acceptance-20261019-clean-windows.md)。r22的设备配置UI与真实B站前端链路、r20真机摄像头等专项按原候选归属。PDF自动选区有历史Edge接口限制和COM超时证据，采用已实现的显式粘贴回退。真实设备完整流程、真实个人PDF/模型质量仍未全验，未部署日用。
+更新：2026-10-19。当前隔离候选 r96（60487文件库存、实际EXE四组、精选插件索引接入）使用 DSH `0.2.1-rc.2`，源码全量1414项OK（19跳过）；安装包已构建、未安装，[手测配置](manual-test-r96.md)、[干净机验收](acceptance-20261019-clean-windows.md)。r22的设备配置UI与真实B站前端链路、r20真机摄像头等专项按原候选归属。PDF自动选区有历史Edge接口限制和COM超时证据，采用已实现的显式粘贴回退。真实设备完整流程、真实个人PDF/模型质量仍未全验，未部署日用。
 
 - 开发接手：`handoff.json` → `progress.json` → `plan.json`；需求原文查 `requirements.json` / `approved-plan.md`。
 - 用户逐项手测：[使用与验收清单](feature-usage-and-acceptance.md)。
@@ -10,7 +10,7 @@
 - 提示词优化接入（2026-10-19）：[预览/确认与本地实测](acceptance-20261019-prompt.md)；[Qwen2.5-7B 等模型对比](acceptance-20261019-prompt-bench.md)；[可管理 SSH 隧道](managed-tunnel.md)。Qwen2.5-7B 产出 6 条可用改写但未通过质量门，本地模型暂不负责提示词优化，日用未启用。
 - 当前缺陷、证据和下一步：[主线修复与验收计划](repair-and-acceptance-plan.md)。
 - UI设计与入口约束：[设计覆盖表](ui-design-coverage.md)。
-- 插件市场：[Sumika 精选索引与 DSH 原生 Discover](plugin-market.md)。
+- 插件市场：[Sumika 精选索引与 DSH 原生 Discover](plugin-market.md)；[插件实验室](plugin-lab-20261027.md)。
 - 长期记忆：[设计与接入](long-term-memory-plan.md)、[治理验收](acceptance-20261017-memory.md)；行为领域：[实现验收](acceptance-20261017-behavior.md)。
 - DSH/社区复用：[市场评估](dsh-market-review-20261017.md)、[内核升级](dsh-upgrade-20261017.md)。评估可用不等于日用替换。
 - 本地模型：[当前选型与实测](phase-07-local-model-plan.md)、[能力上限与路由/估时](local-model-capability-and-routing-20261019.md)。用户 2026-10-19 决定继续用 MiniCPM-V 4.7 35B-A3B 作常驻单模型；LFM2.5-24B-A2B 仅作纯文本备选。服务当前运行状态另查，不把小样本准确率推广成日常质量。
